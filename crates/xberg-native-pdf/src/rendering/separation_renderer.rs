@@ -122,11 +122,7 @@
 //! or `PaintAction::Skip` (leave the plate untouched). Spot/DeviceN
 //! sources route to their named plates regardless of overprint, matching
 //! the inherent behavior of real separation devices.
-#![allow(
-    clippy::field_reassign_with_default,
-    clippy::ptr_arg,
-    clippy::only_used_in_recursion
-)]
+#![allow(clippy::field_reassign_with_default, clippy::ptr_arg, clippy::only_used_in_recursion)]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -143,8 +139,8 @@ use crate::object::Object;
 
 use super::ext_gstate::{ParsedExtGState, parse_ext_g_state_inner};
 use super::resolution::{
-    InkName, PaintBackend, PaintIntent, PaintKind, PaintSide, ResolutionContext,
-    ResolutionPipeline, SeparationBackend, SeparationSurface,
+    InkName, PaintBackend, PaintIntent, PaintKind, PaintSide, ResolutionContext, ResolutionPipeline, SeparationBackend,
+    SeparationSurface,
 };
 use super::text_rasterizer::TextRasterizer;
 use super::{device_bounds_rasterizable, guarded_fill_path, guarded_stroke_path};
@@ -187,11 +183,7 @@ pub struct SeparationPlate {
 /// paint operations to all referenced plates in parallel. Form XObjects
 /// are also recursed into once per page. Unreferenced inks short-circuit
 /// to an all-zero plate before any pixmap is allocated.
-pub fn render_separations(
-    doc: &PdfDocument,
-    page_num: usize,
-    dpi: u32,
-) -> Result<Vec<SeparationPlate>> {
+pub fn render_separations(doc: &PdfDocument, page_num: usize, dpi: u32) -> Result<Vec<SeparationPlate>> {
     let inks = collect_page_inks(doc, page_num)?;
     if inks.is_empty() {
         return Ok(Vec::new());
@@ -214,12 +206,7 @@ pub fn render_separations(
 /// This is a thin wrapper over the multi-ink path; if you need every
 /// plate on a page, call [`render_separations`] instead — it walks the
 /// content stream once for all inks together.
-pub fn render_separation(
-    doc: &PdfDocument,
-    page_num: usize,
-    ink_name: &str,
-    dpi: u32,
-) -> Result<SeparationPlate> {
+pub fn render_separation(doc: &PdfDocument, page_num: usize, ink_name: &str, dpi: u32) -> Result<SeparationPlate> {
     // Always walk operators for the requested ink — the per-page short-circuit
     // in [`render_separations`] is an optimisation that scans the resource
     // declarations to skip inks that are *definitely* unused. For the single-ink
@@ -349,10 +336,7 @@ fn render_plates_for_inks(
         });
     }
 
-    Ok(result
-        .into_iter()
-        .map(|o| o.expect("plate filled"))
-        .collect())
+    Ok(result.into_iter().map(|o| o.expect("plate filled")).collect())
 }
 
 /// Composite-then-separate path. Invoked when the page declares any
@@ -506,10 +490,10 @@ fn scan_operators_for_inks(
                 push(referenced, "Magenta");
                 push(referenced, "Yellow");
                 push(referenced, "Black");
-            },
+            }
             Operator::SetFillColorSpace { name } | Operator::SetStrokeColorSpace { name } => {
                 inks_from_space(name, color_spaces, resources, doc, referenced);
-            },
+            }
             Operator::Do { name } => {
                 if visited.iter().any(|s| s == name) {
                     continue;
@@ -536,14 +520,7 @@ fn scan_operators_for_inks(
                         let mut merged_cs = color_spaces.clone();
                         merged_cs.extend(form_cs);
                         if let Ok(form_ops) = parse_content_stream(&stream_data) {
-                            scan_operators_for_inks(
-                                &form_ops,
-                                doc,
-                                &form_resources,
-                                &merged_cs,
-                                referenced,
-                                visited,
-                            )?;
+                            scan_operators_for_inks(&form_ops, doc, &form_resources, &merged_cs, referenced, visited)?;
                         }
                     } else if subtype == Some("Image") {
                         // §8.9: image XObjects carry their own
@@ -553,15 +530,14 @@ fn scan_operators_for_inks(
                         // stream. Surface those inks so the
                         // per-plate short-circuit doesn't drop
                         // the image's plates as empty. ~keep
-                        let resolved =
-                            resolve_image_color_space(dict, color_spaces, resources, doc);
+                        let resolved = resolve_image_color_space(dict, color_spaces, resources, doc);
                         match resolved {
                             ResolvedSpace::Cmyk | ResolvedSpace::IccCmyk => {
                                 push(referenced, "Cyan");
                                 push(referenced, "Magenta");
                                 push(referenced, "Yellow");
                                 push(referenced, "Black");
-                            },
+                            }
                             ResolvedSpace::Separation(ink) => {
                                 if ink != "None" && !ink.is_empty() {
                                     if ink == "All" {
@@ -573,7 +549,7 @@ fn scan_operators_for_inks(
                                         push(referenced, &ink);
                                     }
                                 }
-                            },
+                            }
                             ResolvedSpace::DeviceN(names) => {
                                 for n in names {
                                     if n != "None" && !n.is_empty() {
@@ -587,15 +563,15 @@ fn scan_operators_for_inks(
                                         }
                                     }
                                 }
-                            },
+                            }
                             // RGB / Gray / Unknown contribute no
                             // plates per the renderer's policy. ~keep
-                            _ => {},
+                            _ => {}
                         }
                     }
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -617,7 +593,7 @@ fn inks_from_space(
                     out.push(ink.to_string());
                 }
             }
-        },
+        }
         ResolvedSpace::Separation(name) => {
             // §8.6.6.4: /All marks every output separation — list CMYK so the
             // per-plate short-circuit in render_separations doesn't skip them.
@@ -631,7 +607,7 @@ fn inks_from_space(
             } else if name != "None" && !out.iter().any(|s| s == &name) {
                 out.push(name);
             }
-        },
+        }
         ResolvedSpace::DeviceN(names) => {
             for n in names {
                 if n == "All" {
@@ -644,22 +620,18 @@ fn inks_from_space(
                     out.push(n);
                 }
             }
-        },
+        }
         ResolvedSpace::Rgb
         | ResolvedSpace::Gray
         | ResolvedSpace::IccRgb
         | ResolvedSpace::IccGray
-        | ResolvedSpace::Unknown => {},
+        | ResolvedSpace::Unknown => {}
     }
 }
 
 /// Page extent computation (width/height in pixels and the base
 /// transform that maps PDF user space into the pixmap).
-fn compute_page_extent(
-    doc: &PdfDocument,
-    page_num: usize,
-    dpi: u32,
-) -> Result<(u32, u32, Transform)> {
+fn compute_page_extent(doc: &PdfDocument, page_num: usize, dpi: u32) -> Result<(u32, u32, Transform)> {
     let page_info = doc.get_page_info(page_num)?;
     let media_box = page_info.media_box;
 
@@ -683,9 +655,14 @@ fn compute_page_extent(
         180 => Transform::from_translate(-media_box.x, -media_box.y)
             .post_scale(-scale, scale)
             .post_translate(media_box.width * scale, 0.0),
-        270 => Transform::from_translate(-media_box.x, -media_box.y).post_concat(
-            Transform::from_row(0.0, scale, -scale, 0.0, media_box.height * scale, 0.0),
-        ),
+        270 => Transform::from_translate(-media_box.x, -media_box.y).post_concat(Transform::from_row(
+            0.0,
+            scale,
+            -scale,
+            0.0,
+            media_box.height * scale,
+            0.0,
+        )),
         _ => Transform::from_translate(-media_box.x, -media_box.y)
             .post_scale(scale, -scale)
             .post_translate(0.0, page_h * scale),
@@ -797,14 +774,12 @@ fn classify_resolved(
             // arm performs the same deref via its `deref` closure. ~keep
             match arr.get(1) {
                 Some(underlying) => {
-                    let resolved = doc
-                        .resolve_object(underlying)
-                        .unwrap_or_else(|_| underlying.clone());
+                    let resolved = doc.resolve_object(underlying).unwrap_or_else(|_| underlying.clone());
                     classify_resolved(&resolved, color_spaces, resources, doc)
-                },
+                }
                 None => ResolvedSpace::Unknown,
             }
-        },
+        }
         "Separation" => {
             let ink = arr
                 .get(1)
@@ -812,7 +787,7 @@ fn classify_resolved(
                 .map(|s| s.to_string())
                 .unwrap_or_default();
             ResolvedSpace::Separation(ink)
-        },
+        }
         "DeviceN" => {
             if let Some(Object::Array(ink_names)) = arr.get(1) {
                 let names = ink_names
@@ -823,7 +798,7 @@ fn classify_resolved(
             } else {
                 ResolvedSpace::Unknown
             }
-        },
+        }
         "ICCBased" => {
             // ICCBased: read /N from the stream dict to pick the component-count
             // interpretation. Unknown / unreachable / unsupported N → Unknown,
@@ -842,7 +817,7 @@ fn classify_resolved(
                 };
             }
             ResolvedSpace::Unknown
-        },
+        }
         _ => ResolvedSpace::Unknown,
     }
 }
@@ -943,16 +918,8 @@ fn tint_for_ink(
     } else {
         &gs.stroke_color_space
     };
-    let components = if fill {
-        fill_components
-    } else {
-        stroke_components
-    };
-    let overprint = if fill {
-        gs.fill_overprint
-    } else {
-        gs.stroke_overprint
-    };
+    let components = if fill { fill_components } else { stroke_components };
+    let overprint = if fill { gs.fill_overprint } else { gs.stroke_overprint };
     // §11.7.4.3: OPM applies only when the source is DeviceCMYK (or implicit
     // conversion thereto). The match arms below check this where relevant. ~keep
     let opm = gs.overprint_mode;
@@ -970,11 +937,7 @@ fn tint_for_ink(
     let resolved = resolve_color_space(space_name, color_spaces, resources, doc);
     match resolved {
         ResolvedSpace::Cmyk | ResolvedSpace::IccCmyk => {
-            let cmyk_state = if fill {
-                gs.fill_color_cmyk
-            } else {
-                gs.stroke_color_cmyk
-            };
+            let cmyk_state = if fill { gs.fill_color_cmyk } else { gs.stroke_color_cmyk };
             let (c, m, y, k) = if let Some(v) = cmyk_state {
                 v
             } else if components.len() >= 4 {
@@ -999,16 +962,13 @@ fn tint_for_ink(
             } else {
                 PaintAction::Paint(tint)
             }
-        },
-        ResolvedSpace::Rgb
-        | ResolvedSpace::Gray
-        | ResolvedSpace::IccRgb
-        | ResolvedSpace::IccGray => {
+        }
+        ResolvedSpace::Rgb | ResolvedSpace::Gray | ResolvedSpace::IccRgb | ResolvedSpace::IccGray => {
             // §11.7.4: overprint is a separation-space concept. RGB / Gray
             // sources do not route to ink plates at all. Converting them
             // would require a tint transform and is intentionally not done. ~keep
             PaintAction::Skip
-        },
+        }
         ResolvedSpace::Separation(ink) => {
             // §8.6.6.4: /All paints to every plate; /None paints nothing. ~keep
             if components.is_empty() || ink == "None" {
@@ -1022,7 +982,7 @@ fn tint_for_ink(
             } else {
                 other_plate_action
             }
-        },
+        }
         ResolvedSpace::DeviceN(names) => {
             for (i, n) in names.iter().enumerate() {
                 if n == "None" {
@@ -1033,7 +993,7 @@ fn tint_for_ink(
                 }
             }
             other_plate_action
-        },
+        }
         ResolvedSpace::Unknown => PaintAction::Skip,
     }
 }
@@ -1062,11 +1022,7 @@ fn logical_color_for_side<'a>(
     } else {
         &cs.stroke_components
     };
-    let cmyk_state = if fill {
-        gs.fill_color_cmyk
-    } else {
-        gs.stroke_color_cmyk
-    };
+    let cmyk_state = if fill { gs.fill_color_cmyk } else { gs.stroke_color_cmyk };
 
     // Device-family aliases: emit the operator-side LogicalColor::Device
     // so the resolver passes straight through to the right channel
@@ -1081,7 +1037,7 @@ fn logical_color_for_side<'a>(
                 }
             })?;
             return Some(LogicalColor::Device(DeviceColor::Cmyk(c, m, y, k)));
-        },
+        }
         "DeviceRGB" | "RGB" => {
             if components.len() >= 3 {
                 return Some(LogicalColor::Device(DeviceColor::Rgb(
@@ -1091,14 +1047,14 @@ fn logical_color_for_side<'a>(
                 )));
             }
             return None;
-        },
+        }
         "DeviceGray" | "G" => {
             if !components.is_empty() {
                 return Some(LogicalColor::Device(DeviceColor::Gray(components[0])));
             }
             return None;
-        },
-        _ => {},
+        }
+        _ => {}
     }
 
     // Spaced: needs a borrow into the page-resource colour-space map. ~keep
@@ -1137,11 +1093,7 @@ fn paint_through_pipeline(
     let Some(logical) = logical_color_for_side(fill, gs, cs, color_spaces) else {
         return Ok(());
     };
-    let side = if fill {
-        PaintSide::Fill
-    } else {
-        PaintSide::Stroke
-    };
+    let side = if fill { PaintSide::Fill } else { PaintSide::Stroke };
     let intent = PaintIntent {
         kind: PaintKind::Path {
             path,
@@ -1288,16 +1240,14 @@ fn initial_components_for_space(
 ) -> (Vec<f32>, Option<(f32, f32, f32, f32)>) {
     let resolved = resolve_color_space(space_name, color_spaces, resources, doc);
     match resolved {
-        ResolvedSpace::Cmyk | ResolvedSpace::IccCmyk => {
-            (vec![0.0, 0.0, 0.0, 1.0], Some((0.0, 0.0, 0.0, 1.0)))
-        },
+        ResolvedSpace::Cmyk | ResolvedSpace::IccCmyk => (vec![0.0, 0.0, 0.0, 1.0], Some((0.0, 0.0, 0.0, 1.0))),
         ResolvedSpace::Rgb | ResolvedSpace::IccRgb => (vec![0.0, 0.0, 0.0], None),
         ResolvedSpace::Gray | ResolvedSpace::IccGray => (vec![0.0], None),
         ResolvedSpace::Separation(_) => (vec![1.0], None),
         ResolvedSpace::DeviceN(names) => {
             let n = names.len().max(1);
             (vec![1.0; n], None)
-        },
+        }
         ResolvedSpace::Unknown => (Vec::new(), None),
     }
 }
@@ -1376,19 +1326,14 @@ fn execute_separation_operators(
     let mut in_text_object = false;
 
     let ext_g_state_resolved: Option<Object> = match resources {
-        Object::Dictionary(rd) => rd
-            .get("ExtGState")
-            .and_then(|o| ctx.doc.resolve_object(o).ok()),
+        Object::Dictionary(rd) => rd.get("ExtGState").and_then(|o| ctx.doc.resolve_object(o).ok()),
         _ => None,
     };
-    let ext_g_states: Option<&HashMap<String, Object>> =
-        ext_g_state_resolved.as_ref().and_then(|o| o.as_dict());
+    let ext_g_states: Option<&HashMap<String, Object>> = ext_g_state_resolved.as_ref().and_then(|o| o.as_dict());
     let mut ext_g_state_cache: HashMap<String, ParsedExtGState> = HashMap::new();
 
     let xobjects_resolved: Option<Object> = match resources {
-        Object::Dictionary(rd) => rd
-            .get("XObject")
-            .and_then(|o| ctx.doc.resolve_object(o).ok()),
+        Object::Dictionary(rd) => rd.get("XObject").and_then(|o| ctx.doc.resolve_object(o).ok()),
         _ => None,
     };
 
@@ -1421,7 +1366,7 @@ fn execute_separation_operators(
                     .unwrap_or_else(SeparationColorState::new);
                 color_state_stack.push(cs);
                 clip_stack.push(clip_stack.last().cloned().unwrap_or(None));
-            },
+            }
             Operator::RestoreState => {
                 gs_stack.restore();
                 if color_state_stack.len() > 1 {
@@ -1430,7 +1375,7 @@ fn execute_separation_operators(
                 if clip_stack.len() > 1 {
                     clip_stack.pop();
                 }
-            },
+            }
 
             Operator::Cm { a, b, c, d, e, f } => {
                 let current = gs_stack.current_mut();
@@ -1443,7 +1388,7 @@ fn execute_separation_operators(
                     f: *f,
                 };
                 current.ctm = new_matrix.multiply(&current.ctm);
-            },
+            }
 
             Operator::SetFillRgb { r, g, b } => {
                 let gs = gs_stack.current_mut();
@@ -1453,7 +1398,7 @@ fn execute_separation_operators(
                 if let Some(cs) = color_state_stack.last_mut() {
                     cs.fill_components = vec![*r, *g, *b];
                 }
-            },
+            }
             Operator::SetStrokeRgb { r, g, b } => {
                 let gs = gs_stack.current_mut();
                 gs.stroke_color_rgb = (*r, *g, *b);
@@ -1462,7 +1407,7 @@ fn execute_separation_operators(
                 if let Some(cs) = color_state_stack.last_mut() {
                     cs.stroke_components = vec![*r, *g, *b];
                 }
-            },
+            }
             Operator::SetFillGray { gray } => {
                 let g = *gray;
                 let gs = gs_stack.current_mut();
@@ -1472,7 +1417,7 @@ fn execute_separation_operators(
                 if let Some(cs) = color_state_stack.last_mut() {
                     cs.fill_components = vec![g];
                 }
-            },
+            }
             Operator::SetStrokeGray { gray } => {
                 let g = *gray;
                 let gs = gs_stack.current_mut();
@@ -1482,7 +1427,7 @@ fn execute_separation_operators(
                 if let Some(cs) = color_state_stack.last_mut() {
                     cs.stroke_components = vec![g];
                 }
-            },
+            }
             Operator::SetFillCmyk { c, m, y, k } => {
                 let gs = gs_stack.current_mut();
                 gs.fill_color_cmyk = Some((*c, *m, *y, *k));
@@ -1490,7 +1435,7 @@ fn execute_separation_operators(
                 if let Some(cs) = color_state_stack.last_mut() {
                     cs.fill_components = vec![*c, *m, *y, *k];
                 }
-            },
+            }
             Operator::SetStrokeCmyk { c, m, y, k } => {
                 let gs = gs_stack.current_mut();
                 gs.stroke_color_cmyk = Some((*c, *m, *y, *k));
@@ -1498,72 +1443,67 @@ fn execute_separation_operators(
                 if let Some(cs) = color_state_stack.last_mut() {
                     cs.stroke_components = vec![*c, *m, *y, *k];
                 }
-            },
+            }
             Operator::SetFillColorSpace { name } => {
-                let (components, cmyk) =
-                    initial_components_for_space(name, color_spaces, resources, ctx.doc);
+                let (components, cmyk) = initial_components_for_space(name, color_spaces, resources, ctx.doc);
                 let gs = gs_stack.current_mut();
                 gs.fill_color_space = name.clone();
                 gs.fill_color_cmyk = cmyk;
                 if let Some(cs) = color_state_stack.last_mut() {
                     cs.fill_components = components;
                 }
-            },
+            }
             Operator::SetStrokeColorSpace { name } => {
-                let (components, cmyk) =
-                    initial_components_for_space(name, color_spaces, resources, ctx.doc);
+                let (components, cmyk) = initial_components_for_space(name, color_spaces, resources, ctx.doc);
                 let gs = gs_stack.current_mut();
                 gs.stroke_color_space = name.clone();
                 gs.stroke_color_cmyk = cmyk;
                 if let Some(cs) = color_state_stack.last_mut() {
                     cs.stroke_components = components;
                 }
-            },
+            }
             Operator::SetFillColor { components } | Operator::SetFillColorN { components, .. } => {
                 let gs = gs_stack.current_mut();
                 let space = gs.fill_color_space.clone();
                 match space.as_str() {
                     "DeviceCMYK" | "CMYK" if components.len() >= 4 => {
-                        gs.fill_color_cmyk =
-                            Some((components[0], components[1], components[2], components[3]));
-                    },
-                    _ => {},
+                        gs.fill_color_cmyk = Some((components[0], components[1], components[2], components[3]));
+                    }
+                    _ => {}
                 }
                 if let Some(cs) = color_state_stack.last_mut() {
                     cs.fill_components = components.clone();
                 }
-            },
-            Operator::SetStrokeColor { components }
-            | Operator::SetStrokeColorN { components, .. } => {
+            }
+            Operator::SetStrokeColor { components } | Operator::SetStrokeColorN { components, .. } => {
                 let gs = gs_stack.current_mut();
                 let space = gs.stroke_color_space.clone();
                 match space.as_str() {
                     "DeviceCMYK" | "CMYK" if components.len() >= 4 => {
-                        gs.stroke_color_cmyk =
-                            Some((components[0], components[1], components[2], components[3]));
-                    },
-                    _ => {},
+                        gs.stroke_color_cmyk = Some((components[0], components[1], components[2], components[3]));
+                    }
+                    _ => {}
                 }
                 if let Some(cs) = color_state_stack.last_mut() {
                     cs.stroke_components = components.clone();
                 }
-            },
+            }
 
             Operator::SetLineWidth { width } => {
                 gs_stack.current_mut().line_width = *width;
-            },
+            }
             Operator::SetLineCap { cap_style } => {
                 gs_stack.current_mut().line_cap = *cap_style;
-            },
+            }
             Operator::SetLineJoin { join_style } => {
                 gs_stack.current_mut().line_join = *join_style;
-            },
+            }
             Operator::SetMiterLimit { limit } => {
                 gs_stack.current_mut().miter_limit = *limit;
-            },
+            }
             Operator::SetDash { array, phase } => {
                 gs_stack.current_mut().dash_pattern = (array.clone(), *phase);
-            },
+            }
             Operator::SetRenderingIntent { intent } => {
                 // §10.7.3 — mirror the composite renderer's dispatch.
                 // The per-plate path doesn't consult OutputIntent for
@@ -1572,38 +1512,26 @@ fn execute_separation_operators(
                 // resolver's ICCBased N=4 path, so keeping it current
                 // matches the composite path's behaviour. ~keep
                 gs_stack.current_mut().rendering_intent = intent.clone();
-            },
+            }
 
             Operator::MoveTo { x, y } => {
                 current_path.move_to(*x, *y);
-            },
+            }
             Operator::LineTo { x, y } => {
                 current_path.line_to(*x, *y);
-            },
-            Operator::CurveTo {
-                x1,
-                y1,
-                x2,
-                y2,
-                x3,
-                y3,
-            } => {
+            }
+            Operator::CurveTo { x1, y1, x2, y2, x3, y3 } => {
                 current_path.cubic_to(*x1, *y1, *x2, *y2, *x3, *y3);
-            },
+            }
             Operator::CurveToV { x2, y2, x3, y3 } => {
                 if let Some(last) = current_path.last_point() {
                     current_path.cubic_to(last.x, last.y, *x2, *y2, *x3, *y3);
                 }
-            },
+            }
             Operator::CurveToY { x1, y1, x3, y3 } => {
                 current_path.cubic_to(*x1, *y1, *x3, *y3, *x3, *y3);
-            },
-            Operator::Rectangle {
-                x,
-                y,
-                width,
-                height,
-            } => {
+            }
+            Operator::Rectangle { x, y, width, height } => {
                 let (nx, nw) = if *width < 0.0 {
                     (x + width, -width)
                 } else {
@@ -1617,10 +1545,10 @@ fn execute_separation_operators(
                 if let Some(rect) = tiny_skia::Rect::from_xywh(nx, ny, nw, nh) {
                     current_path.push_rect(rect);
                 }
-            },
+            }
             Operator::ClosePath => {
                 current_path.close();
-            },
+            }
 
             Operator::Stroke => {
                 apply_separation_clip(
@@ -1666,20 +1594,13 @@ fn execute_separation_operators(
                                 &cs.fill_components,
                                 &cs.stroke_components,
                             ) {
-                                stroke_separation(
-                                    &mut pixmaps[i],
-                                    &path,
-                                    transform,
-                                    gs,
-                                    tint,
-                                    clip,
-                                );
+                                stroke_separation(&mut pixmaps[i], &path, transform, gs, tint, clip);
                             }
                         }
                     }
                 }
                 current_path = PathBuilder::new();
-            },
+            }
             Operator::Fill => {
                 apply_separation_clip(
                     &mut pending_clip,
@@ -1724,20 +1645,13 @@ fn execute_separation_operators(
                                 &cs.fill_components,
                                 &cs.stroke_components,
                             ) {
-                                fill_separation(
-                                    &mut pixmaps[i],
-                                    &path,
-                                    transform,
-                                    tint,
-                                    FillRule::Winding,
-                                    clip,
-                                );
+                                fill_separation(&mut pixmaps[i], &path, transform, tint, FillRule::Winding, clip);
                             }
                         }
                     }
                 }
                 current_path = PathBuilder::new();
-            },
+            }
             Operator::FillEvenOdd => {
                 apply_separation_clip(
                     &mut pending_clip,
@@ -1782,20 +1696,13 @@ fn execute_separation_operators(
                                 &cs.fill_components,
                                 &cs.stroke_components,
                             ) {
-                                fill_separation(
-                                    &mut pixmaps[i],
-                                    &path,
-                                    transform,
-                                    tint,
-                                    FillRule::EvenOdd,
-                                    clip,
-                                );
+                                fill_separation(&mut pixmaps[i], &path, transform, tint, FillRule::EvenOdd, clip);
                             }
                         }
                     }
                 }
                 current_path = PathBuilder::new();
-            },
+            }
             Operator::FillStroke | Operator::CloseFillStroke => {
                 apply_separation_clip(
                     &mut pending_clip,
@@ -1840,14 +1747,7 @@ fn execute_separation_operators(
                                 &cs.fill_components,
                                 &cs.stroke_components,
                             ) {
-                                fill_separation(
-                                    &mut pixmaps[i],
-                                    &path,
-                                    transform,
-                                    tint,
-                                    FillRule::Winding,
-                                    clip,
-                                );
+                                fill_separation(&mut pixmaps[i], &path, transform, tint, FillRule::Winding, clip);
                             }
                         }
                     }
@@ -1880,20 +1780,13 @@ fn execute_separation_operators(
                                 &cs.fill_components,
                                 &cs.stroke_components,
                             ) {
-                                stroke_separation(
-                                    &mut pixmaps[i],
-                                    &path,
-                                    transform,
-                                    gs,
-                                    tint,
-                                    clip,
-                                );
+                                stroke_separation(&mut pixmaps[i], &path, transform, gs, tint, clip);
                             }
                         }
                     }
                 }
                 current_path = PathBuilder::new();
-            },
+            }
             Operator::FillStrokeEvenOdd | Operator::CloseFillStrokeEvenOdd => {
                 apply_separation_clip(
                     &mut pending_clip,
@@ -1938,14 +1831,7 @@ fn execute_separation_operators(
                                 &cs.fill_components,
                                 &cs.stroke_components,
                             ) {
-                                fill_separation(
-                                    &mut pixmaps[i],
-                                    &path,
-                                    transform,
-                                    tint,
-                                    FillRule::EvenOdd,
-                                    clip,
-                                );
+                                fill_separation(&mut pixmaps[i], &path, transform, tint, FillRule::EvenOdd, clip);
                             }
                         }
                     }
@@ -1978,20 +1864,13 @@ fn execute_separation_operators(
                                 &cs.fill_components,
                                 &cs.stroke_components,
                             ) {
-                                stroke_separation(
-                                    &mut pixmaps[i],
-                                    &path,
-                                    transform,
-                                    gs,
-                                    tint,
-                                    clip,
-                                );
+                                stroke_separation(&mut pixmaps[i], &path, transform, gs, tint, clip);
                             }
                         }
                     }
                 }
                 current_path = PathBuilder::new();
-            },
+            }
             Operator::EndPath => {
                 apply_separation_clip(
                     &mut pending_clip,
@@ -2002,54 +1881,54 @@ fn execute_separation_operators(
                     &gs_stack,
                 );
                 current_path = PathBuilder::new();
-            },
+            }
 
             Operator::ClipNonZero => {
                 if let Some(path) = current_path.clone().finish() {
                     pending_clip = Some((path, FillRule::Winding));
                 }
-            },
+            }
             Operator::ClipEvenOdd => {
                 if let Some(path) = current_path.clone().finish() {
                     pending_clip = Some((path, FillRule::EvenOdd));
                 }
-            },
+            }
 
             Operator::BeginText => {
                 in_text_object = true;
                 let gs = gs_stack.current_mut();
                 gs.text_matrix = Matrix::identity();
                 gs.text_line_matrix = Matrix::identity();
-            },
+            }
             Operator::EndText => {
                 in_text_object = false;
-            },
+            }
 
             Operator::Tc { char_space } => {
                 gs_stack.current_mut().char_space = *char_space;
-            },
+            }
             Operator::Tw { word_space } => {
                 gs_stack.current_mut().word_space = *word_space;
-            },
+            }
             Operator::Tz { scale } => {
                 gs_stack.current_mut().horizontal_scaling = *scale;
-            },
+            }
             Operator::TL { leading } => {
                 gs_stack.current_mut().leading = *leading;
-            },
+            }
             Operator::Ts { rise } => {
                 gs_stack.current_mut().text_rise = *rise;
-            },
+            }
             Operator::Tr { render } => {
                 gs_stack.current_mut().render_mode = *render;
-            },
+            }
             Operator::Tf { font, size } => {
                 let wmode = ctx.fonts.get(font).map(|f| f.wmode).unwrap_or(0);
                 let gs = gs_stack.current_mut();
                 gs.font_name = Some(font.clone());
                 gs.font_size = *size;
                 gs.text_wmode = wmode;
-            },
+            }
 
             Operator::Td { tx, ty } => {
                 if in_text_object {
@@ -2058,7 +1937,7 @@ fn execute_separation_operators(
                     gs.text_line_matrix = translation.multiply(&gs.text_line_matrix);
                     gs.text_matrix = gs.text_line_matrix;
                 }
-            },
+            }
             Operator::TD { tx, ty } => {
                 if in_text_object {
                     let gs = gs_stack.current_mut();
@@ -2067,7 +1946,7 @@ fn execute_separation_operators(
                     gs.text_line_matrix = translation.multiply(&gs.text_line_matrix);
                     gs.text_matrix = gs.text_line_matrix;
                 }
-            },
+            }
             Operator::Tm { a, b, c, d, e, f } => {
                 if in_text_object {
                     let gs = gs_stack.current_mut();
@@ -2081,7 +1960,7 @@ fn execute_separation_operators(
                     };
                     gs.text_line_matrix = gs.text_matrix;
                 }
-            },
+            }
             Operator::TStar => {
                 if in_text_object {
                     let gs = gs_stack.current_mut();
@@ -2090,7 +1969,7 @@ fn execute_separation_operators(
                     gs.text_line_matrix = translation.multiply(&gs.text_line_matrix);
                     gs.text_matrix = gs.text_line_matrix;
                 }
-            },
+            }
 
             // Text showing. Each `render_*_to_plate` returns a scalar
             // advance along the active writing axis; the caller routes it
@@ -2112,7 +1991,7 @@ fn execute_separation_operators(
                     )?;
                     gs_stack.current_mut().advance_text_matrix(advance);
                 }
-            },
+            }
             Operator::TJ { array } => {
                 if in_text_object {
                     let advance = render_tj_to_plate(
@@ -2129,7 +2008,7 @@ fn execute_separation_operators(
                     )?;
                     gs_stack.current_mut().advance_text_matrix(advance);
                 }
-            },
+            }
             Operator::Quote { text } => {
                 if in_text_object {
                     let gs_mut = gs_stack.current_mut();
@@ -2152,7 +2031,7 @@ fn execute_separation_operators(
                     )?;
                     gs_stack.current_mut().advance_text_matrix(advance);
                 }
-            },
+            }
             Operator::DoubleQuote {
                 word_space,
                 char_space,
@@ -2181,21 +2060,19 @@ fn execute_separation_operators(
                     )?;
                     gs_stack.current_mut().advance_text_matrix(advance);
                 }
-            },
+            }
 
             Operator::SetExtGState { dict_name } => {
-                let entry = ext_g_state_cache
-                    .entry(dict_name.clone())
-                    .or_insert_with(|| {
-                        if let Some(states) = ext_g_states
-                            && let Some(state_obj) = states.get(dict_name)
-                        {
-                            return parse_ext_g_state_inner(state_obj, ctx.doc).unwrap_or_default();
-                        }
-                        ParsedExtGState::default()
-                    });
+                let entry = ext_g_state_cache.entry(dict_name.clone()).or_insert_with(|| {
+                    if let Some(states) = ext_g_states
+                        && let Some(state_obj) = states.get(dict_name)
+                    {
+                        return parse_ext_g_state_inner(state_obj, ctx.doc).unwrap_or_default();
+                    }
+                    ParsedExtGState::default()
+                });
                 entry.apply(gs_stack.current_mut());
-            },
+            }
 
             // XObject — Form XObjects recurse into their content stream;
             // Image XObjects route per-channel samples to the matching ink
@@ -2243,8 +2120,7 @@ fn execute_separation_operators(
 
                         let form_matrix = parse_form_matrix(dict);
                         let gs = gs_stack.current();
-                        let combined =
-                            combine_transforms(base_transform, &gs.ctm).pre_concat(form_matrix);
+                        let combined = combine_transforms(base_transform, &gs.ctm).pre_concat(form_matrix);
 
                         // Inherit the calling context's colour state into the
                         // form's initial graphics state (PDF §8.10.1, O5). ~keep
@@ -2275,9 +2151,9 @@ fn execute_separation_operators(
                         )?;
                     }
                 }
-            },
+            }
 
-            _ => {},
+            _ => {}
         }
     }
     Ok(())
@@ -2402,12 +2278,12 @@ fn render_tj_to_plate(
                 )?;
                 gs_stack.current_mut().advance_text_matrix(advance);
                 total_advance += advance;
-            },
+            }
             TextElement::Offset(offset) => {
                 let shift = (-*offset / 1000.0) * gs_stack.current().font_size;
                 gs_stack.current_mut().advance_text_matrix(shift);
                 total_advance += shift;
-            },
+            }
         }
     }
     Ok(total_advance)
@@ -2420,16 +2296,8 @@ fn render_tj_to_plate(
 /// Best-effort: when an embedded width table is unavailable we fall
 /// back to `font_size * len * 0.5` — close enough to keep glyph
 /// positions inside the rest of the line.
-fn measure_text_advance(
-    text: &[u8],
-    gs: &GraphicsState,
-    fonts: &HashMap<String, Arc<FontInfo>>,
-) -> Result<f32> {
-    let font_info = gs
-        .font_name
-        .as_ref()
-        .and_then(|n| fonts.get(n))
-        .map(Arc::clone);
+fn measure_text_advance(text: &[u8], gs: &GraphicsState, fonts: &HashMap<String, Arc<FontInfo>>) -> Result<f32> {
+    let font_info = gs.font_name.as_ref().and_then(|n| fonts.get(n)).map(Arc::clone);
 
     // Sum widths from the font's width table (in glyph units / 1000)
     // multiplied by font_size, plus per-char Tc spacing. ~keep
@@ -2587,7 +2455,7 @@ fn parse_form_matrix(dict: &HashMap<String, Object>) -> Transform {
                     } else {
                         0.0
                     }
-                },
+                }
             }
         };
         Transform::from_row(get_f32(0), get_f32(1), get_f32(2), get_f32(3), get_f32(4), get_f32(5))
@@ -2657,7 +2525,7 @@ fn image_channel_for_ink(space: &ResolvedSpace, ink: &str) -> Option<usize> {
             } else {
                 None
             }
-        },
+        }
         ResolvedSpace::DeviceN(names) => names
             .iter()
             .position(|n| n.as_str() != "None" && (n == "All" || n == ink)),
@@ -2672,12 +2540,7 @@ fn image_channel_for_ink(space: &ResolvedSpace, ink: &str) -> Option<usize> {
 /// Pull samples for `target_channel` out of an interleaved 8-bpc image buffer
 /// (`stride` bytes per pixel). Returns a `W*H` byte plane suitable for blitting
 /// as the R channel of an opaque grayscale RGBA pixmap.
-fn extract_image_channel(
-    samples: &[u8],
-    pixel_count: usize,
-    stride: usize,
-    target_channel: usize,
-) -> Vec<u8> {
+fn extract_image_channel(samples: &[u8], pixel_count: usize, stride: usize, target_channel: usize) -> Vec<u8> {
     let mut plane = Vec::with_capacity(pixel_count);
     for p in 0..pixel_count {
         let off = p * stride + target_channel;
@@ -2765,9 +2628,7 @@ fn paint_image_to_plates(
     clip: Option<&Mask>,
     target_inks: &[&str],
 ) -> Result<()> {
-    use crate::extractors::images::{
-        ColorSpace as PdfCs, ImageData, PixelFormat, extract_image_from_xobject,
-    };
+    use crate::extractors::images::{ColorSpace as PdfCs, ImageData, PixelFormat, extract_image_from_xobject};
 
     let dict = match xobject {
         Object::Stream { dict, .. } => dict,
@@ -2826,14 +2687,13 @@ fn paint_image_to_plates(
         return Ok(());
     }
 
-    let pdf_image =
-        match extract_image_from_xobject(Some(ctx.doc), xobject, obj_ref, Some(color_spaces)) {
-            Ok(img) => img,
-            Err(e) => {
-                tracing::warn!("Skipping image XObject '{name}': {e}");
-                return Ok(());
-            },
-        };
+    let pdf_image = match extract_image_from_xobject(Some(ctx.doc), xobject, obj_ref, Some(color_spaces)) {
+        Ok(img) => img,
+        Err(e) => {
+            tracing::warn!("Skipping image XObject '{name}': {e}");
+            return Ok(());
+        }
+    };
     let w = pdf_image.width() as usize;
     let h = pdf_image.height() as usize;
     let pixel_count = w * h;
@@ -2873,45 +2733,48 @@ fn paint_image_to_plates(
     // samples rescaled at all" fact, true for every sub-byte and 16-bit
     // image, and reading it here drops the /Decode those images are owed. ~keep
     let extractor_decode_applied = pdf_image.decode_folded_in();
-    let (samples, stride, decode_pre_applied) =
-        match (resolved_space.clone(), extractor_cs, pdf_image.data()) {
-            // Raw CMYK pixel buffer (Flate / CCITT / etc. on a DeviceCMYK image). ~keep
-            (
-                ResolvedSpace::Cmyk | ResolvedSpace::IccCmyk,
-                PdfCs::DeviceCMYK | PdfCs::ICCBased(4),
-                ImageData::Raw {
-                    pixels,
-                    format: PixelFormat::CMYK,
-                },
-            ) => (pixels.clone(), 4usize, extractor_decode_applied),
-            // JPEG-encoded DeviceCMYK image — decode to raw CMYK preserving APP14 inversion.
-            // ~keep
-            (
-                ResolvedSpace::Cmyk | ResolvedSpace::IccCmyk,
-                PdfCs::DeviceCMYK | PdfCs::ICCBased(4),
-                ImageData::Jpeg(bytes),
-            ) => (crate::extractors::images::decode_cmyk_jpeg_to_raw_cmyk(bytes)?, 4, false),
-            (ResolvedSpace::Separation(_), PdfCs::Separation, ImageData::Raw { pixels, .. }) => {
-                (pixels.clone(), 1, extractor_decode_applied)
+    let (samples, stride, decode_pre_applied) = match (resolved_space.clone(), extractor_cs, pdf_image.data()) {
+        // Raw CMYK pixel buffer (Flate / CCITT / etc. on a DeviceCMYK image). ~keep
+        (
+            ResolvedSpace::Cmyk | ResolvedSpace::IccCmyk,
+            PdfCs::DeviceCMYK | PdfCs::ICCBased(4),
+            ImageData::Raw {
+                pixels,
+                format: PixelFormat::CMYK,
             },
-            (ResolvedSpace::DeviceN(ref names), PdfCs::DeviceN, ImageData::Raw { pixels, .. }) => {
-                (pixels.clone(), names.len().max(1), extractor_decode_applied)
-            },
-            // Shape mismatch (e.g. extractor reports a different colour space than
-            // the dict declared after our resolver ran). Drop silently — the
-            // resolver result wins for routing semantics but we won't fabricate
-            // channels we don't have. ~keep
-            _ => {
-                // Real data loss (the image's plate content is dropped), not a
-                // routine routing decision like the no-subtractive-ink skip
-                // above — promoted to WARN accordingly. ~keep
-                tracing::warn!(
-                    "Image XObject '{name}': shape mismatch between resolved colour space \
+        ) => (pixels.clone(), 4usize, extractor_decode_applied),
+        // JPEG-encoded DeviceCMYK image — decode to raw CMYK preserving APP14 inversion.
+        // ~keep
+        (
+            ResolvedSpace::Cmyk | ResolvedSpace::IccCmyk,
+            PdfCs::DeviceCMYK | PdfCs::ICCBased(4),
+            ImageData::Jpeg(bytes),
+        ) => (
+            crate::extractors::images::decode_cmyk_jpeg_to_raw_cmyk(bytes)?,
+            4,
+            false,
+        ),
+        (ResolvedSpace::Separation(_), PdfCs::Separation, ImageData::Raw { pixels, .. }) => {
+            (pixels.clone(), 1, extractor_decode_applied)
+        }
+        (ResolvedSpace::DeviceN(ref names), PdfCs::DeviceN, ImageData::Raw { pixels, .. }) => {
+            (pixels.clone(), names.len().max(1), extractor_decode_applied)
+        }
+        // Shape mismatch (e.g. extractor reports a different colour space than
+        // the dict declared after our resolver ran). Drop silently — the
+        // resolver result wins for routing semantics but we won't fabricate
+        // channels we don't have. ~keep
+        _ => {
+            // Real data loss (the image's plate content is dropped), not a
+            // routine routing decision like the no-subtractive-ink skip
+            // above — promoted to WARN accordingly. ~keep
+            tracing::warn!(
+                "Image XObject '{name}': shape mismatch between resolved colour space \
                  and extractor sample format; skipping"
-                );
-                return Ok(());
-            },
-        };
+            );
+            return Ok(());
+        }
+    };
     let _ = color_state;
 
     // §8.9.5.2: /Decode maps raw sample values into the colour space's range.
@@ -2961,10 +2824,7 @@ fn expand_1bpc_to_8bpc(packed: &[u8], width: u32, height: u32) -> Vec<u8> {
         for col in 0..w {
             let byte_idx = row_start + col / 8;
             let bit_idx = 7 - (col % 8);
-            let bit = packed
-                .get(byte_idx)
-                .map(|b| (*b >> bit_idx) & 1)
-                .unwrap_or(0);
+            let bit = packed.get(byte_idx).map(|b| (*b >> bit_idx) & 1).unwrap_or(0);
             out.push(if bit == 1 { 255 } else { 0 });
         }
     }
@@ -2974,10 +2834,7 @@ fn expand_1bpc_to_8bpc(packed: &[u8], width: u32, height: u32) -> Vec<u8> {
 /// Read the image's `/Decode` array as per-channel `(dmin, dmax)` pairs.
 /// Returns `None` if the entry is absent or malformed; callers fall back
 /// to the identity mapping (no remap).
-fn read_decode_array(
-    dict: &HashMap<String, Object>,
-    num_components: usize,
-) -> Option<Vec<(f32, f32)>> {
+fn read_decode_array(dict: &HashMap<String, Object>, num_components: usize) -> Option<Vec<(f32, f32)>> {
     let decode = dict.get("Decode")?;
     let arr = decode.as_array()?;
     if arr.len() < num_components * 2 {
@@ -3061,10 +2918,7 @@ fn paint_image_mask_to_plates(
             None => obj.as_integer(),
         }
     };
-    let bpc = dict
-        .get("BitsPerComponent")
-        .and_then(resolve_int)
-        .unwrap_or(1) as u8;
+    let bpc = dict.get("BitsPerComponent").and_then(resolve_int).unwrap_or(1) as u8;
     if bpc != 1 {
         tracing::warn!(
             "Skipping image mask '{name}': BitsPerComponent={bpc} out of spec \

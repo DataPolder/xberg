@@ -365,8 +365,7 @@ fn test_geometric_spacing_word_boundary_detection() {
         char_spacing: 0.0,
     };
 
-    let gap = stream.characters[4].x_position
-        - (stream.characters[3].x_position + stream.characters[3].width);
+    let gap = stream.characters[4].x_position - (stream.characters[3].x_position + stream.characters[3].width);
     assert!(gap > 5.0, "Gap should be significant for word boundary");
 }
 
@@ -607,8 +606,8 @@ fn test_hyphenation_word_boundary() {
     };
 
     assert_eq!(stream.characters[5].code, 0x2D);
-    let gap_after_hyphen = stream.characters[6].x_position
-        - (stream.characters[5].x_position + stream.characters[5].width);
+    let gap_after_hyphen =
+        stream.characters[6].x_position - (stream.characters[5].x_position + stream.characters[5].width);
     assert!(gap_after_hyphen < 2.0, "Hyphen continuation has small gap");
 }
 

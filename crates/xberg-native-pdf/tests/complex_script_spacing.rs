@@ -32,9 +32,7 @@ fn tagged_pdf(bf: &str, ops: &str) -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, dict: &str, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
@@ -63,7 +61,12 @@ fn tagged_pdf(bf: &str, ops: &str) -> Vec<u8> {
     );
     stream(&mut buf, &mut off, 6, "", tu.as_bytes());
     obj(&mut buf, &mut off, 7, "<< /Type /StructTreeRoot /K [8 0 R] >>");
-    obj(&mut buf, &mut off, 8, "<< /Type /StructElem /S /P /P 7 0 R /Pg 3 0 R /K [0] >>");
+    obj(
+        &mut buf,
+        &mut off,
+        8,
+        "<< /Type /StructElem /S /P /P 7 0 R /Pg 3 0 R /K [0] >>",
+    );
     let xref = buf.len();
     buf.extend_from_slice(b"xref\n0 9\n0000000000 65535 f \n");
     for id in 1..=8 {

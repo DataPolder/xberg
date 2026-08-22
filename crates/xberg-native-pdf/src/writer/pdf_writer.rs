@@ -7,16 +7,15 @@ use super::acroform::AcroFormBuilder;
 use super::annotation_builder::{AnnotationBuilder, LinkAnnotation};
 use super::content_stream::{ContentStreamBuilder, StructElemRecord};
 use super::form_fields::{
-    CheckboxWidget, ComboBoxWidget, FormFieldEntry, ListBoxWidget, PushButtonWidget,
-    RadioButtonGroup, SignatureWidget, TextFieldWidget,
+    CheckboxWidget, ComboBoxWidget, FormFieldEntry, ListBoxWidget, PushButtonWidget, RadioButtonGroup, SignatureWidget,
+    TextFieldWidget,
 };
 use super::freetext::FreeTextAnnotation;
 use super::ink::InkAnnotation;
 use super::object_serializer::{ObjectSerializer, hoist_appearance_streams};
 use super::shape_annotations::{LineAnnotation, PolygonAnnotation, ShapeAnnotation};
 use super::special_annotations::{
-    CaretAnnotation, FileAttachmentAnnotation, FileAttachmentIcon, PopupAnnotation,
-    RedactAnnotation,
+    CaretAnnotation, FileAttachmentAnnotation, FileAttachmentIcon, PopupAnnotation, RedactAnnotation,
 };
 use super::stamp::{StampAnnotation, StampType};
 use super::text_annotations::TextAnnotation;
@@ -141,14 +140,7 @@ pub struct PageBuilder<'a> {
 
 impl<'a> PageBuilder<'a> {
     /// Add text to the page.
-    pub fn add_text(
-        &mut self,
-        text: &str,
-        x: f32,
-        y: f32,
-        font_name: &str,
-        font_size: f32,
-    ) -> &mut Self {
+    pub fn add_text(&mut self, text: &str, x: f32, y: f32, font_name: &str, font_size: f32) -> &mut Self {
         let page = &mut self.writer.pages[self.page_index];
         page.content_builder
             .begin_text()
@@ -276,9 +268,7 @@ impl<'a> PageBuilder<'a> {
                 // needed — every text element sets its own colour, matching
                 // the base-14 branch's "always set explicitly" contract. ~keep
                 let color = t.style.color;
-                self.writer.pages[self.page_index]
-                    .content_builder
-                    .fill_color(color);
+                self.writer.pages[self.page_index].content_builder.fill_color(color);
                 self.add_embedded_text(&t.text, t.bbox.x, t.bbox.y, &resource_name, t.font.size);
                 return self;
             }
@@ -306,16 +296,7 @@ impl<'a> PageBuilder<'a> {
     }
 
     /// Fill a rectangle with the given RGB color, then restore the fill color to black.
-    pub fn fill_rect_colored(
-        &mut self,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-        r: f32,
-        g: f32,
-        b: f32,
-    ) -> &mut Self {
+    pub fn fill_rect_colored(&mut self, x: f32, y: f32, width: f32, height: f32, r: f32, g: f32, b: f32) -> &mut Self {
         let page = &mut self.writer.pages[self.page_index];
         page.content_builder.end_text();
         page.content_builder
@@ -506,21 +487,13 @@ impl<'a> PageBuilder<'a> {
     /// * `contents` - The text content
     /// * `font` - Font name (Helvetica, Times, Courier)
     /// * `size` - Font size in points
-    pub fn textbox_styled(
-        &mut self,
-        rect: Rect,
-        contents: impl Into<String>,
-        font: &str,
-        size: f32,
-    ) -> &mut Self {
+    pub fn textbox_styled(&mut self, rect: Rect, contents: impl Into<String>, font: &str, size: f32) -> &mut Self {
         self.add_freetext(FreeTextAnnotation::new(rect, contents).with_font(font, size))
     }
 
     /// Add a centered text box.
     pub fn textbox_centered(&mut self, rect: Rect, contents: impl Into<String>) -> &mut Self {
-        self.add_freetext(
-            FreeTextAnnotation::new(rect, contents).with_alignment(TextAlignment::Center),
-        )
+        self.add_freetext(FreeTextAnnotation::new(rect, contents).with_alignment(TextAlignment::Center))
     }
 
     /// Add a callout annotation (text box with leader line).
@@ -530,12 +503,7 @@ impl<'a> PageBuilder<'a> {
     /// * `rect` - The position and size of the text box
     /// * `contents` - The text content
     /// * `callout_points` - Leader line coordinates [x1,y1, x2,y2] or [x1,y1, x2,y2, x3,y3]
-    pub fn callout(
-        &mut self,
-        rect: Rect,
-        contents: impl Into<String>,
-        callout_points: Vec<f64>,
-    ) -> &mut Self {
+    pub fn callout(&mut self, rect: Rect, contents: impl Into<String>, callout_points: Vec<f64>) -> &mut Self {
         self.add_freetext(FreeTextAnnotation::callout(rect, contents, callout_points))
     }
 
@@ -590,12 +558,7 @@ impl<'a> PageBuilder<'a> {
     }
 
     /// Add a filled rectangle annotation.
-    pub fn rectangle_filled(
-        &mut self,
-        rect: Rect,
-        stroke: (f32, f32, f32),
-        fill: (f32, f32, f32),
-    ) -> &mut Self {
+    pub fn rectangle_filled(&mut self, rect: Rect, stroke: (f32, f32, f32), fill: (f32, f32, f32)) -> &mut Self {
         self.add_shape(
             ShapeAnnotation::square(rect)
                 .with_stroke_color(stroke.0, stroke.1, stroke.2)
@@ -609,12 +572,7 @@ impl<'a> PageBuilder<'a> {
     }
 
     /// Add a filled circle/ellipse annotation.
-    pub fn circle_filled(
-        &mut self,
-        rect: Rect,
-        stroke: (f32, f32, f32),
-        fill: (f32, f32, f32),
-    ) -> &mut Self {
+    pub fn circle_filled(&mut self, rect: Rect, stroke: (f32, f32, f32), fill: (f32, f32, f32)) -> &mut Self {
         self.add_shape(
             ShapeAnnotation::circle(rect)
                 .with_stroke_color(stroke.0, stroke.1, stroke.2)
@@ -685,12 +643,7 @@ impl<'a> PageBuilder<'a> {
     /// * `stroke` - List of (x, y) points
     /// * `color` - RGB color tuple
     /// * `line_width` - Line width in points
-    pub fn ink_styled(
-        &mut self,
-        stroke: Vec<(f64, f64)>,
-        color: (f32, f32, f32),
-        line_width: f32,
-    ) -> &mut Self {
+    pub fn ink_styled(&mut self, stroke: Vec<(f64, f64)>, color: (f32, f32, f32), line_width: f32) -> &mut Self {
         self.add_ink(
             InkAnnotation::with_stroke(stroke)
                 .with_stroke_color(color.0, color.1, color.2)
@@ -802,11 +755,7 @@ impl<'a> PageBuilder<'a> {
     }
 
     /// Add a file attachment with paperclip icon.
-    pub fn file_attachment_paperclip(
-        &mut self,
-        rect: Rect,
-        file_name: impl Into<String>,
-    ) -> &mut Self {
+    pub fn file_attachment_paperclip(&mut self, rect: Rect, file_name: impl Into<String>) -> &mut Self {
         self.add_file_attachment(
             FileAttachmentAnnotation::new(rect, file_name).with_icon(FileAttachmentIcon::Paperclip),
         )
@@ -990,10 +939,7 @@ impl<'a> PageBuilder<'a> {
     /// let mut page = writer.add_page(612.0, 792.0);
     /// page.add_annotation(link);
     /// ```
-    pub fn add_annotation<A: Into<super::annotation_builder::Annotation>>(
-        &mut self,
-        annotation: A,
-    ) -> &mut Self {
+    pub fn add_annotation<A: Into<super::annotation_builder::Annotation>>(&mut self, annotation: A) -> &mut Self {
         let page = &mut self.writer.pages[self.page_index];
         page.annotations.add_annotation(annotation);
         self
@@ -1147,8 +1093,7 @@ impl PdfWriter {
     ) -> String {
         let user_name = user_name.into();
         let resource_name = self.register_embedded_font(font);
-        self.user_font_to_resource
-            .insert(user_name, resource_name.clone());
+        self.user_font_to_resource.insert(user_name, resource_name.clone());
         resource_name
     }
 
@@ -1163,9 +1108,7 @@ impl PdfWriter {
     /// element — matters when a page has thousands of text runs
     /// coming through the HTML+CSS painter.
     pub(super) fn embedded_resource_for_user_name(&self, user_name: &str) -> Option<&str> {
-        self.user_font_to_resource
-            .get(user_name)
-            .map(|s| s.as_str())
+        self.user_font_to_resource.get(user_name).map(|s| s.as_str())
     }
 
     /// Allocate a new object ID.
@@ -1328,9 +1271,7 @@ impl PdfWriter {
                 })
                 .collect();
             let (ids, objects, remapper) =
-                super::font_pdf_objects::build_embedded_font_objects(&mut font, || {
-                    allocated.remove(0)
-                })?;
+                super::font_pdf_objects::build_embedded_font_objects(&mut font, || allocated.remove(0))?;
             font_resources.insert(resource_name.clone(), ObjectSerializer::reference(ids.type0, 0));
             for (id, obj) in objects {
                 embedded_object_ids.push(id);
@@ -1362,8 +1303,7 @@ impl PdfWriter {
             annot_ids.push(page_annot_ids);
         }
 
-        let form_field_counts: Vec<usize> =
-            self.pages.iter().map(|p| p.form_fields.len()).collect();
+        let form_field_counts: Vec<usize> = self.pages.iter().map(|p| p.form_fields.len()).collect();
         let mut form_field_ids: Vec<Vec<u32>> = Vec::with_capacity(page_count);
         for count in form_field_counts {
             let mut page_field_ids = Vec::with_capacity(count);
@@ -1388,13 +1328,11 @@ impl PdfWriter {
         // soft_mask_id?) tuples and pre-allocate object IDs so the main
         // page-build loop can weave them into Resources without needing
         // a second &mut borrow on `self`. ~keep
-        let mut pending_per_page: Vec<Vec<super::content_stream::PendingImage>> =
-            Vec::with_capacity(page_count);
+        let mut pending_per_page: Vec<Vec<super::content_stream::PendingImage>> = Vec::with_capacity(page_count);
         // Collect struct records per page (F-1: tagged PDF structure tree).
         // We drain them here (before the main page loop) so that the content
         // builder borrow is released before we build the StructTreeRoot below. ~keep
-        let mut struct_records_per_page: Vec<Vec<StructElemRecord>> =
-            Vec::with_capacity(page_count);
+        let mut struct_records_per_page: Vec<Vec<StructElemRecord>> = Vec::with_capacity(page_count);
         for page_data in self.pages.iter_mut() {
             pending_per_page.push(page_data.content_builder.take_pending_images());
             struct_records_per_page.push(page_data.content_builder.take_struct_records());
@@ -1468,9 +1406,7 @@ impl PdfWriter {
             // Build content stream, threading the per-font remappers
             // through so every `ShowEmbeddedText` op is renumbered into
             // the subset's dense GID space (FONT-3b). ~keep
-            let raw_content = page_data
-                .content_builder
-                .build_with_remappers(&font_remappers)?;
+            let raw_content = page_data.content_builder.build_with_remappers(&font_remappers)?;
 
             let (content_bytes, is_compressed) = if self.config.compress {
                 match compress_data(&raw_content) {
@@ -1516,17 +1452,13 @@ impl PdfWriter {
                 annot_refs.push(Object::Reference(field_ref));
             }
 
-            let mut resource_entries: Vec<(&str, Object)> =
-                vec![("Font", Object::Dictionary(font_resources.clone()))];
+            let mut resource_entries: Vec<(&str, Object)> = vec![("Font", Object::Dictionary(font_resources.clone()))];
             let pending = &pending_per_page[i];
             let image_ids = &image_ids_per_page[i];
             if !pending.is_empty() {
                 let mut xobject_dict: HashMap<String, Object> = HashMap::new();
                 for (pi, (img_id, _)) in pending.iter().zip(image_ids.iter()) {
-                    xobject_dict.insert(
-                        pi.resource_id.clone(),
-                        Object::Reference(ObjectRef::new(*img_id, 0)),
-                    );
+                    xobject_dict.insert(pi.resource_id.clone(), Object::Reference(ObjectRef::new(*img_id, 0)));
                 }
                 resource_entries.push(("XObject", Object::Dictionary(xobject_dict)));
             }
@@ -1536,12 +1468,7 @@ impl PdfWriter {
                 ("Parent", ObjectSerializer::reference(pages_id, 0)),
                 (
                     "MediaBox",
-                    ObjectSerializer::rect(
-                        0.0,
-                        0.0,
-                        page_data.width as f64,
-                        page_data.height as f64,
-                    ),
+                    ObjectSerializer::rect(0.0, 0.0, page_data.width as f64, page_data.height as f64),
                 ),
                 ("Contents", ObjectSerializer::reference(content_id, 0)),
                 ("Resources", ObjectSerializer::dict(resource_entries)),
@@ -1636,7 +1563,7 @@ impl PdfWriter {
                         ) =>
                     {
                         Some(ObjectRef::new(*id, 0))
-                    },
+                    }
                     _ => None,
                 })
                 .collect();
@@ -1649,7 +1576,7 @@ impl PdfWriter {
                     }
                     self.next_obj_id = result.next_obj_id;
                     Some(result.root_ref)
-                },
+                }
                 _ => None,
             }
         } else {
@@ -1786,8 +1713,7 @@ impl PdfWriter {
                 str_dict.insert("RoleMap".to_string(), Object::Dictionary(role_map_dict));
             }
 
-            self.objects
-                .insert(str_root_id, Object::Dictionary(str_dict));
+            self.objects.insert(str_root_id, Object::Dictionary(str_dict));
 
             for (id, obj) in all_struct_elem_objs {
                 self.objects.insert(id, obj);
@@ -1806,8 +1732,10 @@ impl PdfWriter {
             catalog_entries.push(("AcroForm", ObjectSerializer::reference(acroform_id, 0)));
         }
         if let Some(root_ref) = outline_ref {
-            catalog_entries
-                .push(("Outlines", ObjectSerializer::reference(root_ref.id, root_ref.generation)));
+            catalog_entries.push((
+                "Outlines",
+                ObjectSerializer::reference(root_ref.id, root_ref.generation),
+            ));
         }
         if let Some(labels_id) = page_labels_id {
             catalog_entries.push(("PageLabels", ObjectSerializer::reference(labels_id, 0)));
@@ -1823,37 +1751,24 @@ impl PdfWriter {
         // F-1/F-2: Tagged PDF catalog entries
         // Build XMP metadata stream for pdfuaid:part (PDF/UA-1 ISO 14289-1 §6.7.11). ~keep
         let xmp_metadata_id: Option<u32> = if self.config.tagged {
-            let mark_info =
-                Object::Dictionary(HashMap::from([("Marked".to_string(), Object::Boolean(true))]));
+            let mark_info = Object::Dictionary(HashMap::from([("Marked".to_string(), Object::Boolean(true))]));
             catalog_entries.push(("MarkInfo", mark_info));
 
             if let Some(str_id) = struct_tree_root_id {
                 catalog_entries.push(("StructTreeRoot", ObjectSerializer::reference(str_id, 0)));
             }
 
-            let lang = self
-                .config
-                .language
-                .as_deref()
-                .unwrap_or("en-US")
-                .to_string();
+            let lang = self.config.language.as_deref().unwrap_or("en-US").to_string();
             catalog_entries.push(("Lang", ObjectSerializer::string(&lang)));
 
-            let viewer_prefs = Object::Dictionary(HashMap::from([(
-                "DisplayDocTitle".to_string(),
-                Object::Boolean(true),
-            )]));
+            let viewer_prefs =
+                Object::Dictionary(HashMap::from([("DisplayDocTitle".to_string(), Object::Boolean(true))]));
             catalog_entries.push(("ViewerPreferences", viewer_prefs));
 
             // ISO 14289-1 §6.7.11: PDF/UA documents must carry an XMP metadata
             // stream in the document catalog with pdfuaid:part set to 1 (UA-1). ~keep
             let title = self.config.title.as_deref().unwrap_or("").to_string();
-            let creator = self
-                .config
-                .creator
-                .as_deref()
-                .unwrap_or("xberg-native-pdf")
-                .to_string();
+            let creator = self.config.creator.as_deref().unwrap_or("xberg-native-pdf").to_string();
             let xmp = build_pdfua_xmp(&title, &creator, &lang);
             let xmp_id = self.alloc_obj_id();
             let mut xmp_dict: HashMap<String, Object> = HashMap::new();
@@ -1927,8 +1842,7 @@ impl PdfWriter {
         let mut hoisted_ap_objects: Vec<(u32, Object)> = Vec::new();
         for (_, annot_obj) in annotation_objects.iter_mut() {
             if let Object::Dictionary(annot_dict) = annot_obj {
-                hoisted_ap_objects
-                    .extend(hoist_appearance_streams(annot_dict, &mut self.next_obj_id));
+                hoisted_ap_objects.extend(hoist_appearance_streams(annot_dict, &mut self.next_obj_id));
             }
         }
         annotation_objects.extend(hoisted_ap_objects);
@@ -2127,7 +2041,7 @@ pub(crate) fn image_content_to_xobject_stream(
                  (colours may be wrong)"
             );
             WColorSpace::DeviceRGB
-        },
+        }
     };
     let format = match image.format {
         crate::elements::ImageFormat::Jpeg => WImageFormat::Jpeg,
@@ -2410,11 +2324,7 @@ mod tests {
                 "Help note",
                 TextAnnotationIcon::Help,
             );
-            page.text_note_with_icon(
-                Rect::new(100.0, 720.0, 24.0, 24.0),
-                "Key note",
-                TextAnnotationIcon::Key,
-            );
+            page.text_note_with_icon(Rect::new(100.0, 720.0, 24.0, 24.0), "Key note", TextAnnotationIcon::Key);
             page.text_note_with_icon(
                 Rect::new(128.0, 720.0, 24.0, 24.0),
                 "Insert note",
@@ -2669,16 +2579,8 @@ mod tests {
         let mut writer = PdfWriter::new();
         {
             let mut page = writer.add_letter_page();
-            page.rectangle_filled(
-                Rect::new(100.0, 300.0, 100.0, 80.0),
-                (0.0, 0.0, 1.0),
-                (0.8, 0.8, 1.0),
-            );
-            page.circle_filled(
-                Rect::new(250.0, 300.0, 80.0, 80.0),
-                (1.0, 0.0, 0.0),
-                (1.0, 0.8, 0.8),
-            );
+            page.rectangle_filled(Rect::new(100.0, 300.0, 100.0, 80.0), (0.0, 0.0, 1.0), (0.8, 0.8, 1.0));
+            page.circle_filled(Rect::new(250.0, 300.0, 80.0, 80.0), (1.0, 0.0, 0.0), (1.0, 0.8, 0.8));
             page.finish();
         }
 
@@ -2711,12 +2613,7 @@ mod tests {
         let mut writer = PdfWriter::new();
         {
             let mut page = writer.add_letter_page();
-            page.polyline(vec![
-                (100.0, 500.0),
-                (200.0, 550.0),
-                (300.0, 500.0),
-                (400.0, 550.0),
-            ]);
+            page.polyline(vec![(100.0, 500.0), (200.0, 550.0), (300.0, 500.0), (400.0, 550.0)]);
             page.finish();
         }
 
@@ -2994,10 +2891,7 @@ mod tests {
             let mut page = writer.add_letter_page();
             page.caret(Rect::new(100.0, 700.0, 20.0, 20.0));
             page.caret_paragraph(Rect::new(100.0, 650.0, 20.0, 20.0));
-            page.caret_with_comment(
-                Rect::new(100.0, 600.0, 20.0, 20.0),
-                "Insert new paragraph here",
-            );
+            page.caret_with_comment(Rect::new(100.0, 600.0, 20.0, 20.0), "Insert new paragraph here");
             page.finish();
         }
 
@@ -3123,8 +3017,7 @@ mod tests {
 
     fn make_png_bytes(width: u32, height: u32, pixels_rgb: &[u8]) -> Vec<u8> {
         use image::RgbImage;
-        let img = RgbImage::from_raw(width, height, pixels_rgb.to_vec())
-            .expect("pixel buffer size mismatch");
+        let img = RgbImage::from_raw(width, height, pixels_rgb.to_vec()).expect("pixel buffer size mismatch");
         let mut buf = Vec::new();
         img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
             .expect("encode PNG");
@@ -3133,8 +3026,7 @@ mod tests {
 
     fn make_jpeg_bytes(width: u32, height: u32, pixels_rgb: &[u8]) -> Vec<u8> {
         use image::RgbImage;
-        let img = RgbImage::from_raw(width, height, pixels_rgb.to_vec())
-            .expect("pixel buffer size mismatch");
+        let img = RgbImage::from_raw(width, height, pixels_rgb.to_vec()).expect("pixel buffer size mismatch");
         let mut buf = Vec::new();
         img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg)
             .expect("encode JPEG");
@@ -3150,12 +3042,17 @@ mod tests {
         use crate::geometry::Rect;
 
         let png = make_png_bytes(4, 3, &[128u8; 4 * 3 * 3]);
-        let content =
-            ImageContent::new(Rect::new(0.0, 0.0, 100.0, 100.0), ImageFormat::Png, png, 99, 99);
+        let content = ImageContent::new(Rect::new(0.0, 0.0, 100.0, 100.0), ImageFormat::Png, png, 99, 99);
 
         let (image_data, _soft_mask) = image_content_to_xobject_stream(&content);
-        assert_eq!(image_data.width, 4, "width must come from PNG header (4), not user arg (99)");
-        assert_eq!(image_data.height, 3, "height must come from PNG header (3), not user arg (99)");
+        assert_eq!(
+            image_data.width, 4,
+            "width must come from PNG header (4), not user arg (99)"
+        );
+        assert_eq!(
+            image_data.height, 3,
+            "height must come from PNG header (3), not user arg (99)"
+        );
 
         use crate::object::Object;
         let dict = image_data.build_xobject_dict();
@@ -3176,11 +3073,13 @@ mod tests {
         use crate::geometry::Rect;
 
         let jpeg = make_jpeg_bytes(6, 5, &[200u8; 6 * 5 * 3]);
-        let content =
-            ImageContent::new(Rect::new(0.0, 0.0, 200.0, 380.0), ImageFormat::Jpeg, jpeg, 200, 380);
+        let content = ImageContent::new(Rect::new(0.0, 0.0, 200.0, 380.0), ImageFormat::Jpeg, jpeg, 200, 380);
 
         let (image_data, _soft_mask) = image_content_to_xobject_stream(&content);
-        assert_eq!(image_data.width, 6, "width must come from JPEG header (6), not user arg (200)");
+        assert_eq!(
+            image_data.width, 6,
+            "width must come from JPEG header (6), not user arg (200)"
+        );
         assert_eq!(
             image_data.height, 5,
             "height must come from JPEG header (5), not user arg (380)"

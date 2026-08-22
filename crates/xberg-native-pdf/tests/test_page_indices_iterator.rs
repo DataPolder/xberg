@@ -12,7 +12,10 @@ fn page_indices_yields_zero_to_page_count() {
     let count = doc.page_count().expect("page count");
     let collected: Vec<usize> = doc.page_indices().collect();
     let expected: Vec<usize> = (0..count).collect();
-    assert_eq!(collected, expected, "page_indices() must produce 0..page_count contiguous");
+    assert_eq!(
+        collected, expected,
+        "page_indices() must produce 0..page_count contiguous"
+    );
 }
 
 #[test]

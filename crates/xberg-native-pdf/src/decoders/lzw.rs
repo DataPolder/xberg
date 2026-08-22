@@ -44,7 +44,7 @@ fn decode_lzw_weezl(input: &[u8]) -> Result<Vec<u8>> {
         Err(e) => {
             tracing::warn!(filter = "LZWDecode", error = ?e, "weezl decode failed, falling back to custom decoder");
             Err(Error::Decode(format!("LZWDecode error: {:?}", e)))
-        },
+        }
     }
 }
 
@@ -95,13 +95,7 @@ fn decode_lzw_custom(input: &[u8]) -> Result<Vec<u8>> {
         let string = if code < next_code {
             table
                 .get(&code)
-                .ok_or_else(|| {
-                    Error::Decode(format!(
-                        "Invalid LZW code: {} (table size: {})",
-                        code,
-                        table.len()
-                    ))
-                })?
+                .ok_or_else(|| Error::Decode(format!("Invalid LZW code: {} (table size: {})", code, table.len())))?
                 .clone()
         } else if code == next_code && prev_code.is_some() {
             // Special case: code == next_code

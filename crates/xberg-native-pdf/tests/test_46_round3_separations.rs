@@ -352,8 +352,7 @@ fn round3_p2_detection_off_page_renders_via_per_plate_walker_byte_identical() {
     let psfunc = "<< /FunctionType 2 /Domain [0 1] /Range [0 1 0 1 0 1 0 1] \
                   /C0 [0.0 0.0 0.0 0.0] /C1 [0.0 1.0 0.0 0.0] /N 1 >>";
     let content = "/CS_PMS cs\n1.0 scn\n0 0 100 100 re\nf\n";
-    let resources =
-        format!("/ColorSpace << /CS_PMS [/Separation /InkA /DeviceCMYK {} ] >>", psfunc);
+    let resources = format!("/ColorSpace << /CS_PMS [/Separation /InkA /DeviceCMYK {} ] >>", psfunc);
     let pdf = build_pdf_no_output_intent(content, &resources);
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
@@ -496,9 +495,7 @@ fn round3_p5_smask_attenuates_spot_plate_via_composite_path() {
     let post_u8 = tint_to_u8(compose_normal(0.0, 0.6, 1.0));
     assert_eq!(post_u8, 153);
     let m = 0.5_f32;
-    let expected = (m * post_u8 as f32 + (1.0 - m) * 0.0)
-        .clamp(0.0, 255.0)
-        .round() as u8;
+    let expected = (m * post_u8 as f32 + (1.0 - m) * 0.0).clamp(0.0, 255.0).round() as u8;
     assert_eq!(expected, 77);
     assert_eq!(
         centre(inka),
@@ -771,9 +768,7 @@ fn round3_p9_composite_path_smask_spot_lane_byte_identity_holds() {
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());
     let _img = renderer.render_page(&doc, 0).expect("render");
 
-    let plane = renderer
-        .cmyk_sidecar_spot_plane(0)
-        .expect("InkA plane present");
+    let plane = renderer.cmyk_sidecar_spot_plane(0).expect("InkA plane present");
     let dims = renderer.cmyk_sidecar_dims().unwrap();
     let centre_off = ((dims.1 / 2) * dims.0 + dims.0 / 2) as usize;
     assert_eq!(

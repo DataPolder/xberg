@@ -79,7 +79,7 @@ fn fill_merged_field_widget_persists_value_and_name() {
     match &full_name.value {
         FieldValue::Text(s) => {
             assert_eq!(s, "山田太郎", "filled CJK value must persist on the named field")
-        },
+        }
         other => panic!("full_name value must be Text(山田太郎), got {:?}", other),
     }
 }

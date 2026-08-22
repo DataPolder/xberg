@@ -54,9 +54,7 @@ fn build_cmyk_swatch_and_text_pdf() -> Vec<u8> {
     buf.extend_from_slice(b"\nendstream\nendobj\n");
 
     offsets.push(buf.len());
-    buf.extend_from_slice(
-        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    );
+    buf.extend_from_slice(b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
 
     let xref_offset = buf.len();
     buf.extend_from_slice(b"xref\n");

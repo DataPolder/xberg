@@ -10,9 +10,7 @@ use xberg_native_pdf::editor::{DocumentEditor, EditableDocument, SaveOptions};
 
 /// Create a minimal valid PDF containing an image XObject.
 fn create_pdf_with_image_xobject() -> Vec<u8> {
-    let image_data: &[u8] = &[
-        0xff, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0xff, 0x00,
-    ];
+    let image_data: &[u8] = &[0xff, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0xff, 0x00];
     let content_stream: &[u8] = b"q 100 0 0 100 100 600 cm /Im0 Do Q";
 
     let mut pdf = Vec::new();
@@ -45,9 +43,7 @@ fn create_pdf_with_image_xobject() -> Vec<u8> {
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
 
     let off7 = pdf.len();
-    pdf.extend_from_slice(
-        b"7 0 obj\n<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"7 0 obj\n<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>\nendobj\n");
 
     let xref_offset = pdf.len();
     pdf.extend_from_slice(b"xref\n0 8\n");
@@ -133,5 +129,8 @@ fn test_saved_pdf_with_xobject_is_valid() {
         PdfDocument::from_bytes(std::fs::read(&saved_path).unwrap()).is_ok(),
         "Saved PDF with XObjects should be parseable"
     );
-    assert!(DocumentEditor::open(&saved_path).is_ok(), "Saved PDF should be re-openable");
+    assert!(
+        DocumentEditor::open(&saved_path).is_ok(),
+        "Saved PDF should be re-openable"
+    );
 }

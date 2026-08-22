@@ -335,7 +335,10 @@ fn smask_unknown_s_subtype_does_not_panic() {
                      /SMask << /Type /Mask /S /Bogus /G 5 0 R >> >> >>";
     let pdf = build_pdf("0 0 100 100", resources, content, &[&obj_5]);
     let result = render_rgba_no_panic(pdf);
-    assert!(result.is_ok(), "Renderer must not panic on /SMask /S /Bogus; got {result:?}.");
+    assert!(
+        result.is_ok(),
+        "Renderer must not panic on /SMask /S /Bogus; got {result:?}."
+    );
 }
 
 /// Malformed: /SMask /BC out-of-range.

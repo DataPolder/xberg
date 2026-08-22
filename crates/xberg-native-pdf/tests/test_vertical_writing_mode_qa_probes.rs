@@ -159,15 +159,7 @@ end"
     }
 
     let xref = pdf.len();
-    let mut all_offsets: Vec<(usize, usize)> = vec![
-        (1, o1),
-        (2, o2),
-        (3, o3),
-        (4, o4),
-        (5, o5),
-        (6, o6),
-        (7, o7),
-    ];
+    let mut all_offsets: Vec<(usize, usize)> = vec![(1, o1), (2, o2), (3, o3), (4, o4), (5, o5), (6, o6), (7, o7)];
     all_offsets.extend(extra_offsets);
     all_offsets.sort_by_key(|(n, _)| *n);
     let max_n = all_offsets.iter().map(|(n, _)| *n).max().unwrap();
@@ -176,8 +168,12 @@ end"
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     pdf.extend_from_slice(
-        format!("trailer << /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", max_n + 1, xref)
-            .as_bytes(),
+        format!(
+            "trailer << /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            max_n + 1,
+            xref
+        )
+        .as_bytes(),
     );
     pdf
 }
@@ -260,9 +256,7 @@ fn probe06_pipeline_does_not_route_pure_horizontal_through_tategaki() {
         span_with_wmode("C", 300.0, 700.0, 0),
     ];
     let pipeline = TextPipeline::new();
-    let ordered = pipeline
-        .process(spans, ReadingOrderContext::new())
-        .expect("pipeline");
+    let ordered = pipeline.process(spans, ReadingOrderContext::new()).expect("pipeline");
     // Horizontal LTR (Simple/Geometric/etc) must produce ascending X order:
     // A → B → C. Tategaki would reverse to right-to-left, giving C → B → A. ~keep
     let combined: String = ordered.iter().map(|o| o.span.text.as_str()).collect();
@@ -292,9 +286,7 @@ fn probe07_horizontal_majority_keeps_configured_strategy_even_with_one_vertical(
         span_with_wmode("V", 100.0, 600.0, 1),
     ];
     let pipeline = TextPipeline::new();
-    let ordered = pipeline
-        .process(spans, ReadingOrderContext::new())
-        .expect("pipeline");
+    let ordered = pipeline.process(spans, ReadingOrderContext::new()).expect("pipeline");
     let combined: String = ordered.iter().map(|o| o.span.text.as_str()).collect();
     // Configured (default Geometric) strategy should sort the row of A..E in
     // increasing X order; V is on a lower row and follows. Tategaki sort
@@ -323,15 +315,17 @@ fn probe08_exact_5050_majority_routes_to_tategaki() {
         span_with_wmode("Y", 200.0, 700.0, 0),
     ];
     let pipeline = TextPipeline::new();
-    let ordered = pipeline
-        .process(spans, ReadingOrderContext::new())
-        .expect("pipeline");
+    let ordered = pipeline.process(spans, ReadingOrderContext::new()).expect("pipeline");
     let combined: String = ordered.iter().map(|o| o.span.text.as_str()).collect();
     // Tategaki sort puts rightmost X-center first, descending Y within column.
     // Right column (x≈500): A then B. Left column (x≈100..200): X then Y.
     // But tategaki uses median-width tolerance, so X/Y may cluster as one
     // column or two. Key invariant: A is first (rightmost top). ~keep
-    assert!(combined.starts_with('A'), "5050 must route to tategaki; got {}", combined);
+    assert!(
+        combined.starts_with('A'),
+        "5050 must route to tategaki; got {}",
+        combined
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -367,9 +361,7 @@ fn probe09_boundary_thresholds() {
         span_with_wmode("A", 100.0, 700.0, 0),
     ];
     let pipeline = TextPipeline::new();
-    let ordered = pipeline
-        .process(spans2, ReadingOrderContext::new())
-        .unwrap();
+    let ordered = pipeline.process(spans2, ReadingOrderContext::new()).unwrap();
     let combined: String = ordered.iter().map(|o| o.span.text.as_str()).collect();
     // Vertical majority: rightmost first → V then W then A. ~keep
     assert_eq!(combined, "VWA", "2/3 vertical must use tategaki; got {}", combined);
@@ -408,8 +400,14 @@ fn probe11_large_negative_tj_offset_in_vertical_mode_no_overflow_or_nan() {
     let a = chars.iter().find(|c| c.char == 'A').expect("A");
     let b = chars.iter().find(|c| c.char == 'B').expect("B");
     // Pin: no NaN, no inf — math is well-behaved at large magnitudes. ~keep
-    assert!(a.bbox.x.is_finite() && a.bbox.y.is_finite(), "A position must be finite");
-    assert!(b.bbox.x.is_finite() && b.bbox.y.is_finite(), "B position must be finite");
+    assert!(
+        a.bbox.x.is_finite() && a.bbox.y.is_finite(),
+        "A position must be finite"
+    );
+    assert!(
+        b.bbox.x.is_finite() && b.bbox.y.is_finite(),
+        "B position must be finite"
+    );
     // Pin: current sign convention puts B ABOVE A. The magnitude of the
     // y-jump (ignoring the v_y origin offset) is ~|32767/1000 * 12| - 12 = 381. ~keep
     let dy = b.bbox.y - a.bbox.y;
@@ -545,8 +543,14 @@ fn probe16_w2_for_cid_without_horizontal_width_does_not_crash() {
     // No /W array, only /W2 — CID 1 has vertical metrics, horizontal falls
     // back to /DW = 1000. ~keep
     let content = b"BT /F1 12 Tf 100 700 Td <0001> Tj ET";
-    let pdf =
-        build_pdf("Identity-V", content, 1000, (880, -1000), Some("[1 [-500 250 600]]"), None);
+    let pdf = build_pdf(
+        "Identity-V",
+        content,
+        1000,
+        (880, -1000),
+        Some("[1 [-500 250 600]]"),
+        None,
+    );
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let chars = doc.extract_chars(0).expect("extract_chars");
     let a = chars.iter().find(|c| c.char == 'A').expect("A char");
@@ -591,8 +595,14 @@ fn probe17_w2_at_u16_max_does_not_panic_in_parse() {
 #[test]
 fn probe18_negative_v_x_v_y_in_w2_preserved() {
     let content = b"BT /F1 12 Tf 100 700 Td <0001> Tj ET";
-    let pdf =
-        build_pdf("Identity-V", content, 1000, (880, -1000), Some("[1 [-500 -100 -200]]"), None);
+    let pdf = build_pdf(
+        "Identity-V",
+        content,
+        1000,
+        (880, -1000),
+        Some("[1 [-500 -100 -200]]"),
+        None,
+    );
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let chars = doc.extract_chars(0).expect("extract_chars");
     let a = chars.iter().find(|c| c.char == 'A').expect("A char");
@@ -648,8 +658,7 @@ fn probe20_w2_indirect_reference_resolves() {
     // Unique BaseFont to avoid cache poisoning — see probe_cache_poison_*.
     // The font's /W2 points to object 8, which holds the array. ~keep
     let content = b"BT /F1 12 Tf 100 700 Td <0001> Tj <0002> Tj ET";
-    let extra_objs: Vec<(usize, Vec<u8>)> =
-        vec![(8, b"8 0 obj [1 [-500 250 600]] endobj\n".to_vec())];
+    let extra_objs: Vec<(usize, Vec<u8>)> = vec![(8, b"8 0 obj [1 [-500 250 600]] endobj\n".to_vec())];
     let pdf = build_pdf_full_named(
         "Probe20Font",
         "Identity-V",
@@ -860,11 +869,8 @@ end";
     for off in [o1, o2, o3, o4, o5, o6, o7] {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    pdf.extend_from_slice(
-        format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes(),
-    );
-    let doc =
-        PdfDocument::from_bytes(pdf).expect("parse — must not panic on missing CIDSystemInfo");
+    pdf.extend_from_slice(format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes());
+    let doc = PdfDocument::from_bytes(pdf).expect("parse — must not panic on missing CIDSystemInfo");
     let _ = doc.extract_chars(0);
     let _ = doc.extract_spans(0);
 }
@@ -968,9 +974,10 @@ fn probe32_horizontal_text_with_90deg_rotated_ctm_advances_perpendicularly() {
     let pdf = build_pdf("Identity-H", content, 1000, (880, -1000), None, None);
     let doc = PdfDocument::from_bytes(pdf).expect("parse rotated horizontal");
     let chars = doc.extract_chars(0).expect("extract_chars");
-    if let (Some(a), Some(b)) =
-        (chars.iter().find(|c| c.char == 'A'), chars.iter().find(|c| c.char == 'B'))
-    {
+    if let (Some(a), Some(b)) = (
+        chars.iter().find(|c| c.char == 'A'),
+        chars.iter().find(|c| c.char == 'B'),
+    ) {
         // Under a 90° CCW CTM, the horizontal Tj advance becomes a +Y user
         // space advance. So B.y > A.y, and A.x ≈ B.x. ~keep
         let dx = (a.bbox.x - b.bbox.x).abs();
@@ -1146,9 +1153,7 @@ end";
         b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> /XObject << /FXO 8 0 R >> >> >> endobj\n",
     );
     let o4 = pdf.len();
-    pdf.extend_from_slice(
-        format!("4 0 obj << /Length {} >> stream\n", page_content.len()).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("4 0 obj << /Length {} >> stream\n", page_content.len()).as_bytes());
     pdf.extend_from_slice(page_content);
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
     let o5 = pdf.len();
@@ -1178,9 +1183,7 @@ end";
     for off in [o1, o2, o3, o4, o5, o6, o7, o8] {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    pdf.extend_from_slice(
-        format!("trailer << /Size 9 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer << /Size 9 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes());
 
     let doc = PdfDocument::from_bytes(pdf).expect("parse XObject PDF");
     // Pin: extracting the page should pick up the XObject's spans and tag
@@ -1268,8 +1271,14 @@ fn probe_cache_poison_w2_collision_across_documents() {
     // PDF A: no /W2 override → CID 1 advances per /DW2 → dy=12. ~keep
     let pdf_a = build_pdf("Identity-V", content, 1000, (880, -1000), None, None);
     // PDF B: explicit /W2 forcing CID 1 to w1y=-500 → dy=6. ~keep
-    let pdf_b =
-        build_pdf("Identity-V", content, 1000, (880, -1000), Some("[1 [-500 250 600]]"), None);
+    let pdf_b = build_pdf(
+        "Identity-V",
+        content,
+        1000,
+        (880, -1000),
+        Some("[1 [-500 250 600]]"),
+        None,
+    );
 
     // Force PDF A to land in the cache first. ~keep
     let doc_a = PdfDocument::from_bytes(pdf_a).expect("parse A");
@@ -1389,9 +1398,7 @@ end";
     for off in [o1, o2, o3, o4, o5, o6, o7, o8, o9] {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    pdf.extend_from_slice(
-        format!("trailer << /Size 10 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer << /Size 10 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes());
 
     let doc = PdfDocument::from_bytes(pdf).expect("parse two-font PDF");
     let spans = doc.extract_spans(0).expect("extract_spans");
@@ -1400,10 +1407,7 @@ end";
     let texts: Vec<&str> = spans.iter().map(|s| s.text.as_str()).collect();
     let combined: String = texts.iter().copied().collect();
     assert!(
-        combined.contains('A')
-            && combined.contains('B')
-            && combined.contains('C')
-            && combined.contains('D'),
+        combined.contains('A') && combined.contains('B') && combined.contains('C') && combined.contains('D'),
         "mid-BT Tf font switch must emit all four glyphs as spans; got {:?}",
         texts
     );
@@ -1468,5 +1472,8 @@ fn probe39_vertical_column_with_rotated_tm_stays_one_run() {
     let text = doc.extract_text(0).expect("extract_text");
     let flat: String = text.split_whitespace().collect::<Vec<_>>().join("");
     assert!(flat.contains("ABCD"), "vertical column split glyph-by-glyph: {text:?}");
-    assert!(!text.contains("A B C D"), "spaces injected between vertical glyphs: {text:?}");
+    assert!(
+        !text.contains("A B C D"),
+        "spaces injected between vertical glyphs: {text:?}"
+    );
 }

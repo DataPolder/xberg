@@ -109,7 +109,7 @@ fn normalize_filter_name(name: &str) -> Result<&'static str> {
         "JBIG2Decode" => return Ok("JBIG2Decode"),
         "JPXDecode" => return Ok("JPXDecode"),
         "BrotliDecode" => return Ok("BrotliDecode"),
-        _ => {},
+        _ => {}
     }
 
     // PDF spec abbreviations (Table 6) ~keep
@@ -121,7 +121,7 @@ fn normalize_filter_name(name: &str) -> Result<&'static str> {
         "RL" => return Ok("RunLengthDecode"),
         "DCT" => return Ok("DCTDecode"),
         "CCF" => return Ok("CCITTFaxDecode"),
-        _ => {},
+        _ => {}
     }
 
     let lower = name.to_ascii_lowercase();
@@ -277,11 +277,7 @@ pub fn decode_stream_with_options(
 /// # Returns
 ///
 /// The fully decoded data or an error if any filter fails.
-pub fn decode_stream_with_params(
-    data: &[u8],
-    filters: &[String],
-    params: Option<&DecodeParams>,
-) -> Result<Vec<u8>> {
+pub fn decode_stream_with_params(data: &[u8], filters: &[String], params: Option<&DecodeParams>) -> Result<Vec<u8>> {
     let mut current = data.to_vec();
 
     for filter_name in filters {
@@ -319,7 +315,7 @@ mod tests {
         match result {
             Err(crate::error::Error::UnsupportedFilter(name)) => {
                 assert_eq!(name, "UnsupportedFilter");
-            },
+            }
             _ => panic!("Expected UnsupportedFilter error"),
         }
     }
@@ -359,7 +355,7 @@ mod tests {
         match result {
             Err(crate::error::Error::UnsupportedFilter(name)) => {
                 assert_eq!(name, "BogusFilter");
-            },
+            }
             _ => panic!("Expected UnsupportedFilter error"),
         }
     }

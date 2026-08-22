@@ -36,9 +36,7 @@ fn two_column_pdf() -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
@@ -87,13 +85,9 @@ fn untagged_two_column_reads_column_major() {
         "columns interleaved — left column not read fully before the right:\n{text}"
     );
 
-    let l1 = text
-        .find("the left column begins the article here")
-        .unwrap();
+    let l1 = text.find("the left column begins the article here").unwrap();
     let l2 = text.find("and should be read first top to bottom").unwrap();
-    let l3 = text
-        .find("before the reader moves over the gutter")
-        .unwrap();
+    let l3 = text.find("before the reader moves over the gutter").unwrap();
     let l4 = text.find("to the second column on the right side").unwrap();
     assert!(l1 < l2 && l2 < l3 && l3 < l4, "left column lines out of order:\n{text}");
 

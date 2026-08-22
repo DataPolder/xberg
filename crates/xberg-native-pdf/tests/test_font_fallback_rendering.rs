@@ -55,7 +55,11 @@ fn test_text_extraction_with_standard_font() {
     let pdf_bytes = create_text_pdf();
     let doc = PdfDocument::from_bytes(pdf_bytes).unwrap();
     let text = doc.extract_text(0).unwrap_or_default();
-    assert!(text.contains("Sample text"), "Should extract readable text, got: '{}'", text);
+    assert!(
+        text.contains("Sample text"),
+        "Should extract readable text, got: '{}'",
+        text
+    );
 }
 
 #[test]
@@ -96,5 +100,8 @@ fn test_font_resources_preserved_after_save() {
 
     let saved_bytes = std::fs::read(&saved_path).unwrap();
     let saved_content = String::from_utf8_lossy(&saved_bytes);
-    assert!(saved_content.contains("Helvetica"), "Saved PDF should preserve font references");
+    assert!(
+        saved_content.contains("Helvetica"),
+        "Saved PDF should preserve font references"
+    );
 }

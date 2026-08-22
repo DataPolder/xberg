@@ -64,12 +64,7 @@ impl Matrix {
     /// whether the cache is safe to reuse across invocations — non-identity
     /// matrices mean coordinates differ per call.
     pub fn is_identity(&self) -> bool {
-        self.a == 1.0
-            && self.b == 0.0
-            && self.c == 0.0
-            && self.d == 1.0
-            && self.e == 0.0
-            && self.f == 0.0
+        self.a == 1.0 && self.b == 0.0 && self.c == 0.0 && self.d == 1.0 && self.e == 0.0 && self.f == 0.0
     }
 
     /// Effective scale this matrix applies to a stroked line width.
@@ -399,7 +394,7 @@ impl GraphicsState {
             text_rise: 0.0,
             render_mode: 0,
             text_wmode: 0,
-            fill_color_space: "DeviceGray".to_string(), // PDF default ~keep
+            fill_color_space: "DeviceGray".to_string(),   // PDF default ~keep
             stroke_color_space: "DeviceGray".to_string(), // PDF default ~keep
             fill_color_rgb: (0.0, 0.0, 0.0),
             stroke_color_rgb: (0.0, 0.0, 0.0),
@@ -409,18 +404,18 @@ impl GraphicsState {
             stroke_color_components: smallvec::SmallVec::new(),
             line_width: 1.0,
             dash_pattern: (Vec::new(), 0.0),
-            line_cap: 0,       // Butt cap (PDF default) ~keep
-            line_join: 0,      // Miter join (PDF default) ~keep
-            miter_limit: 10.0, // PDF default miter limit ~keep
+            line_cap: 0,                                          // Butt cap (PDF default) ~keep
+            line_join: 0,                                         // Miter join (PDF default) ~keep
+            miter_limit: 10.0,                                    // PDF default miter limit ~keep
             rendering_intent: "RelativeColorimetric".to_string(), // PDF default ~keep
-            flatness: 1.0,     // PDF default flatness tolerance ~keep
-            fill_alpha: 1.0,   // Fully opaque (PDF default) ~keep
-            stroke_alpha: 1.0, // Fully opaque (PDF default) ~keep
-            blend_mode: "Normal".to_string(), // Normal blend mode (PDF default) ~keep
-            fill_overprint: false, // §11.7.4 default ~keep
-            stroke_overprint: false, // §11.7.4 default ~keep
-            overprint_mode: 0, // §11.7.4 default (standard mode) ~keep
-            smask: None,       // §11.4.7 default (no soft mask) ~keep
+            flatness: 1.0,                                        // PDF default flatness tolerance ~keep
+            fill_alpha: 1.0,                                      // Fully opaque (PDF default) ~keep
+            stroke_alpha: 1.0,                                    // Fully opaque (PDF default) ~keep
+            blend_mode: "Normal".to_string(),                     // Normal blend mode (PDF default) ~keep
+            fill_overprint: false,                                // §11.7.4 default ~keep
+            stroke_overprint: false,                              // §11.7.4 default ~keep
+            overprint_mode: 0,                                    // §11.7.4 default (standard mode) ~keep
+            smask: None,                                          // §11.4.7 default (no soft mask) ~keep
             fill_spot_inks: Vec::new(),
             stroke_spot_inks: Vec::new(),
             fill_pattern_name: None,

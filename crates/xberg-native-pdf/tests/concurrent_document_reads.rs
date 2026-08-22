@@ -27,11 +27,7 @@ use xberg_native_pdf::document::PdfDocument;
 
 #[test]
 fn concurrent_document_reads_no_panic() {
-    let pdf_bytes: Arc<Vec<u8>> = Arc::new(
-        Pdf::from_text("Concurrent read test")
-            .expect("build PDF")
-            .into_bytes(),
-    );
+    let pdf_bytes: Arc<Vec<u8>> = Arc::new(Pdf::from_text("Concurrent read test").expect("build PDF").into_bytes());
 
     let handles: Vec<_> = (0..8)
         .map(|_| {
@@ -69,8 +65,7 @@ fn concurrent_renders_no_panic() {
             let o = Arc::clone(&opts);
             std::thread::spawn(move || {
                 let doc = PdfDocument::from_bytes((*b).clone()).expect("open PDF in thread");
-                let img = xberg_native_pdf::rendering::render_page(&doc, 0, &o)
-                    .expect("render must not fail");
+                let img = xberg_native_pdf::rendering::render_page(&doc, 0, &o).expect("render must not fail");
                 assert!(!img.data.is_empty(), "rendered image data must not be empty");
                 assert!(img.width > 0 && img.height > 0, "rendered dimensions must be positive");
             })
@@ -115,10 +110,10 @@ fn concurrent_render_page_fit_one_shared_handle_no_spurious_parse() {
                             if img.data.is_empty() {
                                 return Err(format!("iter {i}: render produced empty data"));
                             }
-                        },
+                        }
                         Err(e) => {
                             return Err(format!("iter {i}: render failed: {e}"));
-                        },
+                        }
                     }
                 }
                 Ok(())
@@ -129,7 +124,7 @@ fn concurrent_render_page_fit_one_shared_handle_no_spurious_parse() {
     let mut failures = Vec::new();
     for h in handles {
         match h.join() {
-            Ok(Ok(())) => {},
+            Ok(Ok(())) => {}
             Ok(Err(e)) => failures.push(e),
             Err(_) => failures.push("render thread panicked".to_string()),
         }
@@ -148,10 +143,9 @@ fn concurrent_render_embedded_font_no_spurious_parse() {
     const THREADS: usize = 8;
     const ITERS: usize = 16;
 
-    let bytes =
-        Pdf::from_markdown("# Thread Safety\n\nPage 1.\n\n---\n\nPage 2.\n\n---\n\nPage 3.")
-            .expect("build markdown PDF")
-            .into_bytes();
+    let bytes = Pdf::from_markdown("# Thread Safety\n\nPage 1.\n\n---\n\nPage 2.\n\n---\n\nPage 3.")
+        .expect("build markdown PDF")
+        .into_bytes();
     let doc = Arc::new(PdfDocument::from_bytes(bytes).expect("open_from_bytes failed"));
     let opts = Arc::new(RenderOptions::default());
     let pages = doc.page_count().expect("page_count failed");
@@ -173,10 +167,10 @@ fn concurrent_render_embedded_font_no_spurious_parse() {
                         render_page(&doc, page, &opts)
                     };
                     match result {
-                        Ok(img) if !img.data.is_empty() => {},
+                        Ok(img) if !img.data.is_empty() => {}
                         Ok(_) => {
                             return Err(format!("thread {t} iter {i} page {page}: empty render"));
-                        },
+                        }
                         Err(e) => return Err(format!("thread {t} iter {i} page {page}: {e}")),
                     }
                 }
@@ -188,11 +182,14 @@ fn concurrent_render_embedded_font_no_spurious_parse() {
     let mut failures = Vec::new();
     for h in handles {
         match h.join() {
-            Ok(Ok(())) => {},
+            Ok(Ok(())) => {}
             Ok(Err(e)) => failures.push(e),
             Err(_) => failures.push("render thread panicked".to_string()),
         }
     }
 
-    assert!(failures.is_empty(), "embedded-font shared-handle render race: {failures:?}");
+    assert!(
+        failures.is_empty(),
+        "embedded-font shared-handle render race: {failures:?}"
+    );
 }

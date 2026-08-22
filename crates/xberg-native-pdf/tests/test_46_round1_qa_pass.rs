@@ -335,8 +335,7 @@ fn qa2_1_detection_fires_for_bm_array_with_non_normal_mode() {
 fn qa2_2_detection_does_not_fire_for_bm_array_unwrapping_to_normal() {
     let icc = build_constant_cmyk_icc(135);
     let content = "1 1 1 rg\n0 0 100 100 re\nf\n";
-    let resources =
-        "/ExtGState << /NM << /Type /ExtGState /BM [/UnknownInventedMode /Normal] >> >>";
+    let resources = "/ExtGState << /NM << /Type /ExtGState /BM [/UnknownInventedMode /Normal] >> >>";
     let pdf = build_pdf_with_output_intent(content, resources, &icc, &[]);
 
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
@@ -398,8 +397,14 @@ fn qa3_3_empty_name_falls_back_to_normal() {
 #[test]
 fn qa3_4_numeric_looking_names_fall_back_to_normal() {
     assert_eq!(BlendModeClass::from_name("0"), BlendModeClass::SeparableWhitePreserving);
-    assert_eq!(BlendModeClass::from_name("123"), BlendModeClass::SeparableWhitePreserving);
-    assert_eq!(BlendModeClass::from_name("-1"), BlendModeClass::SeparableWhitePreserving);
+    assert_eq!(
+        BlendModeClass::from_name("123"),
+        BlendModeClass::SeparableWhitePreserving
+    );
+    assert_eq!(
+        BlendModeClass::from_name("-1"),
+        BlendModeClass::SeparableWhitePreserving
+    );
 }
 
 /// QA3.5: `/Compatible` — a legacy PDF 1.4 blend-mode synonym for
@@ -435,7 +440,10 @@ fn qa3_6_hex_escaped_name_post_parser_resolution() {
         BlendModeClass::SeparableWhitePreserving
     );
     // HardLight (no space) is the spec name. ~keep
-    assert_eq!(BlendModeClass::from_name("HardLight"), BlendModeClass::SeparableWhitePreserving);
+    assert_eq!(
+        BlendModeClass::from_name("HardLight"),
+        BlendModeClass::SeparableWhitePreserving
+    );
 }
 
 /// QA4.1: an ExtGState with `/CA < 1.0` (stroke alpha) fires the
@@ -683,9 +691,7 @@ fn qa6_1_round1_spot_planes_stay_zero_through_full_render() {
     assert_eq!(names.len(), 2, "two DeviceN spots discovered");
 
     for i in 0..2 {
-        let plane = renderer
-            .cmyk_sidecar_spot_plane(i)
-            .expect("spot plane addressable");
+        let plane = renderer.cmyk_sidecar_spot_plane(i).expect("spot plane addressable");
         assert!(
             plane.iter().all(|&b| b == 0),
             "round-1 baseline: spot plane {} stays byte-identical-zero \

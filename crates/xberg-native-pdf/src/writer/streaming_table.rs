@@ -48,9 +48,7 @@
 
 use super::document_builder::{FluentPageBuilder, TextAlign};
 use super::table_renderer::CellAlign;
-use crate::elements::{
-    ContentElement, FontSpec, PathContent, PathOperation, TextContent, TextStyle,
-};
+use crate::elements::{ContentElement, FontSpec, PathContent, PathOperation, TextContent, TextStyle};
 use crate::error::{Error, Result};
 use crate::geometry::Rect;
 use crate::layout::Color;
@@ -199,12 +197,7 @@ impl StreamingTableConfig {
     /// If fewer rows than `sample_rows` are pushed, widths are frozen at
     /// `finish()` from whatever was buffered (or from the column defaults if
     /// zero rows were buffered).
-    pub fn mode_sample(
-        mut self,
-        sample_rows: usize,
-        min_col_width_pt: f32,
-        max_col_width_pt: f32,
-    ) -> Self {
+    pub fn mode_sample(mut self, sample_rows: usize, min_col_width_pt: f32, max_col_width_pt: f32) -> Self {
         self.mode = TableMode::Sample {
             rows: sample_rows.max(1),
             min_col_width_pt: min_col_width_pt.max(1.0),
@@ -402,7 +395,8 @@ impl<'a> StreamingTable<'a> {
         if matches!(self.config.mode, TableMode::AutoAll) {
             return Err(Error::InvalidOperation(
                 "streaming_table: TableMode::AutoAll requires the buffered Table, not StreamingTable; \
-                 use StreamingTableConfig::mode_fixed() or mode_sample() instead".into(),
+                 use StreamingTableConfig::mode_fixed() or mode_sample() instead"
+                    .into(),
             ));
         }
 
@@ -458,16 +452,14 @@ impl<'a> StreamingTable<'a> {
         let texts: Vec<String> = cells.iter().map(|c| c.text.clone()).collect();
 
         let should_flush = match &mut self.sample_state {
-            SampleState::Collecting {
-                buffered, target, ..
-            } => {
+            SampleState::Collecting { buffered, target, .. } => {
                 buffered.push(texts.clone());
                 if buffered.len() >= *target {
                     true
                 } else {
                     return Ok(());
                 }
-            },
+            }
             _ => false,
         };
         if should_flush {
@@ -518,16 +510,12 @@ impl<'a> StreamingTable<'a> {
     fn freeze_and_flush(&mut self) -> Result<()> {
         // Extract buffer + constraints — replace state with Frozen now so
         // that draw_row calls inside the flush see the updated widths. ~keep
-        let (buffered, min_w, max_w) =
-            match std::mem::replace(&mut self.sample_state, SampleState::Frozen) {
-                SampleState::Collecting {
-                    buffered,
-                    min_w,
-                    max_w,
-                    ..
-                } => (buffered, min_w, max_w),
-                _ => return Ok(()),
-            };
+        let (buffered, min_w, max_w) = match std::mem::replace(&mut self.sample_state, SampleState::Frozen) {
+            SampleState::Collecting {
+                buffered, min_w, max_w, ..
+            } => (buffered, min_w, max_w),
+            _ => return Ok(()),
+        };
 
         let h_pad = self.config.horizontal_padding;
         let n_cols = self.config.columns.len();
@@ -562,12 +550,7 @@ impl<'a> StreamingTable<'a> {
     }
 
     fn draw_header(&mut self) {
-        let headers: Vec<String> = self
-            .config
-            .columns
-            .iter()
-            .map(|c| c.header.clone())
-            .collect();
+        let headers: Vec<String> = self.config.columns.iter().map(|c| c.header.clone()).collect();
         self.draw_row(&headers, true).ok();
     }
 
@@ -769,8 +752,7 @@ impl<'a> StreamingTable<'a> {
             for (col_idx, cell) in row_cells.iter().enumerate() {
                 // For continuation rows (row_idx > 0), cells whose column was
                 // claimed by a rowspan in row 0 are rendered empty. ~keep
-                let is_spanned_slot =
-                    row_idx > 0 && col_idx < rows[0].len() && rows[0][col_idx].rowspan > 1;
+                let is_spanned_slot = row_idx > 0 && col_idx < rows[0].len() && rows[0][col_idx].rowspan > 1;
                 let text = if is_spanned_slot { "" } else { &cell.text };
                 let col_w = self.config.columns[col_idx].width;
                 let content_w = (col_w - 2.0 * h_pad).max(1.0);
@@ -854,11 +836,7 @@ impl<'a> StreamingTable<'a> {
                 }
                 let right_x_val = self.origin_x + self.total_width;
                 let right_top = if row_idx == 0 { group_top } else { top_y };
-                let right_bot = if row_idx == 0 {
-                    group_top - total_height
-                } else {
-                    bot_y
-                };
+                let right_bot = if row_idx == 0 { group_top - total_height } else { bot_y };
                 let _ = right_x_val; // already in column_x last element ~keep
                 let _ = (right_top, right_bot); // handled by column_x loop above ~keep
             }
@@ -915,15 +893,7 @@ impl<'a> StreamingTable<'a> {
         self.page.push_element(ContentElement::Path(path));
     }
 
-    fn push_path_stroke_line(
-        &mut self,
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        color: (f32, f32, f32),
-        width: f32,
-    ) {
+    fn push_path_stroke_line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, color: (f32, f32, f32), width: f32) {
         let min_x = x1.min(x2);
         let min_y = y1.min(y2);
         let w = (x2 - x1).abs().max(1.0);
@@ -976,11 +946,7 @@ mod tests {
             StreamingTableConfig::new()
                 .column(StreamingColumn::new("SKU").width_pt(60.0))
                 .column(StreamingColumn::new("Item").width_pt(120.0))
-                .column(
-                    StreamingColumn::new("Qty")
-                        .width_pt(40.0)
-                        .align(CellAlign::Right),
-                )
+                .column(StreamingColumn::new("Qty").width_pt(40.0).align(CellAlign::Right))
                 .repeat_header(true),
         );
 
@@ -1048,7 +1014,11 @@ mod tests {
         .unwrap();
         t.finish().done();
 
-        assert!(doc.page_count() >= 2, "expected a page break, got {} pages", doc.page_count());
+        assert!(
+            doc.page_count() >= 2,
+            "expected a page break, got {} pages",
+            doc.page_count()
+        );
 
         let p2_texts: Vec<&str> = doc
             .page_elements(1)
@@ -1185,10 +1155,7 @@ mod tests {
                 .mode_sample(3, min_w, max_w),
         );
 
-        for content in &[
-            "A",
-            "A very long string that would exceed 120 pt if measured",
-        ] {
+        for content in &["A", "A very long string that would exceed 120 pt if measured"] {
             t.push_row(|r| {
                 r.cell(*content);
             })
@@ -1277,7 +1244,11 @@ mod tests {
         .unwrap();
         t.finish().done();
 
-        assert!(doc.page_count() >= 2, "expected page break, got {} pages", doc.page_count());
+        assert!(
+            doc.page_count() >= 2,
+            "expected page break, got {} pages",
+            doc.page_count()
+        );
     }
 
     #[test]
@@ -1302,7 +1273,11 @@ mod tests {
         }
         t.finish().done();
 
-        assert!(doc.page_count() >= 2, "expected multiple pages, got {}", doc.page_count());
+        assert!(
+            doc.page_count() >= 2,
+            "expected multiple pages, got {}",
+            doc.page_count()
+        );
 
         let all_texts: Vec<String> = (0..doc.page_count())
             .flat_map(|p| {

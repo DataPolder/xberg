@@ -147,12 +147,7 @@ fn device_bounds(path: &tiny_skia::Path, transform: tiny_skia::Transform) -> Opt
     let b = path.bounds();
     let (left, top) = (f64::from(b.left()), f64::from(b.top()));
     let (right, bottom) = (f64::from(b.right()), f64::from(b.bottom()));
-    let mut out = [
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-    ];
+    let mut out = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
     for (x, y) in [(left, top), (right, top), (left, bottom), (right, bottom)] {
         let dx = sx * x + kx * y + tx;
         let dy = ky * x + sy * y + ty;
@@ -169,10 +164,7 @@ fn device_bounds(path: &tiny_skia::Path, transform: tiny_skia::Transform) -> Opt
 
 /// Whether a path's device-space bounds are representable enough to
 /// rasterize. Used at the clip sites, which have no pixmap to cull against.
-pub(crate) fn device_bounds_rasterizable(
-    path: &tiny_skia::Path,
-    transform: tiny_skia::Transform,
-) -> bool {
+pub(crate) fn device_bounds_rasterizable(path: &tiny_skia::Path, transform: tiny_skia::Transform) -> bool {
     device_bounds(path, transform).is_some_and(|b| b.iter().all(|c| c.abs() <= MAX_DEVICE_COORD))
 }
 
@@ -214,8 +206,7 @@ fn rasterizable_on(
 /// Uniform scale factor `transform` applies, for converting a path-space
 /// line width into device units.
 fn device_scale(transform: tiny_skia::Transform) -> f64 {
-    let det = f64::from(transform.sx) * f64::from(transform.sy)
-        - f64::from(transform.kx) * f64::from(transform.ky);
+    let det = f64::from(transform.sx) * f64::from(transform.sy) - f64::from(transform.kx) * f64::from(transform.ky);
     det.abs().sqrt()
 }
 
@@ -231,10 +222,7 @@ fn stroke_reach(stroke: &tiny_skia::Stroke) -> f64 {
 /// line that wide covers everything the pixmap can show anyway, so the width
 /// is capped rather than the stroke dropped: the only pixels this changes
 /// are further from the centerline than any pixmap reaches.
-fn clamp_stroke_reach(
-    stroke: &tiny_skia::Stroke,
-    transform: tiny_skia::Transform,
-) -> Option<tiny_skia::Stroke> {
+fn clamp_stroke_reach(stroke: &tiny_skia::Stroke, transform: tiny_skia::Transform) -> Option<tiny_skia::Stroke> {
     let reach = stroke_reach(stroke) * device_scale(transform);
     if !reach.is_finite() || reach <= MAX_DEVICE_STROKE_REACH {
         return None;
@@ -310,9 +298,7 @@ pub(crate) fn guarded_mask_fill_path(
 /// caller renders the paint into a fresh scratch pixmap with Normal
 /// blending, then dispatches per-pixel composition via
 /// [`blend_nonsep::compose_in_place`].
-pub(crate) fn pdf_blend_mode_is_nonseparable(
-    mode: &str,
-) -> Option<blend_nonsep::NonSeparableBlend> {
+pub(crate) fn pdf_blend_mode_is_nonseparable(mode: &str) -> Option<blend_nonsep::NonSeparableBlend> {
     blend_nonsep::NonSeparableBlend::from_name(mode)
 }
 
@@ -325,11 +311,8 @@ pub(crate) fn pdf_blend_mode_is_nonseparable(
 /// the non-separable blend mode on its paint object (the dispatcher
 /// substitutes Normal so the scratch captures only the source
 /// contribution).
-pub(crate) fn paint_with_nonsep_blend<F>(
-    dest: &mut tiny_skia::Pixmap,
-    mode: blend_nonsep::NonSeparableBlend,
-    paint: F,
-) where
+pub(crate) fn paint_with_nonsep_blend<F>(dest: &mut tiny_skia::Pixmap, mode: blend_nonsep::NonSeparableBlend, paint: F)
+where
     F: FnOnce(&mut tiny_skia::Pixmap),
 {
     let w = dest.width();
@@ -342,7 +325,7 @@ pub(crate) fn paint_with_nonsep_blend<F>(
             // does for non-separable modes). Better than panic. ~keep
             paint(dest);
             return;
-        },
+        }
     };
     paint(&mut scratch);
     blend_nonsep::compose_in_place(dest.data_mut(), scratch.data(), mode);
@@ -417,21 +400,19 @@ pub fn render_page_region(
     match options.format {
         ImageFormat::Jpeg => {
             use image::ImageEncoder;
-            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
-                &mut buf,
-                options.jpeg_quality.clamp(1, 100),
-            );
+            let encoder =
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, options.jpeg_quality.clamp(1, 100));
             encoder
                 .write_image(cropped.as_bytes(), w, h, cropped.color().into())
                 .map_err(|e| crate::Error::InvalidPdf(format!("jpeg encode: {e}")))?;
-        },
+        }
         _ => {
             use image::ImageEncoder;
             use image::codecs::png::{CompressionType, FilterType, PngEncoder};
             PngEncoder::new_with_quality(&mut buf, CompressionType::Fast, FilterType::Sub)
                 .write_image(cropped.as_bytes(), w, h, cropped.color().into())
                 .map_err(|e| crate::Error::InvalidPdf(format!("png encode: {e}")))?;
-        },
+        }
     }
     Ok(RenderedImage {
         data: buf,

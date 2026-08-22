@@ -190,7 +190,7 @@ impl PdfBuilder {
         let oc_props = match ocg {
             Some(o) => {
                 format!(" /OCProperties << /OCGs [{} 0 R] /D << /Order [{} 0 R] >> >>", o, o)
-            },
+            }
             None => String::new(),
         };
         objs.insert(
@@ -361,8 +361,11 @@ fn three_mcid_content() -> Vec<u8> {
 
 /// Two-page page-0 content (one MCID) used by multi-page tests.
 fn one_mcid_simple(mcid: u32) -> Vec<u8> {
-    format!("BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID {} >> BDC\n(X) Tj\nEMC\nET\n", mcid)
-        .into_bytes()
+    format!(
+        "BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID {} >> BDC\n(X) Tj\nEMC\nET\n",
+        mcid
+    )
+    .into_bytes()
 }
 
 /// Fixture 1: simple single-Span /ActualText.
@@ -373,12 +376,7 @@ fn fixture_simple() -> Vec<u8> {
             .as_bytes()
             .to_vec(),
     );
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("fi")
-            .k(K::Mcid(0, 0)),
-    );
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("fi").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     b.build()
 }
@@ -393,8 +391,18 @@ fn actualtext_simple_emits_replacement_no_raw() {
 
     {
         let (name, output) = ("extract_text", &extracted);
-        assert!(output.contains("fi"), "{}: expected 'fi' (replacement), got {:?}", name, output);
-        assert!(!output.contains('X'), "{}: raw 'X' must NOT appear, got {:?}", name, output);
+        assert!(
+            output.contains("fi"),
+            "{}: expected 'fi' (replacement), got {:?}",
+            name,
+            output
+        );
+        assert!(
+            !output.contains('X'),
+            "{}: raw 'X' must NOT appear, got {:?}",
+            name,
+            output
+        );
     }
 }
 
@@ -406,18 +414,8 @@ fn fixture_nested_inner_wins() -> Vec<u8> {
             .as_bytes()
             .to_vec(),
     );
-    let _outer = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("outer")
-            .k(K::Obj(9)),
-    );
-    let _inner = b.add_elem(
-        Elem::new(9, "Span", 8)
-            .page(4)
-            .actual_text("inner")
-            .k(K::Mcid(0, 0)),
-    );
+    let _outer = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("outer").k(K::Obj(9)));
+    let _inner = b.add_elem(Elem::new(9, "Span", 8).page(4).actual_text("inner").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 9);
     b.build()
 }
@@ -444,7 +442,12 @@ fn actualtext_nested_inner_wins() {
             name,
             output
         );
-        assert!(!output.contains('X'), "{}: raw 'X' must NOT appear, got {:?}", name, output);
+        assert!(
+            !output.contains('X'),
+            "{}: raw 'X' must NOT appear, got {:?}",
+            name,
+            output
+        );
     }
 }
 
@@ -483,7 +486,12 @@ fn actualtext_multi_mcid_subtree_emits_once() {
             name,
             output
         );
-        assert!(!output.contains('X'), "{}: raw 'X' must NOT appear, got {:?}", name, output);
+        assert!(
+            !output.contains('X'),
+            "{}: raw 'X' must NOT appear, got {:?}",
+            name,
+            output
+        );
     }
 }
 
@@ -566,12 +574,7 @@ fn actualtext_wins_over_alt() {
 fn fixture_only_alt() -> Vec<u8> {
     let mut b = PdfBuilder::new();
     b.add_page_content(single_mcid_content("", 0, "X"));
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .alt("alt only")
-            .k(K::Mcid(0, 0)),
-    );
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).alt("alt only").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     b.build()
 }
@@ -634,7 +637,11 @@ fn actualtext_unicode_round_trips() {
     let pdf = fixture_unicode();
     let doc = PdfDocument::from_bytes(pdf).expect("open");
     let extracted = doc.extract_text(0).expect("extract_text");
-    assert!(extracted.contains("你好"), "CJK characters must appear, got {:?}", extracted);
+    assert!(
+        extracted.contains("你好"),
+        "CJK characters must appear, got {:?}",
+        extracted
+    );
     assert!(
         extracted.contains("שלום"),
         "RTL Hebrew characters must appear, got {:?}",
@@ -681,12 +688,7 @@ fn fixture_descendant_mc_scope() -> Vec<u8> {
                    (X) Tj\n\
                    EMC\nET\n";
     b.add_page_content(content.as_bytes().to_vec());
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("struct")
-            .k(K::Mcid(0, 0)),
-    );
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("struct").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     b.build()
 }
@@ -785,7 +787,12 @@ fn actualtext_cross_path_consistency() {
         ),
     ];
     for (name, out) in &surfaces {
-        assert!(out.contains("fi"), "{}: expected 'fi' on every surface, got {:?}", name, out);
+        assert!(
+            out.contains("fi"),
+            "{}: expected 'fi' on every surface, got {:?}",
+            name,
+            out
+        );
         assert!(
             !out.contains('X'),
             "{}: raw 'X' must NOT appear on any surface, got {:?}",

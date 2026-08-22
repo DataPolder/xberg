@@ -41,12 +41,7 @@
 /// assert!(!is_any_whitespace('1'));
 /// ```
 fn is_any_whitespace(c: char) -> bool {
-    c.is_whitespace()
-        || c == '\u{00A0}'
-        || c == '\u{2007}'
-        || c == '\u{202F}'
-        || c == '\u{3000}'
-        || c == '\u{FEFF}'
+    c.is_whitespace() || c == '\u{00A0}' || c == '\u{2007}' || c == '\u{202F}' || c == '\u{3000}' || c == '\u{FEFF}'
 }
 
 /// Result of bold marker validation
@@ -109,7 +104,7 @@ impl BoldGroup {
                 let is_word_char = c.is_alphabetic() || c.is_numeric();
                 let is_not_whitespace = !is_any_whitespace(c);
                 is_word_char && is_not_whitespace
-            },
+            }
             None => false,
         }
     }
@@ -127,7 +122,7 @@ impl BoldGroup {
                 let is_word_char = c.is_alphabetic() || c.is_numeric();
                 let is_not_whitespace = !is_any_whitespace(c);
                 is_word_char && is_not_whitespace
-            },
+            }
             None => false,
         }
     }
@@ -160,24 +155,18 @@ impl BoldMarkerValidator {
     /// # Returns
     ///
     /// `true` if bold group has valid word boundaries before/after
-    pub fn validate_boundary_context(
-        preceding_text: &str,
-        _group_text: &str,
-        following_text: &str,
-    ) -> bool {
+    pub fn validate_boundary_context(preceding_text: &str, _group_text: &str, following_text: &str) -> bool {
         // Bold group must start with a word boundary
         // Valid: "word **bold**" or beginning of line
         // Invalid: "the**Bold**" (CamelCase mid-word) ~keep
-        let has_space_before = preceding_text.ends_with(' ')
-            || preceding_text.ends_with('\n')
-            || preceding_text.is_empty();
+        let has_space_before =
+            preceding_text.ends_with(' ') || preceding_text.ends_with('\n') || preceding_text.is_empty();
 
         // Bold group must end with a word boundary
         // Valid: "**bold** word" or end of line
         // Invalid: "**bold**ness" (not complete word) ~keep
-        let has_space_after = following_text.starts_with(' ')
-            || following_text.starts_with('\n')
-            || following_text.is_empty();
+        let has_space_after =
+            following_text.starts_with(' ') || following_text.starts_with('\n') || following_text.is_empty();
 
         has_space_before && has_space_after
     }
@@ -238,8 +227,8 @@ impl BoldMarkerValidator {
                         err,
                         group.text.chars().take(20).collect::<String>()
                     );
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -250,7 +239,7 @@ impl BoldMarkerValidator {
         match Self::can_insert_markers(group) {
             BoldMarkerDecision::Insert => {
                 format!("**{}**", group.text)
-            },
+            }
             BoldMarkerDecision::Skip(_) => group.text.clone(),
         }
     }
@@ -269,7 +258,10 @@ mod tests {
             last_char_in_group: Some('o'),
         };
 
-        assert_eq!(BoldMarkerValidator::can_insert_markers(&group), BoldMarkerDecision::Insert);
+        assert_eq!(
+            BoldMarkerValidator::can_insert_markers(&group),
+            BoldMarkerDecision::Insert
+        );
     }
 
     #[test]
@@ -376,7 +368,9 @@ mod tests {
 
     #[test]
     fn test_newline_as_boundary() {
-        assert!(BoldMarkerValidator::validate_boundary_context("text\n", "bold", " more"));
+        assert!(BoldMarkerValidator::validate_boundary_context(
+            "text\n", "bold", " more"
+        ));
 
         assert!(BoldMarkerValidator::validate_boundary_context("text ", "bold", "\n"));
 
@@ -407,7 +401,10 @@ mod tests {
             last_char_in_group: Some('4'),
         };
 
-        assert_eq!(BoldMarkerValidator::can_insert_markers(&num_group), BoldMarkerDecision::Insert);
+        assert_eq!(
+            BoldMarkerValidator::can_insert_markers(&num_group),
+            BoldMarkerDecision::Insert
+        );
     }
 
     #[test]

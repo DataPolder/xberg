@@ -82,12 +82,7 @@ impl RadioButtonGroup {
     /// * `export_value` - Value submitted when this button is selected
     /// * `rect` - Position and size of the button
     /// * `label` - Display label for accessibility
-    pub fn add_button(
-        mut self,
-        export_value: impl Into<String>,
-        rect: Rect,
-        label: impl Into<String>,
-    ) -> Self {
+    pub fn add_button(mut self, export_value: impl Into<String>, rect: Rect, label: impl Into<String>) -> Self {
         self.buttons.push(RadioButtonWidget {
             export_value: export_value.into(),
             rect,
@@ -182,10 +177,7 @@ impl RadioButtonGroup {
     /// Build entries for all radio buttons.
     ///
     /// Returns a list of FormFieldEntry for each button, plus the parent field dict.
-    pub fn build_entries(
-        &self,
-        page_ref: ObjectRef,
-    ) -> (HashMap<String, Object>, Vec<FormFieldEntry>) {
+    pub fn build_entries(&self, page_ref: ObjectRef) -> (HashMap<String, Object>, Vec<FormFieldEntry>) {
         let parent_dict = self.build_parent_dict();
 
         let entries: Vec<FormFieldEntry> = self
@@ -261,11 +253,7 @@ impl RadioButtonWidget {
     }
 
     /// Build the widget annotation dictionary.
-    pub fn build_widget_dict(
-        &self,
-        page_ref: ObjectRef,
-        is_selected: bool,
-    ) -> HashMap<String, Object> {
+    pub fn build_widget_dict(&self, page_ref: ObjectRef, is_selected: bool) -> HashMap<String, Object> {
         let mut dict = HashMap::new();
 
         dict.insert("Type".to_string(), Object::Name("Annot".to_string()));
@@ -402,17 +390,19 @@ mod tests {
         assert!(!parent.is_empty());
         assert_eq!(entries.len(), 2);
 
-        assert_eq!(entries[0].widget_dict.get("AS"), Some(&Object::Name("credit".to_string())));
+        assert_eq!(
+            entries[0].widget_dict.get("AS"),
+            Some(&Object::Name("credit".to_string()))
+        );
 
         assert_eq!(entries[1].widget_dict.get("AS"), Some(&Object::Name("Off".to_string())));
     }
 
     #[test]
     fn test_radio_button_widget() {
-        let button =
-            RadioButtonWidget::new("option1", Rect::new(72.0, 700.0, 15.0, 15.0), "Option 1")
-                .with_border_color(0.0, 0.0, 1.0)
-                .with_background_color(0.9, 0.9, 1.0);
+        let button = RadioButtonWidget::new("option1", Rect::new(72.0, 700.0, 15.0, 15.0), "Option 1")
+            .with_border_color(0.0, 0.0, 1.0)
+            .with_background_color(0.9, 0.9, 1.0);
 
         assert_eq!(button.export_value(), "option1");
         assert_eq!(button.label(), "Option 1");

@@ -24,10 +24,7 @@ fn stream(buf: &mut Vec<u8>, off: &mut [usize], id: usize, data: &[u8]) {
 
 /// Minimal single-page-content PDF builder: N pages, each with a body
 /// paragraph plus arbitrary extra content-stream text supplied per page.
-fn build_pdf_with_page_extras(
-    page_count: usize,
-    extra_per_page: impl Fn(usize) -> String,
-) -> Vec<u8> {
+fn build_pdf_with_page_extras(page_count: usize, extra_per_page: impl Fn(usize) -> String) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
 
     // `off[N]` = byte offset where object N's bytes start, filled in as
@@ -276,12 +273,13 @@ fn remove_footers_preserves_repeated_phrase_that_drifts_in_x() {
 #[test]
 fn remove_footers_still_removes_position_locked_footer() {
     let phrase = "Confidential Draft Only";
-    let bytes = build_pdf_with_page_extras(5, |_i| {
-        format!("BT /F1 10 Tf 1 0 0 1 72 30 Tm ({phrase}) Tj ET\n")
-    });
+    let bytes = build_pdf_with_page_extras(5, |_i| format!("BT /F1 10 Tf 1 0 0 1 72 30 Tm ({phrase}) Tj ET\n"));
     let doc = PdfDocument::from_bytes(bytes).unwrap();
     let removed = doc.remove_footers(0.5).unwrap();
-    assert!(removed >= 5, "expected the running footer removed on every page, got {removed}");
+    assert!(
+        removed >= 5,
+        "expected the running footer removed on every page, got {removed}"
+    );
 
     for page in 0..5 {
         let text = doc.extract_text(page).unwrap();

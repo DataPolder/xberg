@@ -45,10 +45,7 @@ impl StructureTreeBuilder {
     ///
     /// - ISO 32000-1:2008, Section 14.7.2 - Structure Hierarchy
     /// - ISO 32000-1:2008, Section 14.7.4.4 - ParentTree (number tree)
-    pub fn build(
-        _content: &HashMap<usize, StructureElement>,
-        _page_count: usize,
-    ) -> Result<StructTreeRoot> {
+    pub fn build(_content: &HashMap<usize, StructureElement>, _page_count: usize) -> Result<StructTreeRoot> {
         // Build new structure tree from modified content
         // For now, return a basic structure
         // Full implementation would:
@@ -64,11 +61,7 @@ impl StructureTreeBuilder {
     ///
     /// Recursively processes the hierarchy, converting marked content
     /// references to MCIDs.
-    fn convert_structure_element(
-        &mut self,
-        element: &StructureElement,
-        _page_index: usize,
-    ) -> Result<StructElem> {
+    fn convert_structure_element(&mut self, element: &StructureElement, _page_index: usize) -> Result<StructElem> {
         let struct_type = StructType::from_str(&element.structure_type);
 
         let mut elem = StructElem::new(struct_type);
@@ -78,7 +71,7 @@ impl StructureTreeBuilder {
                 crate::elements::ContentElement::Structure(nested) => {
                     let nested_elem = self.convert_structure_element(nested, _page_index)?;
                     elem.add_child(StructChild::StructElem(Box::new(nested_elem)));
-                },
+                }
                 _ => {
                     let mcid = self.mcid_counter;
                     self.mcid_counter += 1;
@@ -88,7 +81,7 @@ impl StructureTreeBuilder {
                         page: _page_index as u32,
                         scope: crate::structure::McidScope::Page(_page_index as u32),
                     });
-                },
+                }
             }
         }
 

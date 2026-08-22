@@ -22,13 +22,11 @@ impl StreamDecoder for AsciiHexDecoder {
         while let Some(&high) = chars.next() {
             let low = chars.next().copied().unwrap_or(b'0');
 
-            let high_nibble = hex_digit_to_value(high).ok_or_else(|| {
-                Error::Decode(format!("ASCIIHexDecode: invalid hex digit '{}'", high as char))
-            })?;
+            let high_nibble = hex_digit_to_value(high)
+                .ok_or_else(|| Error::Decode(format!("ASCIIHexDecode: invalid hex digit '{}'", high as char)))?;
 
-            let low_nibble = hex_digit_to_value(low).ok_or_else(|| {
-                Error::Decode(format!("ASCIIHexDecode: invalid hex digit '{}'", low as char))
-            })?;
+            let low_nibble = hex_digit_to_value(low)
+                .ok_or_else(|| Error::Decode(format!("ASCIIHexDecode: invalid hex digit '{}'", low as char)))?;
 
             let byte = (high_nibble << 4) | low_nibble;
             output.push(byte);

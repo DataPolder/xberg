@@ -167,10 +167,7 @@ fn is_likely_columnar(spans: &[TextSpan]) -> bool {
     let median_size = sizes[sizes.len() / 2];
     let gutter_min = (median_size * 0.5) * 4.0;
 
-    let mut intervals: Vec<(f32, f32)> = spans
-        .iter()
-        .map(|s| (s.bbox.x, s.bbox.x + s.bbox.width))
-        .collect();
+    let mut intervals: Vec<(f32, f32)> = spans.iter().map(|s| (s.bbox.x, s.bbox.x + s.bbox.width)).collect();
     intervals.sort_by(|a, b| crate::utils::safe_float_cmp(a.0, b.0));
 
     let mut merged: Vec<(f32, f32)> = Vec::new();
@@ -196,11 +193,7 @@ fn is_likely_columnar(spans: &[TextSpan]) -> bool {
 }
 
 impl ReadingOrderStrategy for GeometricStrategy {
-    fn apply(
-        &self,
-        spans: Vec<TextSpan>,
-        _context: &ReadingOrderContext,
-    ) -> Result<Vec<OrderedTextSpan>> {
+    fn apply(&self, spans: Vec<TextSpan>, _context: &ReadingOrderContext) -> Result<Vec<OrderedTextSpan>> {
         if spans.is_empty() {
             return Ok(Vec::new());
         }
@@ -212,15 +205,11 @@ impl ReadingOrderStrategy for GeometricStrategy {
         // resolves the form-style false-column-detection bug. ~keep
         if !is_likely_columnar(&spans) {
             let mut indexed: Vec<(usize, TextSpan)> = spans.into_iter().enumerate().collect();
-            indexed.sort_by(|(_, a), (_, b)| {
-                crate::utils::row_aware_span_cmp(a.bbox.y, a.bbox.x, b.bbox.y, b.bbox.x)
-            });
+            indexed.sort_by(|(_, a), (_, b)| crate::utils::row_aware_span_cmp(a.bbox.y, a.bbox.x, b.bbox.y, b.bbox.x));
             return Ok(indexed
                 .into_iter()
                 .enumerate()
-                .map(|(order, (_, span))| {
-                    OrderedTextSpan::with_info(span, order, ReadingOrderInfo::geometric())
-                })
+                .map(|(order, (_, span))| OrderedTextSpan::with_info(span, order, ReadingOrderInfo::geometric()))
                 .collect());
         }
 
@@ -288,12 +277,8 @@ impl ReadingOrderStrategy for GeometricStrategy {
         for (group_id, group) in sub_groups.into_iter().enumerate() {
             for idx in group {
                 ordered.push(
-                    OrderedTextSpan::with_info(
-                        spans[idx].clone(),
-                        order,
-                        ReadingOrderInfo::geometric(),
-                    )
-                    .with_group(group_id),
+                    OrderedTextSpan::with_info(spans[idx].clone(), order, ReadingOrderInfo::geometric())
+                        .with_group(group_id),
                 );
                 order += 1;
             }

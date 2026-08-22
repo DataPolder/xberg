@@ -215,7 +215,7 @@ fn cluster_lines(spans: &[TextSpan], indices: &[usize], med_h: f32) -> Vec<LineS
                 }
                 l.span_lefts.push(s.bbox.left());
                 l.span_rights.push(s.bbox.right());
-            },
+            }
             _ => lines.push(LineStat {
                 top: s.bbox.top(),
                 left: s.bbox.left(),
@@ -288,10 +288,7 @@ fn has_hanging_indent(left_edges: &[f32], med_h: f32) -> bool {
     }
     let l0 = left_edges.iter().copied().fold(f32::MAX, f32::min);
     let near_tol = med_h * 0.5;
-    let lo_band = left_edges
-        .iter()
-        .filter(|&&x| (x - l0).abs() <= near_tol)
-        .count();
+    let lo_band = left_edges.iter().filter(|&&x| (x - l0).abs() <= near_tol).count();
     let hi_band = left_edges
         .iter()
         .filter(|&&x| {
@@ -333,9 +330,7 @@ mod tests {
     #[test]
     fn classify_dense_results_is_prose() {
         // 10 wide lines, ~40 chars each → mean_chars > 20, mostly wide. ~keep
-        let spans: Vec<TextSpan> = (0..10)
-            .map(|i| prose_line(i as f32 * 12.0, 0.0, 40))
-            .collect();
+        let spans: Vec<TextSpan> = (0..10).map(|i| prose_line(i as f32 * 12.0, 0.0, 40)).collect();
         assert_eq!(classify(&spans), RegionClass::Prose);
     }
 
@@ -388,8 +383,7 @@ mod tests {
     fn classify_form_label_value_is_form() {
         let spans: Vec<TextSpan> = (0..8)
             .map(|i| {
-                let mut label =
-                    span("Wages, salaries, tips, etc.", 0.0, i as f32 * 12.0, 90.0, 10.0);
+                let mut label = span("Wages, salaries, tips, etc.", 0.0, i as f32 * 12.0, 90.0, 10.0);
                 label.text = "Wages, salaries, tips".to_string();
                 label
             })
@@ -405,18 +399,14 @@ mod tests {
     #[test]
     fn classify_single_paragraph_is_mixed() {
         // Only 4 lines → below the 6-line substantiality floor. ~keep
-        let spans: Vec<TextSpan> = (0..4)
-            .map(|i| prose_line(i as f32 * 12.0, 0.0, 40))
-            .collect();
+        let spans: Vec<TextSpan> = (0..4).map(|i| prose_line(i as f32 * 12.0, 0.0, 40)).collect();
         assert_eq!(classify(&spans), RegionClass::Mixed);
     }
 
     #[test]
     fn classify_empty_or_tiny_is_mixed() {
         assert_eq!(classify(&[]), RegionClass::Mixed);
-        let spans: Vec<TextSpan> = (0..3)
-            .map(|i| prose_line(i as f32 * 12.0, 0.0, 10))
-            .collect();
+        let spans: Vec<TextSpan> = (0..3).map(|i| prose_line(i as f32 * 12.0, 0.0, 10)).collect();
         assert_eq!(classify(&spans), RegionClass::Mixed);
     }
 }

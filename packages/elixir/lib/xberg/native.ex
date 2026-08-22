@@ -396,7 +396,7 @@ defmodule Xberg.Native do
   logger slot, and we do not touch `log::set_max_level` unless our install
   won, so we never silently raise or lower a level someone else configured.
   In that case `pdf_oxide`'s glyph-drop records go wherever that other
-  logger sends them instead of into [`take_pdf_oxide_render_warnings`].
+  logger sends them instead of into [`take_engine_render_warnings`].
   **Opt-in.** Nothing calls this automatically, and that is deliberate: xberg
   is a library, and `log` has exactly one global backend slot per process. A
   library that claims it on its own behalf breaks its embedder — a host that
@@ -408,7 +408,7 @@ defmodule Xberg.Native do
   Returns `true` if this call (or an earlier one) installed the capture, and
   `false` if some other component already owns the `log` backend — in which
   case `pdf_oxide`'s glyph-drop records go to that logger and
-  [`take_pdf_oxide_render_warnings`] stays empty.
+  [`take_engine_render_warnings`] stays empty.
 
   Without this call the #1364 warnings are not produced. The glyph drop
   itself is decided inside `pdf_oxide`, which reports it only through
@@ -448,7 +448,7 @@ defmodule Xberg.Native do
   caller in `extractors::pdf::mod` to merge, so layout-path glyph drops are
   no longer silently lost.
   """
-  def take_pdf_oxide_render_warnings, do: :erlang.nif_error(:nif_not_loaded)
+  def take_engine_render_warnings, do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   Build the four (or three) token Whisper decoder prompt.

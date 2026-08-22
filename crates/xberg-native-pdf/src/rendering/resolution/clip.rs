@@ -42,7 +42,7 @@ mod tests {
     fn no_mask_yields_none() {
         let plan = ClipResolver::new().resolve_with_mask(None);
         match plan {
-            ClipPlan::None => {},
+            ClipPlan::None => {}
             _ => panic!("expected None"),
         }
     }
@@ -59,7 +59,10 @@ mod tests {
             (ClipPlan::Mask(a), ClipPlan::Mask(b)) => (a, b),
             _ => panic!("both plans should be Mask"),
         };
-        assert!(Arc::ptr_eq(a, b), "the resolver must wrap, not clone, the underlying Mask");
+        assert!(
+            Arc::ptr_eq(a, b),
+            "the resolver must wrap, not clone, the underlying Mask"
+        );
     }
 
     #[test]
@@ -72,7 +75,7 @@ mod tests {
             ClipPlan::Mask(m) => {
                 assert_eq!(m.width(), 13);
                 assert_eq!(m.height(), 17);
-            },
+            }
             _ => panic!("expected Mask"),
         }
     }

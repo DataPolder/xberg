@@ -70,7 +70,7 @@ impl InkRouter {
         match overprint.selector {
             InkSelector::All => return InkAction::Paint(overprint.all_tint),
             InkSelector::None => return InkAction::Skip,
-            InkSelector::Listed => {},
+            InkSelector::Listed => {}
         }
 
         let participating = &overprint.participating;
@@ -92,8 +92,7 @@ impl InkRouter {
             // those by the colour variant. `IccCmyk` is a CMYK source
             // for OPM purposes — the embedded ICC profile only changes
             // the composite-RGB path; the per-plate model is identical. ~keep
-            let is_cmyk =
-                matches!(color, ResolvedColor::Cmyk { .. } | ResolvedColor::IccCmyk { .. });
+            let is_cmyk = matches!(color, ResolvedColor::Cmyk { .. } | ResolvedColor::IccCmyk { .. });
             if overprint.enabled && overprint.mode == 1 && is_cmyk && ch.value == 0.0 {
                 return InkAction::Skip;
             }
@@ -278,14 +277,7 @@ mod tests {
             alt_cmyk_fallback: None,
         };
         let router = InkRouter::new();
-        for ink_name in [
-            "Cyan",
-            "Magenta",
-            "Yellow",
-            "Black",
-            "PANTONE 185 C",
-            "Dieline",
-        ] {
+        for ink_name in ["Cyan", "Magenta", "Yellow", "Black", "PANTONE 185 C", "Dieline"] {
             let action = router.route(&gs, &InkName::new(ink_name), &color, &plan);
             assert_eq!(action, InkAction::Paint(0.6), "/All must paint plate {ink_name}");
         }
@@ -314,7 +306,11 @@ mod tests {
         let router = InkRouter::new();
         for ink_name in ["Cyan", "Magenta", "Yellow", "Black", "PANTONE Reflex Blue"] {
             let action = router.route(&gs, &InkName::new(ink_name), &color, &plan);
-            assert_eq!(action, InkAction::Paint(1.0), "/All ignores overprint; plate {ink_name}");
+            assert_eq!(
+                action,
+                InkAction::Paint(1.0),
+                "/All ignores overprint; plate {ink_name}"
+            );
         }
     }
 
@@ -339,14 +335,7 @@ mod tests {
             alt_cmyk_fallback: None,
         };
         let router = InkRouter::new();
-        for ink_name in [
-            "Cyan",
-            "Magenta",
-            "Yellow",
-            "Black",
-            "PANTONE 185 C",
-            "Dieline",
-        ] {
+        for ink_name in ["Cyan", "Magenta", "Yellow", "Black", "PANTONE 185 C", "Dieline"] {
             let action = router.route(&gs, &InkName::new(ink_name), &color, &plan);
             assert_eq!(action, InkAction::Skip, "/None must skip plate {ink_name}");
         }

@@ -168,10 +168,7 @@ pub fn expand_ligature_to_chars(ligature: char, original_width: f32) -> Vec<(cha
 
     let width_per_component = original_width / num_components as f32;
 
-    components_str
-        .chars()
-        .map(|c| (c, width_per_component))
-        .collect()
+    components_str.chars().map(|c| (c, width_per_component)).collect()
 }
 
 #[cfg(test)]

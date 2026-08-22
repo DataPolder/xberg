@@ -1817,16 +1817,16 @@ mod tests {
     /// drawing produces) must report a HIGH invalid ratio, not `None` and not a low one.
     #[test]
     fn should_report_high_ratio_when_most_words_are_dictionary_invalid() {
-        let words = [
-            "LAAALDLI", "sky", "AEA", "ails", "Bri", "ENT", "FRONT", "ELEVATION",
-        ]
-        .map(dict_word);
+        let words = ["LAAALDLI", "sky", "AEA", "ails", "Bri", "ENT", "FRONT", "ELEVATION"].map(dict_word);
         // Mirror the ordinance_2197 page-13 evidence: only FRONT/ELEVATION are real words.
         let is_valid = |text: &str| Some(matches!(text, "FRONT" | "ELEVATION"));
 
         let ratio = invalid_word_ratio_from(&words, is_valid).expect("enough candidates to score");
 
-        assert_eq!(ratio, 0.75, "6 of 8 candidates are dictionary-invalid, expected exactly 0.75");
+        assert_eq!(
+            ratio, 0.75,
+            "6 of 8 candidates are dictionary-invalid, expected exactly 0.75"
+        );
     }
 
     /// A page of genuine prose (all real dictionary words) must report a LOW invalid
@@ -1852,7 +1852,10 @@ mod tests {
 
         let ratio = invalid_word_ratio_from(&words, is_valid).expect("enough candidates to score");
 
-        assert_eq!(ratio, 0.0, "only the 5 alphabetic 3+ char words should count as candidates");
+        assert_eq!(
+            ratio, 0.0,
+            "only the 5 alphabetic 3+ char words should count as candidates"
+        );
     }
 
     /// Too few dictionary-checkable words must yield `None`, never `0.0` -- a page this

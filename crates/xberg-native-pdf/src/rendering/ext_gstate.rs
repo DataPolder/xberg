@@ -70,10 +70,10 @@ impl ParsedExtGState {
             match sm {
                 SoftMaskValue::None => {
                     gs.smask = None;
-                },
+                }
                 SoftMaskValue::Form(f) => {
                     gs.smask = Some(f.clone());
-                },
+                }
             }
         }
     }
@@ -82,10 +82,7 @@ impl ParsedExtGState {
 /// Parse the fields we need from an `ExtGState` *entry* (the inner dict, not
 /// the resource dict that holds it). Resolves `state_obj` once if it is a
 /// reference.
-pub(crate) fn parse_ext_g_state_inner(
-    state_obj: &Object,
-    doc: &PdfDocument,
-) -> Result<ParsedExtGState> {
+pub(crate) fn parse_ext_g_state_inner(state_obj: &Object, doc: &PdfDocument) -> Result<ParsedExtGState> {
     let mut out = ParsedExtGState::default();
     let state_resolved = doc.resolve_object(state_obj)?;
     let state_dict = match state_resolved.as_dict() {
@@ -167,7 +164,7 @@ pub(crate) fn parse_ext_g_state_inner(
         match &resolved {
             Object::Name(n) if n == "None" => {
                 out.smask = Some(SoftMaskValue::None);
-            },
+            }
             Object::Dictionary(mask_dict) => {
                 // §7.3.10: sub-entries of a SMask dict may themselves be
                 // indirect refs. The /G entry is always a Reference by
@@ -235,8 +232,8 @@ pub(crate) fn parse_ext_g_state_inner(
                         transfer,
                     }));
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 
@@ -265,8 +262,7 @@ mod tests {
         buf.extend_from_slice(format!("{:010} 00000 n \n", cat_off).as_bytes());
         buf.extend_from_slice(format!("{:010} 00000 n \n", pages_off).as_bytes());
         buf.extend_from_slice(
-            format!("trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off)
-                .as_bytes(),
+            format!("trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
         );
         PdfDocument::from_bytes(buf).expect("fixture PDF parses")
     }
@@ -370,8 +366,7 @@ mod tests {
             buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
         }
         buf.extend_from_slice(
-            format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off)
-                .as_bytes(),
+            format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
         );
         PdfDocument::from_bytes(buf).expect("fixture PDF parses")
     }

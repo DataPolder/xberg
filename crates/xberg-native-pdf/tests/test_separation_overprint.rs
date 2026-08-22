@@ -373,7 +373,10 @@ fn none_colorant_paints_nothing_and_does_not_knock_out() {
     let plates = render_separations(&doc, 0, 72).expect("render");
     let m = plate(&plates, "Magenta");
 
-    assert!(sample(m, OVERLAP_X, OVERLAP_Y) > 200, "Magenta preserved under /None fill");
+    assert!(
+        sample(m, OVERLAP_X, OVERLAP_Y) > 200,
+        "Magenta preserved under /None fill"
+    );
 }
 
 #[test]
@@ -523,7 +526,10 @@ fn overprint_propagates_into_form_xobject() {
         "M preserved inside Form XObject under inherited OP=true + OPM=1 (got {})",
         sample(m, OVERLAP_X, OVERLAP_Y)
     );
-    assert!(sample(k, OVERLAP_X, OVERLAP_Y) > 200, "Black painted by form's CMYK fill");
+    assert!(
+        sample(k, OVERLAP_X, OVERLAP_Y) > 200,
+        "Black painted by form's CMYK fill"
+    );
 }
 
 #[test]

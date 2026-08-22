@@ -3,12 +3,6 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
-import 'package:xberg/src/native_loader.dart';
-import 'dart:ffi';
-import 'dart:isolate';
-import 'dart:io';
-import 'dart:core' as _DartCore;
-import 'dart:core';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -23,206 +17,6 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   static final instance = RustLib._();
 
   RustLib._();
-  /// Resolve the prebuilt native library from the environment, the package's bundled
-  /// natives, or the versioned user cache — downloading it if the cache is cold.
-  ///
-  /// Never returns `null`. The return type stays nullable to match flutter_rust_bridge's
-  /// `init` signature, but an unresolvable native throws a descriptive `StateError`
-  /// instead of deferring to FRB's default loader, whose relative-path dlopen would fail
-  /// anyway under a hardened runtime.
-  ///
-  /// Checks in order:
-  /// 1. The `nativeLibDirEnv` environment variable
-  ///    (allows test harnesses to point to development build paths)
-  /// 2. Package-installed location with RID subdirectory (lib/src/native/<rid>/)
-  ///    (for published pub.dev packages with platform-specific bundled native libraries)
-  /// 3. Package-installed location (lib/src/xberg_bridge_generated/)
-  ///    (legacy fallback for development or packages without per-platform binaries)
-  /// 4. Versioned user cache populated by `dart run xberg:download_libs`
-  ///    (`<cache>/xberg/<version>/<rid>/`), shared with the download script
-  ///    via `nativeCachedLibPath()` in `native_loader.dart`.
-  /// 5. On a cache miss, downloads and caches the release asset via
-  ///    `nativeDownloadAndCacheLibrary()` and opens the result.
-  /// 6. Throws a StateError naming the expected release asset URL, the
-  ///    download command, and the env-var override (never a silent null miss).
-  static Future<ExternalLibrary?> _alefResolveExternalLibrary() async {
-    try {
-      const candidates = <String>[
-        // macOS: framework bundle (preferred modern packaging)
-        'xberg_dart.framework',
-        // macOS: bare dylib fallback
-        'libxberg_dart.dylib',
-        // Linux
-        'libxberg_dart.so',
-        // Windows
-        'xberg_dart.dll',
-      ];
-
-      // Helper to open a native library by absolute path.
-      // Normalizes path to absolute to avoid hardened-runtime "relative path rejected" errors.
-      ExternalLibrary? tryOpenAbsolute(String libPath) {
-        try {
-          final absPath = File(libPath).absolute.path;
-          return ExternalLibrary.open(absPath);
-        } catch (_) {
-          return null;
-        }
-      }
-
-      bool candidateExists(String libPath) {
-        return File(libPath).existsSync() || Directory(libPath).existsSync();
-      }
-
-      // Check the env-var override first, so test harnesses can point at a development
-      // build path. Read through `nativeLibDirEnv` rather than repeating the literal, so
-      // this and the error message below can never name different variables.
-      final envDir = Platform.environment[nativeLibDirEnv];
-      if (envDir != null && envDir.isNotEmpty) {
-        final absEnvDir = Directory(envDir).absolute.path;
-        final libDir = Directory(absEnvDir);
-        if (libDir.existsSync()) {
-          for (final candidate in candidates) {
-            final libPath = '$absEnvDir/$candidate';
-            if (candidateExists(libPath)) {
-              final result = tryOpenAbsolute(libPath);
-              if (result != null) return result;
-            }
-          }
-        }
-      }
-
-      // Compute RID (runtime identifier) from platform and architecture using Abi.current().
-      // This is more reliable than parsing Platform.version.
-      String? computeRid() {
-        final abi = Abi.current();
-        final os = Platform.operatingSystem;
-
-        // Map from (os, Abi) to RID string.
-        String? ridFromAbi() {
-          if (os == 'linux') {
-            if (abi == Abi.linuxX64) return 'linux-x64';
-            if (abi == Abi.linuxArm64) return 'linux-arm64';
-          } else if (os == 'macos') {
-            if (abi == Abi.macosX64) return 'macos-x64';
-            if (abi == Abi.macosArm64) return 'macos-arm64';
-          } else if (os == 'windows') {
-            if (abi == Abi.windowsX64) return 'windows-x64';
-            if (abi == Abi.windowsArm64) return 'windows-arm64';
-          }
-          return null;
-        }
-
-        return ridFromAbi();
-      }
-
-      final rid = computeRid();
-      if (rid != null) {
-        final packageRoot =
-            await Isolate.resolvePackageUri(_DartCore.Uri.parse('package:xberg/xberg.dart'));
-        if (packageRoot != null) {
-          final ridDir = packageRoot.resolve('src/native/$rid/');
-          for (final candidate in candidates) {
-            final libPath = ridDir.resolve(candidate).toFilePath();
-            if (candidateExists(libPath)) {
-              final result = tryOpenAbsolute(libPath);
-              if (result != null) return result;
-            }
-          }
-        }
-      }
-
-      // Check legacy package-installed location as fallback.
-      final packageRoot =
-          await Isolate.resolvePackageUri(_DartCore.Uri.parse('package:xberg/xberg.dart'));
-      if (packageRoot != null) {
-        final libDir = packageRoot.resolve('src/xberg_bridge_generated/');
-        for (final candidate in candidates) {
-          final libPath = libDir.resolve(candidate).toFilePath();
-          if (candidateExists(libPath)) {
-            final result = tryOpenAbsolute(libPath);
-            if (result != null) return result;
-          }
-        }
-      }
-
-      // As a last resort, resolve the running test/script's package root via
-      // `Platform.script` and search standard RID-relative locations there.
-      // Critical on macOS: `Directory.current` under hardened-runtime `dart` is
-      // the dart binary's own bin dir (relative-path dlopen rejected), whereas
-      // `Platform.script` resolves to the running .dart file's absolute URI,
-      // from which we can walk up to find the package root (the dir containing
-      // `pubspec.yaml`) and look for the bundled native library at standard
-      // paths. This handles the case where `Isolate.resolvePackageUri`
-      // resolution did not yield the actual staging location (e.g., a path
-      // dependency in local development, or a test_app whose host package
-      // contains the native lib directly rather than via the bridged package).
-      try {
-        final scriptPath = Platform.script.toFilePath();
-        var dir = File(scriptPath).absolute.parent;
-        while (dir.parent.path != dir.path
-            && !File('${dir.path}/pubspec.yaml').existsSync()) {
-          dir = dir.parent;
-        }
-        if (File('${dir.path}/pubspec.yaml').existsSync()) {
-          final rid = computeRid();
-          final absRootPath = dir.absolute.path;
-          final searchRoots = <String>[
-            if (rid != null) '$absRootPath/lib/src/native/$rid',
-            '$absRootPath/lib',
-            absRootPath,
-          ];
-          for (final root in searchRoots) {
-            final absRoot = Directory(root).absolute.path;
-            for (final candidate in candidates) {
-              final libPath = '$absRoot/$candidate';
-              if (candidateExists(libPath)) {
-                final result = tryOpenAbsolute(libPath);
-                if (result != null) return result;
-              }
-            }
-          }
-        }
-      } catch (_) {
-        // fall through to the versioned-cache lookup below
-      }
-
-      // Versioned user cache populated by `dart run xberg:download_libs`.
-      // Shares its cache-path logic with the download script via
-      // `nativeCachedLibPath()` so the two can never disagree on the location.
-      final cachedLibPath = nativeCachedLibPath();
-      if (cachedLibPath != null && candidateExists(cachedLibPath)) {
-        final result = tryOpenAbsolute(cachedLibPath);
-        if (result != null) return result;
-      }
-
-      // Cache miss: download and cache the release asset, then open it. Any
-      // failure here (network, checksum mismatch) falls through to the loud
-      // StateError below rather than propagating a raw download exception.
-      try {
-        final downloadedPath = await nativeDownloadAndCacheLibrary();
-        final result = tryOpenAbsolute(downloadedPath);
-        if (result != null) return result;
-      } catch (_) {
-        // fall through to the descriptive miss below
-      }
-    } catch (_) {
-      // Fall through to the descriptive miss below on any resolution failure.
-    }
-
-    // Nothing bundled and nothing staged in the cache: fail loudly rather than
-    // let flutter_rust_bridge attempt a doomed relative-path dlopen. Name the
-    // exact release asset, the fetch command, and the env-var override so the
-    // consumer can recover.
-    final rid = nativeComputeRid() ?? Platform.operatingSystem;
-    throw StateError(
-      'Native library for xberg ($rid) was not found. '
-      'Expected it in the versioned cache (${nativeCacheDir() ?? '<unresolved cache dir>'}) '
-      'or bundled with the package. Download it with '
-      '`dart run xberg:download_libs`, which fetches '
-      '${nativeAssetUrlBase()}.tar.gz and verifies its SHA-256, '
-      'or point $nativeLibDirEnv at a directory containing the native library.',
-    );
-  }
 
   /// Initialize flutter_rust_bridge
   static Future<void> init({
@@ -231,7 +25,6 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
     ExternalLibrary? externalLibrary,
     bool forceSameCodegenVersion = true,
   }) async {
-    externalLibrary ??= await _alefResolveExternalLibrary();
     await instance.initImpl(
       api: api,
       handler: handler,
@@ -271,7 +64,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1406542978;
+  int get rustContentHash => 939365216;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -1283,7 +1076,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateRegisterValidator({required ValidatorDartImpl impl});
 
-  Future<List<ProcessingWarning>> crateTakePdfOxideRenderWarnings();
+  Future<List<ProcessingWarning>> crateTakeXbergNativePdfRenderWarnings();
 
   Future<PlatformInt64> crateTimestampTokenToMs({
     required PlatformInt64 tokenId,
@@ -11063,7 +10856,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "register_validator", argNames: ["impl"]);
 
   @override
-  Future<List<ProcessingWarning>> crateTakePdfOxideRenderWarnings() {
+  Future<List<ProcessingWarning>> crateTakeXbergNativePdfRenderWarnings() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -11079,16 +10872,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_list_processing_warning,
           decodeErrorData: null,
         ),
-        constMeta: kCrateTakePdfOxideRenderWarningsConstMeta,
+        constMeta: kCrateTakeXbergNativePdfRenderWarningsConstMeta,
         argValues: [],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateTakePdfOxideRenderWarningsConstMeta =>
+  TaskConstMeta get kCrateTakeXbergNativePdfRenderWarningsConstMeta =>
       const TaskConstMeta(
-        debugName: "take_pdf_oxide_render_warnings",
+        debugName: "take_xberg_native_pdf_render_warnings",
         argNames: [],
       );
 
@@ -13278,6 +13071,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ContentFilterKind dco_decode_box_autoadd_content_filter_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_content_filter_kind(raw);
+  }
+
+  @protected
   ConversionOptions dco_decode_box_autoadd_conversion_options(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_conversion_options(raw);
@@ -14330,6 +14129,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ContentFilterKind dco_decode_content_filter_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return ContentFilterKind.values[raw as int];
+  }
+
+  @protected
   ContentLayer dco_decode_content_layer(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return ContentLayer.values[raw as int];
@@ -14425,54 +14230,64 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   CrawlConfig dco_decode_crawl_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 43)
-      throw Exception('unexpected arr length: expect 43 but see ${arr.length}');
+    if (arr.length != 47)
+      throw Exception('unexpected arr length: expect 47 but see ${arr.length}');
     return CrawlConfig(
       maxDepth: dco_decode_opt_box_autoadd_i_64(arr[0]),
       maxPages: dco_decode_opt_box_autoadd_i_64(arr[1]),
       maxLinksPerPage: dco_decode_opt_box_autoadd_i_64(arr[2]),
       maxConcurrent: dco_decode_opt_box_autoadd_i_64(arr[3]),
-      respectRobotsTxt: dco_decode_bool(arr[4]),
-      softHttpErrors: dco_decode_bool(arr[5]),
-      userAgent: dco_decode_opt_String(arr[6]),
-      stayOnDomain: dco_decode_bool(arr[7]),
-      allowSubdomains: dco_decode_bool(arr[8]),
-      includePaths: dco_decode_list_String(arr[9]),
-      excludePaths: dco_decode_list_String(arr[10]),
-      customHeaders: dco_decode_Map_String_String_None(arr[11]),
-      requestTimeout: dco_decode_i_64(arr[12]),
-      rateLimitMs: dco_decode_opt_box_autoadd_i_64(arr[13]),
-      maxRedirects: dco_decode_i_64(arr[14]),
-      retryCount: dco_decode_i_64(arr[15]),
-      retryCodes: dco_decode_list_prim_i_64_strict(arr[16]),
-      cookiesEnabled: dco_decode_bool(arr[17]),
-      auth: dco_decode_opt_box_autoadd_auth_config(arr[18]),
-      maxBodySize: dco_decode_opt_box_autoadd_i_64(arr[19]),
-      removeTags: dco_decode_list_String(arr[20]),
-      content: dco_decode_content_config(arr[21]),
-      mapLimit: dco_decode_opt_box_autoadd_i_64(arr[22]),
-      mapSearch: dco_decode_opt_String(arr[23]),
-      downloadAssets: dco_decode_bool(arr[24]),
-      assetTypes: dco_decode_list_asset_category(arr[25]),
-      maxAssetSize: dco_decode_opt_box_autoadd_i_64(arr[26]),
-      browser: dco_decode_browser_config(arr[27]),
-      proxy: dco_decode_opt_box_autoadd_proxy_config(arr[28]),
-      userAgents: dco_decode_list_String(arr[29]),
-      captureScreenshot: dco_decode_bool(arr[30]),
-      followDocumentUrls: dco_decode_bool(arr[31]),
-      documentUrlDepth: dco_decode_opt_box_autoadd_i_64(arr[32]),
-      downloadDocuments: dco_decode_bool(arr[33]),
-      documentMaxSize: dco_decode_opt_box_autoadd_i_64(arr[34]),
-      documentMimeTypes: dco_decode_list_String(arr[35]),
-      documentOutputDir: dco_decode_opt_String(arr[36]),
+      crawlStrategy: dco_decode_crawl_strategy_kind(arr[4]),
+      contentFilter: dco_decode_opt_box_autoadd_content_filter_kind(arr[5]),
+      bm25Query: dco_decode_opt_String(arr[6]),
+      bm25Threshold: dco_decode_opt_box_autoadd_f_64(arr[7]),
+      respectRobotsTxt: dco_decode_bool(arr[8]),
+      softHttpErrors: dco_decode_bool(arr[9]),
+      userAgent: dco_decode_opt_String(arr[10]),
+      stayOnDomain: dco_decode_bool(arr[11]),
+      allowSubdomains: dco_decode_bool(arr[12]),
+      includePaths: dco_decode_list_String(arr[13]),
+      excludePaths: dco_decode_list_String(arr[14]),
+      customHeaders: dco_decode_Map_String_String_None(arr[15]),
+      requestTimeout: dco_decode_i_64(arr[16]),
+      rateLimitMs: dco_decode_opt_box_autoadd_i_64(arr[17]),
+      maxRedirects: dco_decode_i_64(arr[18]),
+      retryCount: dco_decode_i_64(arr[19]),
+      retryCodes: dco_decode_list_prim_i_64_strict(arr[20]),
+      cookiesEnabled: dco_decode_bool(arr[21]),
+      auth: dco_decode_opt_box_autoadd_auth_config(arr[22]),
+      maxBodySize: dco_decode_opt_box_autoadd_i_64(arr[23]),
+      removeTags: dco_decode_list_String(arr[24]),
+      content: dco_decode_content_config(arr[25]),
+      mapLimit: dco_decode_opt_box_autoadd_i_64(arr[26]),
+      mapSearch: dco_decode_opt_String(arr[27]),
+      downloadAssets: dco_decode_bool(arr[28]),
+      assetTypes: dco_decode_list_asset_category(arr[29]),
+      maxAssetSize: dco_decode_opt_box_autoadd_i_64(arr[30]),
+      browser: dco_decode_browser_config(arr[31]),
+      proxy: dco_decode_opt_box_autoadd_proxy_config(arr[32]),
+      userAgents: dco_decode_list_String(arr[33]),
+      captureScreenshot: dco_decode_bool(arr[34]),
+      followDocumentUrls: dco_decode_bool(arr[35]),
+      documentUrlDepth: dco_decode_opt_box_autoadd_i_64(arr[36]),
+      downloadDocuments: dco_decode_bool(arr[37]),
+      documentMaxSize: dco_decode_opt_box_autoadd_i_64(arr[38]),
+      documentMimeTypes: dco_decode_list_String(arr[39]),
+      documentOutputDir: dco_decode_opt_String(arr[40]),
       documentContentEncoding:
-          dco_decode_opt_box_autoadd_document_content_encoding(arr[37]),
-      warcOutput: dco_decode_opt_String(arr[38]),
-      browserProfile: dco_decode_opt_String(arr[39]),
-      saveBrowserProfile: dco_decode_bool(arr[40]),
-      ssrf: dco_decode_ssrf_policy(arr[41]),
-      ssrfDenyPrivateExplicit: dco_decode_opt_box_autoadd_bool(arr[42]),
+          dco_decode_opt_box_autoadd_document_content_encoding(arr[41]),
+      warcOutput: dco_decode_opt_String(arr[42]),
+      browserProfile: dco_decode_opt_String(arr[43]),
+      saveBrowserProfile: dco_decode_bool(arr[44]),
+      ssrf: dco_decode_ssrf_policy(arr[45]),
+      ssrfDenyPrivateExplicit: dco_decode_opt_box_autoadd_bool(arr[46]),
     );
+  }
+
+  @protected
+  CrawlStrategyKind dco_decode_crawl_strategy_kind(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return CrawlStrategyKind.values[raw as int];
   }
 
   @protected
@@ -16861,8 +16676,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   LlmConfig dco_decode_llm_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 26)
-      throw Exception('unexpected arr length: expect 26 but see ${arr.length}');
+    if (arr.length != 27)
+      throw Exception('unexpected arr length: expect 27 but see ${arr.length}');
     return LlmConfig(
       model: dco_decode_String(arr[0]),
       apiKey: dco_decode_opt_String(arr[1]),
@@ -16892,6 +16707,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       credentialProvider: dco_decode_opt_box_autoadd_credential_provider_config(
         arr[25],
       ),
+      maxConcurrency: dco_decode_opt_box_autoadd_i_64(arr[26]),
     );
   }
 
@@ -17376,8 +17192,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   OcrQualityThresholds dco_decode_ocr_quality_thresholds(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 22)
-      throw Exception('unexpected arr length: expect 22 but see ${arr.length}');
+    if (arr.length != 23)
+      throw Exception('unexpected arr length: expect 23 but see ${arr.length}');
     return OcrQualityThresholds(
       minTotalNonWhitespace: dco_decode_i_64(arr[0]),
       minNonWhitespacePerPage: dco_decode_f_64(arr[1]),
@@ -17390,17 +17206,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       maxOcrOutputFragmentedWordRatio: dco_decode_f_64(arr[8]),
       minOcrMeanConfidence: dco_decode_f_64(arr[9]),
       minWordsForOcrOutputCheck: dco_decode_i_64(arr[10]),
-      minAvgWordLength: dco_decode_f_64(arr[11]),
-      minWordsForAvgLengthCheck: dco_decode_i_64(arr[12]),
-      minConsecutiveRepeatRatio: dco_decode_f_64(arr[13]),
-      minWordsForRepeatCheck: dco_decode_i_64(arr[14]),
-      substantiveMinChars: dco_decode_i_64(arr[15]),
-      nonTextMinChars: dco_decode_i_64(arr[16]),
-      alnumWsRatioThreshold: dco_decode_f_64(arr[17]),
-      pipelineMinQuality: dco_decode_f_64(arr[18]),
-      minUndecodableRatio: dco_decode_f_64(arr[19]),
-      enableProvenanceOcrRouting: dco_decode_bool(arr[20]),
-      minProvenanceFallbackRatio: dco_decode_f_64(arr[21]),
+      maxOcrOutputDictInvalidWordRatio: dco_decode_f_64(arr[11]),
+      minAvgWordLength: dco_decode_f_64(arr[12]),
+      minWordsForAvgLengthCheck: dco_decode_i_64(arr[13]),
+      minConsecutiveRepeatRatio: dco_decode_f_64(arr[14]),
+      minWordsForRepeatCheck: dco_decode_i_64(arr[15]),
+      substantiveMinChars: dco_decode_i_64(arr[16]),
+      nonTextMinChars: dco_decode_i_64(arr[17]),
+      alnumWsRatioThreshold: dco_decode_f_64(arr[18]),
+      pipelineMinQuality: dco_decode_f_64(arr[19]),
+      minUndecodableRatio: dco_decode_f_64(arr[20]),
+      enableProvenanceOcrRouting: dco_decode_bool(arr[21]),
+      minProvenanceFallbackRatio: dco_decode_f_64(arr[22]),
     );
   }
 
@@ -17566,6 +17383,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return raw == null
         ? null
         : dco_decode_box_autoadd_content_filter_config(raw);
+  }
+
+  @protected
+  ContentFilterKind? dco_decode_opt_box_autoadd_content_filter_kind(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_content_filter_kind(raw);
   }
 
   @protected
@@ -19242,8 +19067,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   SecurityLimits dco_decode_security_limits(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return SecurityLimits(
       maxArchiveSize: dco_decode_i_64(arr[0]),
       maxCompressionRatio: dco_decode_i_64(arr[1]),
@@ -19254,6 +19079,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       maxIterations: dco_decode_i_64(arr[6]),
       maxXmlDepth: dco_decode_i_64(arr[7]),
       maxTableCells: dco_decode_i_64(arr[8]),
+      maxPages: dco_decode_opt_box_autoadd_i_64(arr[9]),
     );
   }
 
@@ -21017,6 +20843,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ContentFilterKind sse_decode_box_autoadd_content_filter_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_content_filter_kind(deserializer));
+  }
+
+  @protected
   ConversionOptions sse_decode_box_autoadd_conversion_options(
     SseDeserializer deserializer,
   ) {
@@ -22279,6 +22113,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ContentFilterKind sse_decode_content_filter_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return ContentFilterKind.values[inner];
+  }
+
+  @protected
   ContentLayer sse_decode_content_layer(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
@@ -22424,6 +22267,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_maxPages = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_maxLinksPerPage = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_maxConcurrent = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_crawlStrategy = sse_decode_crawl_strategy_kind(deserializer);
+    var var_contentFilter = sse_decode_opt_box_autoadd_content_filter_kind(
+      deserializer,
+    );
+    var var_bm25Query = sse_decode_opt_String(deserializer);
+    var var_bm25Threshold = sse_decode_opt_box_autoadd_f_64(deserializer);
     var var_respectRobotsTxt = sse_decode_bool(deserializer);
     var var_softHttpErrors = sse_decode_bool(deserializer);
     var var_userAgent = sse_decode_opt_String(deserializer);
@@ -22471,6 +22320,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       maxPages: var_maxPages,
       maxLinksPerPage: var_maxLinksPerPage,
       maxConcurrent: var_maxConcurrent,
+      crawlStrategy: var_crawlStrategy,
+      contentFilter: var_contentFilter,
+      bm25Query: var_bm25Query,
+      bm25Threshold: var_bm25Threshold,
       respectRobotsTxt: var_respectRobotsTxt,
       softHttpErrors: var_softHttpErrors,
       userAgent: var_userAgent,
@@ -22511,6 +22364,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ssrf: var_ssrf,
       ssrfDenyPrivateExplicit: var_ssrfDenyPrivateExplicit,
     );
+  }
+
+  @protected
+  CrawlStrategyKind sse_decode_crawl_strategy_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return CrawlStrategyKind.values[inner];
   }
 
   @protected
@@ -25951,6 +25813,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_bedrock = sse_decode_opt_box_autoadd_bedrock_config(deserializer);
     var var_credentialProvider =
         sse_decode_opt_box_autoadd_credential_provider_config(deserializer);
+    var var_maxConcurrency = sse_decode_opt_box_autoadd_i_64(deserializer);
     return LlmConfig(
       model: var_model,
       apiKey: var_apiKey,
@@ -25978,6 +25841,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       healthCheckSecs: var_healthCheckSecs,
       bedrock: var_bedrock,
       credentialProvider: var_credentialProvider,
+      maxConcurrency: var_maxConcurrency,
     );
   }
 
@@ -26584,6 +26448,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_maxOcrOutputFragmentedWordRatio = sse_decode_f_64(deserializer);
     var var_minOcrMeanConfidence = sse_decode_f_64(deserializer);
     var var_minWordsForOcrOutputCheck = sse_decode_i_64(deserializer);
+    var var_maxOcrOutputDictInvalidWordRatio = sse_decode_f_64(deserializer);
     var var_minAvgWordLength = sse_decode_f_64(deserializer);
     var var_minWordsForAvgLengthCheck = sse_decode_i_64(deserializer);
     var var_minConsecutiveRepeatRatio = sse_decode_f_64(deserializer);
@@ -26607,6 +26472,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       maxOcrOutputFragmentedWordRatio: var_maxOcrOutputFragmentedWordRatio,
       minOcrMeanConfidence: var_minOcrMeanConfidence,
       minWordsForOcrOutputCheck: var_minWordsForOcrOutputCheck,
+      maxOcrOutputDictInvalidWordRatio: var_maxOcrOutputDictInvalidWordRatio,
       minAvgWordLength: var_minAvgWordLength,
       minWordsForAvgLengthCheck: var_minWordsForAvgLengthCheck,
       minConsecutiveRepeatRatio: var_minConsecutiveRepeatRatio,
@@ -26882,6 +26748,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_content_filter_config(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  ContentFilterKind? sse_decode_opt_box_autoadd_content_filter_kind(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_content_filter_kind(deserializer));
     } else {
       return null;
     }
@@ -29328,6 +29207,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_maxIterations = sse_decode_i_64(deserializer);
     var var_maxXmlDepth = sse_decode_i_64(deserializer);
     var var_maxTableCells = sse_decode_i_64(deserializer);
+    var var_maxPages = sse_decode_opt_box_autoadd_i_64(deserializer);
     return SecurityLimits(
       maxArchiveSize: var_maxArchiveSize,
       maxCompressionRatio: var_maxCompressionRatio,
@@ -29338,6 +29218,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       maxIterations: var_maxIterations,
       maxXmlDepth: var_maxXmlDepth,
       maxTableCells: var_maxTableCells,
+      maxPages: var_maxPages,
     );
   }
 
@@ -31554,6 +31435,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_content_filter_kind(
+    ContentFilterKind self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_content_filter_kind(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_conversion_options(
     ConversionOptions self,
     SseSerializer serializer,
@@ -32806,6 +32696,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_content_filter_kind(
+    ContentFilterKind self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_content_layer(ContentLayer self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
@@ -32898,6 +32797,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_i_64(self.maxPages, serializer);
     sse_encode_opt_box_autoadd_i_64(self.maxLinksPerPage, serializer);
     sse_encode_opt_box_autoadd_i_64(self.maxConcurrent, serializer);
+    sse_encode_crawl_strategy_kind(self.crawlStrategy, serializer);
+    sse_encode_opt_box_autoadd_content_filter_kind(
+      self.contentFilter,
+      serializer,
+    );
+    sse_encode_opt_String(self.bm25Query, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.bm25Threshold, serializer);
     sse_encode_bool(self.respectRobotsTxt, serializer);
     sse_encode_bool(self.softHttpErrors, serializer);
     sse_encode_opt_String(self.userAgent, serializer);
@@ -32940,6 +32846,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.saveBrowserProfile, serializer);
     sse_encode_ssrf_policy(self.ssrf, serializer);
     sse_encode_opt_box_autoadd_bool(self.ssrfDenyPrivateExplicit, serializer);
+  }
+
+  @protected
+  void sse_encode_crawl_strategy_kind(
+    CrawlStrategyKind self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -35654,6 +35569,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       self.credentialProvider,
       serializer,
     );
+    sse_encode_opt_box_autoadd_i_64(self.maxConcurrency, serializer);
   }
 
   @protected
@@ -36132,6 +36048,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_f_64(self.maxOcrOutputFragmentedWordRatio, serializer);
     sse_encode_f_64(self.minOcrMeanConfidence, serializer);
     sse_encode_i_64(self.minWordsForOcrOutputCheck, serializer);
+    sse_encode_f_64(self.maxOcrOutputDictInvalidWordRatio, serializer);
     sse_encode_f_64(self.minAvgWordLength, serializer);
     sse_encode_i_64(self.minWordsForAvgLengthCheck, serializer);
     sse_encode_f_64(self.minConsecutiveRepeatRatio, serializer);
@@ -36387,6 +36304,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_content_filter_config(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_content_filter_kind(
+    ContentFilterKind? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_content_filter_kind(self, serializer);
     }
   }
 
@@ -38575,6 +38505,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.maxIterations, serializer);
     sse_encode_i_64(self.maxXmlDepth, serializer);
     sse_encode_i_64(self.maxTableCells, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.maxPages, serializer);
   }
 
   @protected

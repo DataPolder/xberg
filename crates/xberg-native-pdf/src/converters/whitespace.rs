@@ -8,12 +8,9 @@ use std::sync::LazyLock;
 
 static RE_MULTI_NEWLINE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n{3,}").unwrap());
 static RE_PAGE_NUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^Page\s+\d+\s*$").unwrap());
-static RE_DASH_PAGE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?m)^\s*-\s*\d+\s*-\s*$").unwrap());
-static RE_BRACKET_PAGE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?m)^\s*[\[\(]\d+[\]\)]\s*$").unwrap());
-static RE_STANDALONE_NUM: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?m)^\s*\d{1,3}\s*$").unwrap());
+static RE_DASH_PAGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^\s*-\s*\d+\s*-\s*$").unwrap());
+static RE_BRACKET_PAGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^\s*[\[\(]\d+[\]\)]\s*$").unwrap());
+static RE_STANDALONE_NUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^\s*\d{1,3}\s*$").unwrap());
 static RE_DASH_SEP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^[\s\-]{5,}$").unwrap());
 static RE_EQUALS_SEP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^[\s=]{5,}$").unwrap());
 

@@ -180,11 +180,7 @@ impl AcroFormBuilder {
         }
 
         if !self.calc_order.is_empty() {
-            let co: Vec<Object> = self
-                .calc_order
-                .iter()
-                .map(|r| Object::Reference(*r))
-                .collect();
+            let co: Vec<Object> = self.calc_order.iter().map(|r| Object::Reference(*r)).collect();
             dict.insert("CO".to_string(), Object::Array(co));
         }
 
@@ -264,11 +260,7 @@ impl AcroFormBuilder {
         dict.insert("DR".to_string(), Object::Dictionary(dr));
 
         if !self.calc_order.is_empty() {
-            let co: Vec<Object> = self
-                .calc_order
-                .iter()
-                .map(|r| Object::Reference(*r))
-                .collect();
+            let co: Vec<Object> = self.calc_order.iter().map(|r| Object::Reference(*r)).collect();
             dict.insert("CO".to_string(), Object::Array(co));
         }
 
@@ -374,8 +366,7 @@ mod tests {
 
     #[test]
     fn test_acroform_calc_order() {
-        let acroform = AcroFormBuilder::new()
-            .with_calc_order(vec![ObjectRef::new(5, 0), ObjectRef::new(6, 0)]);
+        let acroform = AcroFormBuilder::new().with_calc_order(vec![ObjectRef::new(5, 0), ObjectRef::new(6, 0)]);
 
         let dict = acroform.build(None);
 

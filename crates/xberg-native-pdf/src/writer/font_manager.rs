@@ -132,11 +132,9 @@ impl FontManager {
 
     /// Get font info, falling back to Helvetica if not found.
     pub fn get_font_or_default(&self, name: &str) -> &FontInfo {
-        self.fonts.get(name).unwrap_or_else(|| {
-            self.fonts
-                .get("Helvetica")
-                .expect("Helvetica must be registered")
-        })
+        self.fonts
+            .get(name)
+            .unwrap_or_else(|| self.fonts.get("Helvetica").expect("Helvetica must be registered"))
     }
 
     /// Calculate the width of a string in the given font at the given size.
@@ -330,9 +328,7 @@ impl FontWidths {
     /// Get widths for a Base-14 font.
     fn for_base14(name: &str) -> Self {
         match name {
-            "Courier" | "Courier-Bold" | "Courier-Oblique" | "Courier-BoldOblique" => {
-                FontWidths::Monospace(600.0)
-            },
+            "Courier" | "Courier-Bold" | "Courier-Oblique" | "Courier-BoldOblique" => FontWidths::Monospace(600.0),
             "Symbol" | "ZapfDingbats" => FontWidths::Symbol,
             _ => FontWidths::Proportional(get_base14_widths(name)),
         }
@@ -736,13 +732,7 @@ impl TextLayout {
     /// Calculate wrapped lines for text within a given width.
     ///
     /// Returns a vector of (line_text, line_width) pairs.
-    pub fn wrap_text(
-        &self,
-        text: &str,
-        font_name: &str,
-        font_size: f32,
-        max_width: f32,
-    ) -> Vec<(String, f32)> {
+    pub fn wrap_text(&self, text: &str, font_name: &str, font_size: f32, max_width: f32) -> Vec<(String, f32)> {
         let mut lines = Vec::new();
         let mut current_line = String::new();
         let mut current_width = 0.0;
@@ -785,13 +775,7 @@ impl TextLayout {
     }
 
     /// Calculate the bounding box dimensions for wrapped text.
-    pub fn text_bounds(
-        &self,
-        text: &str,
-        font_name: &str,
-        font_size: f32,
-        max_width: f32,
-    ) -> (f32, f32) {
+    pub fn text_bounds(&self, text: &str, font_name: &str, font_size: f32, max_width: f32) -> (f32, f32) {
         let lines = self.wrap_text(text, font_name, font_size, max_width);
         let font = self.font_manager.get_font_or_default(font_name);
         let line_height = font.line_height(font_size) * font.line_spacing_factor();
@@ -865,13 +849,9 @@ impl EmbeddedFont {
     /// * `name` - Font name to use (if None, uses PostScript name from font)
     /// * `data` - Raw TTF/OTF file data
     pub fn from_data(name: Option<String>, data: Vec<u8>) -> Result<Self, String> {
-        let font =
-            TrueTypeFont::parse(&data).map_err(|e| format!("Failed to parse font: {}", e))?;
+        let font = TrueTypeFont::parse(&data).map_err(|e| format!("Failed to parse font: {}", e))?;
 
-        let font_name = name.unwrap_or_else(|| {
-            font.postscript_name()
-                .unwrap_or_else(|| "Unknown".to_string())
-        });
+        let font_name = name.unwrap_or_else(|| font.postscript_name().unwrap_or_else(|| "Unknown".to_string()));
 
         let metrics = crate::fonts::FontMetrics::from_font(&font);
 
@@ -907,8 +887,7 @@ impl EmbeddedFont {
 
     /// Load an embedded font from a file.
     pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
-        let data =
-            std::fs::read(path.as_ref()).map_err(|e| format!("Failed to read font file: {}", e))?;
+        let data = std::fs::read(path.as_ref()).map_err(|e| format!("Failed to read font file: {}", e))?;
         Self::from_data(None, data)
     }
 
@@ -937,11 +916,9 @@ impl EmbeddedFont {
         let face = TrueTypeFont::parse(self.font_data.as_ref()).ok();
         for (codepoint, gid) in mapping {
             self.glyph_lookup.insert(codepoint, gid);
-            self.glyph_widths.entry(gid).or_insert_with(|| {
-                face.as_ref()
-                    .map(|font| font.glyph_width(gid))
-                    .unwrap_or(500)
-            });
+            self.glyph_widths
+                .entry(gid)
+                .or_insert_with(|| face.as_ref().map(|font| font.glyph_width(gid)).unwrap_or(500));
         }
     }
 
@@ -1007,9 +984,7 @@ impl EmbeddedFont {
 
     /// Get the width of a character in 1/1000 em units.
     pub fn char_width(&self, codepoint: u32) -> u16 {
-        self.glyph_id(codepoint)
-            .map(|gid| self.glyph_width(gid))
-            .unwrap_or(500)
+        self.glyph_id(codepoint).map(|gid| self.glyph_width(gid)).unwrap_or(500)
     }
 
     /// Calculate text width in points at the given font size.
@@ -1040,9 +1015,7 @@ impl EmbeddedFont {
     /// renumber the GIDs into their subset-local indices.
     pub fn encode_string(&mut self, text: &str) -> Vec<u16> {
         self.use_string(text);
-        text.chars()
-            .map(|ch| self.glyph_id(ch as u32).unwrap_or(0))
-            .collect()
+        text.chars().map(|ch| self.glyph_id(ch as u32).unwrap_or(0)).collect()
     }
 
     /// Encode a [`crate::writer::font_shaping::ShapedRun`] as a sequence
@@ -1317,11 +1290,9 @@ impl EmbeddedFontManager {
 
     /// Iterate over all fonts with resource IDs.
     pub fn fonts_with_ids(&self) -> impl Iterator<Item = (&str, &str, &EmbeddedFont)> {
-        self.fonts.iter().filter_map(|(name, font)| {
-            self.resource_ids
-                .get(name)
-                .map(|id| (name.as_str(), id.as_str(), font))
-        })
+        self.fonts
+            .iter()
+            .filter_map(|(name, font)| self.resource_ids.get(name).map(|id| (name.as_str(), id.as_str(), font)))
     }
 
     /// Get the number of registered fonts.
@@ -1573,7 +1544,10 @@ mod tests {
             manager.select_font(FontFamily::Times, FontWeight::Normal, false),
             "Times-Roman"
         );
-        assert_eq!(manager.select_font(FontFamily::Times, FontWeight::Bold, false), "Times-Bold");
+        assert_eq!(
+            manager.select_font(FontFamily::Times, FontWeight::Bold, false),
+            "Times-Bold"
+        );
         assert_eq!(
             manager.select_font(FontFamily::Times, FontWeight::Normal, true),
             "Times-Italic"
@@ -1583,7 +1557,10 @@ mod tests {
             "Times-BoldItalic"
         );
 
-        assert_eq!(manager.select_font(FontFamily::Courier, FontWeight::Normal, false), "Courier");
+        assert_eq!(
+            manager.select_font(FontFamily::Courier, FontWeight::Normal, false),
+            "Courier"
+        );
         assert_eq!(
             manager.select_font(FontFamily::Courier, FontWeight::Bold, false),
             "Courier-Bold"
@@ -1597,8 +1574,14 @@ mod tests {
             "Courier-BoldOblique"
         );
 
-        assert_eq!(manager.select_font(FontFamily::Symbol, FontWeight::Normal, false), "Symbol");
-        assert_eq!(manager.select_font(FontFamily::Symbol, FontWeight::Bold, true), "Symbol");
+        assert_eq!(
+            manager.select_font(FontFamily::Symbol, FontWeight::Normal, false),
+            "Symbol"
+        );
+        assert_eq!(
+            manager.select_font(FontFamily::Symbol, FontWeight::Bold, true),
+            "Symbol"
+        );
         assert_eq!(
             manager.select_font(FontFamily::ZapfDingbats, FontWeight::Normal, false),
             "ZapfDingbats"

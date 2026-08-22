@@ -28,9 +28,7 @@
 //! let (dict, stream_bytes) = ap.build();
 //! ```
 
-use crate::annotation_types::{
-    AnnotationColor, CaretSymbol, LineEndingStyle, StampType, TextAnnotationIcon,
-};
+use crate::annotation_types::{AnnotationColor, CaretSymbol, LineEndingStyle, StampType, TextAnnotationIcon};
 use crate::geometry::Rect;
 use crate::object::Object;
 use std::collections::HashMap;
@@ -182,22 +180,22 @@ impl AppearanceStreamBuilder {
         match icon {
             TextAnnotationIcon::Note => {
                 content.push_str(&Self::draw_note_icon(size));
-            },
+            }
             TextAnnotationIcon::Comment => {
                 content.push_str(&Self::draw_comment_icon(size));
-            },
+            }
             TextAnnotationIcon::Key => {
                 content.push_str(&Self::draw_key_icon(size));
-            },
+            }
             TextAnnotationIcon::Help => {
                 content.push_str(&Self::draw_help_icon(size));
-            },
+            }
             TextAnnotationIcon::Insert => {
                 content.push_str(&Self::draw_insert_icon(size));
-            },
+            }
             TextAnnotationIcon::Paragraph | TextAnnotationIcon::NewParagraph => {
                 content.push_str(&Self::draw_paragraph_icon(size));
-            },
+            }
         }
 
         builder.content = content.into_bytes();
@@ -426,8 +424,7 @@ impl AppearanceStreamBuilder {
         max_x += padding;
         max_y += padding;
 
-        let mut builder =
-            Self::new(Rect::new(0.0, 0.0, (max_x - min_x) as f32, (max_y - min_y) as f32));
+        let mut builder = Self::new(Rect::new(0.0, 0.0, (max_x - min_x) as f32, (max_y - min_y) as f32));
 
         let mut content = String::new();
 
@@ -472,10 +469,10 @@ impl AppearanceStreamBuilder {
                 let w = rect.width;
                 let h = rect.height;
                 content.push_str(&format!("0 0 m {} {} l {} 0 l S\n", w / 2.0, h, w));
-            },
+            }
             CaretSymbol::Paragraph => {
                 content.push_str(&Self::draw_paragraph_icon(rect.width.min(rect.height)));
-            },
+            }
         }
 
         builder.content = content.into_bytes();
@@ -630,10 +627,42 @@ impl AppearanceStreamBuilder {
 
         let k = 0.552_284_7_f32 * r;
         s.push_str(&format!("{} {} m\n", cx + r, cy));
-        s.push_str(&format!("{} {} {} {} {} {} c\n", cx + r, cy + k, cx + k, cy + r, cx, cy + r));
-        s.push_str(&format!("{} {} {} {} {} {} c\n", cx - k, cy + r, cx - r, cy + k, cx - r, cy));
-        s.push_str(&format!("{} {} {} {} {} {} c\n", cx - r, cy - k, cx - k, cy - r, cx, cy - r));
-        s.push_str(&format!("{} {} {} {} {} {} c\n", cx + k, cy - r, cx + r, cy - k, cx + r, cy));
+        s.push_str(&format!(
+            "{} {} {} {} {} {} c\n",
+            cx + r,
+            cy + k,
+            cx + k,
+            cy + r,
+            cx,
+            cy + r
+        ));
+        s.push_str(&format!(
+            "{} {} {} {} {} {} c\n",
+            cx - k,
+            cy + r,
+            cx - r,
+            cy + k,
+            cx - r,
+            cy
+        ));
+        s.push_str(&format!(
+            "{} {} {} {} {} {} c\n",
+            cx - r,
+            cy - k,
+            cx - k,
+            cy - r,
+            cx,
+            cy - r
+        ));
+        s.push_str(&format!(
+            "{} {} {} {} {} {} c\n",
+            cx + k,
+            cy - r,
+            cx + r,
+            cy - k,
+            cx + r,
+            cy
+        ));
         s.push_str("S\n");
 
         let shaft_w = size * 0.08;
@@ -731,14 +760,7 @@ impl AppearanceStreamBuilder {
     }
 
     /// Draw a line ending.
-    fn draw_line_ending(
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        style: LineEndingStyle,
-        at_start: bool,
-    ) -> String {
+    fn draw_line_ending(x1: f32, y1: f32, x2: f32, y2: f32, style: LineEndingStyle, at_start: bool) -> String {
         let size = 10.0_f32;
 
         let dx = x2 - x1;
@@ -747,16 +769,12 @@ impl AppearanceStreamBuilder {
 
         let (px, py) = if at_start { (x1, y1) } else { (x2, y2) };
 
-        let arrow_angle = if at_start {
-            angle + std::f32::consts::PI
-        } else {
-            angle
-        };
+        let arrow_angle = if at_start { angle + std::f32::consts::PI } else { angle };
 
         let mut s = String::new();
 
         match style {
-            LineEndingStyle::None => {},
+            LineEndingStyle::None => {}
             LineEndingStyle::OpenArrow => {
                 let a1 = arrow_angle + std::f32::consts::PI / 6.0;
                 let a2 = arrow_angle - std::f32::consts::PI / 6.0;
@@ -774,7 +792,7 @@ impl AppearanceStreamBuilder {
                     px + size * a2.cos(),
                     py + size * a2.sin()
                 ));
-            },
+            }
             LineEndingStyle::ClosedArrow => {
                 let a1 = arrow_angle + std::f32::consts::PI / 6.0;
                 let a2 = arrow_angle - std::f32::consts::PI / 6.0;
@@ -787,7 +805,7 @@ impl AppearanceStreamBuilder {
                     px + size * a2.cos(),
                     py + size * a2.sin()
                 ));
-            },
+            }
             LineEndingStyle::Circle => {
                 let r = size / 2.0;
                 let k = 0.552_284_7_f32 * r;
@@ -828,19 +846,19 @@ impl AppearanceStreamBuilder {
                     px + r,
                     py
                 ));
-            },
+            }
             LineEndingStyle::Square => {
                 let half = size / 2.0;
                 s.push_str(&format!("{} {} {} {} re S\n", px - half, py - half, size, size));
-            },
+            }
             LineEndingStyle::Diamond => {
                 let half = size / 2.0;
                 s.push_str(&format!("{} {} m\n", px, py - half));
                 s.push_str(&format!("{} {} l\n", px + half, py));
                 s.push_str(&format!("{} {} l\n", px, py + half));
                 s.push_str(&format!("{} {} l h S\n", px - half, py));
-            },
-            _ => {},
+            }
+            _ => {}
         }
 
         s
@@ -942,11 +960,7 @@ mod tests {
     #[test]
     fn test_text_note_appearance() {
         let rect = Rect::new(0.0, 0.0, 24.0, 24.0);
-        let ap = AppearanceStreamBuilder::for_text_note(
-            rect,
-            TextAnnotationIcon::Note,
-            AnnotationColor::yellow(),
-        );
+        let ap = AppearanceStreamBuilder::for_text_note(rect, TextAnnotationIcon::Note, AnnotationColor::yellow());
 
         let (dict, content) = ap.build();
         assert!(dict.contains_key("BBox"));
@@ -1020,8 +1034,7 @@ mod tests {
     #[test]
     fn test_stamp_appearance() {
         let rect = Rect::new(0.0, 0.0, 150.0, 50.0);
-        let ap =
-            AppearanceStreamBuilder::for_stamp(rect, StampType::Approved, AnnotationColor::red());
+        let ap = AppearanceStreamBuilder::for_stamp(rect, StampType::Approved, AnnotationColor::red());
 
         let (_, content) = ap.build();
         let content_str = String::from_utf8_lossy(&content);
@@ -1033,8 +1046,7 @@ mod tests {
     #[test]
     fn test_caret_appearance() {
         let rect = Rect::new(0.0, 0.0, 20.0, 20.0);
-        let ap =
-            AppearanceStreamBuilder::for_caret(rect, CaretSymbol::None, AnnotationColor::blue());
+        let ap = AppearanceStreamBuilder::for_caret(rect, CaretSymbol::None, AnnotationColor::blue());
 
         let (_, content) = ap.build();
         let content_str = String::from_utf8_lossy(&content);
@@ -1195,16 +1207,17 @@ mod tests {
     #[test]
     fn test_color_stroke_cmyk() {
         assert_eq!(
-            AppearanceStreamBuilder::color_to_stroke_ops(&AnnotationColor::Cmyk(
-                0.0, 1.0, 0.0, 0.0
-            )),
+            AppearanceStreamBuilder::color_to_stroke_ops(&AnnotationColor::Cmyk(0.0, 1.0, 0.0, 0.0)),
             Some("0 1 0 0 K\n".to_string())
         );
     }
 
     #[test]
     fn test_color_stroke_none() {
-        assert_eq!(AppearanceStreamBuilder::color_to_stroke_ops(&AnnotationColor::None), None);
+        assert_eq!(
+            AppearanceStreamBuilder::color_to_stroke_ops(&AnnotationColor::None),
+            None
+        );
     }
 
     #[test]
@@ -1331,11 +1344,7 @@ mod tests {
     #[test]
     fn test_text_note_comment_icon() {
         let rect = Rect::new(0.0, 0.0, 24.0, 24.0);
-        let ap = AppearanceStreamBuilder::for_text_note(
-            rect,
-            TextAnnotationIcon::Comment,
-            AnnotationColor::yellow(),
-        );
+        let ap = AppearanceStreamBuilder::for_text_note(rect, TextAnnotationIcon::Comment, AnnotationColor::yellow());
         let (_, content) = ap.build();
         assert!(!content.is_empty());
         let content_str = String::from_utf8_lossy(&content);
@@ -1345,11 +1354,8 @@ mod tests {
     #[test]
     fn test_text_note_key_icon() {
         let rect = Rect::new(0.0, 0.0, 24.0, 24.0);
-        let ap = AppearanceStreamBuilder::for_text_note(
-            rect,
-            TextAnnotationIcon::Key,
-            AnnotationColor::Rgb(0.5, 0.5, 0.5),
-        );
+        let ap =
+            AppearanceStreamBuilder::for_text_note(rect, TextAnnotationIcon::Key, AnnotationColor::Rgb(0.5, 0.5, 0.5));
         let (_, content) = ap.build();
         assert!(!content.is_empty());
         let content_str = String::from_utf8_lossy(&content);
@@ -1360,11 +1366,7 @@ mod tests {
     #[test]
     fn test_text_note_help_icon() {
         let rect = Rect::new(0.0, 0.0, 24.0, 24.0);
-        let ap = AppearanceStreamBuilder::for_text_note(
-            rect,
-            TextAnnotationIcon::Help,
-            AnnotationColor::blue(),
-        );
+        let ap = AppearanceStreamBuilder::for_text_note(rect, TextAnnotationIcon::Help, AnnotationColor::blue());
         let (_, content) = ap.build();
         assert!(!content.is_empty());
         let content_str = String::from_utf8_lossy(&content);
@@ -1375,11 +1377,7 @@ mod tests {
     #[test]
     fn test_text_note_insert_icon() {
         let rect = Rect::new(0.0, 0.0, 24.0, 24.0);
-        let ap = AppearanceStreamBuilder::for_text_note(
-            rect,
-            TextAnnotationIcon::Insert,
-            AnnotationColor::green(),
-        );
+        let ap = AppearanceStreamBuilder::for_text_note(rect, TextAnnotationIcon::Insert, AnnotationColor::green());
         let (_, content) = ap.build();
         assert!(!content.is_empty());
         let content_str = String::from_utf8_lossy(&content);
@@ -1390,11 +1388,7 @@ mod tests {
     #[test]
     fn test_text_note_paragraph_icon() {
         let rect = Rect::new(0.0, 0.0, 24.0, 24.0);
-        let ap = AppearanceStreamBuilder::for_text_note(
-            rect,
-            TextAnnotationIcon::Paragraph,
-            AnnotationColor::red(),
-        );
+        let ap = AppearanceStreamBuilder::for_text_note(rect, TextAnnotationIcon::Paragraph, AnnotationColor::red());
         let (_, content) = ap.build();
         assert!(!content.is_empty());
     }
@@ -1402,11 +1396,7 @@ mod tests {
     #[test]
     fn test_text_note_new_paragraph_icon() {
         let rect = Rect::new(0.0, 0.0, 24.0, 24.0);
-        let ap = AppearanceStreamBuilder::for_text_note(
-            rect,
-            TextAnnotationIcon::NewParagraph,
-            AnnotationColor::red(),
-        );
+        let ap = AppearanceStreamBuilder::for_text_note(rect, TextAnnotationIcon::NewParagraph, AnnotationColor::red());
         let (_, content) = ap.build();
         assert!(!content.is_empty());
     }
@@ -1414,11 +1404,7 @@ mod tests {
     #[test]
     fn test_text_note_uses_min_dimension() {
         let rect = Rect::new(0.0, 0.0, 20.0, 40.0);
-        let ap = AppearanceStreamBuilder::for_text_note(
-            rect,
-            TextAnnotationIcon::Note,
-            AnnotationColor::yellow(),
-        );
+        let ap = AppearanceStreamBuilder::for_text_note(rect, TextAnnotationIcon::Note, AnnotationColor::yellow());
         assert_eq!(ap.bbox().width, 20.0);
         assert_eq!(ap.bbox().height, 20.0);
     }
@@ -1426,11 +1412,7 @@ mod tests {
     #[test]
     fn test_text_note_no_color() {
         let rect = Rect::new(0.0, 0.0, 24.0, 24.0);
-        let ap = AppearanceStreamBuilder::for_text_note(
-            rect,
-            TextAnnotationIcon::Note,
-            AnnotationColor::None,
-        );
+        let ap = AppearanceStreamBuilder::for_text_note(rect, TextAnnotationIcon::Note, AnnotationColor::None);
         let (_, content) = ap.build();
         let content_str = String::from_utf8_lossy(&content);
         assert!(!content_str.contains("rg"));
@@ -1440,11 +1422,7 @@ mod tests {
     #[test]
     fn test_stamp_rounded_corners() {
         let rect = Rect::new(0.0, 0.0, 120.0, 40.0);
-        let ap = AppearanceStreamBuilder::for_stamp(
-            rect,
-            StampType::Confidential,
-            AnnotationColor::Rgb(0.8, 0.0, 0.0),
-        );
+        let ap = AppearanceStreamBuilder::for_stamp(rect, StampType::Confidential, AnnotationColor::Rgb(0.8, 0.0, 0.0));
         let (_, content) = ap.build();
         let content_str = String::from_utf8_lossy(&content);
 
@@ -1457,8 +1435,7 @@ mod tests {
     #[test]
     fn test_stamp_small_rect() {
         let rect = Rect::new(0.0, 0.0, 12.0, 6.0);
-        let ap =
-            AppearanceStreamBuilder::for_stamp(rect, StampType::Approved, AnnotationColor::green());
+        let ap = AppearanceStreamBuilder::for_stamp(rect, StampType::Approved, AnnotationColor::green());
         let (_, content) = ap.build();
         assert!(!content.is_empty());
     }
@@ -1662,10 +1639,7 @@ mod tests {
 
     #[test]
     fn test_ink_multiple_strokes() {
-        let strokes = vec![
-            vec![(10.0, 10.0), (50.0, 50.0)],
-            vec![(60.0, 60.0), (100.0, 100.0)],
-        ];
+        let strokes = vec![vec![(10.0, 10.0), (50.0, 50.0)], vec![(60.0, 60.0), (100.0, 100.0)]];
         let ap = AppearanceStreamBuilder::for_ink(&strokes, AnnotationColor::red(), 1.0);
 
         let (_, content) = ap.build();
@@ -1702,8 +1676,7 @@ mod tests {
     #[test]
     fn test_caret_none_symbol() {
         let rect = Rect::new(0.0, 0.0, 20.0, 30.0);
-        let ap =
-            AppearanceStreamBuilder::for_caret(rect, CaretSymbol::None, AnnotationColor::blue());
+        let ap = AppearanceStreamBuilder::for_caret(rect, CaretSymbol::None, AnnotationColor::blue());
 
         let (_, content) = ap.build();
         let content_str = String::from_utf8_lossy(&content);
@@ -1714,11 +1687,7 @@ mod tests {
     #[test]
     fn test_caret_paragraph_symbol() {
         let rect = Rect::new(0.0, 0.0, 20.0, 20.0);
-        let ap = AppearanceStreamBuilder::for_caret(
-            rect,
-            CaretSymbol::Paragraph,
-            AnnotationColor::black(),
-        );
+        let ap = AppearanceStreamBuilder::for_caret(rect, CaretSymbol::Paragraph, AnnotationColor::black());
 
         let (_, content) = ap.build();
         let content_str = String::from_utf8_lossy(&content);
@@ -1741,8 +1710,7 @@ mod tests {
     #[test]
     fn test_redact_custom_color() {
         let rect = Rect::new(0.0, 0.0, 100.0, 20.0);
-        let ap =
-            AppearanceStreamBuilder::for_redact(rect, Some(AnnotationColor::Rgb(0.5, 0.5, 0.5)));
+        let ap = AppearanceStreamBuilder::for_redact(rect, Some(AnnotationColor::Rgb(0.5, 0.5, 0.5)));
 
         let (_, content) = ap.build();
         let content_str = String::from_utf8_lossy(&content);
@@ -1802,118 +1770,55 @@ mod tests {
 
     #[test]
     fn test_draw_line_ending_none() {
-        let s = AppearanceStreamBuilder::draw_line_ending(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
-            LineEndingStyle::None,
-            false,
-        );
+        let s = AppearanceStreamBuilder::draw_line_ending(0.0, 0.0, 100.0, 0.0, LineEndingStyle::None, false);
         assert!(s.is_empty());
     }
 
     #[test]
     fn test_draw_line_ending_open_arrow() {
-        let s = AppearanceStreamBuilder::draw_line_ending(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
-            LineEndingStyle::OpenArrow,
-            false,
-        );
+        let s = AppearanceStreamBuilder::draw_line_ending(0.0, 0.0, 100.0, 0.0, LineEndingStyle::OpenArrow, false);
         assert!(!s.is_empty());
         assert!(s.contains("l S"));
     }
 
     #[test]
     fn test_draw_line_ending_closed_arrow() {
-        let s = AppearanceStreamBuilder::draw_line_ending(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
-            LineEndingStyle::ClosedArrow,
-            false,
-        );
+        let s = AppearanceStreamBuilder::draw_line_ending(0.0, 0.0, 100.0, 0.0, LineEndingStyle::ClosedArrow, false);
         assert!(!s.is_empty());
         assert!(s.contains("h f"));
     }
 
     #[test]
     fn test_draw_line_ending_circle() {
-        let s = AppearanceStreamBuilder::draw_line_ending(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
-            LineEndingStyle::Circle,
-            false,
-        );
+        let s = AppearanceStreamBuilder::draw_line_ending(0.0, 0.0, 100.0, 0.0, LineEndingStyle::Circle, false);
         assert!(!s.is_empty());
         assert!(s.contains("c S"));
     }
 
     #[test]
     fn test_draw_line_ending_square() {
-        let s = AppearanceStreamBuilder::draw_line_ending(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
-            LineEndingStyle::Square,
-            false,
-        );
+        let s = AppearanceStreamBuilder::draw_line_ending(0.0, 0.0, 100.0, 0.0, LineEndingStyle::Square, false);
         assert!(!s.is_empty());
         assert!(s.contains("re S"));
     }
 
     #[test]
     fn test_draw_line_ending_diamond() {
-        let s = AppearanceStreamBuilder::draw_line_ending(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
-            LineEndingStyle::Diamond,
-            false,
-        );
+        let s = AppearanceStreamBuilder::draw_line_ending(0.0, 0.0, 100.0, 0.0, LineEndingStyle::Diamond, false);
         assert!(!s.is_empty());
         assert!(s.contains("h S"));
     }
 
     #[test]
     fn test_draw_line_ending_at_start() {
-        let s_start = AppearanceStreamBuilder::draw_line_ending(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
-            LineEndingStyle::OpenArrow,
-            true,
-        );
-        let s_end = AppearanceStreamBuilder::draw_line_ending(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
-            LineEndingStyle::OpenArrow,
-            false,
-        );
+        let s_start = AppearanceStreamBuilder::draw_line_ending(0.0, 0.0, 100.0, 0.0, LineEndingStyle::OpenArrow, true);
+        let s_end = AppearanceStreamBuilder::draw_line_ending(0.0, 0.0, 100.0, 0.0, LineEndingStyle::OpenArrow, false);
         assert_ne!(s_start, s_end);
     }
 
     #[test]
     fn test_draw_line_ending_butt_fallthrough() {
-        let s = AppearanceStreamBuilder::draw_line_ending(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
-            LineEndingStyle::Butt,
-            false,
-        );
+        let s = AppearanceStreamBuilder::draw_line_ending(0.0, 0.0, 100.0, 0.0, LineEndingStyle::Butt, false);
         assert!(s.is_empty());
     }
 

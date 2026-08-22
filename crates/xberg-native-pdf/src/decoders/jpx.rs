@@ -43,18 +43,17 @@ pub struct JpxImage {
 pub fn decode_jpx(bytes: &[u8]) -> Result<JpxImage> {
     use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
 
-    let image = Image::new(bytes, &DecodeSettings::default()).map_err(|e| {
-        Error::UnsupportedFilter(format!("JPXDecode: JPEG 2000 decode failed: {e:?}"))
-    })?;
+    let image = Image::new(bytes, &DecodeSettings::default())
+        .map_err(|e| Error::UnsupportedFilter(format!("JPXDecode: JPEG 2000 decode failed: {e:?}")))?;
 
     let width = image.width();
     let height = image.height();
     let npix = width as usize * height as usize;
 
     let mut ctx = DecoderContext::default();
-    let decoded = image.decode(&mut ctx).map_err(|e| {
-        Error::UnsupportedFilter(format!("JPXDecode: JPEG 2000 decode failed: {e:?}"))
-    })?;
+    let decoded = image
+        .decode(&mut ctx)
+        .map_err(|e| Error::UnsupportedFilter(format!("JPXDecode: JPEG 2000 decode failed: {e:?}")))?;
 
     let comps = decoded.components();
     if comps.is_empty() {
@@ -91,9 +90,7 @@ pub fn decode_jpx(bytes: &[u8]) -> Result<JpxImage> {
         }
         let s = comp.samples();
         let plane = if s.len() == npix {
-            s.iter()
-                .map(|&v| v.round().clamp(0.0, 255.0) as u8)
-                .collect()
+            s.iter().map(|&v| v.round().clamp(0.0, 255.0) as u8).collect()
         } else if s.len() == sw * sh {
             upsample_nearest_u8(s, sw, sh, w, h)
         } else {
@@ -146,9 +143,7 @@ mod tests {
         let out = upsample_nearest_u8(&sub, 2, 2, 4, 4);
         assert_eq!(
             out,
-            vec![
-                10, 10, 20, 20, 10, 10, 20, 20, 30, 30, 40, 40, 30, 30, 40, 40,
-            ]
+            vec![10, 10, 20, 20, 10, 10, 20, 20, 30, 30, 40, 40, 30, 30, 40, 40,]
         );
     }
 

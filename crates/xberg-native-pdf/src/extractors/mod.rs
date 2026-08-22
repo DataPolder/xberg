@@ -19,28 +19,24 @@ pub mod warnings;
 pub mod xmp;
 
 pub use auto::{
-    AutoExtractOptions, AutoExtractOptionsBuilder, AutoExtractor, DocumentClassification,
-    DocumentExtraction, DocumentSummary, ExtractMode, ExtractSource, ExtractionStatus,
-    ImageCodecClass, PageClassification, PageExtraction, PageKind, PageSignals, ProducerPrior,
-    Quad, ReasonCode, Region, RegionKind, TableData,
+    AutoExtractOptions, AutoExtractOptionsBuilder, AutoExtractor, DocumentClassification, DocumentExtraction,
+    DocumentSummary, ExtractMode, ExtractSource, ExtractionStatus, ImageCodecClass, PageClassification, PageExtraction,
+    PageKind, PageSignals, ProducerPrior, Quad, ReasonCode, Region, RegionKind, TableData,
 };
 pub use forms::{FieldType, FieldValue, FormExtractor, FormField};
 pub use gap_statistics::{
-    AdaptiveThresholdConfig, AdaptiveThresholdResult, GapStatistics, analyze_document_gaps,
-    calculate_statistics, determine_adaptive_threshold, extract_gaps,
+    AdaptiveThresholdConfig, AdaptiveThresholdResult, GapStatistics, analyze_document_gaps, calculate_statistics,
+    determine_adaptive_threshold, extract_gaps,
 };
 pub use geometric_spacing::{SpaceInsertion, SpacingConfig, should_insert_space};
 pub use hierarchical::HierarchicalExtractor;
-pub use images::{
-    ColorSpace, ImageData, PdfImage, PixelFormat, expand_inline_image_dict,
-    extract_image_from_xobject,
-};
+pub use images::{ColorSpace, ImageData, PdfImage, PixelFormat, expand_inline_image_dict, extract_image_from_xobject};
 pub use page_labels::{PageLabelExtractor, PageLabelRange, PageLabelStyle};
 pub use paths::{FillRule, PathExtractor};
 pub use pattern_detector::{PatternDetector, PatternPreservationConfig};
 pub use structured::{
-    BoundingBox, DocumentElement, DocumentMetadata, ExtractorConfig, ListItem, StructuredDocument,
-    StructuredExtractor, TextAlignment, TextStyle,
+    BoundingBox, DocumentElement, DocumentMetadata, ExtractorConfig, ListItem, StructuredDocument, StructuredExtractor,
+    TextAlignment, TextStyle,
 };
 pub use synthetic_structure::{SyntheticStructureConfig, SyntheticStructureGenerator};
 pub use text::{SpanMergingConfig, TextExtractionConfig, TextExtractor};

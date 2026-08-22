@@ -112,10 +112,7 @@ impl PatternDetector {
             return false;
         }
 
-        let text: String = characters
-            .iter()
-            .filter_map(|ch| char::from_u32(ch.code))
-            .collect();
+        let text: String = characters.iter().filter_map(|ch| char::from_u32(ch.code)).collect();
 
         let text_lower = text.to_lowercase();
 
@@ -149,10 +146,7 @@ impl PatternDetector {
     /// let mut characters = vec![/* ... */];
     /// PatternDetector::mark_pattern_contexts(&mut characters, &config)?;
     /// ```
-    pub fn mark_pattern_contexts(
-        characters: &mut [CharacterInfo],
-        config: &PatternPreservationConfig,
-    ) -> Result<()> {
+    pub fn mark_pattern_contexts(characters: &mut [CharacterInfo], config: &PatternPreservationConfig) -> Result<()> {
         if !config.preserve_patterns {
             return Ok(());
         }
@@ -267,12 +261,7 @@ impl PatternDetector {
             return;
         }
 
-        let schemes = [
-            ("http://", 7),
-            ("https://", 8),
-            ("ftp://", 6),
-            ("mailto:", 7),
-        ];
+        let schemes = [("http://", 7), ("https://", 8), ("ftp://", 6), ("mailto:", 7)];
 
         for i in 0..characters.len() {
             for (scheme, len) in &schemes {
@@ -388,7 +377,10 @@ mod tests {
     #[test]
     fn test_email_pattern_detection() {
         let chars = string_to_chars("user@example.com");
-        assert!(PatternDetector::has_email_pattern(&chars), "Should detect email pattern");
+        assert!(
+            PatternDetector::has_email_pattern(&chars),
+            "Should detect email pattern"
+        );
     }
 
     #[test]
@@ -448,7 +440,10 @@ mod tests {
         PatternDetector::mark_pattern_contexts(&mut chars, &config).unwrap();
 
         for ch in &chars {
-            assert!(!ch.protected_from_split, "Characters should not be protected when disabled");
+            assert!(
+                !ch.protected_from_split,
+                "Characters should not be protected when disabled"
+            );
         }
     }
 
@@ -463,7 +458,11 @@ mod tests {
         let email_end = email_start + "user@example.com".len();
 
         for i in email_start..email_end {
-            assert!(chars[i].protected_from_split, "Email character {} should be protected", i);
+            assert!(
+                chars[i].protected_from_split,
+                "Email character {} should be protected",
+                i
+            );
         }
 
         for i in 0..email_start {

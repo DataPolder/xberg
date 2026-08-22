@@ -52,13 +52,7 @@ pub(crate) enum ResolvedColor {
     Rgba { r: f32, g: f32, b: f32, a: f32 },
     /// DeviceCMYK colour with straight alpha. Backends that emit CMYK
     /// directly (PDF/X-ready preflight, plate output) consume this.
-    Cmyk {
-        c: f32,
-        m: f32,
-        y: f32,
-        k: f32,
-        a: f32,
-    },
+    Cmyk { c: f32, m: f32, y: f32, k: f32, a: f32 },
     /// Dual-payload variant for `/ICCBased` N=4 sources whose embedded
     /// profile compiled into a usable CMM. Carries both the composite-
     /// ready RGB (pre-converted via the embedded profile per

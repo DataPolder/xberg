@@ -78,13 +78,7 @@ pub struct PdfImage {
 
 impl PdfImage {
     /// Create a new PDF image.
-    pub fn new(
-        width: u32,
-        height: u32,
-        color_space: ColorSpace,
-        bits_per_component: u8,
-        data: ImageData,
-    ) -> Self {
+    pub fn new(width: u32, height: u32, color_space: ColorSpace, bits_per_component: u8, data: ImageData) -> Self {
         Self {
             width,
             height,
@@ -312,18 +306,14 @@ impl PdfImage {
                 if self.color_space.components() == 4 {
                     let transform = self.build_icc_transform();
                     let rgb = decode_cmyk_jpeg_to_rgb_with_profile(jpeg_data, transform.as_ref())?;
-                    let buf = image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(
-                        self.width,
-                        self.height,
-                        rgb,
-                    )
-                    .ok_or_else(|| Error::Image("Invalid CMYK image dimensions".to_string()))?;
+                    let buf = image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(self.width, self.height, rgb)
+                        .ok_or_else(|| Error::Image("Invalid CMYK image dimensions".to_string()))?;
                     buf.save_with_format(path, image::ImageFormat::Png)
                         .map_err(|e| Error::Image(format!("Failed to save PNG: {}", e)))
                 } else {
                     save_jpeg_as_png(jpeg_data, path)
                 }
-            },
+            }
             ImageData::Raw { pixels, format } => {
                 // Always build the transform if a profile is present; the
                 // save helper picks the right convert_* method for the
@@ -333,7 +323,7 @@ impl PdfImage {
                 // grayscale other than sRGB gamma. ~keep
                 let transform = self.build_icc_transform();
                 save_raw_as_png(pixels, self.width, self.height, *format, transform.as_ref(), path)
-            },
+            }
         }
     }
 
@@ -354,22 +344,18 @@ impl PdfImage {
                 if self.color_space.components() == 4 {
                     let transform = self.build_icc_transform();
                     let rgb = decode_cmyk_jpeg_to_rgb_with_profile(jpeg_data, transform.as_ref())?;
-                    let buf = image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(
-                        self.width,
-                        self.height,
-                        rgb,
-                    )
-                    .ok_or_else(|| Error::Image("Invalid CMYK image dimensions".to_string()))?;
+                    let buf = image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(self.width, self.height, rgb)
+                        .ok_or_else(|| Error::Image("Invalid CMYK image dimensions".to_string()))?;
                     buf.save_with_format(path, image::ImageFormat::Jpeg)
                         .map_err(|e| Error::Image(format!("Failed to save JPEG: {}", e)))
                 } else {
                     std::fs::write(path, jpeg_data).map_err(Error::from)
                 }
-            },
+            }
             ImageData::Raw { pixels, format } => {
                 let transform = self.build_icc_transform();
                 save_raw_as_jpeg(pixels, self.width, self.height, *format, transform.as_ref(), path)
-            },
+            }
         }
     }
 
@@ -386,11 +372,7 @@ impl PdfImage {
         // ramp encodes *larger* than its uncompressed samples. Purely a
         // container-size choice; PNG is lossless, so the decoded pixels are
         // byte-identical either way. ~keep
-        let encoder = PngEncoder::new_with_quality(
-            &mut buffer,
-            CompressionType::Default,
-            FilterType::Adaptive,
-        );
+        let encoder = PngEncoder::new_with_quality(&mut buffer, CompressionType::Default, FilterType::Adaptive);
 
         match &self.data {
             ImageData::Raw { pixels, format } => {
@@ -430,27 +412,17 @@ impl PdfImage {
                         )));
                     }
                     encoder
-                        .write_image(
-                            rgb.as_raw(),
-                            self.width,
-                            self.height,
-                            image::ColorType::Rgb8.into(),
-                        )
+                        .write_image(rgb.as_raw(), self.width, self.height, image::ColorType::Rgb8.into())
                         .map_err(|e| Error::Encode(format!("Failed to encode PNG: {}", e)))?;
                 }
-            },
+            }
             ImageData::Jpeg(_) => {
                 let dynamic_image = self.to_dynamic_image()?;
                 let rgb = dynamic_image.to_rgb8();
                 encoder
-                    .write_image(
-                        rgb.as_raw(),
-                        self.width,
-                        self.height,
-                        image::ColorType::Rgb8.into(),
-                    )
+                    .write_image(rgb.as_raw(), self.width, self.height, image::ColorType::Rgb8.into())
                     .map_err(|e| Error::Encode(format!("Failed to encode PNG: {}", e)))?;
-            },
+            }
         }
 
         Ok(buffer.into_inner())
@@ -464,12 +436,12 @@ impl PdfImage {
             ImageData::Jpeg(jpeg_data) => {
                 let base64_str = STANDARD.encode(jpeg_data);
                 Ok(format!("data:image/jpeg;base64,{}", base64_str))
-            },
+            }
             ImageData::Raw { .. } => {
                 let png_bytes = self.to_png_bytes()?;
                 let base64_str = STANDARD.encode(&png_bytes);
                 Ok(format!("data:image/png;base64,{}", base64_str))
-            },
+            }
         }
     }
 
@@ -485,22 +457,17 @@ impl PdfImage {
                     // (see decode_cmyk_jpeg_to_rgb_with_profile). ~keep
                     let transform = self.build_icc_transform();
                     let rgb = decode_cmyk_jpeg_to_rgb_with_profile(jpeg_data, transform.as_ref())?;
-                    return image::ImageBuffer::<image::Rgb<u8>, Vec<u8>>::from_raw(
-                        self.width,
-                        self.height,
-                        rgb,
-                    )
-                    .ok_or_else(|| Error::Decode("Invalid CMYK image dimensions".to_string()))
-                    .map(image::DynamicImage::ImageRgb8);
+                    return image::ImageBuffer::<image::Rgb<u8>, Vec<u8>>::from_raw(self.width, self.height, rgb)
+                        .ok_or_else(|| Error::Decode("Invalid CMYK image dimensions".to_string()))
+                        .map(image::DynamicImage::ImageRgb8);
                 }
                 tracing::debug!(
                     "Decoding JPEG data ({} bytes), starts with: {:02X?}",
                     jpeg_data.len(),
                     &jpeg_data[..min(jpeg_data.len(), 16)]
                 );
-                image::load_from_memory(jpeg_data)
-                    .map_err(|e| Error::Decode(format!("Failed to decode JPEG: {}", e)))
-            },
+                image::load_from_memory(jpeg_data).map_err(|e| Error::Decode(format!("Failed to decode JPEG: {}", e)))
+            }
             ImageData::Raw { pixels, format } => {
                 if self.bits_per_component == 1
                     && matches!(self.color_space, ColorSpace::DeviceGray)
@@ -514,19 +481,12 @@ impl PdfImage {
                     };
 
                     let decompressed = ccitt_bilevel::decompress_ccitt(pixels, &params)?;
-                    let grayscale =
-                        ccitt_bilevel::bilevel_to_grayscale(&decompressed, self.width, self.height);
+                    let grayscale = ccitt_bilevel::bilevel_to_grayscale(&decompressed, self.width, self.height);
 
-                    image::ImageBuffer::<image::Luma<u8>, Vec<u8>>::from_raw(
-                        self.width,
-                        self.height,
-                        grayscale,
-                    )
-                    .ok_or_else(|| Error::Decode("Invalid image dimensions".to_string()))
-                    .map(image::DynamicImage::ImageLuma8)
-                } else if self.bits_per_component == 1
-                    && matches!(self.color_space, ColorSpace::DeviceGray)
-                {
+                    image::ImageBuffer::<image::Luma<u8>, Vec<u8>>::from_raw(self.width, self.height, grayscale)
+                        .ok_or_else(|| Error::Decode("Invalid image dimensions".to_string()))
+                        .map(image::DynamicImage::ImageLuma8)
+                } else if self.bits_per_component == 1 && matches!(self.color_space, ColorSpace::DeviceGray) {
                     // Packed 1-bit DeviceGray rows, `ceil(width / 8)` bytes
                     // each, MSB first. `extract_image_from_xobject` unpacks
                     // sub-byte images to 8-bit samples (with /Decode applied)
@@ -535,27 +495,19 @@ impl PdfImage {
                     // §8.9.5.2 Table 90 default semantics: sample bit 0 ->
                     // component 0.0 (black), bit 1 -> component 1.0 (white). ~keep
                     let row_bytes = (self.width as usize).div_ceil(8);
-                    let mut grayscale =
-                        Vec::with_capacity(self.width as usize * self.height as usize);
+                    let mut grayscale = Vec::with_capacity(self.width as usize * self.height as usize);
                     for row in 0..self.height as usize {
                         let row_start = row * row_bytes;
                         for col in 0..self.width as usize {
                             let byte_idx = row_start + col / 8;
-                            let bit = pixels
-                                .get(byte_idx)
-                                .map(|b| (b >> (7 - (col % 8))) & 1)
-                                .unwrap_or(1);
+                            let bit = pixels.get(byte_idx).map(|b| (b >> (7 - (col % 8))) & 1).unwrap_or(1);
                             grayscale.push(if bit == 0 { 0x00 } else { 0xFF });
                         }
                     }
 
-                    image::ImageBuffer::<image::Luma<u8>, Vec<u8>>::from_raw(
-                        self.width,
-                        self.height,
-                        grayscale,
-                    )
-                    .ok_or_else(|| Error::Decode("Invalid image dimensions".to_string()))
-                    .map(image::DynamicImage::ImageLuma8)
+                    image::ImageBuffer::<image::Luma<u8>, Vec<u8>>::from_raw(self.width, self.height, grayscale)
+                        .ok_or_else(|| Error::Decode("Invalid image dimensions".to_string()))
+                        .map(image::DynamicImage::ImageLuma8)
                 } else {
                     match (format, self.color_space) {
                         (PixelFormat::RGB, ColorSpace::DeviceRGB) => {
@@ -566,38 +518,30 @@ impl PdfImage {
                             )
                             .ok_or_else(|| Error::Decode("Invalid image dimensions".to_string()))
                             .map(image::DynamicImage::ImageRgb8)
-                        },
-                        (PixelFormat::Grayscale, ColorSpace::DeviceGray) => {
-                            image::ImageBuffer::<image::Luma<u8>, Vec<u8>>::from_raw(
-                                self.width,
-                                self.height,
-                                pixels.clone(),
-                            )
-                            .ok_or_else(|| Error::Decode("Invalid image dimensions".to_string()))
-                            .map(image::DynamicImage::ImageLuma8)
-                        },
+                        }
+                        (PixelFormat::Grayscale, ColorSpace::DeviceGray) => image::ImageBuffer::<
+                            image::Luma<u8>,
+                            Vec<u8>,
+                        >::from_raw(
+                            self.width, self.height, pixels.clone()
+                        )
+                        .ok_or_else(|| Error::Decode("Invalid image dimensions".to_string()))
+                        .map(image::DynamicImage::ImageLuma8),
                         _ => {
                             let rgb_pixels = match format {
-                                PixelFormat::Grayscale => {
-                                    pixels.iter().flat_map(|&g| vec![g, g, g]).collect()
-                                },
-                                PixelFormat::CMYK => cmyk_to_rgb_with_transform(
-                                    pixels,
-                                    self.build_icc_transform().as_ref(),
-                                ),
+                                PixelFormat::Grayscale => pixels.iter().flat_map(|&g| vec![g, g, g]).collect(),
+                                PixelFormat::CMYK => {
+                                    cmyk_to_rgb_with_transform(pixels, self.build_icc_transform().as_ref())
+                                }
                                 PixelFormat::RGB => pixels.clone(),
                             };
-                            image::ImageBuffer::<image::Rgb<u8>, Vec<u8>>::from_raw(
-                                self.width,
-                                self.height,
-                                rgb_pixels,
-                            )
-                            .ok_or_else(|| Error::Decode("Invalid image dimensions".to_string()))
-                            .map(image::DynamicImage::ImageRgb8)
-                        },
+                            image::ImageBuffer::<image::Rgb<u8>, Vec<u8>>::from_raw(self.width, self.height, rgb_pixels)
+                                .ok_or_else(|| Error::Decode("Invalid image dimensions".to_string()))
+                                .map(image::DynamicImage::ImageRgb8)
+                        }
                     }
                 }
-            },
+            }
         }
     }
 }
@@ -753,7 +697,7 @@ pub fn parse_color_space(obj: &crate::object::Object) -> Result<ColorSpace> {
                             3
                         };
                         Ok(ColorSpace::ICCBased(num_components))
-                    },
+                    }
                     "Separation" => Ok(ColorSpace::Separation),
                     "DeviceN" => Ok(ColorSpace::DeviceN),
                     "Pattern" => Ok(ColorSpace::Pattern),
@@ -762,7 +706,7 @@ pub fn parse_color_space(obj: &crate::object::Object) -> Result<ColorSpace> {
             } else {
                 Err(Error::Image("Color space array must start with a name".to_string()))
             }
-        },
+        }
         _ => Err(Error::Image(format!("Invalid color space object: {:?}", obj))),
     }
 }
@@ -777,8 +721,7 @@ fn decode_array_inverts_1bpc(decode: Option<&crate::object::Object>) -> bool {
         Some(a) if a.len() == 2 => a,
         _ => return false,
     };
-    let as_num =
-        |o: &crate::object::Object| o.as_integer().map(|i| i as f64).or_else(|| o.as_real());
+    let as_num = |o: &crate::object::Object| o.as_integer().map(|i| i as f64).or_else(|| o.as_real());
     matches!((as_num(&arr[0]), as_num(&arr[1])), (Some(lo), Some(hi)) if lo > hi)
 }
 
@@ -806,8 +749,7 @@ fn decode_ranges(decode: Option<&crate::object::Object>, ncomp: usize) -> Option
     if arr.len() != ncomp * 2 {
         return None;
     }
-    let as_num =
-        |o: &crate::object::Object| o.as_integer().map(|i| i as f64).or_else(|| o.as_real());
+    let as_num = |o: &crate::object::Object| o.as_integer().map(|i| i as f64).or_else(|| o.as_real());
     let mut out = Vec::with_capacity(ncomp);
     for pair in arr.chunks_exact(2) {
         out.push((as_num(&pair[0])? as f32, as_num(&pair[1])? as f32));
@@ -954,10 +896,7 @@ pub fn extract_image_from_xobject(
         .ok_or_else(|| Error::Image("Image missing /Height".to_string()))? as u32;
 
     // /BitsPerComponent may likewise be indirect (§7.3.10). ~keep
-    let bits_per_component = dict
-        .get("BitsPerComponent")
-        .and_then(resolve_int)
-        .unwrap_or(8) as u8;
+    let bits_per_component = dict.get("BitsPerComponent").and_then(resolve_int).unwrap_or(8) as u8;
 
     let color_space_obj = dict
         .get("ColorSpace")
@@ -988,27 +927,26 @@ pub fn extract_image_from_xobject(
     // `Object::Stream` dict, so an unresolved reference silently falls back to
     // `N = 3` and a CMYK (N = 4) image is labelled as RGB. Resolve the stream
     // reference here so the component count reflects the real profile. ~keep
-    let resolved_color_space =
-        if let (Some(doc_mut), Object::Array(arr)) = (doc, &resolved_color_space) {
-            if arr.len() > 1 {
-                if let Some(second_ref) = arr[1].as_reference() {
-                    match doc_mut.load_object(second_ref) {
-                        Ok(resolved_second) => {
-                            let mut new_arr = arr.clone();
-                            new_arr[1] = resolved_second;
-                            Object::Array(new_arr)
-                        },
-                        _ => resolved_color_space,
+    let resolved_color_space = if let (Some(doc_mut), Object::Array(arr)) = (doc, &resolved_color_space) {
+        if arr.len() > 1 {
+            if let Some(second_ref) = arr[1].as_reference() {
+                match doc_mut.load_object(second_ref) {
+                    Ok(resolved_second) => {
+                        let mut new_arr = arr.clone();
+                        new_arr[1] = resolved_second;
+                        Object::Array(new_arr)
                     }
-                } else {
-                    resolved_color_space
+                    _ => resolved_color_space,
                 }
             } else {
                 resolved_color_space
             }
         } else {
             resolved_color_space
-        };
+        }
+    } else {
+        resolved_color_space
+    };
 
     let color_space = parse_color_space(&resolved_color_space)?;
     // For Indexed color spaces, resolve the base color space and palette now so we
@@ -1020,7 +958,9 @@ pub fn extract_image_from_xobject(
     let indexed_resolution: Option<IndexedResolution> = if color_space == ColorSpace::Indexed {
         let resolved = resolve_indexed_palette(doc, &resolved_color_space)?;
         if resolved.is_none() {
-            return Err(Error::Image("Unable to resolve Indexed color space palette".to_string()));
+            return Err(Error::Image(
+                "Unable to resolve Indexed color space palette".to_string(),
+            ));
         }
         resolved
     } else {
@@ -1056,10 +996,7 @@ pub fn extract_image_from_xobject(
     let filter_names = if let Some(filter_obj) = dict.get("Filter") {
         match filter_obj {
             Object::Name(name) => vec![name.clone()],
-            Object::Array(filters) => filters
-                .iter()
-                .filter_map(|f| f.as_name().map(String::from))
-                .collect(),
+            Object::Array(filters) => filters.iter().filter_map(|f| f.as_name().map(String::from)).collect(),
             _ => vec![],
         }
     } else {
@@ -1070,17 +1007,11 @@ pub fn extract_image_from_xobject(
     let is_jpeg_only = has_dct && filter_names.len() == 1;
     let is_jpeg_chain = has_dct && filter_names.len() > 1;
 
-    let is_jbig2 = filter_names
-        .iter()
-        .any(|n| n.eq_ignore_ascii_case("JBIG2Decode"));
+    let is_jbig2 = filter_names.iter().any(|n| n.eq_ignore_ascii_case("JBIG2Decode"));
 
-    let is_jpx = filter_names
-        .iter()
-        .any(|n| n.eq_ignore_ascii_case("JPXDecode"));
+    let is_jpx = filter_names.iter().any(|n| n.eq_ignore_ascii_case("JPXDecode"));
 
-    let is_ccitt = filter_names
-        .iter()
-        .any(|n| n.eq_ignore_ascii_case("CCITTFaxDecode"));
+    let is_ccitt = filter_names.iter().any(|n| n.eq_ignore_ascii_case("CCITTFaxDecode"));
 
     // Bit depth of the buffer actually stored: raised to 8 when a transform
     // below (sub-byte unpack, /Decode application, 16-bit reduction) rewrites
@@ -1178,8 +1109,7 @@ pub fn extract_image_from_xobject(
             // with the wrong value every row starts at the wrong offset, and a
             // stream sized for its true ink count runs out partway down, so
             // the tail of the image is padded with fabricated zeros. ~keep
-            let ncomp = devicen_ink_count(&resolved_color_space)
-                .unwrap_or_else(|| color_space.components());
+            let ncomp = devicen_ink_count(&resolved_color_space).unwrap_or_else(|| color_space.components());
             // The stored buffer is one byte per component at the stride
             // `PixelFormat` declares, and that stride is only ever 1, 3 or 4.
             // A colour space whose component count is anything else — a
@@ -1194,8 +1124,8 @@ pub fn extract_image_from_xobject(
             // not confined to [0, 1], so the linear-to-byte mapping does not
             // apply to them. ~keep
             let keep_raw = is_ccitt || color_space == ColorSpace::Lab || !representable;
-            let ranges = decode_ranges(dict.get("Decode"), ncomp)
-                .filter(|r| r.iter().any(|&(lo, hi)| (lo, hi) != (0.0, 1.0)));
+            let ranges =
+                decode_ranges(dict.get("Decode"), ncomp).filter(|r| r.iter().any(|&(lo, hi)| (lo, hi) != (0.0, 1.0)));
 
             // The stored buffer contract is one 8-bit byte per component
             // (`PixelFormat::bytes_per_pixel`), so sub-byte samples are
@@ -1206,14 +1136,7 @@ pub fn extract_image_from_xobject(
             let unpacked = if keep_raw || (bpc_after_reduce == 8 && ranges.is_none()) {
                 None
             } else {
-                samples_to_decoded_bytes(
-                    &reduced,
-                    width,
-                    height,
-                    ncomp,
-                    bpc_after_reduce,
-                    ranges.as_deref(),
-                )
+                samples_to_decoded_bytes(&reduced, width, height, ncomp, bpc_after_reduce, ranges.as_deref())
             };
             let pixels = match unpacked {
                 Some(samples) => {
@@ -1229,7 +1152,7 @@ pub fn extract_image_from_xobject(
                     // narrower fact: only `ranges` actually folds one in. ~keep
                     decode_folded_in = ranges.is_some();
                     samples
-                },
+                }
                 None => reduced,
             };
             ImageData::Raw {
@@ -1431,13 +1354,9 @@ fn resolve_indexed_palette(
     } else {
         arr[2].clone()
     };
-    let hival: Option<usize> = hival_obj.as_integer().and_then(|i| {
-        if (0..=255).contains(&i) {
-            Some(i as usize)
-        } else {
-            None
-        }
-    });
+    let hival: Option<usize> = hival_obj
+        .as_integer()
+        .and_then(|i| if (0..=255).contains(&i) { Some(i as usize) } else { None });
 
     let lookup_obj = if let Some(d) = doc {
         if let Some(r) = arr[3].as_reference() {
@@ -1560,19 +1479,17 @@ fn expand_indexed_to_rgb_with_transform(
         )));
     }
 
-    let bytes_per_row = w
-        .checked_mul(bpc as usize)
-        .map(|v| v.div_ceil(8))
-        .ok_or_else(|| {
-            Error::Image(format!("Indexed image row width overflow: {w} × {bpc} bpc exceeds usize"))
-        })?;
+    let bytes_per_row = w.checked_mul(bpc as usize).map(|v| v.div_ceil(8)).ok_or_else(|| {
+        Error::Image(format!(
+            "Indexed image row width overflow: {w} × {bpc} bpc exceeds usize"
+        ))
+    })?;
 
-    let output_bytes = w
-        .checked_mul(h)
-        .and_then(|v| v.checked_mul(3))
-        .ok_or_else(|| {
-            Error::Image(format!("Indexed image output size overflow: {w} × {h} × 3 exceeds usize"))
-        })?;
+    let output_bytes = w.checked_mul(h).and_then(|v| v.checked_mul(3)).ok_or_else(|| {
+        Error::Image(format!(
+            "Indexed image output size overflow: {w} × {h} × 3 exceeds usize"
+        ))
+    })?;
 
     if output_bytes > MAX_INDEXED_OUTPUT_BYTES {
         return Err(Error::Image(format!(
@@ -1616,19 +1533,19 @@ fn expand_indexed_to_rgb_with_transform(
                 } else {
                     (b & 0x0F) as usize
                 }
-            },
+            }
             2 => {
                 let byte_idx = x / 4;
                 let b = row.get(byte_idx).copied().unwrap_or(0);
                 let shift = 6 - (x % 4) * 2;
                 ((b >> shift) & 0x03) as usize
-            },
+            }
             1 => {
                 let byte_idx = x / 8;
                 let b = row.get(byte_idx).copied().unwrap_or(0);
                 let shift = 7 - (x % 8);
                 ((b >> shift) & 0x01) as usize
-            },
+            }
             // Unreachable: bpc is validated to be in {1, 2, 4, 8} above
             // before the closure is called, so this arm only exists to
             // satisfy exhaustiveness on `u8`. ~keep
@@ -1658,7 +1575,7 @@ fn expand_indexed_to_rgb_with_transform(
                     out.push(g);
                     out.push(g);
                     out.push(g);
-                },
+                }
                 PixelFormat::CMYK => {
                     let c = palette[off];
                     let m = palette[off + 1];
@@ -1672,7 +1589,7 @@ fn expand_indexed_to_rgb_with_transform(
                     out.push(r);
                     out.push(g);
                     out.push(b);
-                },
+                }
             }
         }
     }
@@ -1695,12 +1612,7 @@ fn expand_indexed_to_rgb_with_transform(
 /// CMM (qcms / lcms2) still takes precedence when a profile is available; this
 /// is the no-profile fallback.
 pub(crate) fn cmyk_pixel_to_rgb(c: u8, m: u8, y: u8, k: u8) -> [u8; 3] {
-    let (r, g, b) = crate::color::cmyk_to_rgb(
-        c as f32 / 255.0,
-        m as f32 / 255.0,
-        y as f32 / 255.0,
-        k as f32 / 255.0,
-    );
+    let (r, g, b) = crate::color::cmyk_to_rgb(c as f32 / 255.0, m as f32 / 255.0, y as f32 / 255.0, k as f32 / 255.0);
     [
         (r * 255.0).round() as u8,
         (g * 255.0).round() as u8,
@@ -1826,10 +1738,7 @@ pub fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
 /// Like [`cmyk_to_rgb`] but routes through an ICC transform when given,
 /// and falls through to §10.3.5 otherwise. Used by save_raw_as_* when
 /// the source image carries an ICC profile.
-pub fn cmyk_to_rgb_with_transform(
-    cmyk: &[u8],
-    transform: Option<&crate::color::Transform>,
-) -> Vec<u8> {
+pub fn cmyk_to_rgb_with_transform(cmyk: &[u8], transform: Option<&crate::color::Transform>) -> Vec<u8> {
     if let Some(t) = transform {
         return t.convert_cmyk_buffer(cmyk);
     }
@@ -1942,12 +1851,11 @@ pub fn decode_cmyk_jpeg_to_rgb_with_profile(
         )));
     }
 
-    let straight_cmyk: Vec<u8> =
-        if matches!(scan_app14_color_transform(jpeg_data), Some(0) | Some(2)) {
-            cmyk[..expected].iter().map(|b| 255 - *b).collect()
-        } else {
-            cmyk[..expected].to_vec()
-        };
+    let straight_cmyk: Vec<u8> = if matches!(scan_app14_color_transform(jpeg_data), Some(0) | Some(2)) {
+        cmyk[..expected].iter().map(|b| 255 - *b).collect()
+    } else {
+        cmyk[..expected].to_vec()
+    };
 
     if let Some(t) = transform {
         return Ok(t.convert_cmyk_buffer(&straight_cmyk));
@@ -2058,34 +1966,30 @@ fn save_raw_as_png(
                 .ok_or_else(|| Error::Image("Invalid RGB image dimensions".to_string()))?;
             img.save_with_format(path, ImageFormat::Png)
                 .map_err(|e| Error::Image(format!("Failed to save PNG: {}", e)))
-        },
+        }
         PixelFormat::Grayscale => {
             // A Gray ICC profile promotes to sRGB RGB; without one the
             // single channel is written as an L8 PNG. ~keep
             if let Some(t) = icc_matches_format(transform, format) {
                 let rgb = t.convert_gray_buffer(pixels);
-                let img =
-                    ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, rgb).ok_or_else(|| {
-                        Error::Image("Invalid grayscale image dimensions".to_string())
-                    })?;
+                let img = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, rgb)
+                    .ok_or_else(|| Error::Image("Invalid grayscale image dimensions".to_string()))?;
                 img.save_with_format(path, ImageFormat::Png)
                     .map_err(|e| Error::Image(format!("Failed to save PNG: {}", e)))
             } else {
                 let img = ImageBuffer::<Luma<u8>, _>::from_raw(width, height, pixels.to_vec())
-                    .ok_or_else(|| {
-                        Error::Image("Invalid grayscale image dimensions".to_string())
-                    })?;
+                    .ok_or_else(|| Error::Image("Invalid grayscale image dimensions".to_string()))?;
                 img.save_with_format(path, ImageFormat::Png)
                     .map_err(|e| Error::Image(format!("Failed to save PNG: {}", e)))
             }
-        },
+        }
         PixelFormat::CMYK => {
             let rgb = cmyk_to_rgb_with_transform(pixels, icc_matches_format(transform, format));
             let img = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, rgb)
                 .ok_or_else(|| Error::Image("Invalid CMYK image dimensions".to_string()))?;
             img.save_with_format(path, ImageFormat::Png)
                 .map_err(|e| Error::Image(format!("Failed to save PNG: {}", e)))
-        },
+        }
     }
 }
 
@@ -2109,32 +2013,28 @@ fn save_raw_as_jpeg(
                 .ok_or_else(|| Error::Image("Invalid RGB image dimensions".to_string()))?;
             img.save_with_format(path, ImageFormat::Jpeg)
                 .map_err(|e| Error::Image(format!("Failed to save JPEG: {}", e)))
-        },
+        }
         PixelFormat::Grayscale => {
             if let Some(t) = icc_matches_format(transform, format) {
                 let rgb = t.convert_gray_buffer(pixels);
-                let img =
-                    ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, rgb).ok_or_else(|| {
-                        Error::Image("Invalid grayscale image dimensions".to_string())
-                    })?;
+                let img = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, rgb)
+                    .ok_or_else(|| Error::Image("Invalid grayscale image dimensions".to_string()))?;
                 img.save_with_format(path, ImageFormat::Jpeg)
                     .map_err(|e| Error::Image(format!("Failed to save JPEG: {}", e)))
             } else {
                 let img = ImageBuffer::<Luma<u8>, _>::from_raw(width, height, pixels.to_vec())
-                    .ok_or_else(|| {
-                        Error::Image("Invalid grayscale image dimensions".to_string())
-                    })?;
+                    .ok_or_else(|| Error::Image("Invalid grayscale image dimensions".to_string()))?;
                 img.save_with_format(path, ImageFormat::Jpeg)
                     .map_err(|e| Error::Image(format!("Failed to save JPEG: {}", e)))
             }
-        },
+        }
         PixelFormat::CMYK => {
             let rgb = cmyk_to_rgb_with_transform(pixels, icc_matches_format(transform, format));
             let img = ImageBuffer::<Rgb<u8>, _>::from_raw(width, height, rgb)
                 .ok_or_else(|| Error::Image("Invalid CMYK image dimensions".to_string()))?;
             img.save_with_format(path, ImageFormat::Jpeg)
                 .map_err(|e| Error::Image(format!("Failed to save JPEG: {}", e)))
-        },
+        }
     }
 }
 
@@ -2163,8 +2063,7 @@ fn decode_jbig2_image(
         let globals_ref = dp.get("JBIG2Globals")?.as_reference()?;
         let d = doc.as_ref()?;
         let globals_obj = d.load_object(globals_ref).ok()?;
-        d.decode_stream_with_encryption(&globals_obj, globals_ref)
-            .ok()
+        d.decode_stream_with_encryption(&globals_obj, globals_ref).ok()
     })();
 
     let image = hayro_jbig2::Image::new_embedded(&jbig2_bytes, globals.as_deref())
@@ -2229,7 +2128,9 @@ pub(crate) fn decode_jbig2_image_mask_bits(
 ) -> Result<Vec<u8>> {
     let decoded = decode_jbig2_image(xobject, obj_ref, dict, doc, width, height)?;
     let ImageData::Raw { pixels, .. } = decoded else {
-        return Err(Error::Image("JBIG2 ImageMask decode did not yield raw pixels".to_string()));
+        return Err(Error::Image(
+            "JBIG2 ImageMask decode did not yield raw pixels".to_string(),
+        ));
     };
 
     Ok(pack_image_mask_rows(&pixels, width, height))
@@ -2248,9 +2149,7 @@ fn pack_image_mask_rows(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut packed = vec![0u8; row_bytes * height as usize];
     for y in 0..height as usize {
         for x in 0..width as usize {
-            let is_background = pixels
-                .get(y * width as usize + x)
-                .is_none_or(|&pixel| pixel >= 128);
+            let is_background = pixels.get(y * width as usize + x).is_none_or(|&pixel| pixel >= 128);
             if is_background {
                 packed[y * row_bytes + (x / 8)] |= 0x80 >> (x % 8);
             }
@@ -2291,7 +2190,7 @@ fn decode_jpx_image(
             return Err(Error::UnsupportedFilter(format!(
                 "JPXDecode: unsupported JPEG 2000 component count {n}"
             )));
-        },
+        }
     };
 
     Ok(ImageData::Raw {
@@ -2336,7 +2235,7 @@ pub fn expand_inline_image_dict(
             Some(v) => {
                 dict.remove(full);
                 Some(v)
-            },
+            }
             None => dict.remove(full),
         };
         if let Some(v) = value {
@@ -2396,22 +2295,14 @@ fn filter_abbrev(name: &str) -> Option<&'static str> {
 /// Rewrite abbreviated names in an inline-image value. Handles a bare name, and
 /// an array (a filter chain, or an `[/I /RGB 255 <lookup>]` indexed space, whose
 /// BASE name is itself abbreviated).
-fn expand_inline_abbrev(
-    value: crate::object::Object,
-    map: fn(&str) -> Option<&'static str>,
-) -> crate::object::Object {
+fn expand_inline_abbrev(value: crate::object::Object, map: fn(&str) -> Option<&'static str>) -> crate::object::Object {
     use crate::object::Object;
     match value {
         Object::Name(n) => match map(&n) {
             Some(full) => Object::Name(full.to_string()),
             None => Object::Name(n),
         },
-        Object::Array(items) => Object::Array(
-            items
-                .into_iter()
-                .map(|item| expand_inline_abbrev(item, map))
-                .collect(),
-        ),
+        Object::Array(items) => Object::Array(items.into_iter().map(|item| expand_inline_abbrev(item, map)).collect()),
         other => other,
     }
 }
@@ -2423,10 +2314,7 @@ mod inline_image_dict_tests {
     use std::collections::HashMap;
 
     fn dict(pairs: &[(&str, Object)]) -> HashMap<String, Object> {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.clone()))
-            .collect()
+        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
     }
 
     /// The decoder requires `/Subtype`, and an inline image never carries one
@@ -2434,10 +2322,7 @@ mod inline_image_dict_tests {
     /// rejected with "XObject missing /Subtype" and silently dropped.
     #[test]
     fn supplies_the_implied_image_subtype() {
-        let out = expand_inline_image_dict(dict(&[
-            ("W", Object::Integer(26)),
-            ("H", Object::Integer(1)),
-        ]));
+        let out = expand_inline_image_dict(dict(&[("W", Object::Integer(26)), ("H", Object::Integer(1))]));
         assert_eq!(out.get("Subtype"), Some(&Object::Name("Image".to_string())));
         assert_eq!(out.get("Width"), Some(&Object::Integer(26)));
         assert_eq!(out.get("Height"), Some(&Object::Integer(1)));
@@ -2480,7 +2365,11 @@ mod inline_image_dict_tests {
             ("DCT", "DCTDecode"),
         ] {
             let out = expand_inline_image_dict(dict(&[("F", Object::Name(abbr.to_string()))]));
-            assert_eq!(out.get("Filter"), Some(&Object::Name(full.to_string())), "filter /{abbr}");
+            assert_eq!(
+                out.get("Filter"),
+                Some(&Object::Name(full.to_string())),
+                "filter /{abbr}"
+            );
         }
     }
 
@@ -2490,10 +2379,7 @@ mod inline_image_dict_tests {
         let out = expand_inline_image_dict(dict(&[
             (
                 "F",
-                Object::Array(vec![
-                    Object::Name("A85".to_string()),
-                    Object::Name("Fl".to_string()),
-                ]),
+                Object::Array(vec![Object::Name("A85".to_string()), Object::Name("Fl".to_string())]),
             ),
             (
                 "CS",
@@ -2634,8 +2520,8 @@ mod indexed_tests {
         assert_eq!(
             out,
             vec![
-                10, 20, 30, 200, 210, 220, 10, 20, 30, 200, 210, 220, 10, 20, 30, 200, 210, 220,
-                200, 210, 220, 10, 20, 30, 10, 20, 30, 200, 210, 220,
+                10, 20, 30, 200, 210, 220, 10, 20, 30, 200, 210, 220, 10, 20, 30, 200, 210, 220, 200, 210, 220, 10, 20,
+                30, 10, 20, 30, 200, 210, 220,
             ]
         );
     }
@@ -2760,11 +2646,7 @@ mod indexed_tests {
             Object::Integer(1),
             Object::Array(vec![
                 Object::Array(vec![Object::Integer(0), Object::Integer(0), Object::Integer(0)]),
-                Object::Array(vec![
-                    Object::Integer(255),
-                    Object::Integer(255),
-                    Object::Integer(255),
-                ]),
+                Object::Array(vec![Object::Integer(255), Object::Integer(255), Object::Integer(255)]),
             ]),
         ]);
         assert!(resolve_indexed_palette(None, &cs).unwrap().is_none());
@@ -2794,8 +2676,8 @@ mod indexed_tests {
             data: bytes::Bytes::from_static(&[0, 1]),
         };
 
-        let err = extract_image_from_xobject(None, &xobject, None, None)
-            .expect_err("Indexed with Array lookup must error");
+        let err =
+            extract_image_from_xobject(None, &xobject, None, None).expect_err("Indexed with Array lookup must error");
         let msg = format!("{err:?}");
         assert!(
             msg.contains("Unable to resolve Indexed color space palette"),
@@ -2815,7 +2697,10 @@ mod indexed_tests {
         let [r, g, b] = super::lab_pixel_to_rgb(128, 128, 128, d65);
         for (label, v, expected) in [("R", r, 119), ("G", g, 119), ("B", b, 119)] {
             let diff = (v as i32 - expected).abs();
-            assert!(diff <= 3, "Lab(50,0,0) {label}: expected ~{expected}, got {v} (Δ={diff})");
+            assert!(
+                diff <= 3,
+                "Lab(50,0,0) {label}: expected ~{expected}, got {v} (Δ={diff})"
+            );
         }
     }
 
@@ -2870,11 +2755,7 @@ mod indexed_tests {
                 let mut d = std::collections::HashMap::new();
                 d.insert(
                     "WhitePoint".to_string(),
-                    Object::Array(vec![
-                        Object::Real(0.9505),
-                        Object::Real(1.0),
-                        Object::Real(1.0890),
-                    ]),
+                    Object::Array(vec![Object::Real(0.9505), Object::Real(1.0), Object::Real(1.0890)]),
                 );
                 d
             }),
@@ -2948,9 +2829,7 @@ impl PdfFilter {
 ///
 /// The spec allows either a single name (`/DCTDecode`) or an array of names
 /// (`[/ASCII85Decode /FlateDecode]`).
-pub(crate) fn parse_filter_chain(
-    dict: &std::collections::HashMap<String, crate::object::Object>,
-) -> Vec<PdfFilter> {
+pub(crate) fn parse_filter_chain(dict: &std::collections::HashMap<String, crate::object::Object>) -> Vec<PdfFilter> {
     use crate::object::Object;
     match dict.get("Filter") {
         Some(Object::Name(n)) => vec![PdfFilter::from_name(n)],
@@ -3067,7 +2946,7 @@ impl<'doc> PdfImageHandle<'doc> {
             PdfImageSource::XObject(obj_ref) => {
                 xobject_for_extract = self.doc.load_object(*obj_ref)?;
                 (&xobject_for_extract, Some(*obj_ref))
-            },
+            }
             PdfImageSource::Inline { stream_object, .. } => (stream_object, None),
         };
 
@@ -3085,9 +2964,7 @@ impl<'doc> PdfImageHandle<'doc> {
         // Use pre-computed bbox and rotation from Phase 1 — no need to call
         // back into document.rs helpers here. ~keep
         image.set_bbox(self.bbox);
-        image.set_matrix([
-            self.ctm.a, self.ctm.b, self.ctm.c, self.ctm.d, self.ctm.e, self.ctm.f,
-        ]);
+        image.set_matrix([self.ctm.a, self.ctm.b, self.ctm.c, self.ctm.d, self.ctm.e, self.ctm.f]);
         image.set_rotation_degrees(self.rotation_degrees as i32);
 
         Ok(image)
@@ -3110,10 +2987,8 @@ impl<'doc> PdfImageHandle<'doc> {
                     crate::object::Object::Stream { data, .. } => Ok(data.to_vec()),
                     _ => Err(crate::error::Error::Image("XObject is not a stream".to_string())),
                 }
-            },
-            PdfImageSource::Inline {
-                compressed_bytes, ..
-            } => Ok(compressed_bytes.to_vec()),
+            }
+            PdfImageSource::Inline { compressed_bytes, .. } => Ok(compressed_bytes.to_vec()),
         }
     }
 
@@ -3167,10 +3042,7 @@ fn matrix_to_rotation(m: crate::content::Matrix) -> f32 {
 ///
 /// Transforms all four corners and returns the axis-aligned bounding box of the
 /// result, which correctly handles rotation, shear, and negative scaling.
-fn transform_bbox_with_ctm(
-    rect: &crate::geometry::Rect,
-    ctm: crate::content::Matrix,
-) -> crate::geometry::Rect {
+fn transform_bbox_with_ctm(rect: &crate::geometry::Rect, ctm: crate::content::Matrix) -> crate::geometry::Rect {
     let x0 = rect.x;
     let y0 = rect.y;
     let x1 = rect.x + rect.width;
@@ -3232,14 +3104,12 @@ fn resolve_color_space_for_handle(
     // (a) Resource-name → resolved Object (skip standard device names, which
     // always identify their space directly and never refer to resources). ~keep
     let after_name = match entry {
-        Object::Name(name)
-            if !matches!(name.as_str(), "DeviceGray" | "DeviceRGB" | "DeviceCMYK" | "Pattern") =>
-        {
+        Object::Name(name) if !matches!(name.as_str(), "DeviceGray" | "DeviceRGB" | "DeviceCMYK" | "Pattern") => {
             color_space_resources
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| entry.clone())
-        },
+        }
         _ => entry.clone(),
     };
 
@@ -3321,10 +3191,7 @@ pub(crate) fn image_handle_from_xobject<'doc>(
     // /BitsPerComponent and /Length are likewise permitted to be indirect
     // (§7.3.10); /Length in particular is routinely indirect in the wild
     // (issue #1444's fixture has `/Length 9 0 R`). ~keep
-    let bpc = xobject_dict
-        .get("BitsPerComponent")
-        .and_then(resolve_int)
-        .unwrap_or(8) as u8;
+    let bpc = xobject_dict.get("BitsPerComponent").and_then(resolve_int).unwrap_or(8) as u8;
     let byte_size = xobject_dict
         .get("Length")
         .and_then(resolve_int)
@@ -3528,9 +3395,7 @@ mod handle_color_space_tests {
         pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
 
         offsets.push((3, pdf.len()));
-        pdf.extend_from_slice(
-            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] >>\nendobj\n",
-        );
+        pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] >>\nendobj\n");
 
         offsets.push((99, pdf.len()));
         pdf.extend_from_slice(format!("99 0 obj\n{}\nendobj\n", cs_body).as_bytes());
@@ -3561,10 +3426,9 @@ mod handle_color_space_tests {
 
     #[test]
     fn helper_indirect_indexed_array_de_indexed() {
-        let doc = crate::document::PdfDocument::from_bytes(pdf_with_cs_object(
-            "[/Indexed /DeviceRGB 1 <000000FFFFFF>]",
-        ))
-        .expect("synthetic pdf parses");
+        let doc =
+            crate::document::PdfDocument::from_bytes(pdf_with_cs_object("[/Indexed /DeviceRGB 1 <000000FFFFFF>]"))
+                .expect("synthetic pdf parses");
         let entry = Object::Reference(ObjectRef::new(99, 0));
         let (cs, base) = resolve_color_space_for_handle(&entry, &empty_map(), Some(&doc));
         assert_eq!(cs, ColorSpace::Indexed);
@@ -3573,8 +3437,7 @@ mod handle_color_space_tests {
 
     #[test]
     fn helper_indirect_plain_device_gray() {
-        let doc =
-            crate::document::PdfDocument::from_bytes(pdf_with_cs_object("/DeviceGray")).unwrap();
+        let doc = crate::document::PdfDocument::from_bytes(pdf_with_cs_object("/DeviceGray")).unwrap();
         let entry = Object::Reference(ObjectRef::new(99, 0));
         let (cs, base) = resolve_color_space_for_handle(&entry, &empty_map(), Some(&doc));
         assert_eq!(cs, ColorSpace::DeviceGray);
@@ -3606,9 +3469,7 @@ mod handle_color_space_tests {
         offsets.push((2, pdf.len()));
         pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
         offsets.push((3, pdf.len()));
-        pdf.extend_from_slice(
-            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] >>\nendobj\n",
-        );
+        pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] >>\nendobj\n");
 
         offsets.push((99, pdf.len()));
         let header = format!(
@@ -3648,8 +3509,7 @@ mod handle_color_space_tests {
         // Image XObject with `/ColorSpace /CS0`; the page `/Resources/ColorSpace`
         // maps `/CS0 → /DeviceGray`. Before the fix, decode() failed with
         // "Unsupported color space: CS0"; now it succeeds. ~keep
-        let doc = crate::document::PdfDocument::from_bytes(pdf_with_image_xobject("/CS0", &[128]))
-            .unwrap();
+        let doc = crate::document::PdfDocument::from_bytes(pdf_with_image_xobject("/CS0", &[128])).unwrap();
         let obj_ref = ObjectRef::new(99, 0);
         let xobj = doc.load_object(obj_ref).unwrap();
         let dict = xobj.as_dict().expect("image xobject dict").clone();
@@ -3657,15 +3517,8 @@ mod handle_color_space_tests {
         let mut map = empty_map();
         map.insert("CS0".to_string(), Object::Name("DeviceGray".to_string()));
 
-        let handle = image_handle_from_xobject(
-            &doc,
-            obj_ref,
-            &dict,
-            crate::content::Matrix::identity(),
-            0,
-            &map,
-        )
-        .expect("handle builds");
+        let handle = image_handle_from_xobject(&doc, obj_ref, &dict, crate::content::Matrix::identity(), 0, &map)
+            .expect("handle builds");
 
         assert_eq!(handle.color_space, ColorSpace::DeviceGray);
         assert!(handle.indexed_base().is_none());
@@ -3898,8 +3751,7 @@ mod ccitt_decode_array_polarity_tests {
     /// Decode `xobject` to a Luma8 image and count white (0xFF) vs black
     /// (0x00) pixels.
     fn white_black_counts(xobject: &Object) -> (u32, u32) {
-        let img = extract_image_from_xobject(None, xobject, None, None)
-            .expect("decode hand-built CCITT test image");
+        let img = extract_image_from_xobject(None, xobject, None, None).expect("decode hand-built CCITT test image");
         let luma = img
             .to_dynamic_image()
             .expect("decode CCITT test image pixels")
@@ -4012,8 +3864,8 @@ mod non_ccitt_1bpc_devicegray_tests {
     }
 
     fn white_black_counts(xobject: &Object) -> (u32, u32) {
-        let img = extract_image_from_xobject(None, xobject, None, None)
-            .expect("decode hand-built non-CCITT 1bpc test image");
+        let img =
+            extract_image_from_xobject(None, xobject, None, None).expect("decode hand-built non-CCITT 1bpc test image");
         let luma = img
             .to_dynamic_image()
             .expect("decode non-CCITT 1bpc test image pixels")

@@ -20,8 +20,7 @@ use xberg_native_pdf::editor::{EncryptionAlgorithm, EncryptionConfig, Permission
 use xberg_native_pdf::writer::{DocumentBuilder, DocumentMetadata, PageSize};
 
 fn make_builder(body: &str) -> DocumentBuilder {
-    let mut builder =
-        DocumentBuilder::new().metadata(DocumentMetadata::new().title("enc test").author("test"));
+    let mut builder = DocumentBuilder::new().metadata(DocumentMetadata::new().title("enc test").author("test"));
     {
         let page = builder.page(PageSize::Letter);
         page.at(72.0, 720.0).text(body).done();
@@ -168,9 +167,7 @@ fn save_encrypted_works_with_embedded_font_subsetting() {
     // And the encrypted PDF should still be much smaller than the
     // original face: encryption overhead doesn't re-embed the full
     // font bytes on top of the subset. ~keep
-    let face_bytes = std::fs::metadata("src/fonts/assets/DejaVuSans.ttf")
-        .unwrap()
-        .len() as usize;
+    let face_bytes = std::fs::metadata("src/fonts/assets/DejaVuSans.ttf").unwrap().len() as usize;
     assert!(
         bytes.len() * 5 < face_bytes,
         "encrypted PDF ({} bytes) is not meaningfully smaller than the original face ({} bytes) — \
@@ -195,8 +192,7 @@ fn open_encrypted_and_extract(path: &std::path::Path, password: &str) -> String 
         .authenticate(password.as_bytes())
         .expect("authenticate should not error");
     assert!(authenticated, "password '{password}' should authenticate successfully");
-    doc.extract_text(0)
-        .expect("extract_text should succeed after auth")
+    doc.extract_text(0).expect("extract_text should succeed after auth")
 }
 
 /// Helper: write encrypted bytes to a temp file and open+extract.
@@ -217,14 +213,16 @@ fn save_encrypted_content_preserved_ascii() {
     let path = dir.path().join("ascii_encrypted.pdf");
     let expected = "Hello from the encryption fix";
 
-    let config =
-        EncryptionConfig::new("user123", "owner456").with_algorithm(EncryptionAlgorithm::Aes128);
+    let config = EncryptionConfig::new("user123", "owner456").with_algorithm(EncryptionAlgorithm::Aes128);
     make_builder(expected)
         .save_with_encryption(&path, config)
         .expect("save_with_encryption AES-128 should succeed");
 
     let text = open_encrypted_and_extract(&path, "user123");
-    assert!(text.contains(expected), "extracted text {text:?} should contain {expected:?}");
+    assert!(
+        text.contains(expected),
+        "extracted text {text:?} should contain {expected:?}"
+    );
 }
 
 /// to_bytes_with_encryption (AES-128) must also preserve content end-to-end.
@@ -237,7 +235,10 @@ fn to_bytes_encrypted_content_preserved() {
         .expect("to_bytes_with_encryption AES-128 should succeed");
 
     let text = bytes_open_encrypted_and_extract(&bytes, "u");
-    assert!(text.contains(expected), "extracted text {text:?} should contain {expected:?}");
+    assert!(
+        text.contains(expected),
+        "extracted text {text:?} should contain {expected:?}"
+    );
 }
 
 /// AES-128 round-trip preserves content.
@@ -306,8 +307,7 @@ fn save_encrypted_embedded_ttf_content_preserved() {
         .text(expected)
         .done();
 
-    let config =
-        EncryptionConfig::new("ttfuser", "ttfowner").with_algorithm(EncryptionAlgorithm::Aes128);
+    let config = EncryptionConfig::new("ttfuser", "ttfowner").with_algorithm(EncryptionAlgorithm::Aes128);
     builder
         .save_with_encryption(&path, config)
         .expect("save_with_encryption AES-128 with embedded TTF should succeed");
@@ -508,10 +508,7 @@ fn debug_trace_editor_from_bytes_size() {
     let mut builder = DocumentBuilder::new().register_embedded_font("DejaVu", font);
     {
         let page = builder.page(PageSize::A4);
-        page.font("DejaVu", 12.0)
-            .at(72.0, 720.0)
-            .text("Hello embedded")
-            .done();
+        page.font("DejaVu", 12.0).at(72.0, 720.0).text("Hello embedded").done();
     }
 
     let plain_bytes = builder.build().expect("build");
@@ -550,10 +547,7 @@ fn all_object_ids_returns_complete_set_for_built_pdf() {
     let mut builder = DocumentBuilder::new().register_embedded_font("DejaVu", font);
     {
         let page = builder.page(PageSize::A4);
-        page.font("DejaVu", 12.0)
-            .at(72.0, 720.0)
-            .text("Hello embedded")
-            .done();
+        page.font("DejaVu", 12.0).at(72.0, 720.0).text("Hello embedded").done();
     }
 
     let plain_bytes = builder.build().expect("build");

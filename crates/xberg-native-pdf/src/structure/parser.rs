@@ -108,8 +108,7 @@ fn decode_pdf_text_string(bytes: &[u8]) -> String {
             .iter()
             .map(|c| u16::from_be_bytes([c[0], c[1]]))
             .collect();
-        String::from_utf16(&utf16_pairs)
-            .unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
+        String::from_utf16(&utf16_pairs).unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
     } else if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
         // UTF-16LE with BOM ~keep
         let utf16_pairs: Vec<u16> = bytes[2..]
@@ -118,8 +117,7 @@ fn decode_pdf_text_string(bytes: &[u8]) -> String {
             .iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
-        String::from_utf16(&utf16_pairs)
-            .unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
+        String::from_utf16(&utf16_pairs).unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
     } else {
         bytes
             .iter()
@@ -179,7 +177,7 @@ fn build_page_map_recursive(
         "Page" => {
             page_map.insert(node_ref.id, *index);
             *index += 1;
-        },
+        }
         "Pages" => {
             if let Some(kids) = dict.get("Kids").and_then(|k| k.as_array()) {
                 let kid_refs: Vec<_> = kids.iter().filter_map(|k| k.as_reference()).collect();
@@ -187,8 +185,8 @@ fn build_page_map_recursive(
                     build_page_map_recursive(document, kid_ref, page_map, index);
                 }
             }
-        },
-        _ => {},
+        }
+        _ => {}
     }
 }
 
@@ -224,10 +222,7 @@ pub fn parse_structure_tree_with_budget(
     parse_structure_tree_inner(document, ParseBudget::from_option(budget))
 }
 
-fn parse_structure_tree_inner(
-    document: &PdfDocument,
-    deadline: ParseBudget,
-) -> Result<Option<StructTreeRoot>, Error> {
+fn parse_structure_tree_inner(document: &PdfDocument, deadline: ParseBudget) -> Result<Option<StructTreeRoot>, Error> {
     let parse_start = Timer::now();
 
     let catalog = document.catalog()?;
@@ -255,7 +250,7 @@ fn parse_structure_tree_inner(
                 "StructTreeRoot did not resolve to a dictionary; treating as no structure tree"
             );
             return Ok(None);
-        },
+        }
     };
 
     let mut struct_tree = StructTreeRoot::new();
@@ -286,9 +281,7 @@ fn parse_structure_tree_inner(
             Object::Array(arr) => {
                 for elem_obj in arr {
                     if deadline.exceeded(element_count) {
-                        tracing::warn!(
-                            "structure tree parse budget exceeded; falling back to content order"
-                        );
+                        tracing::warn!("structure tree parse budget exceeded; falling back to content order");
                         return Ok(None);
                     }
                     // Record root element IDs before descending so that a back-reference
@@ -314,7 +307,7 @@ fn parse_structure_tree_inner(
                         struct_tree.add_root_element(elem);
                     }
                 }
-            },
+            }
             _ => {
                 if let Some(elem) = parse_struct_elem(
                     document,
@@ -327,7 +320,7 @@ fn parse_structure_tree_inner(
                 )? {
                     struct_tree.add_root_element(elem);
                 }
-            },
+            }
         }
     }
 
@@ -394,7 +387,7 @@ fn parse_struct_elem(
                             element_count,
                             visited,
                         );
-                    },
+                    }
                     Err(e) => {
                         tracing::warn!(
                             object_id = obj_ref.id,
@@ -403,7 +396,7 @@ fn parse_struct_elem(
                             "OBJR: failed to load /Obj"
                         );
                         return Ok(None);
-                    },
+                    }
                 }
             }
             return Ok(None);
@@ -464,7 +457,7 @@ fn parse_struct_elem(
                 Err(e) => {
                     tracing::warn!(object_id = r.id, error = %e, "failed to load /K reference");
                     return Ok(Some(struct_elem));
-                },
+                }
             };
             if k_resolved.as_dict().is_some() && !visited.insert(r.id) {
                 tracing::warn!(
@@ -525,7 +518,7 @@ fn parse_k_children(
                     scope: crate::structure::McidScope::Page(page),
                 });
             }
-        },
+        }
 
         Object::Array(arr) => {
             for child_obj in arr {
@@ -559,7 +552,7 @@ fn parse_k_children(
                                 scope: crate::structure::McidScope::Page(page),
                             });
                         }
-                    },
+                    }
 
                     Object::Dictionary(_) => {
                         // Could be a StructElem or marked content reference ~keep
@@ -574,16 +567,14 @@ fn parse_k_children(
                         )? {
                             Some(child_elem) => {
                                 parent.add_child(StructChild::StructElem(Box::new(child_elem)));
-                            },
+                            }
                             _ => {
-                                if let Some(mcr) =
-                                    parse_marked_content_ref(document, &child_obj, page_map)?
-                                {
+                                if let Some(mcr) = parse_marked_content_ref(document, &child_obj, page_map)? {
                                     parent.add_child(mcr);
                                 }
-                            },
+                            }
                         }
-                    },
+                    }
 
                     Object::Reference(obj_ref) => {
                         if !visited.insert(obj_ref.id) {
@@ -605,19 +596,15 @@ fn parse_k_children(
                                     visited,
                                 )? {
                                     Some(child_elem) => {
-                                        parent.add_child(StructChild::StructElem(Box::new(
-                                            child_elem,
-                                        )));
-                                    },
+                                        parent.add_child(StructChild::StructElem(Box::new(child_elem)));
+                                    }
                                     _ => {
-                                        if let Some(mcr) =
-                                            parse_marked_content_ref(document, &resolved, page_map)?
-                                        {
+                                        if let Some(mcr) = parse_marked_content_ref(document, &resolved, page_map)? {
                                             parent.add_child(mcr);
                                         }
-                                    },
+                                    }
                                 }
-                            },
+                            }
                             Err(e) => {
                                 tracing::warn!(
                                     object_id = obj_ref.id,
@@ -625,35 +612,27 @@ fn parse_k_children(
                                     error = %e,
                                     "failed to resolve ObjectRef"
                                 );
-                            },
+                            }
                         }
-                    },
+                    }
 
-                    _ => {},
+                    _ => {}
                 }
             }
-        },
+        }
 
         Object::Dictionary(_) => {
-            match parse_struct_elem(
-                document,
-                k_obj,
-                role_map,
-                page_map,
-                deadline,
-                element_count,
-                visited,
-            )? {
+            match parse_struct_elem(document, k_obj, role_map, page_map, deadline, element_count, visited)? {
                 Some(child_elem) => {
                     parent.add_child(StructChild::StructElem(Box::new(child_elem)));
-                },
+                }
                 _ => {
                     if let Some(mcr) = parse_marked_content_ref(document, k_obj, page_map)? {
                         parent.add_child(mcr);
                     }
-                },
+                }
             }
-        },
+        }
 
         Object::Reference(obj_ref) => {
             if !visited.insert(obj_ref.id) {
@@ -676,16 +655,14 @@ fn parse_k_children(
                     )? {
                         Some(child_elem) => {
                             parent.add_child(StructChild::StructElem(Box::new(child_elem)));
-                        },
+                        }
                         _ => {
-                            if let Some(mcr) =
-                                parse_marked_content_ref(document, &resolved, page_map)?
-                            {
+                            if let Some(mcr) = parse_marked_content_ref(document, &resolved, page_map)? {
                                 parent.add_child(mcr);
                             }
-                        },
+                        }
                     }
-                },
+                }
                 Err(e) => {
                     tracing::warn!(
                         object_id = obj_ref.id,
@@ -693,11 +670,11 @@ fn parse_k_children(
                         error = %e,
                         "failed to resolve ObjectRef"
                     );
-                },
+                }
             }
-        },
+        }
 
-        _ => {},
+        _ => {}
     }
 
     Ok(())
@@ -774,7 +751,7 @@ pub(crate) fn checked_mcid(raw: i64) -> Option<u32> {
         Err(_) => {
             tracing::warn!(raw_mcid = raw, "marked-content id is out of range, skipping");
             None
-        },
+        }
     }
 }
 
@@ -806,7 +783,7 @@ fn resolve_mcr_scope(
         _ => {
             tracing::warn!("MCR /Stm is not an indirect reference; defaulting to page scope");
             return McidScope::Page(page);
-        },
+        }
     };
 
     let stm_obj = match document.load_object(stm_ref) {
@@ -819,7 +796,7 @@ fn resolve_mcr_scope(
                 "MCR /Stm could not be resolved; defaulting to page scope"
             );
             return McidScope::Page(page);
-        },
+        }
     };
 
     // For both streams and dictionaries, locate the dict-half. ~keep
@@ -833,7 +810,7 @@ fn resolve_mcr_scope(
                 "MCR /Stm resolves to non-stream/non-dict; defaulting to page scope"
             );
             return McidScope::Page(page);
-        },
+        }
     };
 
     // Form XObject: /Type /XObject /Subtype /Form (or /Subtype /Form
@@ -894,10 +871,7 @@ mod tests {
             map
         };
 
-        let mapped = role_map
-            .get("Heading1")
-            .map(|s| s.as_str())
-            .unwrap_or("Heading1");
+        let mapped = role_map.get("Heading1").map(|s| s.as_str()).unwrap_or("Heading1");
         assert_eq!(mapped, "H1");
     }
 
@@ -1005,10 +979,7 @@ mod tests {
         dict.insert("MCID".to_string(), Object::Integer(3));
         dict.insert(
             "Pg".to_string(),
-            Object::Reference(crate::object::ObjectRef {
-                id: 10,
-                generation: 0,
-            }),
+            Object::Reference(crate::object::ObjectRef { id: 10, generation: 0 }),
         );
         let obj = Object::Dictionary(dict);
         let result = parse_marked_content_ref(&doc, &obj, &page_map).unwrap();
@@ -1037,9 +1008,7 @@ mod tests {
         let off2 = pdf.len();
         pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
         let off3 = pdf.len();
-        pdf.extend_from_slice(
-            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
-        );
+        pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
 
         let xref_offset = pdf.len();
         pdf.extend_from_slice(b"xref\n0 4\n");
@@ -1048,8 +1017,11 @@ mod tests {
         pdf.extend_from_slice(format!("{:010} 00000 n \r\n", off2).as_bytes());
         pdf.extend_from_slice(format!("{:010} 00000 n \r\n", off3).as_bytes());
         pdf.extend_from_slice(
-            format!("trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_offset)
-                .as_bytes(),
+            format!(
+                "trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+                xref_offset
+            )
+            .as_bytes(),
         );
         pdf
     }

@@ -20,8 +20,8 @@ pub mod xycut;
 
 pub use article_thread::ArticleThreadStrategy;
 pub use detectors::{
-    DetectorGlyph, ReadingOrderClass, classify_region, detect_dense_single_line,
-    detect_dramatic_script, detect_narrow_tracked, detect_sub_super_glyphs,
+    DetectorGlyph, ReadingOrderClass, classify_region, detect_dense_single_line, detect_dramatic_script,
+    detect_narrow_tracked, detect_sub_super_glyphs,
 };
 pub use geometric::GeometricStrategy;
 pub use simple::SimpleStrategy;
@@ -54,11 +54,7 @@ pub trait ReadingOrderStrategy: Send + Sync {
     /// # Returns
     ///
     /// Spans with assigned reading order indices.
-    fn apply(
-        &self,
-        spans: Vec<TextSpan>,
-        context: &ReadingOrderContext,
-    ) -> Result<Vec<OrderedTextSpan>>;
+    fn apply(&self, spans: Vec<TextSpan>, context: &ReadingOrderContext) -> Result<Vec<OrderedTextSpan>>;
 
     /// Return the name of this strategy for debugging.
     fn name(&self) -> &'static str;
@@ -153,9 +149,7 @@ impl ReadingOrderContext {
 }
 
 /// Create a reading order strategy based on configuration.
-pub fn create_strategy(
-    config: &crate::pipeline::ReadingOrderConfig,
-) -> Box<dyn ReadingOrderStrategy> {
+pub fn create_strategy(config: &crate::pipeline::ReadingOrderConfig) -> Box<dyn ReadingOrderStrategy> {
     match config.strategy {
         ReadingOrderStrategyType::StructureTreeFirst => Box::new(StructureTreeStrategy::new()),
         ReadingOrderStrategyType::Geometric => Box::new(GeometricStrategy::new()),

@@ -37,7 +37,10 @@ fn test_old_prefix_pattern_panics_on_multibyte() {
     //   &span.text[..span.text.len().min(10)] ~keep
     let text = "✚✳★✵";
     let result = std::panic::catch_unwind(|| &text[..text.len().min(10)]);
-    assert!(result.is_err(), "old byte-offset prefix slice should panic on multi-byte UTF-8");
+    assert!(
+        result.is_err(),
+        "old byte-offset prefix slice should panic on multi-byte UTF-8"
+    );
 }
 
 #[test]
@@ -46,7 +49,10 @@ fn test_old_suffix_pattern_panics_on_multibyte() {
     //   &current.text[current.text.len().saturating_sub(10)..] ~keep
     let text = "AB✚✳★✵";
     let result = std::panic::catch_unwind(|| &text[text.len().saturating_sub(10)..]);
-    assert!(result.is_err(), "old byte-offset suffix slice should panic on multi-byte UTF-8");
+    assert!(
+        result.is_err(),
+        "old byte-offset suffix slice should panic on multi-byte UTF-8"
+    );
 }
 
 // Regression test: the fixed patterns do not panic ~keep

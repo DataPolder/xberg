@@ -29,8 +29,7 @@ fn build_source_pdf_with_text_and_graphics() -> Vec<u8> {
         endobj\n",
     );
 
-    let content =
-        b"0.8 g\n100 600 200 100 re f\n0 g\nBT /F1 14 Tf 110 640 Td (Original text) Tj ET";
+    let content = b"0.8 g\n100 600 200 100 re f\n0 g\nBT /F1 14 Tf 110 640 Td (Original text) Tj ET";
     let off_content = pdf.len();
     pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes());
     pdf.extend_from_slice(content);
@@ -45,14 +44,7 @@ fn build_source_pdf_with_text_and_graphics() -> Vec<u8> {
     );
 
     let xref_pos = pdf.len();
-    let offsets = [
-        0usize,
-        off_catalog,
-        off_pages,
-        off_page,
-        off_content,
-        off_font,
-    ];
+    let offsets = [0usize, off_catalog, off_pages, off_page, off_content, off_font];
     pdf.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
     pdf.extend_from_slice(format!("{:010} 65535 f\r\n", 0).as_bytes());
     for &off in &offsets[1..] {
@@ -87,11 +79,9 @@ fn test_add_text_on_existing_pdf_preserves_original_content() {
     let font_size = 24.0;
     let text = "hello world";
     let approx_width = text.len() as f32 * font_size * 0.5;
-    let text_bbox =
-        Rect::new(cx - approx_width / 2.0, cy - font_size / 2.0, approx_width, font_size);
+    let text_bbox = Rect::new(cx - approx_width / 2.0, cy - font_size / 2.0, approx_width, font_size);
 
-    let content =
-        TextContent::new(text, text_bbox, FontSpec::helvetica(font_size), TextStyle::new());
+    let content = TextContent::new(text, text_bbox, FontSpec::helvetica(font_size), TextStyle::new());
     page.add_text(content);
 
     editor.save_page(page).expect("save_page");
@@ -102,11 +92,7 @@ fn test_add_text_on_existing_pdf_preserves_original_content() {
     let doc = PdfDocument::from_bytes(output_bytes.clone()).expect("re-open output");
 
     let spans = doc.extract_spans(0).expect("extract_spans");
-    let all_text: String = spans
-        .iter()
-        .map(|s| s.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let all_text: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
 
     assert!(
         all_text.contains("Original text"),
@@ -153,8 +139,7 @@ fn test_add_text_then_select_pages_preserves_overlay() {
     let mut page = editor.get_page(page_index).expect("get_page 1");
 
     let text_bbox = Rect::new(100.0, 400.0, 200.0, 30.0);
-    let content =
-        TextContent::new("overlay text", text_bbox, FontSpec::helvetica(14.0), TextStyle::new());
+    let content = TextContent::new("overlay text", text_bbox, FontSpec::helvetica(14.0), TextStyle::new());
     page.add_text(content);
     editor.save_page(page).expect("save_page");
 
@@ -164,11 +149,7 @@ fn test_add_text_then_select_pages_preserves_overlay() {
 
     let doc = PdfDocument::from_bytes(output_bytes.clone()).expect("re-open output");
     let spans = doc.extract_spans(0).expect("extract_spans page 0");
-    let all_text: String = spans
-        .iter()
-        .map(|s| s.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let all_text: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
 
     assert!(
         all_text.contains("Page one original"),
@@ -176,8 +157,7 @@ fn test_add_text_then_select_pages_preserves_overlay() {
         all_text,
     );
 
-    let overlay_found =
-        all_text.contains("overlay text") || output_bytes.windows(12).any(|w| w == b"overlay text");
+    let overlay_found = all_text.contains("overlay text") || output_bytes.windows(12).any(|w| w == b"overlay text");
     assert!(
         overlay_found,
         "overlay text must appear in output after select_pages; extracted: {:?}",
@@ -198,11 +178,7 @@ fn test_save_page_without_adding_content_is_noop() {
 
     let doc = PdfDocument::from_bytes(output_bytes.clone()).expect("re-open");
     let spans = doc.extract_spans(0).expect("extract_spans");
-    let all_text: String = spans
-        .iter()
-        .map(|s| s.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let all_text: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
 
     assert!(
         all_text.contains("Original text"),

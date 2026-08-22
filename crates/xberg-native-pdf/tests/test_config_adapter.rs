@@ -67,14 +67,15 @@ fn test_reading_order_mode_mapping_structure_tree() {
 
     let config = TextPipelineConfig::from_conversion_options(&options);
 
-    assert_eq!(config.reading_order.strategy, ReadingOrderStrategyType::StructureTreeFirst);
+    assert_eq!(
+        config.reading_order.strategy,
+        ReadingOrderStrategyType::StructureTreeFirst
+    );
 }
 
 #[test]
 fn test_config_adapter_all_fields() {
-    use xberg_native_pdf::converters::{
-        BoldMarkerBehavior as OldBMB, ConversionOptions, ReadingOrderMode,
-    };
+    use xberg_native_pdf::converters::{BoldMarkerBehavior as OldBMB, ConversionOptions, ReadingOrderMode};
     use xberg_native_pdf::pipeline::config::{BoldMarkerBehavior, TextPipelineConfig};
 
     let options = ConversionOptions {
@@ -154,12 +155,8 @@ fn test_config_adapter_defaults() {
 
 #[test]
 fn test_config_adapter_all_options_combined() {
-    use xberg_native_pdf::converters::{
-        BoldMarkerBehavior as OldBMB, ConversionOptions, ReadingOrderMode,
-    };
-    use xberg_native_pdf::pipeline::config::{
-        BoldMarkerBehavior, ReadingOrderStrategyType, TextPipelineConfig,
-    };
+    use xberg_native_pdf::converters::{BoldMarkerBehavior as OldBMB, ConversionOptions, ReadingOrderMode};
+    use xberg_native_pdf::pipeline::config::{BoldMarkerBehavior, ReadingOrderStrategyType, TextPipelineConfig};
 
     let options = ConversionOptions {
         reading_order_mode: ReadingOrderMode::StructureTreeFirst {
@@ -177,7 +174,10 @@ fn test_config_adapter_all_options_combined() {
 
     let config = TextPipelineConfig::from_conversion_options(&options);
 
-    assert_eq!(config.reading_order.strategy, ReadingOrderStrategyType::StructureTreeFirst);
+    assert_eq!(
+        config.reading_order.strategy,
+        ReadingOrderStrategyType::StructureTreeFirst
+    );
     assert!(config.output.detect_headings);
     assert!(!config.output.include_images);
     assert_eq!(config.output.bold_marker_behavior, BoldMarkerBehavior::Conservative);

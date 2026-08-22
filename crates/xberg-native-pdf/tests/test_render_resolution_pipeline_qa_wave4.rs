@@ -96,8 +96,11 @@ fn build_pdf_shading_raw(
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     buf.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", size, xref_off)
-            .as_bytes(),
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            size, xref_off
+        )
+        .as_bytes(),
     );
     buf
 }
@@ -532,7 +535,11 @@ fn qa_radial_non_concentric_circles_renders_pixmap() {
     );
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
     let on = render_with_pipeline(&doc, true);
-    assert_eq!(on.len(), 100 * 100 * 4, "non-concentric radial must produce a full pixmap");
+    assert_eq!(
+        on.len(),
+        100 * 100 * 4,
+        "non-concentric radial must produce a full pixmap"
+    );
 }
 
 /// Probe 7 — One zero-radius circle (origin point). `/Coords
@@ -784,16 +791,14 @@ fn qa_devicen_two_colorant_type4_capability_pin() {
 /// Build a stitching-function shading from N Type-2 sub-functions
 /// using equal `/Bounds`. Helper returns the full shading-dict body
 /// for `build_pdf_shading_raw`.
-fn type3_stitching_body(
-    space_str: &str,
-    coords: &str,
-    sub_c0_c1: &[(&str, &str)],
-    extra_shading_keys: &str,
-) -> String {
+fn type3_stitching_body(space_str: &str, coords: &str, sub_c0_c1: &[(&str, &str)], extra_shading_keys: &str) -> String {
     let n = sub_c0_c1.len();
     let mut funcs = String::new();
     for (c0, c1) in sub_c0_c1 {
-        funcs.push_str(&format!("<< /FunctionType 2 /Domain [0 1] /C0 {} /C1 {} /N 1 >> ", c0, c1));
+        funcs.push_str(&format!(
+            "<< /FunctionType 2 /Domain [0 1] /C0 {} /C1 {} /N 1 >> ",
+            c0, c1
+        ));
     }
     let bounds: String = (1..n)
         .map(|i| format!("{:.4}", i as f32 / n as f32))
@@ -818,11 +823,7 @@ fn qa_type3_stitching_three_subfunctions_uses_first_c0_and_last_c1() {
     let body = type3_stitching_body(
         "/DeviceRGB",
         "[0 50 100 50]",
-        &[
-            ("[1 0 0]", "[0 1 0]"),
-            ("[0 1 0]", "[0 0 1]"),
-            ("[0 0 1]", "[1 1 0]"),
-        ],
+        &[("[1 0 0]", "[0 1 0]"), ("[0 1 0]", "[0 0 1]"), ("[0 0 1]", "[1 1 0]")],
         "",
     );
     let bytes = build_pdf_shading_raw("/Sh1 sh\n", &body, "", &[]);
@@ -919,8 +920,8 @@ fn qa_type4_as_shading_function_helper_returns_none_falls_back() {
     );
     let bytes = build_pdf_shading_raw("/Sh1 sh\n", &shading_body, "", &[]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("Type-4-as-shading-function must not panic the renderer");
+    let on =
+        render_with_pipeline_allow_fail(&doc, true).expect("Type-4-as-shading-function must not panic the renderer");
     // The helper returns None for Type 4 as shading function; the
     // caller's inline fallback paints whatever Type-4 program emits.
     // Pin the no-panic + full pixmap invariant. ~keep
@@ -1029,8 +1030,11 @@ fn build_pdf_shading_under_smask(space_str: &str, c0: &str, c1: &str, smask_gray
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     buf.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", size, xref_off)
-            .as_bytes(),
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            size, xref_off
+        )
+        .as_bytes(),
     );
     buf
 }
@@ -1044,7 +1048,11 @@ fn qa_shading_under_smask_renders_without_panic() {
     let bytes = build_pdf_shading_under_smask("/DeviceRGB", "[1 0 0]", "[0 0 1]", 0.5);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
     let on = render_with_pipeline(&doc, true);
-    assert_eq!(on.len(), 100 * 100 * 4, "SMask-bearing shading must produce a full pixmap");
+    assert_eq!(
+        on.len(),
+        100 * 100 * 4,
+        "SMask-bearing shading must produce a full pixmap"
+    );
 }
 
 /// Probe 19 — Shading drawn under an active clip path. This probe
@@ -1083,8 +1091,7 @@ fn qa_shading_under_triangular_clip_corner_remains_background() {
 #[test]
 fn qa_shading_under_multiply_blend_mode_paints_inside_axis() {
     let extra_resources = "/ExtGState << /GS1 6 0 R >>";
-    let extra_objects =
-        vec![(6, "6 0 obj\n<< /Type /ExtGState /BM /Multiply >>\nendobj\n".to_string())];
+    let extra_objects = vec![(6, "6 0 obj\n<< /Type /ExtGState /BM /Multiply >>\nendobj\n".to_string())];
     let content = "1 1 0 rg\n0 0 100 100 re f\n/GS1 gs\n/Sh1 sh\n";
     let bytes = build_pdf_axial_shading(
         content,
@@ -1150,8 +1157,7 @@ fn qa_type1_function_based_shading_no_panic_full_pixmap() {
     // invariant + full pixmap. ~keep
     let bytes = build_pdf_raw_shading_type(1);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("Type-1 shading must not panic the renderer");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("Type-1 shading must not panic the renderer");
     assert_eq!(on.len(), 100 * 100 * 4, "Type-1 shading must produce a full pixmap");
 }
 
@@ -1163,9 +1169,12 @@ fn qa_type1_function_based_shading_no_panic_full_pixmap() {
 fn qa_type4_mesh_shading_no_panic_full_pixmap() {
     let bytes = build_pdf_raw_shading_type(4);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("Type-4 mesh shading must not panic the renderer");
-    assert_eq!(on.len(), 100 * 100 * 4, "Type-4 mesh shading must produce a full pixmap");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("Type-4 mesh shading must not panic the renderer");
+    assert_eq!(
+        on.len(),
+        100 * 100 * 4,
+        "Type-4 mesh shading must produce a full pixmap"
+    );
 }
 
 /// Probe 23 — Type 5 (lattice-form Gouraud mesh) shading.
@@ -1173,9 +1182,12 @@ fn qa_type4_mesh_shading_no_panic_full_pixmap() {
 fn qa_type5_lattice_mesh_shading_no_panic_full_pixmap() {
     let bytes = build_pdf_raw_shading_type(5);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("Type-5 lattice mesh must not panic the renderer");
-    assert_eq!(on.len(), 100 * 100 * 4, "Type-5 lattice mesh must produce a full pixmap");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("Type-5 lattice mesh must not panic the renderer");
+    assert_eq!(
+        on.len(),
+        100 * 100 * 4,
+        "Type-5 lattice mesh must produce a full pixmap"
+    );
 }
 
 /// Probe 24 — Type 6 (Coons patch mesh) shading.
@@ -1183,8 +1195,7 @@ fn qa_type5_lattice_mesh_shading_no_panic_full_pixmap() {
 fn qa_type6_coons_patch_mesh_shading_no_panic_full_pixmap() {
     let bytes = build_pdf_raw_shading_type(6);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("Type-6 Coons patch must not panic the renderer");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("Type-6 Coons patch must not panic the renderer");
     assert_eq!(on.len(), 100 * 100 * 4, "Type-6 Coons patch must produce a full pixmap");
 }
 
@@ -1193,9 +1204,12 @@ fn qa_type6_coons_patch_mesh_shading_no_panic_full_pixmap() {
 fn qa_type7_tensor_patch_mesh_shading_no_panic_full_pixmap() {
     let bytes = build_pdf_raw_shading_type(7);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("Type-7 tensor patch must not panic the renderer");
-    assert_eq!(on.len(), 100 * 100 * 4, "Type-7 tensor patch must produce a full pixmap");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("Type-7 tensor patch must not panic the renderer");
+    assert_eq!(
+        on.len(),
+        100 * 100 * 4,
+        "Type-7 tensor patch must produce a full pixmap"
+    );
 }
 
 // ===========================================================================
@@ -1219,8 +1233,7 @@ fn qa_adversarial_missing_color_space_no_panic() {
          /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >>";
     let bytes = build_pdf_shading_raw("/Sh1 sh\n", shading_body, "", &[]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("missing /ColorSpace must not panic the renderer");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("missing /ColorSpace must not panic the renderer");
     assert_eq!(on.len(), 100 * 100 * 4, "renderer must produce a full pixmap");
 }
 
@@ -1235,8 +1248,7 @@ fn qa_adversarial_missing_function_no_panic() {
                           /Coords [0 50 100 50] /Domain [0 1] >>";
     let bytes = build_pdf_shading_raw("/Sh1 sh\n", shading_body, "", &[]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("missing /Function must not panic the renderer");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("missing /Function must not panic the renderer");
     assert_eq!(on.len(), 100 * 100 * 4, "renderer must produce a full pixmap");
 }
 
@@ -1251,8 +1263,7 @@ fn qa_adversarial_missing_c0_no_panic() {
                           /Function << /FunctionType 2 /Domain [0 1] /C1 [0 0 1] /N 1 >> >>";
     let bytes = build_pdf_shading_raw("/Sh1 sh\n", shading_body, "", &[]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("missing /C0 must not panic the renderer");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("missing /C0 must not panic the renderer");
     assert_eq!(on.len(), 100 * 100 * 4, "renderer must produce a full pixmap");
 }
 
@@ -1265,8 +1276,7 @@ fn qa_adversarial_missing_c1_no_panic() {
                           /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /N 1 >> >>";
     let bytes = build_pdf_shading_raw("/Sh1 sh\n", shading_body, "", &[]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("missing /C1 must not panic the renderer");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("missing /C1 must not panic the renderer");
     assert_eq!(on.len(), 100 * 100 * 4, "renderer must produce a full pixmap");
 }
 
@@ -1282,8 +1292,7 @@ fn qa_adversarial_empty_stitching_functions_no_panic() {
                           /Functions [] /Bounds [] /Encode [] >> >>";
     let bytes = build_pdf_shading_raw("/Sh1 sh\n", shading_body, "", &[]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("empty /Functions must not panic the renderer");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("empty /Functions must not panic the renderer");
     assert_eq!(on.len(), 100 * 100 * 4, "renderer must produce a full pixmap");
 }
 
@@ -1298,8 +1307,7 @@ fn qa_adversarial_missing_coords_no_panic() {
                           /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >>";
     let bytes = build_pdf_shading_raw("/Sh1 sh\n", shading_body, "", &[]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("missing /Coords must not panic the renderer");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("missing /Coords must not panic the renderer");
     assert_eq!(on.len(), 100 * 100 * 4, "renderer must produce a full pixmap");
 }
 
@@ -1323,8 +1331,7 @@ fn qa_adversarial_dangling_color_space_ref_no_panic_pin() {
                           /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >>";
     let bytes = build_pdf_shading_raw("/Sh1 sh\n", shading_body, "", &[]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let _ = render_with_pipeline_allow_fail(&doc, true)
-        .expect("dangling /ColorSpace ref must not panic");
+    let _ = render_with_pipeline_allow_fail(&doc, true).expect("dangling /ColorSpace ref must not panic");
 }
 
 /// Probe 29d — Capability-divergence pin for the dangling-/ColorSpace
@@ -1338,8 +1345,7 @@ fn qa_adversarial_dangling_color_space_ref_no_panic() {
                           /Function << /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >>";
     let bytes = build_pdf_shading_raw("/Sh1 sh\n", shading_body, "", &[]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("renderer must not panic on dangling ref");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("renderer must not panic on dangling ref");
     assert_eq!(on.len(), 100 * 100 * 4, "renderer must produce a full pixmap");
 }
 

@@ -4,9 +4,7 @@
 //! the first block encountered.
 
 use xberg_native_pdf::layout::{Color, FontWeight, TextSpan};
-use xberg_native_pdf::structure::{
-    McidScope, StructChild, StructElem, StructType, extract_table_from_spans,
-};
+use xberg_native_pdf::structure::{McidScope, StructChild, StructElem, StructType, extract_table_from_spans};
 
 fn span(text: &str, x: f32, y: f32, mcid: u32, seq: usize) -> TextSpan {
     TextSpan {

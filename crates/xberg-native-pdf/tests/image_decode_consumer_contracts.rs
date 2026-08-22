@@ -41,9 +41,7 @@ fn build_pdf(image_dict: &str, image_data: &[u8]) -> Vec<u8> {
     for id in 1..=5 {
         out.extend_from_slice(format!("{:010} 00000 n \n", offsets[id]).as_bytes());
     }
-    out.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
-    );
+    out.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     out
 }
 

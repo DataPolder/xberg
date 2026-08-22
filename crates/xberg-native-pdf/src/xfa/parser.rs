@@ -257,13 +257,13 @@ impl XfaParser {
                 "template" => {
                     self.form.template_xml = Some(xml_str.to_string());
                     self.parse_template(&xml_str)?;
-                },
+                }
                 "datasets" => {
                     self.form.datasets_xml = Some(xml_str.to_string());
                     self.parse_datasets(&xml_str)?;
-                },
+                }
                 // Other packets (config, form, etc.) are not needed for static conversion ~keep
-                _ => {},
+                _ => {}
             }
         }
 
@@ -321,7 +321,7 @@ impl XfaParser {
                                     });
                                 }
                             }
-                        },
+                        }
                         "field" => {
                             let name = self.get_attribute(e, "name").unwrap_or_default();
                             let mut binding = self.binding_parts.join(".");
@@ -346,24 +346,24 @@ impl XfaParser {
                             }
 
                             current_field = Some(field);
-                        },
-                        "textEdit" | "numericEdit" | "dateTimeEdit" | "checkButton"
-                        | "choiceList" | "button" | "signature" | "imageEdit" | "barcode" => {
+                        }
+                        "textEdit" | "numericEdit" | "dateTimeEdit" | "checkButton" | "choiceList" | "button"
+                        | "signature" | "imageEdit" | "barcode" => {
                             if let Some(ref mut field) = current_field {
                                 field.field_type = XfaFieldType::from_xfa_name(&local_name);
                             }
-                        },
+                        }
                         "items" => {
                             in_items = true;
-                        },
-                        "text" => {},
-                        "caption" => {},
-                        "toolTip" => {},
-                        _ => {},
+                        }
+                        "text" => {}
+                        "caption" => {}
+                        "toolTip" => {}
+                        _ => {}
                     }
 
                     self.context_stack.push(local_name);
-                },
+                }
                 Ok(Event::Text(e)) => {
                     let text = e.xml11_content().unwrap_or_default().to_string();
 
@@ -380,27 +380,27 @@ impl XfaParser {
                                     {
                                         field.caption = Some(text);
                                     }
-                                },
+                                }
                                 "toolTip" => {
                                     field.tooltip = Some(text);
-                                },
+                                }
                                 "value" => {
                                     if field.default_value.is_none() {
                                         field.default_value = Some(text);
                                     }
-                                },
-                                _ => {},
+                                }
+                                _ => {}
                             }
                         }
                     }
-                },
+                }
                 Ok(Event::End(ref e)) => {
                     let local_name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
 
                     match local_name.as_str() {
                         "subform" => {
                             self.binding_parts.pop();
-                        },
+                        }
                         "field" => {
                             if let Some(field) = current_field.take() {
                                 self.form.fields.push(field.clone());
@@ -408,10 +408,10 @@ impl XfaParser {
                                     page.fields.push(field);
                                 }
                             }
-                        },
+                        }
                         "items" => {
                             in_items = false;
-                        },
+                        }
                         "text" => {
                             if in_items {
                                 if let Some(ref mut field) = current_field {
@@ -423,17 +423,17 @@ impl XfaParser {
                                 current_option_text.clear();
                                 current_option_value.clear();
                             }
-                        },
-                        _ => {},
+                        }
+                        _ => {}
                     }
 
                     self.context_stack.pop();
-                },
+                }
                 Ok(Event::Eof) => break,
                 Err(e) => {
                     return Err(Error::InvalidPdf(format!("XFA template parse error: {}", e)));
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
 
@@ -462,29 +462,27 @@ impl XfaParser {
                     if local_name != "xfa" && local_name != "datasets" && local_name != "data" {
                         path_stack.push(format!("{}[0]", local_name));
                     }
-                },
+                }
                 Ok(Event::Text(e)) => {
                     current_text = e.xml11_content().unwrap_or_default().to_string();
-                },
+                }
                 Ok(Event::End(ref e)) => {
                     let local_name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
 
                     if local_name != "xfa" && local_name != "datasets" && local_name != "data" {
                         if !current_text.is_empty() && !path_stack.is_empty() {
                             let binding = path_stack.join(".");
-                            self.form
-                                .dataset_values
-                                .insert(binding, current_text.clone());
+                            self.form.dataset_values.insert(binding, current_text.clone());
                         }
                         current_text.clear();
                         path_stack.pop();
                     }
-                },
+                }
                 Ok(Event::Eof) => break,
                 Err(e) => {
                     return Err(Error::InvalidPdf(format!("XFA datasets parse error: {}", e)));
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
 
@@ -524,11 +522,7 @@ impl XfaParser {
     }
 
     /// Get an attribute value from an element.
-    fn get_attribute<'a>(
-        &self,
-        e: &'a quick_xml::events::BytesStart<'a>,
-        name: &str,
-    ) -> Option<String> {
+    fn get_attribute<'a>(&self, e: &'a quick_xml::events::BytesStart<'a>, name: &str) -> Option<String> {
         for attr in e.attributes().flatten() {
             if attr.key.as_ref() == name.as_bytes() {
                 return Some(String::from_utf8_lossy(&attr.value).to_string());
@@ -572,7 +566,10 @@ mod tests {
         assert_eq!(XfaFieldType::from_xfa_name("numericEdit"), XfaFieldType::Numeric);
         assert_eq!(XfaFieldType::from_xfa_name("checkButton"), XfaFieldType::Checkbox);
         assert_eq!(XfaFieldType::from_xfa_name("choiceList"), XfaFieldType::DropDown);
-        assert!(matches!(XfaFieldType::from_xfa_name("unknown"), XfaFieldType::Unknown(_)));
+        assert!(matches!(
+            XfaFieldType::from_xfa_name("unknown"),
+            XfaFieldType::Unknown(_)
+        ));
     }
 
     #[test]
@@ -626,7 +623,9 @@ mod tests {
 
     #[test]
     fn test_is_xfa_data() {
-        assert!(is_xfa_data(b"<template xmlns=\"http://www.xfa.org/schema/xfa-template/2.8/\">"));
+        assert!(is_xfa_data(
+            b"<template xmlns=\"http://www.xfa.org/schema/xfa-template/2.8/\">"
+        ));
         assert!(is_xfa_data(b"<xfa:datasets>"));
         assert!(is_xfa_data(b"<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\">"));
         assert!(!is_xfa_data(b"<html><body>Not XFA</body></html>"));

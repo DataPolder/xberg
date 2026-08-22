@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use std::io::Write;
 use weezl::{BitOrder, encode::Encoder as LzwEncoder};
 use xberg_native_pdf::decoders::{
-    Ascii85Decoder, AsciiHexDecoder, DctDecoder, FlateDecoder, LzwDecoder, RunLengthDecoder,
-    StreamDecoder, decode_stream,
+    Ascii85Decoder, AsciiHexDecoder, DctDecoder, FlateDecoder, LzwDecoder, RunLengthDecoder, StreamDecoder,
+    decode_stream,
 };
 use xberg_native_pdf::object::Object;
 
@@ -222,10 +222,7 @@ fn test_complex_filter_pipeline() {
     flate_encoder.write_all(&lzw_compressed).unwrap();
     let double_compressed = flate_encoder.finish().unwrap();
 
-    let hex_encoded: String = double_compressed
-        .iter()
-        .map(|b| format!("{:02X}", b))
-        .collect();
+    let hex_encoded: String = double_compressed.iter().map(|b| format!("{:02X}", b)).collect();
 
     let filters = vec![
         "ASCIIHexDecode".to_string(),

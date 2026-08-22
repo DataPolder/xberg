@@ -80,7 +80,10 @@ fn prime_followed_by_decimal_keeps_number_intact() {
     let doc = PdfDocument::open(tmp.path()).expect("open");
     let text = doc.extract_text(0).expect("extract");
 
-    assert!(text.contains('\u{2032}'), "expected PRIME (U+2032) in output, got: {text:?}");
+    assert!(
+        text.contains('\u{2032}'),
+        "expected PRIME (U+2032) in output, got: {text:?}"
+    );
 
     // The decimal must stay attached to the prime — no `′ .` / `′. ` break. ~keep
     assert!(

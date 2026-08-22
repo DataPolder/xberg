@@ -50,10 +50,14 @@ fn stream_obj(dict: &str, data: &[u8]) -> Vec<u8> {
 /// Build a page carrying one `/AP` dictionary with the given entries, or no
 /// annotation at all when `ap_entries` is `None`.
 fn annotation_ap_pdf(ap_entries: Option<&str>) -> Vec<u8> {
-    let red =
-        stream_obj("/Type /XObject /Subtype /Form /BBox [0 0 30 30]", b"1 0 0 rg 0 0 30 30 re f");
-    let green =
-        stream_obj("/Type /XObject /Subtype /Form /BBox [0 0 30 30]", b"0 1 0 rg 0 0 30 30 re f");
+    let red = stream_obj(
+        "/Type /XObject /Subtype /Form /BBox [0 0 30 30]",
+        b"1 0 0 rg 0 0 30 30 re f",
+    );
+    let green = stream_obj(
+        "/Type /XObject /Subtype /Form /BBox [0 0 30 30]",
+        b"0 1 0 rg 0 0 30 30 re f",
+    );
     let annots = match ap_entries {
         Some(_) => "/Annots [5 0 R]",
         None => "",
@@ -61,7 +65,7 @@ fn annotation_ap_pdf(ap_entries: Option<&str>) -> Vec<u8> {
     let annot = match ap_entries {
         Some(ap) => {
             format!("<< /Type /Annot /Subtype /Square /Rect [10 10 40 40] /F 4 /AP << {ap} >> >>")
-        },
+        }
         None => "<< /Type /Annot /Subtype /Square /Rect [10 10 40 40] /F 4 >>".to_string(),
     };
     let objects = vec![
@@ -101,7 +105,12 @@ fn annotation_appearance_without_normal_entry_draws_nothing() {
         .expect("baseline render");
 
     let renders = distinct_renders(&annotation_ap_pdf(Some("/D 6 0 R /R 7 0 R")), 64);
-    assert_eq!(renders.len(), 1, "identical bytes produced {} distinct renders", renders.len());
+    assert_eq!(
+        renders.len(),
+        1,
+        "identical bytes produced {} distinct renders",
+        renders.len()
+    );
     assert_eq!(
         renders.into_iter().next().expect("one render"),
         blank,
@@ -119,7 +128,12 @@ fn annotation_appearance_with_normal_entry_is_deterministic() {
         .expect("baseline render");
 
     let renders = distinct_renders(&annotation_ap_pdf(Some("/N 6 0 R /R 7 0 R")), 64);
-    assert_eq!(renders.len(), 1, "identical bytes produced {} distinct renders", renders.len());
+    assert_eq!(
+        renders.len(),
+        1,
+        "identical bytes produced {} distinct renders",
+        renders.len()
+    );
     assert_ne!(
         renders.into_iter().next().expect("one render"),
         blank,

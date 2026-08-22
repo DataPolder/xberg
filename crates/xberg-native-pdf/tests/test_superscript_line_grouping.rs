@@ -101,9 +101,7 @@ fn two_lines_normal_leading_still_split() {
 
 #[test]
 fn multi_line_body_text_preserves_breaks() {
-    let lines = [
-        "LineAAA", "LineBBB", "LineCCC", "LineDDD", "LineEEE", "LineFFF",
-    ];
+    let lines = ["LineAAA", "LineBBB", "LineCCC", "LineDDD", "LineEEE", "LineFFF"];
 
     let out = build_and_extract(|w| {
         let mut page = w.add_letter_page();
@@ -143,10 +141,7 @@ fn superscript_then_next_line_still_breaks() {
 
     assert!(out.contains('8') && out.contains("th"), "got {:?}", out);
 
-    let super_end = out
-        .find("th")
-        .or_else(|| out.find('8'))
-        .expect("superscript present");
+    let super_end = out.find("th").or_else(|| out.find('8')).expect("superscript present");
     let body_start = out.find("Next paragraph line").expect("body line present");
     let between = &out[super_end..body_start];
     assert!(between.contains('\n'), "got {:?}", out);

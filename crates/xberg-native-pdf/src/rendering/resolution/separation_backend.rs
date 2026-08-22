@@ -186,13 +186,13 @@ fn paint_one_plate(
                 // fields off `gs` directly. See follow-up branch. ~keep
                 let stroke = tiny_skia::Stroke::default();
                 stroke_plate(pixmap, path, transform, &stroke, tint, clip);
-            },
+            }
         },
         // ColorOnly intents are colour-resolution-only — there is no
         // geometry to paint. The pipeline still produces a resolved
         // command for them (the caller may need the resolved RGBA in
         // some non-paint context); the backend skips them. ~keep
-        PaintKind::ColorOnly => {},
+        PaintKind::ColorOnly => {}
         // Glyph, Image, and Shading variants are provisional in the
         // intent enum today — the operator walker doesn't emit them.
         // Once it does, this backend will need per-variant rasterisation
@@ -200,7 +200,7 @@ fn paint_one_plate(
         // routing, per-plate gradient endpoint routing). Documented
         // gap; surfaced rather than silently dropped because the
         // wave 5 acceptance does not require these to be live. ~keep
-        PaintKind::Glyph { .. } | PaintKind::Image { .. } | PaintKind::Shading { .. } => {},
+        PaintKind::Glyph { .. } | PaintKind::Image { .. } | PaintKind::Shading { .. } => {}
     }
 }
 
@@ -268,8 +268,7 @@ mod tests {
 
     use super::super::intent::{PaintKind, PaintSide};
     use super::super::resolved::{
-        BlendPlan, ClipPlan, InkSelector, OverprintPlan, ParticipatingChannel, ResolvedColor,
-        ResolvedPaintCmd,
+        BlendPlan, ClipPlan, InkSelector, OverprintPlan, ParticipatingChannel, ResolvedColor, ResolvedPaintCmd,
     };
 
     fn rect_path() -> tiny_skia::Path {
@@ -286,13 +285,7 @@ mod tests {
         Pixmap::new(16, 16).expect("16x16 pixmap allocates")
     }
 
-    fn cmyk_cmd<'a>(
-        path: &'a tiny_skia::Path,
-        c: f32,
-        m: f32,
-        y: f32,
-        k: f32,
-    ) -> ResolvedPaintCmd<'a> {
+    fn cmyk_cmd<'a>(path: &'a tiny_skia::Path, c: f32, m: f32, y: f32, k: f32) -> ResolvedPaintCmd<'a> {
         ResolvedPaintCmd {
             kind: PaintKind::Path {
                 path,
@@ -341,12 +334,7 @@ mod tests {
         // renderer's tint_for_ink performs — now driven via the pipeline. ~keep
         let path = rect_path();
         let cmd = cmyk_cmd(&path, 0.5, 0.25, 0.0, 1.0);
-        let mut plates = vec![
-            fresh_pixmap(),
-            fresh_pixmap(),
-            fresh_pixmap(),
-            fresh_pixmap(),
-        ];
+        let mut plates = vec![fresh_pixmap(), fresh_pixmap(), fresh_pixmap(), fresh_pixmap()];
         let inks = [
             InkName::new("Cyan"),
             InkName::new("Magenta"),
@@ -670,12 +658,7 @@ mod tests {
             clip: ClipPlan::None,
             ctm: Matrix::identity(),
         };
-        let mut plates = vec![
-            fresh_pixmap(),
-            fresh_pixmap(),
-            fresh_pixmap(),
-            fresh_pixmap(),
-        ];
+        let mut plates = vec![fresh_pixmap(), fresh_pixmap(), fresh_pixmap(), fresh_pixmap()];
         let inks = [
             InkName::new("Cyan"),
             InkName::new("Magenta"),
@@ -757,14 +740,7 @@ mod tests {
             InkName::new("Black"),
         ];
         let tints = [0.5, 0.0, 0.0, 0.0];
-        assert_backend_matches_inline(
-            &path,
-            Matrix::identity(),
-            cmd,
-            &inks,
-            &tints,
-            FillRule::Winding,
-        );
+        assert_backend_matches_inline(&path, Matrix::identity(), cmd, &inks, &tints, FillRule::Winding);
     }
 
     #[test]
@@ -780,14 +756,7 @@ mod tests {
             InkName::new("Black"),
         ];
         let tints = [0.5, 0.25, 0.0, 0.7];
-        assert_backend_matches_inline(
-            &path,
-            Matrix::identity(),
-            cmd,
-            &inks,
-            &tints,
-            FillRule::Winding,
-        );
+        assert_backend_matches_inline(&path, Matrix::identity(), cmd, &inks, &tints, FillRule::Winding);
     }
 
     #[test]

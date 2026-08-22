@@ -4,9 +4,7 @@
 //! this test must NOT call `set_policy` first — it asserts the
 //! behaviour-preserving lazy default).
 
-use xberg_native_pdf::crypto::{
-    AlgorithmId, AlgorithmUse, Decision, PolicyMode, active_policy, is_policy_set,
-};
+use xberg_native_pdf::crypto::{AlgorithmId, AlgorithmUse, Decision, PolicyMode, active_policy, is_policy_set};
 
 #[test]
 fn lazy_default_policy_is_compat_and_byte_stable() {

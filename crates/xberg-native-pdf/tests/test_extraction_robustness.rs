@@ -123,8 +123,7 @@ fn corrupt_struct_tree_root_falls_back_gracefully() {
         .as_bytes(),
     );
 
-    let doc = PdfDocument::from_bytes(pdf)
-        .expect("PDF with corrupt StructTreeRoot must open without error");
+    let doc = PdfDocument::from_bytes(pdf).expect("PDF with corrupt StructTreeRoot must open without error");
     let text = doc
         .extract_text(0)
         .expect("extract_text must not error on corrupt StructTreeRoot");
@@ -156,17 +155,13 @@ fn encrypted_pdf_page_count_returns_encrypted_error() {
     pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [99 0 R] /Count 1 >>\nendobj\n");
 
     let off3 = pdf.len();
-    pdf.extend_from_slice(
-        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
 
     let off4 = pdf.len();
     pdf.extend_from_slice(b"4 0 obj\n<< /Length 0 >>\nstream\nendstream\nendobj\n");
 
     let off5 = pdf.len();
-    pdf.extend_from_slice(
-        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
 
     let off6 = pdf.len();
     pdf.extend_from_slice(
@@ -203,15 +198,15 @@ fn encrypted_pdf_page_count_returns_encrypted_error() {
     match doc.page_count() {
         Ok(0) => {
             panic!("page_count() returned Ok(0) for encrypted PDF — this is the pre-fix regression")
-        },
+        }
         Ok(n) => {
             assert!(n > 0, "page count must be positive when Ok() is returned");
-        },
-        Err(xberg_native_pdf::error::Error::EncryptedPdf) => {},
+        }
+        Err(xberg_native_pdf::error::Error::EncryptedPdf) => {}
         Err(e) => {
             // Any other error is also acceptable — the point is it must not be Ok(0) ~keep
             let _ = e;
-        },
+        }
     }
 
     // Text extraction degrades to empty output (warn + empty) rather than
@@ -230,10 +225,7 @@ fn encrypted_pdf_page_count_returns_encrypted_error() {
 #[test]
 fn rotated_page_extraction_does_not_crash() {
     let content = b"BT /F1 12 Tf 50 700 Td (Rotated content) Tj ET";
-    let pdf = build_minimal_pdf_raw(
-        content,
-        b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Rotate 90",
-    );
+    let pdf = build_minimal_pdf_raw(content, b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Rotate 90");
     let doc = PdfDocument::from_bytes(pdf).expect("rotated page must open without error");
     let result = doc.extract_text(0);
     assert!(
@@ -261,10 +253,7 @@ fn rotated_page_extraction_does_not_crash() {
 #[test]
 fn rotate_90_keeps_raw_coords_and_does_not_fuse_rows() {
     let content = b"BT /F1 12 Tf 100 200 Td (Alpha) Tj ET\nBT /F1 12 Tf 100 214 Td (Bravo) Tj ET";
-    let pdf = build_minimal_pdf_raw(
-        content,
-        b"/Type /Page /Parent 2 0 R /MediaBox [0 0 800 600] /Rotate 90",
-    );
+    let pdf = build_minimal_pdf_raw(content, b"/Type /Page /Parent 2 0 R /MediaBox [0 0 800 600] /Rotate 90");
     let doc = PdfDocument::from_bytes(pdf).expect("rotated page must open without error");
     assert_eq!(doc.get_page_rotation(0).unwrap(), 90, "sanity: /Rotate 90 parsed");
 
@@ -367,10 +356,7 @@ fn rotated_text_matrix_columns_do_not_fuse() {
 fn rotate_90_portrait_page_with_rotated_content_reads_upright() {
     let content = b"BT /F1 12 Tf 0 1 -1 0 300 100 Tm (ALPHA) Tj ET\n\
                     BT /F1 12 Tf 0 1 -1 0 100 100 Tm (BRAVO) Tj ET";
-    let pdf = build_minimal_pdf_raw(
-        content,
-        b"/Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Rotate 90",
-    );
+    let pdf = build_minimal_pdf_raw(content, b"/Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Rotate 90");
     let doc = PdfDocument::from_bytes(pdf).expect("PDF must open without error");
     assert_eq!(doc.get_page_rotation(0).unwrap(), 90, "sanity: /Rotate 90");
 

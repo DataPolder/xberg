@@ -175,20 +175,14 @@ fn test_same_form_xobject_twice_different_ctm_same_page() {
 
     let spans = doc.extract_spans(0).expect("extract spans");
 
-    let matching: Vec<_> = spans
-        .iter()
-        .filter(|s| s.text.contains("FORM_TEXT"))
-        .collect();
+    let matching: Vec<_> = spans.iter().filter(|s| s.text.contains("FORM_TEXT")).collect();
 
     assert!(
         matching.len() >= 2,
         "Expected at least 2 'FORM_TEXT' spans (one per CTM invocation), \
          got {}: {:?}",
         matching.len(),
-        matching
-            .iter()
-            .map(|s| (s.text.as_str(), s.bbox.y))
-            .collect::<Vec<_>>()
+        matching.iter().map(|s| (s.text.as_str(), s.bbox.y)).collect::<Vec<_>>()
     );
 
     let y_vals: Vec<f32> = matching.iter().map(|s| s.bbox.y).collect();
@@ -219,9 +213,8 @@ fn test_same_form_xobject_two_pages_different_ctm() {
     let spans0 = doc.extract_spans(0).expect("extract page 0 spans");
     let spans1 = doc.extract_spans(1).expect("extract page 1 spans");
 
-    let find_text_span = |spans: &[xberg_native_pdf::layout::TextSpan]| {
-        spans.iter().find(|s| s.text.contains("PAGE_TEXT")).cloned()
-    };
+    let find_text_span =
+        |spans: &[xberg_native_pdf::layout::TextSpan]| spans.iter().find(|s| s.text.contains("PAGE_TEXT")).cloned();
 
     let span0 = find_text_span(&spans0);
     let span1 = find_text_span(&spans1);

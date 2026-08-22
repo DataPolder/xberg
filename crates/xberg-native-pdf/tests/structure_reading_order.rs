@@ -33,9 +33,7 @@ fn table_pdf(tagged: bool) -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
@@ -113,12 +111,8 @@ fn order_of(pdf: Vec<u8>, ro: ReadingOrder) -> Vec<String> {
 }
 
 // Row-major logical order declared by the structure tree. ~keep
-const ROW_MAJOR: [&str; 8] = [
-    "ALPHA", "BRAVO", "CHARLIE", "DELTA", "ECHO", "FOXTROT", "GOLF", "HOTEL",
-];
-const GEOMETRIC: [&str; 8] = [
-    "ECHO", "FOXTROT", "GOLF", "HOTEL", "ALPHA", "BRAVO", "CHARLIE", "DELTA",
-];
+const ROW_MAJOR: [&str; 8] = ["ALPHA", "BRAVO", "CHARLIE", "DELTA", "ECHO", "FOXTROT", "GOLF", "HOTEL"];
+const GEOMETRIC: [&str; 8] = ["ECHO", "FOXTROT", "GOLF", "HOTEL", "ALPHA", "BRAVO", "CHARLIE", "DELTA"];
 
 /// The load-bearing test: `Structure` must actually REORDER, not silently behave
 /// like `ColumnAware`. On the tagged bytes the geometric order and the structure
@@ -139,7 +133,10 @@ fn structure_reorders_table_to_logical_order() {
 fn structure_falls_back_to_geometry_when_untagged() {
     let structure = order_of(table_pdf(false), ReadingOrder::Structure);
     let column = order_of(table_pdf(false), ReadingOrder::ColumnAware);
-    assert_eq!(structure, column, "untagged: Structure must equal ColumnAware, byte for byte");
+    assert_eq!(
+        structure, column,
+        "untagged: Structure must equal ColumnAware, byte for byte"
+    );
     assert_eq!(structure, GEOMETRIC, "untagged: falls back to visual/geometric order");
 }
 
@@ -191,9 +188,7 @@ fn tagged_pdf(content: &[u8], struct_objs: &[String]) -> Vec<u8> {
     for id in 1..=last {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n", last + 1).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n", last + 1).as_bytes());
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());
     buf
 }
@@ -217,7 +212,10 @@ fn structure_keeps_multi_span_cell_contiguous() {
         "<< /Type /StructElem /S /TD /P 10 0 R /Pg 3 0 R /K 1 >>".to_string(),
     ];
     let pdf = tagged_pdf(content, &structs);
-    assert_eq!(order_of(pdf.clone(), ReadingOrder::ColumnAware), vec!["BAZ", "FOO", "BAR"]);
+    assert_eq!(
+        order_of(pdf.clone(), ReadingOrder::ColumnAware),
+        vec!["BAZ", "FOO", "BAR"]
+    );
     assert_eq!(order_of(pdf, ReadingOrder::Structure), vec!["FOO", "BAR", "BAZ"]);
 }
 

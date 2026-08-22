@@ -95,13 +95,19 @@ end
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
-    assert_eq!(font.char_to_unicode(0x0001), Some("\u{4E00}".to_string()), "1-byte code");
-    assert_eq!(font.char_to_unicode(0x0002), Some("\u{4E01}".to_string()), "1-byte code");
+    assert_eq!(
+        font.char_to_unicode(0x0001),
+        Some("\u{4E00}".to_string()),
+        "1-byte code"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x0002),
+        Some("\u{4E01}".to_string()),
+        "1-byte code"
+    );
 
     assert_eq!(
         font.char_to_unicode(0x8140),
@@ -196,23 +202,49 @@ end
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     // Verify: Range 1 (0x0001-0x000F → 0x4E00-0x4E0E) ~keep
-    assert_eq!(font.char_to_unicode(0x0001), Some("\u{4E00}".to_string()), "Range 1 start");
-    assert_eq!(font.char_to_unicode(0x0008), Some("\u{4E07}".to_string()), "Range 1 middle");
-    assert_eq!(font.char_to_unicode(0x000F), Some("\u{4E0E}".to_string()), "Range 1 end");
+    assert_eq!(
+        font.char_to_unicode(0x0001),
+        Some("\u{4E00}".to_string()),
+        "Range 1 start"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x0008),
+        Some("\u{4E07}".to_string()),
+        "Range 1 middle"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x000F),
+        Some("\u{4E0E}".to_string()),
+        "Range 1 end"
+    );
 
     // Verify: Range 2 (0x8140-0x814F → 0x30A0-0x30AF) ~keep
-    assert_eq!(font.char_to_unicode(0x8140), Some("\u{30A0}".to_string()), "Range 2 start");
-    assert_eq!(font.char_to_unicode(0x8145), Some("\u{30A5}".to_string()), "Range 2 middle");
-    assert_eq!(font.char_to_unicode(0x814F), Some("\u{30AF}".to_string()), "Range 2 end");
+    assert_eq!(
+        font.char_to_unicode(0x8140),
+        Some("\u{30A0}".to_string()),
+        "Range 2 start"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x8145),
+        Some("\u{30A5}".to_string()),
+        "Range 2 middle"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x814F),
+        Some("\u{30AF}".to_string()),
+        "Range 2 end"
+    );
 
     // Verify: Range 3 (0x0100-0x010F → 0xAC00-0xAC0F) ~keep
-    assert_eq!(font.char_to_unicode(0x0100), Some("\u{AC00}".to_string()), "Range 3 start");
+    assert_eq!(
+        font.char_to_unicode(0x0100),
+        Some("\u{AC00}".to_string()),
+        "Range 3 start"
+    );
 }
 
 #[test]
@@ -300,14 +332,24 @@ end
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
-    assert_eq!(font.char_to_unicode(0x0001), Some("\u{4E00}".to_string()), "First CJK char");
-    assert_eq!(font.char_to_unicode(0x0050), Some("\u{4E4F}".to_string()), "Middle CJK char");
-    assert_eq!(font.char_to_unicode(0x0064), Some("\u{4E63}".to_string()), "Last CJK char");
+    assert_eq!(
+        font.char_to_unicode(0x0001),
+        Some("\u{4E00}".to_string()),
+        "First CJK char"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x0050),
+        Some("\u{4E4F}".to_string()),
+        "Middle CJK char"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x0064),
+        Some("\u{4E63}".to_string()),
+        "Last CJK char"
+    );
 }
 
 #[test]
@@ -384,17 +426,35 @@ end
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
-    assert_eq!(font.char_to_unicode(0x0001), Some("\u{4E00}".to_string()), "Range 1 start");
-    assert_eq!(font.char_to_unicode(0x0080), Some("\u{4E7F}".to_string()), "Range 1 middle");
-    assert_eq!(font.char_to_unicode(0x00FF), Some("\u{4EFE}".to_string()), "Range 1 end");
+    assert_eq!(
+        font.char_to_unicode(0x0001),
+        Some("\u{4E00}".to_string()),
+        "Range 1 start"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x0080),
+        Some("\u{4E7F}".to_string()),
+        "Range 1 middle"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x00FF),
+        Some("\u{4EFE}".to_string()),
+        "Range 1 end"
+    );
 
-    assert_eq!(font.char_to_unicode(0x0100), Some("\u{9FA0}".to_string()), "Range 2 start");
-    assert_eq!(font.char_to_unicode(0x01FF), Some("\u{A09F}".to_string()), "Range 2 end");
+    assert_eq!(
+        font.char_to_unicode(0x0100),
+        Some("\u{9FA0}".to_string()),
+        "Range 2 start"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x01FF),
+        Some("\u{A09F}".to_string()),
+        "Range 2 end"
+    );
 }
 
 #[test]
@@ -472,16 +532,26 @@ end
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
-    assert_eq!(font.char_to_unicode(0x0001), Some("\u{3041}".to_string()), "Hiragana start");
+    assert_eq!(
+        font.char_to_unicode(0x0001),
+        Some("\u{3041}".to_string()),
+        "Hiragana start"
+    );
 
-    assert_eq!(font.char_to_unicode(0x0100), Some("\u{3341}".to_string()), "Katakana start");
+    assert_eq!(
+        font.char_to_unicode(0x0100),
+        Some("\u{3341}".to_string()),
+        "Katakana start"
+    );
 
-    assert_eq!(font.char_to_unicode(0x0200), Some("\u{4E00}".to_string()), "Kanji start");
+    assert_eq!(
+        font.char_to_unicode(0x0200),
+        Some("\u{4E00}".to_string()),
+        "Kanji start"
+    );
 }
 
 #[test]
@@ -572,9 +642,7 @@ end
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     assert_eq!(font.char_to_unicode(0x0020), Some(" ".to_string()), "Space");
@@ -661,14 +729,24 @@ end
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
-    assert_eq!(font.char_to_unicode(0x8000), Some("\u{F900}".to_string()), "Large CID 0x8000");
-    assert_eq!(font.char_to_unicode(0x9000), Some("\u{FA00}".to_string()), "Large CID 0x9000");
-    assert_eq!(font.char_to_unicode(0xA000), Some("\u{FB00}".to_string()), "Large CID 0xA000");
+    assert_eq!(
+        font.char_to_unicode(0x8000),
+        Some("\u{F900}".to_string()),
+        "Large CID 0x8000"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x9000),
+        Some("\u{FA00}".to_string()),
+        "Large CID 0x9000"
+    );
+    assert_eq!(
+        font.char_to_unicode(0xA000),
+        Some("\u{FB00}".to_string()),
+        "Large CID 0xA000"
+    );
 
     // Note: U+FFFD (replacement character) mappings are intentionally rejected per PDF Spec compliance.
     // CMaps with <FFFD> <FFFD> entries are treated as "unmapped" and fall through to Priority 2.

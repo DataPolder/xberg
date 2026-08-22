@@ -2,9 +2,7 @@
 //!
 //! Implements pre-order traversal of structure trees to determine correct reading order.
 
-use super::types::{
-    ActualTextIndex, McidScope, StructChild, StructElem, StructTreeRoot, StructType,
-};
+use super::types::{ActualTextIndex, McidScope, StructChild, StructElem, StructTreeRoot, StructType};
 use crate::error::Error;
 use std::sync::Arc;
 
@@ -241,10 +239,7 @@ impl InheritedContext {
 ///
 /// # Returns
 /// * Vector of ordered content items for the specified page
-pub fn traverse_structure_tree(
-    struct_tree: &StructTreeRoot,
-    page_num: u32,
-) -> Result<Vec<OrderedContent>, Error> {
+pub fn traverse_structure_tree(struct_tree: &StructTreeRoot, page_num: u32) -> Result<Vec<OrderedContent>, Error> {
     let mut result = Vec::new();
     let mut block_counter = 0u32;
 
@@ -271,17 +266,11 @@ pub fn traverse_structure_tree(
 pub fn traverse_structure_tree_all_pages(
     struct_tree: &StructTreeRoot,
 ) -> std::collections::HashMap<u32, Vec<OrderedContent>> {
-    let mut result: std::collections::HashMap<u32, Vec<OrderedContent>> =
-        std::collections::HashMap::new();
+    let mut result: std::collections::HashMap<u32, Vec<OrderedContent>> = std::collections::HashMap::new();
 
     let mut block_counter = 0u32;
     for root_elem in &struct_tree.root_elements {
-        traverse_element_all_pages(
-            root_elem,
-            InheritedContext::default(),
-            &mut block_counter,
-            &mut result,
-        );
+        traverse_element_all_pages(root_elem, InheritedContext::default(), &mut block_counter, &mut result);
     }
 
     result
@@ -338,7 +327,7 @@ fn traverse_element_all_pages(
                     actual_text: None,
                     mcid_scope: Some(mcid_scope.clone()),
                 });
-            },
+            }
 
             StructChild::StructElem(child_elem) => {
                 // If parent is WB, emit word break markers before processing child ~keep
@@ -365,15 +354,11 @@ fn traverse_element_all_pages(
                     }
                 }
                 traverse_element_all_pages(child_elem, descended, block_counter, result);
-            },
+            }
 
             StructChild::ObjectRef(_obj_num, _gen) => {
-                tracing::warn!(
-                    object_id = _obj_num,
-                    generation = _gen,
-                    "skipping unresolved ObjectRef"
-                );
-            },
+                tracing::warn!(object_id = _obj_num, generation = _gen, "skipping unresolved ObjectRef");
+            }
         }
     }
 }
@@ -395,11 +380,11 @@ fn collect_pages_recursive(elem: &StructElem, pages: &mut Vec<u32>) {
         match child {
             StructChild::MarkedContentRef { page, .. } => {
                 pages.push(*page);
-            },
+            }
             StructChild::StructElem(child_elem) => {
                 collect_pages_recursive(child_elem, pages);
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 }
@@ -474,21 +459,17 @@ fn traverse_element(
                         mcid_scope: Some(mcid_scope.clone()),
                     });
                 }
-            },
+            }
 
             StructChild::StructElem(child_elem) => {
                 traverse_element(child_elem, target_page, descended, block_counter, result)?;
-            },
+            }
 
             StructChild::ObjectRef(_obj_num, _gen) => {
                 // ObjectRef should be resolved at parse time (structure/parser.rs).
                 // If we encounter one here, it means the reference couldn't be resolved. ~keep
-                tracing::warn!(
-                    object_id = _obj_num,
-                    generation = _gen,
-                    "skipping unresolved ObjectRef"
-                );
-            },
+                tracing::warn!(object_id = _obj_num, generation = _gen, "skipping unresolved ObjectRef");
+            }
         }
     }
 
@@ -510,13 +491,13 @@ fn has_content_on_page(elem: &StructElem, target_page: u32) -> bool {
                 if *page == target_page {
                     return true;
                 }
-            },
+            }
             StructChild::StructElem(child_elem) => {
                 if has_content_on_page(child_elem, target_page) {
                     return true;
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
     false
@@ -584,11 +565,7 @@ struct ActiveScope {
 /// to find the first Page-scoped page (so the across-pages emit-once
 /// rule still works), then walk children with our scope active.
 fn walk_actualtext(elem: &StructElem, inherited: Option<ActiveScope>, idx: &mut ActualTextIndex) {
-    let own_text: Option<Arc<str>> = elem
-        .actual_text
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .map(Arc::from);
+    let own_text: Option<Arc<str>> = elem.actual_text.as_deref().filter(|s| !s.is_empty()).map(Arc::from);
 
     let active = if let Some(text) = own_text {
         // Pre-scan to find this scope's first Page-scoped descendant.
@@ -637,8 +614,7 @@ fn walk_actualtext(elem: &StructElem, inherited: Option<ActiveScope>, idx: &mut 
                     //   each contained MCID. ~keep
                     let should_emit = match mcid_scope {
                         crate::structure::McidScope::Page(_) => s.first_page == Some(*page),
-                        crate::structure::McidScope::Form(_)
-                        | crate::structure::McidScope::Pattern(_) => true,
+                        crate::structure::McidScope::Form(_) | crate::structure::McidScope::Pattern(_) => true,
                     };
 
                     if should_emit {
@@ -651,14 +627,14 @@ fn walk_actualtext(elem: &StructElem, inherited: Option<ActiveScope>, idx: &mut 
                         idx.suppress_only.insert(key);
                     }
                 }
-            },
+            }
             StructChild::StructElem(child_elem) => {
                 walk_actualtext(child_elem, scope.clone(), idx);
-            },
+            }
             StructChild::ObjectRef(_, _) => {
                 // Unresolved external reference — consistent with the
                 // rest of the traversal, we skip. ~keep
-            },
+            }
         }
     }
 }
@@ -674,13 +650,13 @@ fn first_page_in_subtree(elem: &StructElem) -> Option<u32> {
                 if matches!(scope, crate::structure::McidScope::Page(_)) {
                     return Some(*page);
                 }
-            },
+            }
             StructChild::StructElem(c) => {
                 if let Some(p) = first_page_in_subtree(c) {
                     return Some(p);
                 }
-            },
-            StructChild::ObjectRef(_, _) => {},
+            }
+            StructChild::ObjectRef(_, _) => {}
         }
     }
     None
@@ -696,8 +672,8 @@ fn has_any_mcr(elem: &StructElem) -> bool {
                 if has_any_mcr(c) {
                     return true;
                 }
-            },
-            StructChild::ObjectRef(_, _) => {},
+            }
+            StructChild::ObjectRef(_, _) => {}
         }
     }
     false
@@ -717,10 +693,7 @@ fn has_any_mcr(elem: &StructElem) -> bool {
 ///
 /// # Returns
 /// * Vector of MCIDs in reading order
-pub fn extract_reading_order(
-    struct_tree: &StructTreeRoot,
-    page_num: u32,
-) -> Result<Vec<u32>, Error> {
+pub fn extract_reading_order(struct_tree: &StructTreeRoot, page_num: u32) -> Result<Vec<u32>, Error> {
     let ordered_content = traverse_structure_tree(struct_tree, page_num)?;
     Ok(ordered_content
         .into_iter()
@@ -930,12 +903,7 @@ mod tests {
         );
         assert_eq!(heading_mcrs[0].mcid, Some(0));
         let by_page = traverse_structure_tree_all_pages(&struct_tree);
-        let heading_mcrs_all: Vec<_> = by_page
-            .get(&0)
-            .unwrap()
-            .iter()
-            .filter(|c| c.is_heading)
-            .collect();
+        let heading_mcrs_all: Vec<_> = by_page.get(&0).unwrap().iter().filter(|c| c.is_heading).collect();
         assert_eq!(heading_mcrs_all.len(), 1);
     }
 
@@ -1153,7 +1121,10 @@ mod tests {
         let m0 = ordered.iter().find(|c| c.mcid == Some(0)).unwrap();
         let m1 = ordered.iter().find(|c| c.mcid == Some(1)).unwrap();
         let m2 = ordered.iter().find(|c| c.mcid == Some(2)).unwrap();
-        assert_eq!(m0.block_id, m1.block_id, "two MCRs inside the same /P must share block_id");
+        assert_eq!(
+            m0.block_id, m1.block_id,
+            "two MCRs inside the same /P must share block_id"
+        );
         assert_ne!(
             m0.block_id, m2.block_id,
             "MCRs in different /P elements must have different block_id"
@@ -1261,10 +1232,7 @@ mod tests {
         assert_eq!(ordered[0].actual_text, None);
 
         let idx = build_actualtext_index(&struct_tree);
-        assert!(
-            idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(0), 0))
-        );
+        assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(0), 0)));
         assert_eq!(
             idx.mcid_to_actual_text
                 .get(&(crate::structure::McidScope::Page(0), 0))
@@ -1295,10 +1263,7 @@ mod tests {
         let ordered = traverse_structure_tree(&struct_tree, 0).unwrap();
         assert!(ordered.is_empty());
         let idx = build_actualtext_index(&struct_tree);
-        assert!(
-            idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(1), 0))
-        );
+        assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(1), 0)));
         assert_eq!(
             idx.mcid_to_actual_text
                 .get(&(crate::structure::McidScope::Page(1), 0))
@@ -1394,22 +1359,13 @@ mod tests {
         let idx = build_actualtext_index(&struct_tree);
         // The bearing element covers both pages; first page wins for
         // emission, the second is suppress-only. ~keep
-        assert!(
-            idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(0), 0))
-        );
-        assert!(
-            idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(1), 1))
-        );
+        assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(0), 0)));
+        assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(1), 1)));
         assert!(
             idx.mcid_to_actual_text
                 .contains_key(&(crate::structure::McidScope::Page(0), 0))
         );
-        assert!(
-            idx.suppress_only
-                .contains(&(crate::structure::McidScope::Page(1), 1))
-        );
+        assert!(idx.suppress_only.contains(&(crate::structure::McidScope::Page(1), 1)));
     }
 
     #[test]
@@ -1501,10 +1457,7 @@ mod tests {
         tree.add_root_element(span);
 
         let idx = build_actualtext_index(&tree);
-        assert!(
-            idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(0), 0))
-        );
+        assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(0), 0)));
         assert_eq!(
             idx.mcid_to_actual_text
                 .get(&(crate::structure::McidScope::Page(0), 0))
@@ -1541,10 +1494,7 @@ mod tests {
                 .map(|s| &**s),
             Some("inner")
         );
-        assert!(
-            idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(0), 5))
-        );
+        assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(0), 5)));
     }
 
     #[test]
@@ -1589,14 +1539,8 @@ mod tests {
                 .map(|s| &**s),
             Some("O")
         );
-        assert!(
-            idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(0), 0))
-        );
-        assert!(
-            idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(0), 1))
-        );
+        assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(0), 0)));
+        assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(0), 1)));
     }
 
     #[test]
@@ -1619,24 +1563,15 @@ mod tests {
         let mut tree = StructTreeRoot::new();
         tree.add_root_element(h1);
         let idx = build_actualtext_index(&tree);
-        assert!(
-            idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(1), 0))
-        );
-        assert!(
-            idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(0), 1))
-        );
+        assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(1), 0)));
+        assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(0), 1)));
         assert_eq!(
             idx.mcid_to_actual_text
                 .get(&(crate::structure::McidScope::Page(1), 0))
                 .map(|s| &**s),
             Some("Heading X")
         );
-        assert!(
-            idx.suppress_only
-                .contains(&(crate::structure::McidScope::Page(0), 1))
-        );
+        assert!(idx.suppress_only.contains(&(crate::structure::McidScope::Page(0), 1)));
         assert!(
             !idx.mcid_to_actual_text
                 .contains_key(&(crate::structure::McidScope::Page(0), 1))
@@ -1660,10 +1595,7 @@ mod tests {
         tree.add_root_element(span);
         let idx = build_actualtext_index(&tree);
         for m in [7, 8, 9] {
-            assert!(
-                idx.covered_mcids
-                    .contains(&(crate::structure::McidScope::Page(0), m))
-            );
+            assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(0), m)));
             assert_eq!(
                 idx.mcid_to_actual_text
                     .get(&(crate::structure::McidScope::Page(0), m))
@@ -1765,18 +1697,9 @@ mod tests {
         tree.add_root_element(doc);
 
         let idx = build_actualtext_index(&tree);
-        assert!(
-            idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(0), 0))
-        );
-        assert!(
-            !idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(1), 0))
-        );
-        assert!(
-            !idx.suppress_only
-                .contains(&(crate::structure::McidScope::Page(1), 0))
-        );
+        assert!(idx.covered_mcids.contains(&(crate::structure::McidScope::Page(0), 0)));
+        assert!(!idx.covered_mcids.contains(&(crate::structure::McidScope::Page(1), 0)));
+        assert!(!idx.suppress_only.contains(&(crate::structure::McidScope::Page(1), 0)));
         assert_eq!(
             idx.mcid_to_actual_text
                 .get(&(crate::structure::McidScope::Page(0), 0))
@@ -1859,10 +1782,7 @@ mod tests {
         let key = (crate::structure::McidScope::Form(form_ref), 3);
         assert!(idx.covered_mcids.contains(&key));
         assert_eq!(idx.mcid_to_actual_text.get(&key).map(|s| &**s), Some("alt"));
-        assert!(
-            !idx.covered_mcids
-                .contains(&(crate::structure::McidScope::Page(0), 3))
-        );
+        assert!(!idx.covered_mcids.contains(&(crate::structure::McidScope::Page(0), 3)));
     }
 
     /// Same as above but for Tiling Patterns (§8.7.3.3 + §14.7.4.3).

@@ -45,9 +45,7 @@ fn multiword_rotated_runs_pdf() -> Vec<u8> {
 fn tj_offset_separated_rotated_run_pdf() -> Vec<u8> {
     let mut content = Vec::new();
     content.extend_from_slice(b"BT /F1 10 Tf\n");
-    content.extend_from_slice(
-        b"0 1 -1 0 200 200 Tm [(large-scale)-333(two-omics)-333(integration)] TJ\n",
-    );
+    content.extend_from_slice(b"0 1 -1 0 200 200 Tm [(large-scale)-333(two-omics)-333(integration)] TJ\n");
     content.extend_from_slice(b"ET");
     build_minimal_pdf_raw(&content, b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]")
 }
@@ -136,7 +134,10 @@ fn multiword_rotated_run_keeps_word_boundaries() {
         "correction",
         "metrics",
     ] {
-        assert!(words.iter().any(|w| w == expected), "word {expected:?} missing from {words:?}");
+        assert!(
+            words.iter().any(|w| w == expected),
+            "word {expected:?} missing from {words:?}"
+        );
     }
     for glued in [
         "large-scaletwo-omics",
@@ -145,7 +146,10 @@ fn multiword_rotated_run_keeps_word_boundaries() {
         "batchcorrection",
         "correctionmetrics",
     ] {
-        assert!(!words.iter().any(|w| w == glued), "words glued into {glued:?}: {words:?}");
+        assert!(
+            !words.iter().any(|w| w == glued),
+            "words glued into {glued:?}: {words:?}"
+        );
     }
 }
 
@@ -170,8 +174,7 @@ fn multiword_rotated_run_reads_forward_in_text() {
 /// come apart — the gap is real, it just lies along the writing axis.
 #[test]
 fn tj_offset_word_gap_in_rotated_run_splits() {
-    let doc =
-        PdfDocument::from_bytes(tj_offset_separated_rotated_run_pdf()).expect("parse fixture");
+    let doc = PdfDocument::from_bytes(tj_offset_separated_rotated_run_pdf()).expect("parse fixture");
     let words: Vec<String> = doc
         .extract_words(0)
         .expect("extract words")
@@ -180,7 +183,10 @@ fn tj_offset_word_gap_in_rotated_run_splits() {
         .collect();
 
     for expected in ["large-scale", "two-omics", "integration"] {
-        assert!(words.iter().any(|w| w == expected), "word {expected:?} missing from {words:?}");
+        assert!(
+            words.iter().any(|w| w == expected),
+            "word {expected:?} missing from {words:?}"
+        );
     }
     assert!(
         !words
@@ -208,7 +214,10 @@ fn rotated_grid_cells_do_not_fuse() {
         }
     }
     let longest = words.iter().map(|w| w.chars().count()).max().unwrap_or(0);
-    assert!(longest <= 4, "cells fused into a longer token (len {longest}): {words:?}");
+    assert!(
+        longest <= 4,
+        "cells fused into a longer token (len {longest}): {words:?}"
+    );
 }
 
 /// Every cell of a rotated grid survives into assembled text — none is dropped
@@ -220,7 +229,10 @@ fn rotated_grid_cells_survive_assembly() {
     for row in 1..=3 {
         for col in 1..=3 {
             let cell = format!("0.{row}{col}");
-            assert!(text.contains(&cell), "cell {cell:?} dropped from assembled text: {text:?}");
+            assert!(
+                text.contains(&cell),
+                "cell {cell:?} dropped from assembled text: {text:?}"
+            );
         }
     }
 }
@@ -239,19 +251,24 @@ fn rotated_paragraph_keeps_words_and_lines() {
     for expected in [
         "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog", "keeps", "going",
     ] {
-        assert!(words.iter().any(|w| w == expected), "word {expected:?} missing from {words:?}");
+        assert!(
+            words.iter().any(|w| w == expected),
+            "word {expected:?} missing from {words:?}"
+        );
     }
     let text = doc.extract_text(0).expect("extract text");
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(flat.contains("the quick brown fox"), "rotated line 1 not contiguous: {flat:?}");
+    assert!(
+        flat.contains("the quick brown fox"),
+        "rotated line 1 not contiguous: {flat:?}"
+    );
 }
 
 /// On a page whose MAJORITY is upright, a minority rotated run still gets its
 /// own word boundaries — and the upright body is untouched.
 #[test]
 fn minority_rotated_run_keeps_word_boundaries() {
-    let doc =
-        PdfDocument::from_bytes(upright_body_with_rotated_table_pdf()).expect("parse fixture");
+    let doc = PdfDocument::from_bytes(upright_body_with_rotated_table_pdf()).expect("parse fixture");
     let words: Vec<String> = doc
         .extract_words(0)
         .expect("extract words")
@@ -343,11 +360,9 @@ fn rotated_subscript_formula_stays_contiguous() {
     let doc = PdfDocument::from_bytes(rotated_formula_with_subscript_pdf()).expect("parse fixture");
     let spans = doc.extract_spans(0).expect("extract spans");
     assert!(
-        spans.iter().any(|s| s
-            .text
-            .split_whitespace()
-            .collect::<String>()
-            .contains("N2O")),
+        spans
+            .iter()
+            .any(|s| s.text.split_whitespace().collect::<String>().contains("N2O")),
         "subscript drop split the rotated run: {spans:?}"
     );
 }

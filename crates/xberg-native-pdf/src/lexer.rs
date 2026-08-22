@@ -93,11 +93,13 @@ pub enum Token<'a> {
 ///
 /// Returns an error if no whitespace is found (requires at least one whitespace char).
 fn whitespace(input: &[u8]) -> IResult<&[u8], ()> {
-    let (remaining, ws) =
-        take_while(|c| matches!(c, b' ' | b'\t' | b'\r' | b'\n' | 0x00 | 0x0C)).parse(input)?;
+    let (remaining, ws) = take_while(|c| matches!(c, b' ' | b'\t' | b'\r' | b'\n' | 0x00 | 0x0C)).parse(input)?;
 
     if ws.is_empty() {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Space)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Space,
+        )));
     }
 
     Ok((remaining, ()))
@@ -158,7 +160,10 @@ fn parse_number(input: &[u8]) -> IResult<&[u8], Token<'_>> {
             // This occurs in malformed TJ arrays like `(v)-(e)` where `-` is a bare offset. ~keep
             return Ok((input, Token::Integer(0)));
         }
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Digit,
+        )));
     }
 
     if frac_part.is_some() {
@@ -167,24 +172,26 @@ fn parse_number(input: &[u8]) -> IResult<&[u8], Token<'_>> {
             num_str.push('-');
         }
         if let Some(int) = int_part {
-            num_str.push_str(std::str::from_utf8(int).map_err(|_| {
-                nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
-            })?);
+            num_str.push_str(
+                std::str::from_utf8(int)
+                    .map_err(|_| nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit)))?,
+            );
         } else {
             num_str.push('0');
         }
         num_str.push('.');
         if let Some(Some(frac)) = frac_part {
-            num_str.push_str(std::str::from_utf8(frac).map_err(|_| {
-                nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
-            })?);
+            num_str.push_str(
+                std::str::from_utf8(frac)
+                    .map_err(|_| nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit)))?,
+            );
         } else {
             num_str.push('0');
         }
 
-        let mut num: f64 = num_str.parse().map_err(|_| {
-            nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
-        })?;
+        let mut num: f64 = num_str
+            .parse()
+            .map_err(|_| nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit)))?;
         // PDF 32000-1:2008 Annex C.2, Table C.1: real values are bounded to
         // approximately ±3.403×10^38. `f64::from_str` saturates an
         // oversized all-digit literal to `f64::INFINITY` rather than
@@ -197,15 +204,13 @@ fn parse_number(input: &[u8]) -> IResult<&[u8], Token<'_>> {
         }
         Ok((input, Token::Real(num)))
     } else {
-        let int_bytes = int_part.ok_or_else(|| {
-            nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
-        })?;
-        let int_str = std::str::from_utf8(int_bytes).map_err(|_| {
-            nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
-        })?;
-        let mut num: i64 = int_str.parse().map_err(|_| {
-            nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit))
-        })?;
+        let int_bytes =
+            int_part.ok_or_else(|| nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit)))?;
+        let int_str = std::str::from_utf8(int_bytes)
+            .map_err(|_| nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit)))?;
+        let mut num: i64 = int_str
+            .parse()
+            .map_err(|_| nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit)))?;
         if sign == Some('-') {
             num = -num;
         }
@@ -247,23 +252,26 @@ fn parse_literal_string(input: &[u8]) -> IResult<&[u8], Token<'_>> {
                         pos += 1;
                     }
                 }
-            },
+            }
             b'(' => {
                 depth += 1;
                 pos += 1;
-            },
+            }
             b')' => {
                 depth -= 1;
                 pos += 1;
-            },
+            }
             _ => {
                 pos += 1;
-            },
+            }
         }
     }
 
     if depth != 0 {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
     }
 
     let content = &remaining[..pos - 1];
@@ -281,11 +289,18 @@ fn parse_literal_string(input: &[u8]) -> IResult<&[u8], Token<'_>> {
 /// Examples: <48656C6C6F> = "Hello", <901FA3> = bytes [0x90, 0x1F, 0xA3]
 fn parse_hex_string(input: &[u8]) -> IResult<&[u8], Token<'_>> {
     if input.len() >= 2 && input[0] == b'<' && input[1] == b'<' {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
     }
 
-    delimited(char('<'), map(take_while(|c: u8| c != b'>'), Token::HexString), char('>'))
-        .parse(input)
+    delimited(
+        char('<'),
+        map(take_while(|c: u8| c != b'>'), Token::HexString),
+        char('>'),
+    )
+    .parse(input)
 }
 
 /// Decode #XX escape sequences in PDF names.
@@ -430,10 +445,16 @@ fn parse_keyword(input: &[u8]) -> IResult<&[u8], Token<'_>> {
 /// preventing false matches on operator names like `RG`, `Re`, `RI`.
 fn parse_r_token(input: &[u8]) -> IResult<&[u8], Token<'_>> {
     if input.first() != Some(&b'R') {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
     }
     if input.len() > 1 && input[1].is_ascii_alphabetic() {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
     }
     Ok((&input[1..], Token::R))
 }
@@ -447,8 +468,7 @@ fn parse_r_token(input: &[u8]) -> IResult<&[u8], Token<'_>> {
 /// the same as a last resort, consuming alphanumeric chars and `_-+*@.!^~`.
 fn parse_bare_identifier(input: &[u8]) -> IResult<&[u8], Token<'_>> {
     let (rest, word) = take_while(|c: u8| {
-        c.is_ascii_alphanumeric()
-            || matches!(c, b'_' | b'-' | b'+' | b'*' | b'@' | b'.' | b'!' | b'^' | b'~')
+        c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'+' | b'*' | b'@' | b'.' | b'!' | b'^' | b'~')
     })(input)?;
     if word.is_empty() {
         return Err(nom::Err::Error(nom::error::Error::new(
@@ -480,8 +500,14 @@ fn parse_bare_identifier(input: &[u8]) -> IResult<&[u8], Token<'_>> {
 pub fn token(input: &[u8]) -> IResult<&[u8], Token<'_>> {
     let (input, _) = skip_ws(input)?;
 
-    alt((parse_keyword, parse_name, parse_number, parse_literal_string, parse_hex_string))
-        .parse(input)
+    alt((
+        parse_keyword,
+        parse_name,
+        parse_number,
+        parse_literal_string,
+        parse_hex_string,
+    ))
+    .parse(input)
 }
 
 /// Parse a single PDF token with lenient bare-identifier fallback.
@@ -584,7 +610,7 @@ mod tests {
         match tok {
             Token::Real(n) => {
                 assert!(n.is_finite() && n < 0.0, "expected a finite negative clamp, got {n}")
-            },
+            }
             other => panic!("expected Token::Real, got {other:?}"),
         }
     }

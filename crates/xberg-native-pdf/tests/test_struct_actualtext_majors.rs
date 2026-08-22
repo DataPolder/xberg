@@ -132,8 +132,7 @@ impl PdfBuilder {
         for i in 0..n_pages {
             let content_obj = first_content + i;
             let content_bytes = &self.page_contents[i as usize];
-            let mut stream =
-                format!("<< /Length {} >>\nstream\n", content_bytes.len()).into_bytes();
+            let mut stream = format!("<< /Length {} >>\nstream\n", content_bytes.len()).into_bytes();
             stream.extend_from_slice(content_bytes);
             stream.extend_from_slice(b"\nendstream");
             objs.insert(content_obj, stream);
@@ -307,12 +306,7 @@ fn fixture_major1_nested_bdc() -> Vec<u8> {
 
     // Tree: Document → P-A (10) → inner Span (11); Document → P-D (12)
     // Structure-tree pre-order MCID list: 10, 11, 12. ~keep
-    let _doc = b.add_elem(
-        Elem::new(8, "Document", 7)
-            .page(4)
-            .k(K::Obj(9))
-            .k(K::Obj(11)),
-    );
+    let _doc = b.add_elem(Elem::new(8, "Document", 7).page(4).k(K::Obj(9)).k(K::Obj(11)));
     let _p_a = b.add_elem(Elem::new(9, "P", 8).page(4).k(K::Mcid(10, 0)).k(K::Obj(10)));
     let _inner = b.add_elem(Elem::new(10, "Span", 9).page(4).k(K::Mcid(11, 0)));
     let _p_d = b.add_elem(Elem::new(11, "P", 8).page(4).k(K::Mcid(12, 0)));
@@ -328,7 +322,12 @@ fn major1_nested_bdc_restores_outer_mcid() {
     let doc = PdfDocument::from_bytes(pdf).expect("open");
     let extracted = doc.extract_text(0).expect("extract_text");
     for g in ['A', 'B', 'C', 'D'] {
-        assert!(extracted.contains(g), "{}: glyph must appear in output, got {:?}", g, extracted);
+        assert!(
+            extracted.contains(g),
+            "{}: glyph must appear in output, got {:?}",
+            g,
+            extracted
+        );
     }
     // C must precede D — the discriminator for MAJOR-1. When MAJOR-1
     // is broken, C carries mcid=None and lands in the "unconsumed

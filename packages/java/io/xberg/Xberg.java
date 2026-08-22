@@ -310,7 +310,7 @@ public final class Xberg {
      * logger slot, and we do not touch {@code log.set_max_level} unless our install
      * won, so we never silently raise or lower a level someone else configured.
      * In that case {@code pdf_oxide}'s glyph-drop records go wherever that other
-     * logger sends them instead of into take_pdf_oxide_render_warnings.
+     * logger sends them instead of into take_engine_render_warnings.
      * **Opt-in.** Nothing calls this automatically, and that is deliberate: xberg
      * is a library, and {@code log} has exactly one global backend slot per process. A
      * library that claims it on its own behalf breaks its embedder — a host that
@@ -322,7 +322,7 @@ public final class Xberg {
      * Returns {@code true} if this call (or an earlier one) installed the capture, and
      * {@code false} if some other component already owns the {@code log} backend — in which
      * case {@code pdf_oxide}'s glyph-drop records go to that logger and
-     * take_pdf_oxide_render_warnings stays empty.
+     * take_engine_render_warnings stays empty.
      *
      * Without this call the #1364 warnings are not produced. The glyph drop
      * itself is decided inside {@code pdf_oxide}, which reports it only through
@@ -364,8 +364,8 @@ public final class Xberg {
      * caller in {@code extractors.pdf.mod} to merge, so layout-path glyph drops are
      * no longer silently lost.
      */
-    public static List<ProcessingWarning> takePdfOxideRenderWarnings() throws XbergRsException {
-        return XbergRs.takePdfOxideRenderWarnings();
+    public static List<ProcessingWarning> takeEngineRenderWarnings() throws XbergRsException {
+        return XbergRs.takeEngineRenderWarnings();
     }
 
     /**

@@ -32,9 +32,7 @@ impl WhitespaceNormalizer {
     /// assert_eq!(normalizer.normalize("hello   world"), "hello world");
     /// ```
     pub fn new(preserve_layout_mode: bool) -> Self {
-        Self {
-            preserve_layout_mode,
-        }
+        Self { preserve_layout_mode }
     }
 
     /// Normalize whitespace in text.
@@ -62,10 +60,7 @@ impl WhitespaceNormalizer {
 
         let paragraphs: Vec<&str> = text.split("\n\n").collect();
 
-        let normalized_paragraphs: Vec<String> = paragraphs
-            .iter()
-            .map(|para| self.normalize_paragraph(para))
-            .collect();
+        let normalized_paragraphs: Vec<String> = paragraphs.iter().map(|para| self.normalize_paragraph(para)).collect();
 
         normalized_paragraphs.join("\n\n")
     }

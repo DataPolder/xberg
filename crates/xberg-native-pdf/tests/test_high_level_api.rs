@@ -44,25 +44,19 @@ mod pdf_builder_tests {
 
     #[test]
     fn test_builder_with_subject() {
-        let result = PdfBuilder::new()
-            .subject("Test Subject")
-            .from_text("Content");
+        let result = PdfBuilder::new().subject("Test Subject").from_text("Content");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_builder_with_keywords() {
-        let result = PdfBuilder::new()
-            .keywords("test, keywords")
-            .from_text("Content");
+        let result = PdfBuilder::new().keywords("test, keywords").from_text("Content");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_builder_with_page_size() {
-        let result = PdfBuilder::new()
-            .page_size(PageSize::A4)
-            .from_text("A4 content");
+        let result = PdfBuilder::new().page_size(PageSize::A4).from_text("A4 content");
         assert!(result.is_ok());
     }
 
@@ -82,17 +76,13 @@ mod pdf_builder_tests {
 
     #[test]
     fn test_builder_with_font_size() {
-        let result = PdfBuilder::new()
-            .font_size(14.0)
-            .from_text("Custom font size");
+        let result = PdfBuilder::new().font_size(14.0).from_text("Custom font size");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_builder_with_line_height() {
-        let result = PdfBuilder::new()
-            .line_height(1.8)
-            .from_text("Custom line height");
+        let result = PdfBuilder::new().line_height(1.8).from_text("Custom line height");
         assert!(result.is_ok());
     }
 
@@ -236,10 +226,7 @@ fn main() {
 
     #[test]
     fn test_config_access() {
-        let pdf = PdfBuilder::new()
-            .title("My Title")
-            .from_text("Content")
-            .unwrap();
+        let pdf = PdfBuilder::new().title("My Title").from_text("Content").unwrap();
 
         let config = pdf.config();
         assert_eq!(config.title, Some("My Title".to_string()));
@@ -460,10 +447,16 @@ mod markdown_styling_regression {
         let text: String = chars.iter().map(|c| c.char).collect();
         assert!(text.contains("Hello"), "heading text missing: {text:?}");
         assert!(text.contains("test"), "body text missing: {text:?}");
-        assert!(!text.contains('*'), "literal emphasis markers leaked into output: {text:?}");
+        assert!(
+            !text.contains('*'),
+            "literal emphasis markers leaked into output: {text:?}"
+        );
 
         let (body, heading) = alpha_size_extent(&chars);
-        assert!(heading >= body * 1.5, "heading not scaled: largest={heading} body={body}");
+        assert!(
+            heading >= body * 1.5,
+            "heading not scaled: largest={heading} body={body}"
+        );
 
         let heading_font = chars
             .iter()
@@ -471,7 +464,10 @@ mod markdown_styling_regression {
             .map(|c| c.font_name.to_lowercase())
             .next()
             .unwrap_or_default();
-        assert!(heading_font.contains("bold"), "heading not bold, font was {heading_font:?}");
+        assert!(
+            heading_font.contains("bold"),
+            "heading not bold, font was {heading_font:?}"
+        );
     }
 
     /// Characters belonging to a contiguous word, found by its first
@@ -485,7 +481,7 @@ mod markdown_styling_regression {
             Some(byte_pos) => {
                 let start = flat[..byte_pos].chars().count();
                 chars[start..start + word.chars().count()].iter().collect()
-            },
+            }
             None => Vec::new(),
         }
     }
@@ -499,14 +495,12 @@ mod markdown_styling_regression {
         let this = word_chars(&chars, "This");
         assert!(!some.is_empty() && !this.is_empty(), "words not extracted");
         assert!(
-            some.iter()
-                .all(|c| c.font_name.to_lowercase().contains("bold")),
+            some.iter().all(|c| c.font_name.to_lowercase().contains("bold")),
             "**some** not rendered bold: {:?}",
             some.iter().map(|c| &c.font_name).collect::<Vec<_>>()
         );
         assert!(
-            this.iter()
-                .all(|c| !c.font_name.to_lowercase().contains("bold")),
+            this.iter().all(|c| !c.font_name.to_lowercase().contains("bold")),
             "surrounding text wrongly bold"
         );
         let text: String = chars.iter().map(|c| c.char).collect();
@@ -554,10 +548,7 @@ mod markdown_styling_regression {
         let mut pdf = Pdf::from_markdown(md).unwrap();
         let chars = pdf.extract_chars(0).expect("extract chars");
         assert!(!chars.is_empty(), "code block produced no text");
-        let code_chars: Vec<_> = chars
-            .iter()
-            .filter(|c| "fnmai(){}".contains(c.char))
-            .collect();
+        let code_chars: Vec<_> = chars.iter().filter(|c| "fnmai(){}".contains(c.char)).collect();
         assert!(
             !code_chars.is_empty(),
             "no code characters extracted from Unicode-path document"
@@ -568,10 +559,7 @@ mod markdown_styling_regression {
         assert!(
             mono,
             "code block on Unicode path not monospace: {:?}",
-            code_chars
-                .iter()
-                .map(|c| (c.char, &c.font_name))
-                .collect::<Vec<_>>()
+            code_chars.iter().map(|c| (c.char, &c.font_name)).collect::<Vec<_>>()
         );
     }
 
@@ -612,10 +600,7 @@ mod document_builder_rich_text_regression {
     fn rich_paragraph_bold_and_italic_select_styled_faces() {
         let mut b = DocumentBuilder::new();
         {
-            let p = b
-                .page(PageSize::Letter)
-                .at(72.0, 700.0)
-                .font("Helvetica", 14.0);
+            let p = b.page(PageSize::Letter).at(72.0, 700.0).font("Helvetica", 14.0);
             p.rich_paragraph(&[
                 TextRun::normal("plain "),
                 TextRun::bold("BOLD "),
@@ -655,10 +640,7 @@ mod document_builder_rich_text_regression {
     fn rich_paragraph_inserts_space_between_runs() {
         let mut b = DocumentBuilder::new();
         {
-            let p = b
-                .page(PageSize::Letter)
-                .at(72.0, 700.0)
-                .font("Helvetica", 14.0);
+            let p = b.page(PageSize::Letter).at(72.0, 700.0).font("Helvetica", 14.0);
             p.rich_paragraph(&[TextRun::bold("Text Run 1"), TextRun::normal("Text Run 2")])
                 .done();
         }
@@ -683,10 +665,7 @@ mod document_builder_rich_text_regression {
         let mut b = DocumentBuilder::new();
         {
             let long_run = "word ".repeat(30);
-            let p = b
-                .page(PageSize::Letter)
-                .at(72.0, 700.0)
-                .font("Helvetica", 14.0);
+            let p = b.page(PageSize::Letter).at(72.0, 700.0).font("Helvetica", 14.0);
             p.rich_paragraph(&[TextRun::normal(long_run.trim()), TextRun::bold("TAIL")])
                 .done();
         }

@@ -91,10 +91,7 @@ impl GlyphDropTally {
     /// Only callers that actually render from the decoded string may build
     /// this; the CID-direct and CJK-substitution paths paint from the raw
     /// codes, and a decode miss says nothing about what they draw.
-    pub(crate) fn warning_omitted(
-        &self,
-        font_name: &str,
-    ) -> Option<crate::extractors::warnings::Warning> {
+    pub(crate) fn warning_omitted(&self, font_name: &str) -> Option<crate::extractors::warnings::Warning> {
         let (reason, char_code, _) = self.first?;
         Some(crate::extractors::warnings::Warning {
             category: crate::extractors::warnings::WarningCategory::GlyphDropped,
@@ -247,7 +244,7 @@ pub(crate) fn fallback_char_to_unicode(char_code: u32) -> String {
                 tracing::trace!("Character code 0x{:04X} is not a valid Unicode code point", code);
                 "?".to_string()
             }
-        },
+        }
     }
 }
 
@@ -324,7 +321,7 @@ pub(crate) fn get_byte_mode(font: Option<&FontInfo>) -> ByteMode {
                     } else {
                         ByteMode::OneByte
                     }
-                },
+                }
                 _ => ByteMode::OneByte,
             }
         } else {
@@ -361,9 +358,10 @@ impl<'a> Iterator for TextCharIter<'a> {
         }
 
         let (char_code, bytes_consumed) = match self.byte_mode {
-            ByteMode::TwoByte if self.index + 1 < self.bytes.len() => {
-                (((self.bytes[self.index] as u16) << 8) | (self.bytes[self.index + 1] as u16), 2)
-            },
+            ByteMode::TwoByte if self.index + 1 < self.bytes.len() => (
+                ((self.bytes[self.index] as u16) << 8) | (self.bytes[self.index + 1] as u16),
+                2,
+            ),
             ByteMode::ShiftJIS => {
                 let b = self.bytes[self.index];
                 let is_lead = (0x81..=0x9F).contains(&b) || (0xE0..=0xFC).contains(&b);
@@ -372,7 +370,7 @@ impl<'a> Iterator for TextCharIter<'a> {
                 } else {
                     (b as u16, 1)
                 }
-            },
+            }
             _ => (self.bytes[self.index] as u16, 1),
         };
 
@@ -540,10 +538,7 @@ pub(crate) fn decode_text_to_unicode(
 /// six uppercase letters and a `+` — is treated as a tag, so fonts whose
 /// real name contains `+` are left alone.
 pub(crate) fn strip_subset_prefix(name: &str) -> &str {
-    if name.len() > 7
-        && name.as_bytes()[6] == b'+'
-        && name[..6].chars().all(|c| c.is_ascii_uppercase())
-    {
+    if name.len() > 7 && name.as_bytes()[6] == b'+' && name[..6].chars().all(|c| c.is_ascii_uppercase()) {
         &name[7..]
     } else {
         name
@@ -568,13 +563,13 @@ pub(crate) fn best_truetype_cmaps<'a>(
     for font in fonts {
         if let Some(cmap) = font.truetype_cmap() {
             let stripped = strip_subset_prefix(&font.base_font).to_string();
-            let dominated = best
-                .get(&stripped)
-                .is_none_or(|(existing, existing_name)| match cmap.len().cmp(&existing.len()) {
-                    std::cmp::Ordering::Greater => true,
-                    std::cmp::Ordering::Equal => font.base_font < *existing_name,
-                    std::cmp::Ordering::Less => false,
-                });
+            let dominated =
+                best.get(&stripped)
+                    .is_none_or(|(existing, existing_name)| match cmap.len().cmp(&existing.len()) {
+                        std::cmp::Ordering::Greater => true,
+                        std::cmp::Ordering::Equal => font.base_font < *existing_name,
+                        std::cmp::Ordering::Less => false,
+                    });
             if dominated {
                 best.insert(stripped, (cmap.clone(), font.base_font.clone()));
             }
@@ -661,7 +656,10 @@ mod tests {
     fn char_codes_with_len_reports_the_bytes_each_code_consumed() {
         let font = utf8_cmap_font();
         let bytes = [0x41, 0xC3, 0xA9, 0xE4, 0xB8, 0xAD];
-        assert_eq!(char_codes_with_len(&bytes, &font), vec![(0x41, 1), (0xC3A9, 2), (0xE4B8AD, 3)]);
+        assert_eq!(
+            char_codes_with_len(&bytes, &font),
+            vec![(0x41, 1), (0xC3A9, 2), (0xE4B8AD, 3)]
+        );
     }
 
     /// A tally with no drops has no warning to report.

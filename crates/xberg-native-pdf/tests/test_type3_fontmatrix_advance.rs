@@ -57,7 +57,10 @@ fn type3_pdf_no_widths_array(font_matrix_a: f64, tfs: f64) -> Vec<u8> {
     push(
         &mut out,
         &mut offsets,
-        &format!("<< /Length {} >>\nstream\n{char_proc_a}\nendstream", char_proc_a.len() + 1),
+        &format!(
+            "<< /Length {} >>\nstream\n{char_proc_a}\nendstream",
+            char_proc_a.len() + 1
+        ),
     );
 
     let xref_offset = out.len();
@@ -125,7 +128,10 @@ fn type3_pdf_advance(font_matrix_a: f64, glyph_width: f64, tfs: f64) -> Vec<u8> 
     push(
         &mut out,
         &mut offsets,
-        &format!("<< /Length {} >>\nstream\n{char_proc_a}\nendstream", char_proc_a.len() + 1),
+        &format!(
+            "<< /Length {} >>\nstream\n{char_proc_a}\nendstream",
+            char_proc_a.len() + 1
+        ),
     );
 
     let xref_offset = out.len();

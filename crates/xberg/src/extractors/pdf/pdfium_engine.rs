@@ -155,7 +155,9 @@ fn open_document<'a>(pdfium: &'a Pdfium, content: &'a [u8], passwords: &[String]
                  configured passwords opened it",
             ))
         }
-        Err(err) => Err(XbergError::parsing(format!("pdfium failed to open the document: {err}"))),
+        Err(err) => Err(XbergError::parsing(format!(
+            "pdfium failed to open the document: {err}"
+        ))),
     }
 }
 
@@ -180,9 +182,9 @@ fn extract_blocking(content: &[u8], mime_type: &str, passwords: &[String]) -> Re
 
     for (index, page) in document.pages().iter().enumerate() {
         let page_number = (index + 1) as u32;
-        let page_text = page.text().map_err(|err| {
-            XbergError::parsing(format!("pdfium failed to read text on page {page_number}: {err}"))
-        })?;
+        let page_text = page
+            .text()
+            .map_err(|err| XbergError::parsing(format!("pdfium failed to read text on page {page_number}: {err}")))?;
 
         let byte_start = joined_text.len();
         joined_text.push_str(&page_text.all());

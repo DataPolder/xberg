@@ -83,8 +83,7 @@ mod text_search {
         let results = TextSearcher::search(&doc, "hello", &options).expect("Search failed");
 
         let options_insensitive = SearchOptions::case_insensitive();
-        let results_insensitive =
-            TextSearcher::search(&doc, "hello", &options_insensitive).expect("Search failed");
+        let results_insensitive = TextSearcher::search(&doc, "hello", &options_insensitive).expect("Search failed");
 
         assert!(
             results_insensitive.len() >= results.len(),
@@ -114,8 +113,7 @@ mod text_search {
 
     #[test]
     fn test_literal_search() {
-        let bytes =
-            create_test_pdf_with_text("The regex a.b matches axb but literal a.b only matches a.b");
+        let bytes = create_test_pdf_with_text("The regex a.b matches axb but literal a.b only matches a.b");
 
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let temp_path = temp_dir.path().join("test_search_literal.pdf");
@@ -185,8 +183,7 @@ mod text_search {
         let doc = PdfDocument::open(&temp_path).expect("Failed to open PDF");
 
         let options = SearchOptions::default();
-        let results =
-            TextSearcher::search(&doc, "xyz123notfound", &options).expect("Search failed");
+        let results = TextSearcher::search(&doc, "xyz123notfound", &options).expect("Search failed");
 
         assert!(results.is_empty(), "Should return empty results for non-existent text");
 
@@ -248,9 +245,7 @@ mod api_integration {
         let mut pdf = Pdf::open(&temp_path).expect("Failed to open PDF");
 
         let options = SearchOptions::case_insensitive();
-        let results = pdf
-            .search_with_options("search", options)
-            .expect("Search failed");
+        let results = pdf.search_with_options("search", options).expect("Search failed");
 
         assert!(
             !results.is_empty(),

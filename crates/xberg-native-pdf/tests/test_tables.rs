@@ -3,8 +3,8 @@
 //! Tests table creation, layout calculation, and rendering.
 
 use xberg_native_pdf::writer::{
-    Borders, CellAlign, CellPadding, CellVAlign, ColumnWidth, ContentStreamBuilder,
-    SimpleFontMetrics, Table, TableBorderStyle, TableCell, TableRow, TableStyle,
+    Borders, CellAlign, CellPadding, CellVAlign, ColumnWidth, ContentStreamBuilder, SimpleFontMetrics, Table,
+    TableBorderStyle, TableCell, TableRow, TableStyle,
 };
 
 // =============================================================================
@@ -116,11 +116,7 @@ mod row_tests {
 
     #[test]
     fn test_row_creation() {
-        let row = TableRow::new(vec![
-            TableCell::text("A"),
-            TableCell::text("B"),
-            TableCell::text("C"),
-        ]);
+        let row = TableRow::new(vec![TableCell::text("A"), TableCell::text("B"), TableCell::text("C")]);
         assert_eq!(row.cells.len(), 3);
         assert!(!row.is_header);
     }
@@ -545,9 +541,7 @@ mod rendering_tests {
 
     #[test]
     fn test_table_with_background_renders() {
-        let table = Table::new(vec![vec![
-            TableCell::text("Highlighted").background(1.0, 1.0, 0.0),
-        ]]);
+        let table = Table::new(vec![vec![TableCell::text("Highlighted").background(1.0, 1.0, 0.0)]]);
 
         let metrics = SimpleFontMetrics::default();
         let layout = table.calculate_layout(200.0, &metrics);
@@ -565,8 +559,7 @@ mod rendering_tests {
 
     #[test]
     fn test_table_with_borders_renders() {
-        let table =
-            Table::new(vec![vec![TableCell::text("Bordered")]]).with_style(TableStyle::bordered());
+        let table = Table::new(vec![vec![TableCell::text("Bordered")]]).with_style(TableStyle::bordered());
 
         let metrics = SimpleFontMetrics::default();
         let layout = table.calculate_layout(200.0, &metrics);
@@ -629,11 +622,7 @@ mod integration_tests {
     fn test_table_with_colspan() {
         let table = Table::new(vec![
             vec![TableCell::text("Header").colspan(3)],
-            vec![
-                TableCell::text("A"),
-                TableCell::text("B"),
-                TableCell::text("C"),
-            ],
+            vec![TableCell::text("A"), TableCell::text("B"), TableCell::text("C")],
         ]);
 
         assert_eq!(table.num_columns(), 3);

@@ -42,10 +42,7 @@ impl HierarchicalExtractor {
     /// - Handles both direct and indirect children per §14.7.4
     /// - Processes MCID (Marked Content ID) references per §14.7.4
     /// - Generates synthetic structure using geometric analysis for untagged PDFs
-    pub fn extract_page(
-        document: &PdfDocument,
-        page_index: usize,
-    ) -> Result<Option<StructureElement>> {
+    pub fn extract_page(document: &PdfDocument, page_index: usize) -> Result<Option<StructureElement>> {
         let page_count = document.page_count()?;
         if page_index >= page_count {
             return Err(crate::error::Error::InvalidPdf(format!(
@@ -84,21 +81,14 @@ impl HierarchicalExtractor {
     /// # Returns
     ///
     /// `Ok(Some(structure))` with synthetic hierarchy, or `Ok(None)` if page is empty
-    pub fn generate_synthetic_structure(
-        document: &PdfDocument,
-        page_index: usize,
-    ) -> Result<Option<StructureElement>> {
+    pub fn generate_synthetic_structure(document: &PdfDocument, page_index: usize) -> Result<Option<StructureElement>> {
         use crate::elements::{ContentElement, TextContent};
 
         // Extract text spans from the page
         // Handle pages without content gracefully (return empty structure) ~keep
         let text_spans = match document.extract_spans(page_index) {
             Ok(spans) => spans,
-            Err(crate::error::Error::ParseError { reason, .. })
-                if reason.contains("no Contents") =>
-            {
-                Vec::new()
-            },
+            Err(crate::error::Error::ParseError { reason, .. }) if reason.contains("no Contents") => Vec::new(),
             Err(e) => return Err(e),
         };
 

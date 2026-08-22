@@ -334,10 +334,26 @@ fn nchannel_process_subtype_routes_to_process_class() {
     let m = centre(plate(&plates, "Magenta"));
     let y = centre(plate(&plates, "Yellow"));
     let k = centre(plate(&plates, "Black"));
-    assert_eq!(c, 115, "/NChannel /Process: C lane mismatch with /DeviceN. Got u8 {}.", c);
-    assert_eq!(m, 26, "/NChannel /Process: M lane mismatch with /DeviceN. Got u8 {}.", m);
-    assert_eq!(y, 89, "/NChannel /Process: Y lane mismatch with /DeviceN. Got u8 {}.", y);
-    assert_eq!(k, 13, "/NChannel /Process: K lane mismatch with /DeviceN. Got u8 {}.", k);
+    assert_eq!(
+        c, 115,
+        "/NChannel /Process: C lane mismatch with /DeviceN. Got u8 {}.",
+        c
+    );
+    assert_eq!(
+        m, 26,
+        "/NChannel /Process: M lane mismatch with /DeviceN. Got u8 {}.",
+        m
+    );
+    assert_eq!(
+        y, 89,
+        "/NChannel /Process: Y lane mismatch with /DeviceN. Got u8 {}.",
+        y
+    );
+    assert_eq!(
+        k, 13,
+        "/NChannel /Process: K lane mismatch with /DeviceN. Got u8 {}.",
+        k
+    );
 }
 
 /// Pure-OP DeviceCMYK rendered through the per-plate walker baseline.
@@ -605,7 +621,11 @@ fn stale_fill_color_cmyk_cleared_by_g_operator() {
          is back. Got u8 {}.",
         c
     );
-    assert_eq!(m, 64, "M lane: c_s=0 (gray), c_b=0.5, α=0.5 → 0.25 → u8 64. Got u8 {}.", m);
+    assert_eq!(
+        m, 64,
+        "M lane: c_s=0 (gray), c_b=0.5, α=0.5 → 0.25 → u8 64. Got u8 {}.",
+        m
+    );
     assert_eq!(
         k, 96,
         "K lane: c_s=0.75 (gray→K=1-g=0.75), c_b=0, α=0.5 → 0.375 → u8 \
@@ -962,8 +982,7 @@ fn stroke_op_uppercase_and_fill_op_lowercase_independent() {
     // stroke/fill ordering which is path-painter-specific. ~keep
     let content = "0.2 0.5 0 0 k\n0 0 100 100 re\nf\n\
                    /Ov gs\n1 0 0 0 k\n1 0 0 0 K\n10 10 80 80 re\nB\n";
-    let resources =
-        "/ExtGState << /Ov << /Type /ExtGState /op true /OP false /ca 0.5 /CA 0.5 >> >>";
+    let resources = "/ExtGState << /Ov << /Type /ExtGState /op true /OP false /ca 0.5 /CA 0.5 >> >>";
     let pdf = build_pdf_with_output_intent(content, resources, &icc, &[]);
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");

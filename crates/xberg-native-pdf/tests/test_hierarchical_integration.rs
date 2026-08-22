@@ -159,9 +159,8 @@ mod hierarchical_integration_tests {
     #[test]
     fn test_standard_structure_types() {
         let standard_types = vec![
-            "Document", "Part", "Art", "Sect", "Div", "P", "H1", "H2", "H3", "H4", "H5", "H6",
-            "List", "ListItem", "Label", "ListBody", "Table", "THead", "TBody", "TFoot", "TR",
-            "TD", "TH", "Span", "Quote", "Code", "Link",
+            "Document", "Part", "Art", "Sect", "Div", "P", "H1", "H2", "H3", "H4", "H5", "H6", "List", "ListItem",
+            "Label", "ListBody", "Table", "THead", "TBody", "TFoot", "TR", "TD", "TH", "Span", "Quote", "Code", "Link",
         ];
 
         for type_name in standard_types {
@@ -285,12 +284,7 @@ mod hierarchical_integration_tests {
     /// Test structure type formatting.
     #[test]
     fn test_structure_type_formatting() {
-        let types = vec![
-            ("Document", "Document"),
-            ("H1", "H1"),
-            ("P", "P"),
-            ("Sect", "Sect"),
-        ];
+        let types = vec![("Document", "Document"), ("H1", "H1"), ("P", "P"), ("Sect", "Sect")];
 
         for (input, expected) in types {
             let structure = StructureElement {

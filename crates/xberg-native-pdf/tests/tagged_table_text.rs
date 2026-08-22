@@ -26,9 +26,7 @@ fn tagged_table_pdf() -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
@@ -75,8 +73,18 @@ fn tagged_table_pdf() -> Vec<u8> {
         10,
         "<< /Type /StructElem /S /TR /P 8 0 R /K [13 0 R 14 0 R] >>",
     );
-    obj(&mut buf, &mut off, 11, "<< /Type /StructElem /S /TD /P 9 0 R /Pg 3 0 R /K 0 >>");
-    obj(&mut buf, &mut off, 12, "<< /Type /StructElem /S /TD /P 9 0 R /Pg 3 0 R /K 1 >>");
+    obj(
+        &mut buf,
+        &mut off,
+        11,
+        "<< /Type /StructElem /S /TD /P 9 0 R /Pg 3 0 R /K 0 >>",
+    );
+    obj(
+        &mut buf,
+        &mut off,
+        12,
+        "<< /Type /StructElem /S /TD /P 9 0 R /Pg 3 0 R /K 1 >>",
+    );
     obj(
         &mut buf,
         &mut off,

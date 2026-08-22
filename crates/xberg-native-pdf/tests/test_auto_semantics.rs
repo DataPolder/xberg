@@ -11,9 +11,7 @@
 //!    `OcrRequestedButUnavailable`, even if the classifier wanted OCR.
 
 use xberg_native_pdf::document::PdfDocument;
-use xberg_native_pdf::extractors::auto::{
-    AutoExtractor, ExtractSource, ExtractionStatus, PageKind, ReasonCode,
-};
+use xberg_native_pdf::extractors::auto::{AutoExtractor, ExtractSource, ExtractionStatus, PageKind, ReasonCode};
 
 const TEXT_PDF: &str = "tests/fixtures/1.pdf";
 
@@ -84,9 +82,7 @@ fn clean_sparse_text_is_textlayer_not_scanned() {
 #[test]
 fn complete_native_text_reports_complete_not_partial() {
     let doc = PdfDocument::from_bytes(tiny_text_pdf()).expect("open tiny text pdf");
-    let pe = AutoExtractor::new()
-        .extract_page(&doc, 0)
-        .expect("extract_page");
+    let pe = AutoExtractor::new().extract_page(&doc, 0).expect("extract_page");
     assert!(!pe.text.trim().is_empty(), "expected non-empty native text");
     assert_eq!(
         pe.status,

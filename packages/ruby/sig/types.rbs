@@ -2925,7 +2925,7 @@ module Xberg
 
   def self.install_pdf_render_diagnostics: () -> bool
 
-  def self.take_pdf_oxide_render_warnings: () -> Array[ProcessingWarning]
+  def self.take_engine_render_warnings: () -> Array[ProcessingWarning]
 
   def self.build_decoder_prompt_tokens: (Integer start_of_transcript, Integer lang_id, Integer transcribe, Integer no_timestamps, bool timestamps) -> Array[Integer]
 

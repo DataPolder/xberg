@@ -96,15 +96,11 @@ impl ObjectSerializer {
             Object::String(s) => {
                 let encrypted = handler.encrypt_string(s, obj_num, gen_num);
                 self.write_string(w, &encrypted)
-            },
+            }
             Object::Name(n) => self.write_name(w, n),
             Object::Array(arr) => self.write_array_encrypted(w, arr, obj_num, gen_num, handler),
-            Object::Dictionary(dict) => {
-                self.write_dictionary_encrypted(w, dict, obj_num, gen_num, handler)
-            },
-            Object::Stream { dict, data } => {
-                self.write_stream_encrypted(w, dict, data, obj_num, gen_num, handler)
-            },
+            Object::Dictionary(dict) => self.write_dictionary_encrypted(w, dict, obj_num, gen_num, handler),
+            Object::Stream { dict, data } => self.write_stream_encrypted(w, dict, data, obj_num, gen_num, handler),
             Object::Reference(r) => write!(w, "{} {} R", r.id, r.generation),
         }
     }
@@ -265,10 +261,10 @@ impl ObjectSerializer {
                 | b'|'
                 | b'~' => {
                     w.write_all(&[byte])?;
-                },
+                }
                 _ => {
                     write!(w, "#{:02X}", byte)?;
-                },
+                }
             }
         }
         Ok(())
@@ -287,11 +283,7 @@ impl ObjectSerializer {
     }
 
     /// Write a PDF dictionary.
-    fn write_dictionary<W: Write>(
-        &self,
-        w: &mut W,
-        dict: &HashMap<String, Object>,
-    ) -> std::io::Result<()> {
+    fn write_dictionary<W: Write>(&self, w: &mut W, dict: &HashMap<String, Object>) -> std::io::Result<()> {
         write!(w, "<<")?;
 
         // Sort keys for deterministic output ~keep
@@ -316,12 +308,7 @@ impl ObjectSerializer {
     }
 
     /// Write a PDF stream.
-    fn write_stream<W: Write>(
-        &self,
-        w: &mut W,
-        dict: &HashMap<String, Object>,
-        data: &[u8],
-    ) -> std::io::Result<()> {
+    fn write_stream<W: Write>(&self, w: &mut W, dict: &HashMap<String, Object>, data: &[u8]) -> std::io::Result<()> {
         let mut dict_with_length = dict.clone();
         if !dict_with_length.contains_key("Length") {
             dict_with_length.insert("Length".to_string(), Object::Integer(data.len() as i64));
@@ -371,10 +358,7 @@ impl ObjectSerializer {
 
     /// Create a Dictionary object.
     pub fn dict(entries: Vec<(&str, Object)>) -> Object {
-        let map: HashMap<String, Object> = entries
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
+        let map: HashMap<String, Object> = entries.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
         Object::Dictionary(map)
     }
 
@@ -433,8 +417,8 @@ pub(crate) fn hoist_appearance_streams(
                     for state in states.values_mut() {
                         hoist(state, &mut extracted);
                     }
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
     }
@@ -559,7 +543,10 @@ mod tests {
     #[test]
     fn test_serialize_hex_string() {
         let s = ObjectSerializer::new();
-        assert_eq!(s.serialize_to_string(&Object::String(vec![0x00, 0xFF, 0x80])), "<00FF80>");
+        assert_eq!(
+            s.serialize_to_string(&Object::String(vec![0x00, 0xFF, 0x80])),
+            "<00FF80>"
+        );
     }
 
     #[test]

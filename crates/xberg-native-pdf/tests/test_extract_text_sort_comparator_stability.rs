@@ -20,7 +20,11 @@ const FIXTURE: &str = "tests/fixtures/1008.3918v2.pdf";
 fn extract_text_does_not_panic_on_nan_span_positions() {
     let doc = PdfDocument::open(FIXTURE).expect("open fixture");
     let page_count = doc.page_count().expect("page_count");
-    assert!(page_count >= 15, "fixture should have at least 15 pages, got {}", page_count);
+    assert!(
+        page_count >= 15,
+        "fixture should have at least 15 pages, got {}",
+        page_count
+    );
 
     // Page 15 (1-indexed in the bug report) → 0-indexed 14.
     // The extraction must not panic. We don't assert on specific

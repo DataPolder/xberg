@@ -11910,13 +11910,8 @@ approval of the rezoning request; and";
         let thresholds = OcrQualityThresholds::default();
         let mut warnings = Vec::new();
 
-        let (text, rejected) = accept_or_reject_ocr_page(
-            3,
-            PLAT_DRAWING_NOISE.to_string(),
-            &thresholds,
-            &mut warnings,
-            None,
-        );
+        let (text, rejected) =
+            accept_or_reject_ocr_page(3, PLAT_DRAWING_NOISE.to_string(), &thresholds, &mut warnings, None);
         assert!(
             rejected,
             "the plat drawing must be reported as rejected, not merely emptied"
@@ -12447,13 +12442,8 @@ Each row of the preceding table records one measurement taken during the survey 
         );
 
         let mut warnings = Vec::new();
-        let (text, rejected) = accept_or_reject_ocr_page(
-            0,
-            ORDINANCE_PROSE.to_string(),
-            &configured,
-            &mut warnings,
-            Some(0.9),
-        );
+        let (text, rejected) =
+            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &configured, &mut warnings, Some(0.9));
         assert!(
             rejected,
             "a page failing only the dictionary signal must still be rejected"

@@ -149,12 +149,7 @@ impl SystemFontDb {
     /// `fantasy`, `system-ui`) are translated to fontdb's `Family`
     /// generic variants which delegate to the host's configured
     /// defaults.
-    pub fn resolve(
-        &self,
-        families: &[&str],
-        weight: u16,
-        style: FontStyle,
-    ) -> Result<ResolvedFont, FontResolveError> {
+    pub fn resolve(&self, families: &[&str], weight: u16, style: FontStyle) -> Result<ResolvedFont, FontResolveError> {
         self.ensure_loaded();
 
         // Hold the fontdb Mutex *only* long enough to pick a face and
@@ -171,9 +166,7 @@ impl SystemFontDb {
 
         let resolved_meta: Option<(String, PathBuf, String)> = {
             let guard = self.inner.lock().expect("system font db mutex");
-            let db = guard
-                .as_ref()
-                .expect("ensure_loaded populated the database");
+            let db = guard.as_ref().expect("ensure_loaded populated the database");
 
             let mut found: Option<(String, PathBuf, String)> = None;
             for &family in families {
@@ -205,7 +198,7 @@ impl SystemFontDb {
                     Ok((path, postscript_family)) => {
                         found = Some((family_norm.to_string(), path, postscript_family));
                         break;
-                    },
+                    }
                     Err(_) => continue,
                 }
             }
@@ -238,14 +231,8 @@ impl SystemFontDb {
 /// while holding the fontdb Mutex. Intentionally does **not** read
 /// the file — the caller does that after dropping the lock so
 /// concurrent `resolve` calls don't serialise on slow I/O.
-fn face_metadata(
-    db: &Database,
-    id: ID,
-    matched_family: &str,
-) -> Result<(PathBuf, String), FontResolveError> {
-    let face = db
-        .face(id)
-        .expect("fontdb returned an ID it doesn't recognise");
+fn face_metadata(db: &Database, id: ID, matched_family: &str) -> Result<(PathBuf, String), FontResolveError> {
+    let face = db.face(id).expect("fontdb returned an ID it doesn't recognise");
     let path = match &face.source {
         fontdb::Source::File(p) => p.clone(),
         // TTC collections (e.g. /System/Library/Fonts/Helvetica.ttc) load
@@ -263,7 +250,7 @@ fn face_metadata(
             return Err(FontResolveError::NoPath {
                 family: matched_family.to_string(),
             });
-        },
+        }
     };
     // FaceInfo::families is a Vec<(String, Option<String>)> of (name,
     // BCP-47 language tag); pick the English entry if present, otherwise
@@ -295,10 +282,10 @@ mod tests {
             Ok(r) => {
                 assert!(!r.bytes.is_empty(), "resolved font had empty bytes");
                 assert!(r.path.exists(), "resolved path must exist");
-            },
+            }
             Err(FontResolveError::NoMatch { .. }) => {
                 eprintln!("no system sans-serif on this host; skipping (CI sandbox?)");
-            },
+            }
             Err(other) => panic!("unexpected resolve error: {other:?}"),
         }
     }
@@ -306,8 +293,7 @@ mod tests {
     #[test]
     fn resolves_specific_family_with_fallback() {
         let db = SystemFontDb::new();
-        let resolved =
-            db.resolve(&["NonExistentFontFromTheVoid", "sans-serif"], 400, FontStyle::Normal);
+        let resolved = db.resolve(&["NonExistentFontFromTheVoid", "sans-serif"], 400, FontStyle::Normal);
         if let Ok(r) = resolved {
             assert!(!r.bytes.is_empty());
             assert_ne!(r.matched_family, "NonExistentFontFromTheVoid");

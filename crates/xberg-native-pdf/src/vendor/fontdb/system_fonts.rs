@@ -65,7 +65,7 @@ impl Database {
                     "failed to read font file; skipping",
                 );
                 return;
-            },
+            }
         };
 
         let source = Source::File(path.to_path_buf());
@@ -84,7 +84,7 @@ impl Database {
                         "loaded font face",
                     );
                     self.faces.push(info);
-                },
+                }
                 Err(error) => tracing::warn!(
                     target: "xberg_native_pdf::vendor::fontdb",
                     path = %path.display(),
@@ -113,10 +113,7 @@ impl Database {
 
             if let Ok(home) = std::env::var("USERPROFILE") {
                 let home_path = Path::new(&home);
-                self.load_fonts_dir_impl(
-                    &home_path.join("AppData\\Local\\Microsoft\\Windows\\Fonts"),
-                    &mut seen,
-                );
+                self.load_fonts_dir_impl(&home_path.join("AppData\\Local\\Microsoft\\Windows\\Fonts"), &mut seen);
                 self.load_fonts_dir_impl(
                     &home_path.join("AppData\\Roaming\\Microsoft\\Windows\\Fonts"),
                     &mut seen,
@@ -155,10 +152,7 @@ impl Database {
         }
 
         // Linux/BSD. ~keep
-        #[cfg(all(
-            unix,
-            not(any(target_os = "macos", target_os = "ios", target_os = "android"))
-        ))]
+        #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
         {
             if !self.load_fontconfig() {
                 tracing::warn!(
@@ -173,10 +167,7 @@ impl Database {
     /// Scans the hard-coded Linux/BSD font directories directly, without
     /// consulting fontconfig. Used as a fallback when fontconfig parsing
     /// fails or reports no directories.
-    #[cfg(all(
-        unix,
-        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
-    ))]
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
     fn load_no_fontconfig(&mut self) {
         let mut seen = HashSet::default();
         self.load_fonts_dir_impl(Path::new("/usr/share/fonts/"), &mut seen);
@@ -198,10 +189,7 @@ impl Database {
     ///
     /// Returns `false` (caller falls back to `load_no_fontconfig`) when no
     /// fontconfig directories were found, matching upstream fontdb.
-    #[cfg(all(
-        unix,
-        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
-    ))]
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
     fn load_fontconfig(&mut self) -> bool {
         let mut fontconfig = fontconfig_parser::FontConfig::default();
         let home = std::env::var("HOME");
@@ -220,9 +208,7 @@ impl Database {
             };
 
             let read_global = match xdg_config_home {
-                Some(p) => fontconfig
-                    .merge_config(&p.join("fontconfig/fonts.conf"))
-                    .is_err(),
+                Some(p) => fontconfig.merge_config(&p.join("fontconfig/fonts.conf")).is_err(),
                 None => true,
             };
 
@@ -239,10 +225,7 @@ impl Database {
             accept,
         } in fontconfig.aliases
         {
-            let name = prefer
-                .first()
-                .or_else(|| accept.first())
-                .or_else(|| default.first());
+            let name = prefer.first().or_else(|| accept.first()).or_else(|| default.first());
 
             if let Some(name) = name {
                 match alias.to_lowercase().as_str() {
@@ -251,7 +234,7 @@ impl Database {
                     "monospace" => self.set_monospace_family(name.as_str()),
                     "cursive" => self.set_cursive_family(name.as_str()),
                     "fantasy" => self.set_fantasy_family(name.as_str()),
-                    _ => {},
+                    _ => {}
                 }
             }
         }

@@ -260,7 +260,10 @@ impl ShadingPatternBuilder {
         }
 
         if let Some(id) = self.ext_gstate_id {
-            dict.insert(key("ExtGState"), Object::Reference(crate::object::ObjectRef::new(id, 0)));
+            dict.insert(
+                key("ExtGState"),
+                Object::Reference(crate::object::ObjectRef::new(id, 0)),
+            );
         }
 
         Object::Dictionary(dict)
@@ -272,12 +275,7 @@ pub struct PatternPresets;
 
 impl PatternPresets {
     /// Create horizontal stripes pattern content.
-    pub fn horizontal_stripes(
-        width: f32,
-        _height: f32,
-        stripe_height: f32,
-        color: Color,
-    ) -> Vec<u8> {
+    pub fn horizontal_stripes(width: f32, _height: f32, stripe_height: f32, color: Color) -> Vec<u8> {
         format!(
             "{} {} {} rg\n0 0 {} {} re\nf\n",
             color.r, color.g, color.b, width, stripe_height
@@ -391,8 +389,7 @@ mod tests {
 
     #[test]
     fn test_tiling_pattern_builder() {
-        let content =
-            PatternPresets::horizontal_stripes(10.0, 10.0, 5.0, Color::new(1.0, 0.0, 0.0));
+        let content = PatternPresets::horizontal_stripes(10.0, 10.0, 5.0, Color::new(1.0, 0.0, 0.0));
         let (dict, _content) = TilingPatternBuilder::new()
             .bbox(0.0, 0.0, 10.0, 10.0)
             .step(10.0, 10.0)

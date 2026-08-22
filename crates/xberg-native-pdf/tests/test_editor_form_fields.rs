@@ -17,8 +17,7 @@ fn test_add_text_field_to_existing_pdf() {
     let name = editor
         .add_form_field(
             0,
-            TextFieldWidget::new("email", Rect::new(100.0, 700.0, 200.0, 20.0))
-                .with_value("test@example.com"),
+            TextFieldWidget::new("email", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("test@example.com"),
         )
         .unwrap();
 
@@ -93,7 +92,10 @@ fn test_remove_form_field() {
     let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
 
     editor
-        .add_form_field(0, TextFieldWidget::new("to_remove", Rect::new(100.0, 700.0, 200.0, 20.0)))
+        .add_form_field(
+            0,
+            TextFieldWidget::new("to_remove", Rect::new(100.0, 700.0, 200.0, 20.0)),
+        )
         .unwrap();
 
     assert!(editor.has_form_field("to_remove").unwrap());
@@ -111,8 +113,7 @@ fn test_set_form_field_value() {
     editor
         .add_form_field(
             0,
-            TextFieldWidget::new("name", Rect::new(100.0, 700.0, 200.0, 20.0))
-                .with_value("initial"),
+            TextFieldWidget::new("name", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("initial"),
         )
         .unwrap();
 
@@ -168,8 +169,7 @@ fn test_remove_nonexistent_field() {
 fn test_add_field_invalid_page() {
     let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
 
-    let result = editor
-        .add_form_field(100, TextFieldWidget::new("field", Rect::new(100.0, 700.0, 200.0, 20.0)));
+    let result = editor.add_form_field(100, TextFieldWidget::new("field", Rect::new(100.0, 700.0, 200.0, 20.0)));
 
     assert!(result.is_err());
 }
@@ -188,8 +188,7 @@ fn test_multiple_field_types_same_page() {
     editor
         .add_form_field(
             0,
-            ComboBoxWidget::new("combo", Rect::new(100.0, 600.0, 150.0, 20.0))
-                .with_options(vec!["A", "B", "C"]),
+            ComboBoxWidget::new("combo", Rect::new(100.0, 600.0, 150.0, 20.0)).with_options(vec!["A", "B", "C"]),
         )
         .unwrap();
 

@@ -146,8 +146,7 @@ impl PdfBuilder {
         for i in 0..n_pages {
             let content_obj = first_content + i;
             let content_bytes = &self.page_contents[i as usize];
-            let mut stream =
-                format!("<< /Length {} >>\nstream\n", content_bytes.len()).into_bytes();
+            let mut stream = format!("<< /Length {} >>\nstream\n", content_bytes.len()).into_bytes();
             stream.extend_from_slice(content_bytes);
             stream.extend_from_slice(b"\nendstream");
             objs.insert(content_obj, stream);
@@ -282,12 +281,7 @@ fn one_mcid_content(g: char) -> Vec<u8> {
 fn make_struct_with_actualtext(stype: &'static str) -> Vec<u8> {
     let mut b = PdfBuilder::new();
     b.add_page_content(one_mcid_content('X'));
-    let _ = b.add_elem(
-        Elem::new(8, stype, 7)
-            .page(4)
-            .actual_text("R")
-            .k(K::Mcid(0, 0)),
-    );
+    let _ = b.add_elem(Elem::new(8, stype, 7).page(4).actual_text("R").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     b.build()
 }
@@ -323,12 +317,7 @@ fn actualtext_long_string_round_trips() {
 
     let mut b = PdfBuilder::new();
     b.add_page_content(one_mcid_content('X'));
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text(&long)
-            .k(K::Mcid(0, 0)),
-    );
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text(&long).k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
 
     let pdf = b.build();
@@ -340,7 +329,11 @@ fn actualtext_long_string_round_trips() {
         long.len(),
         extracted.len()
     );
-    assert!(!extracted.contains('X'), "raw 'X' must NOT appear, got len {}", extracted.len());
+    assert!(
+        !extracted.contains('X'),
+        "raw 'X' must NOT appear, got len {}",
+        extracted.len()
+    );
 }
 
 #[test]
@@ -371,12 +364,7 @@ fn actualtext_malformed_name_value_does_not_panic() {
 fn actualtext_malformed_integer_value_does_not_panic() {
     let mut b = PdfBuilder::new();
     b.add_page_content(one_mcid_content('X'));
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text_raw("42")
-            .k(K::Mcid(0, 0)),
-    );
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text_raw("42").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     let pdf = b.build();
     let doc = PdfDocument::from_bytes(pdf).expect("open");
@@ -440,12 +428,7 @@ fn same_replacement_multi_mcid_run_emits_once() {
 fn empty_actualtext_is_ignored_raw_glyph_survives() {
     let mut b = PdfBuilder::new();
     b.add_page_content(one_mcid_content('X'));
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("")
-            .k(K::Mcid(0, 0)),
-    );
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     let pdf = b.build();
     let doc = PdfDocument::from_bytes(pdf).expect("open");
@@ -460,12 +443,7 @@ fn empty_actualtext_is_ignored_raw_glyph_survives() {
 fn fixture_byte_equal() -> Vec<u8> {
     let mut b = PdfBuilder::new();
     b.add_page_content(one_mcid_content('X'));
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("fi")
-            .k(K::Mcid(0, 0)),
-    );
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("fi").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     b.build()
 }

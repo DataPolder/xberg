@@ -39,9 +39,7 @@ fn pdf_with_offpage_text() -> Vec<u8> {
         x.push_str(&format!("{o:010} 00000 n \n"));
     }
     pdf.extend_from_slice(x.as_bytes());
-    pdf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     pdf
 }
 
@@ -78,9 +76,7 @@ fn pdf_with_swapped_mediabox() -> Vec<u8> {
         x.push_str(&format!("{o:010} 00000 n \n"));
     }
     pdf.extend_from_slice(x.as_bytes());
-    pdf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     pdf
 }
 

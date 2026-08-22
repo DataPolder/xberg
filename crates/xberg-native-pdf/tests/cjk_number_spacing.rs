@@ -87,7 +87,10 @@ fn cjk_embedded_number_has_no_boundary_spaces() {
     assert!(text.contains("1000"), "number not decoded: {text:?}");
 
     // The fix: no space between the ideographs and the embedded number. ~keep
-    assert!(text.contains("公元前1000年"), "CJK↔number spaces not stripped: {text:?}");
+    assert!(
+        text.contains("公元前1000年"),
+        "CJK↔number spaces not stripped: {text:?}"
+    );
     assert!(!text.contains("公元前 1000"), "stray space before number: {text:?}");
     assert!(!text.contains("1000 年"), "stray space after number: {text:?}");
 }

@@ -38,8 +38,8 @@ mod text;
 pub use image::{ColorSpace, ImageContent, ImageFormat};
 pub use path::{LineCap, LineJoin, PathContent, PathOperation};
 pub use table::{
-    TableCellAlign, TableCellContent, TableCellVAlign, TableContent, TableContentStyle,
-    TableDetectionInfo, TableRowContent, TableSource,
+    TableCellAlign, TableCellContent, TableCellVAlign, TableContent, TableContentStyle, TableDetectionInfo,
+    TableRowContent, TableSource,
 };
 pub use text::{FontSpec, FontStyle, TextContent, TextStyle};
 

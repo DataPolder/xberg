@@ -69,10 +69,8 @@ impl PageFontStats {
         // Bin font sizes into 0.25 pt buckets so 11.97 / 12.00 / 12.03
         // (which all came from the same nominal 12 pt body) collapse to
         // one bucket. ~keep
-        let mut size_buckets: std::collections::HashMap<u32, usize> =
-            std::collections::HashMap::new();
-        let mut font_buckets: std::collections::HashMap<&str, usize> =
-            std::collections::HashMap::new();
+        let mut size_buckets: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+        let mut font_buckets: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for s in spans {
             let chars = s.text.chars().count();
             if chars == 0 || !s.font_size.is_finite() || s.font_size <= 0.0 {
@@ -120,9 +118,7 @@ impl PageFontStats {
 
         let body_font_name = font_buckets
             .iter()
-            .max_by(|(a_name, a_count), (b_name, b_count)| {
-                a_count.cmp(b_count).then_with(|| b_name.cmp(a_name))
-            })
+            .max_by(|(a_name, a_count), (b_name, b_count)| a_count.cmp(b_count).then_with(|| b_name.cmp(a_name)))
             .map(|(name, _)| (*name).to_string())
             .unwrap_or_default();
 
@@ -164,11 +160,7 @@ impl PageFontStats {
 fn compute_line_height(spans: &[TextSpan], body_font: &str, dominant_em: f32) -> Option<f32> {
     let mut ys: Vec<f32> = spans
         .iter()
-        .filter(|s| {
-            s.font_name == body_font
-                && (s.font_size - dominant_em).abs() < 0.5
-                && s.bbox.y.is_finite()
-        })
+        .filter(|s| s.font_name == body_font && (s.font_size - dominant_em).abs() < 0.5 && s.bbox.y.is_finite())
         .map(|s| s.bbox.y)
         .collect();
 

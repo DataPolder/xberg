@@ -825,11 +825,7 @@ impl DocumentEditor {
     /// Apply page property modifications to a page object.
     ///
     /// Returns a new page object with the modifications applied.
-    fn apply_page_props_to_object(
-        &self,
-        page_obj: &Object,
-        props: &ModifiedPageProps,
-    ) -> Result<Object> {
+    fn apply_page_props_to_object(&self, page_obj: &Object, props: &ModifiedPageProps) -> Result<Object> {
         let page_dict = page_obj
             .as_dict()
             .ok_or_else(|| Error::InvalidPdf("Page is not a dictionary".to_string()))?;
@@ -1123,12 +1119,7 @@ impl DocumentEditor {
         // Fast path: serialise once with a trimmed page_order and a staged
         // Pages dict, so collect_reachable_ids() drops orphan objects from
         // dropped pages instead of walking the original page tree. ~keep
-        let visible: Vec<i32> = self
-            .page_order
-            .iter()
-            .filter(|&&i| i >= 0)
-            .copied()
-            .collect();
+        let visible: Vec<i32> = self.page_order.iter().filter(|&&i| i >= 0).copied().collect();
         let new_order: Vec<i32> = pages.iter().map(|&i| visible[i]).collect();
 
         // Stage a trimmed /Pages dict in modified_objects so GC reachability
@@ -1190,10 +1181,10 @@ impl DocumentEditor {
             match prior {
                 Some(prev_obj) => {
                     self.modified_objects.insert(pages_id, prev_obj);
-                },
+                }
                 None => {
                     self.modified_objects.remove(&pages_id);
-                },
+                }
             }
         }
 
@@ -1211,10 +1202,7 @@ impl DocumentEditor {
     ///
     /// Mirrors the chunked workflow described in issue #474: a 12k-page
     /// document split into 3000-page chunks for downstream processing.
-    pub fn extract_page_ranges_to_bytes(
-        &mut self,
-        ranges: &[(usize, usize)],
-    ) -> Result<Vec<Vec<u8>>> {
+    pub fn extract_page_ranges_to_bytes(&mut self, ranges: &[(usize, usize)]) -> Result<Vec<Vec<u8>>> {
         let mut out: Vec<Vec<u8>> = Vec::with_capacity(ranges.len());
         for &(start, end) in ranges {
             if end < start {
@@ -1255,17 +1243,11 @@ impl DocumentEditor {
         }
         if !self.merged_pages.is_empty() {
             return Err(Error::InvalidPdf(
-                "select_pages does not yet support documents with pages added via merge_from"
-                    .to_string(),
+                "select_pages does not yet support documents with pages added via merge_from".to_string(),
             ));
         }
 
-        let visible: Vec<i32> = self
-            .page_order
-            .iter()
-            .filter(|&&i| i >= 0)
-            .copied()
-            .collect();
+        let visible: Vec<i32> = self.page_order.iter().filter(|&&i| i >= 0).copied().collect();
         let new_order: Vec<i32> = pages.iter().map(|&i| visible[i]).collect();
 
         self.page_order = new_order;
@@ -1351,11 +1333,7 @@ impl DocumentEditor {
     ///
     /// Performs a deep copy of the page object graph, remapping all indirect
     /// references to new object IDs allocated in this document.
-    fn import_page_from_document(
-        &mut self,
-        source: &mut PdfDocument,
-        page_index: usize,
-    ) -> Result<MergedPageData> {
+    fn import_page_from_document(&mut self, source: &mut PdfDocument, page_index: usize) -> Result<MergedPageData> {
         let page_ref = source.get_page_ref(page_index)?;
         let page_obj = source.load_object(page_ref)?;
 
@@ -1371,13 +1349,8 @@ impl DocumentEditor {
         let mut id_map: HashMap<u32, u32> = HashMap::new();
         let mut collected: Vec<(u32, Object)> = Vec::new();
 
-        let final_page = self.deep_import_object(
-            source,
-            &stripped_page,
-            &mut id_map,
-            &mut collected,
-            &mut HashSet::new(),
-        )?;
+        let final_page =
+            self.deep_import_object(source, &stripped_page, &mut id_map, &mut collected, &mut HashSet::new())?;
 
         Ok(MergedPageData {
             page_object: final_page,
@@ -1416,45 +1389,41 @@ impl DocumentEditor {
                 id_map.insert(obj_ref.id, new_id);
 
                 let loaded = source.load_object(*obj_ref)?;
-                let remapped =
-                    self.deep_import_object(source, &loaded, id_map, collected, visiting)?;
+                let remapped = self.deep_import_object(source, &loaded, id_map, collected, visiting)?;
 
                 visiting.remove(&obj_ref.id);
 
                 collected.push((new_id, remapped));
 
                 Ok(Object::Reference(ObjectRef::new(new_id, 0)))
-            },
+            }
             Object::Dictionary(dict) => {
                 let mut new_dict = HashMap::with_capacity(dict.len());
                 for (key, value) in dict {
-                    let new_value =
-                        self.deep_import_object(source, value, id_map, collected, visiting)?;
+                    let new_value = self.deep_import_object(source, value, id_map, collected, visiting)?;
                     new_dict.insert(key.clone(), new_value);
                 }
                 Ok(Object::Dictionary(new_dict))
-            },
+            }
             Object::Array(arr) => {
                 let mut new_arr = Vec::with_capacity(arr.len());
                 for item in arr {
-                    let new_item =
-                        self.deep_import_object(source, item, id_map, collected, visiting)?;
+                    let new_item = self.deep_import_object(source, item, id_map, collected, visiting)?;
                     new_arr.push(new_item);
                 }
                 Ok(Object::Array(new_arr))
-            },
+            }
             Object::Stream { dict, data } => {
                 let mut new_dict = HashMap::with_capacity(dict.len());
                 for (key, value) in dict {
-                    let new_value =
-                        self.deep_import_object(source, value, id_map, collected, visiting)?;
+                    let new_value = self.deep_import_object(source, value, id_map, collected, visiting)?;
                     new_dict.insert(key.clone(), new_value);
                 }
                 Ok(Object::Stream {
                     dict: new_dict,
                     data: data.clone(),
                 })
-            },
+            }
             _ => Ok(obj.clone()),
         }
     }
@@ -1476,11 +1445,7 @@ impl DocumentEditor {
     /// editor.save("combined.pdf")?;
     /// ```
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn merge_pages_from(
-        &mut self,
-        source_path: impl AsRef<Path>,
-        pages: &[usize],
-    ) -> Result<usize> {
+    pub fn merge_pages_from(&mut self, source_path: impl AsRef<Path>, pages: &[usize]) -> Result<usize> {
         let mut source_doc = PdfDocument::open(source_path.as_ref())?;
         let source_page_count = source_doc.page_count()?;
 
@@ -1637,10 +1602,7 @@ impl DocumentEditor {
                     None => continue,
                 };
 
-                let is_button = wrapper
-                    .field_type()
-                    .map(|ft| *ft == FieldType::Button)
-                    .unwrap_or(false);
+                let is_button = wrapper.field_type().map(|ft| *ft == FieldType::Button).unwrap_or(false);
 
                 result.push((obj_ref.id, obj_ref.generation, new_value, is_button));
             }
@@ -1664,8 +1626,7 @@ impl DocumentEditor {
                 new_dict.insert("AS".to_string(), new_value.clone());
             }
 
-            self.modified_objects
-                .insert(*obj_id, Object::Dictionary(new_dict));
+            self.modified_objects.insert(*obj_id, Object::Dictionary(new_dict));
         }
 
         if !fields_to_flush.is_empty() {
@@ -1690,8 +1651,7 @@ impl DocumentEditor {
                     new_catalog.insert("AcroForm".to_string(), Object::Dictionary(new_af));
 
                     if let Some(trailer_dict) = self.source.trailer().as_dict()
-                        && let Some(root_ref) =
-                            trailer_dict.get("Root").and_then(|r| r.as_reference())
+                        && let Some(root_ref) = trailer_dict.get("Root").and_then(|r| r.as_reference())
                     {
                         self.modified_objects
                             .insert(root_ref.id, Object::Dictionary(new_catalog));
@@ -1707,11 +1667,7 @@ impl DocumentEditor {
     fn find_prev_xref_offset(&self, bytes: &[u8]) -> Result<u64> {
         let search = b"startxref";
         let end = bytes.len();
-        let mut pos = if end >= search.len() {
-            end - search.len()
-        } else {
-            0
-        };
+        let mut pos = if end >= search.len() { end - search.len() } else { 0 };
 
         while pos > 0 {
             if bytes[pos..].starts_with(search) {
@@ -1732,7 +1688,9 @@ impl DocumentEditor {
             pos = pos.saturating_sub(1);
         }
 
-        Err(Error::InvalidPdf("Could not find startxref in original PDF".to_string()))
+        Err(Error::InvalidPdf(
+            "Could not find startxref in original PDF".to_string(),
+        ))
     }
 
     /// Write a full rewrite of the PDF.
@@ -1757,7 +1715,7 @@ impl DocumentEditor {
                 Object::Array(arr) => arr.iter().for_each(|o| traverse(o, queue)),
                 Object::Dictionary(d) => d.values().for_each(|o| traverse(o, queue)),
                 Object::Stream { dict, .. } => dict.values().for_each(|o| traverse(o, queue)),
-                _ => {},
+                _ => {}
             }
         }
 
@@ -1790,9 +1748,7 @@ impl DocumentEditor {
             let obj = if let Some(m) = self.modified_objects.get(&id) {
                 Some(m.clone())
             } else {
-                self.source
-                    .load_object(ObjectRef { id, generation: 0 })
-                    .ok()
+                self.source.load_object(ObjectRef { id, generation: 0 }).ok()
             };
             if let Some(obj) = obj {
                 traverse(&obj, &mut queue);
@@ -1816,14 +1772,8 @@ impl DocumentEditor {
     }
 
     /// Write a full rewrite of the PDF to a generic writer.
-    fn write_full_to_writer(
-        &mut self,
-        writer: &mut (impl Write + Seek),
-        options: &SaveOptions,
-    ) -> Result<()> {
-        use crate::encryption::{
-            Algorithm, EncryptDictBuilder, EncryptionWriteHandler, generate_file_id,
-        };
+    fn write_full_to_writer(&mut self, writer: &mut (impl Write + Seek), options: &SaveOptions) -> Result<()> {
+        use crate::encryption::{Algorithm, EncryptDictBuilder, EncryptionWriteHandler, generate_file_id};
         use flate2::{Compression, write::ZlibEncoder};
 
         // Fail closed rather than silently copying unreadable ciphertext
@@ -1850,22 +1800,16 @@ impl DocumentEditor {
                     }
                     match enc.finish() {
                         Ok(compressed) => {
-                            dict.insert(
-                                "Filter".to_string(),
-                                Object::Name("FlateDecode".to_string()),
-                            );
-                            dict.insert(
-                                "Length".to_string(),
-                                Object::Integer(compressed.len() as i64),
-                            );
+                            dict.insert("Filter".to_string(), Object::Name("FlateDecode".to_string()));
+                            dict.insert("Length".to_string(), Object::Integer(compressed.len() as i64));
                             Object::Stream {
                                 dict,
                                 data: compressed.into(),
                             }
-                        },
+                        }
                         Err(_) => Object::Stream { dict, data },
                     }
-                },
+                }
                 other => other,
             }
         }
@@ -1877,37 +1821,36 @@ impl DocumentEditor {
 
         let serializer = ObjectSerializer::compact();
 
-        let (file_id, encrypt_dict, encryption_handler) =
-            if let Some(config) = options.encryption.as_ref() {
-                let (id1, id2) = generate_file_id();
+        let (file_id, encrypt_dict, encryption_handler) = if let Some(config) = options.encryption.as_ref() {
+            let (id1, id2) = generate_file_id();
 
-                let algorithm = match config.algorithm {
-                    EncryptionAlgorithm::Rc4_40 => Algorithm::RC4_40,
-                    EncryptionAlgorithm::Rc4_128 => Algorithm::Rc4_128,
-                    EncryptionAlgorithm::Aes128 => Algorithm::Aes128,
-                    EncryptionAlgorithm::Aes256 => Algorithm::Aes256,
-                };
-
-                let encrypt_dict = EncryptDictBuilder::new(algorithm)
-                    .user_password(config.user_password.as_bytes())
-                    .owner_password(config.owner_password.as_bytes())
-                    .permissions(config.permissions.to_bits())
-                    .encrypt_metadata(true)
-                    .build(&id1)?;
-
-                let handler = EncryptionWriteHandler::new(
-                    config.user_password.as_bytes(),
-                    &encrypt_dict.owner_password,
-                    encrypt_dict.permissions,
-                    &id1,
-                    algorithm,
-                    true,
-                )?;
-
-                (Some((id1, id2)), Some(encrypt_dict), Some(handler))
-            } else {
-                (None, None, None)
+            let algorithm = match config.algorithm {
+                EncryptionAlgorithm::Rc4_40 => Algorithm::RC4_40,
+                EncryptionAlgorithm::Rc4_128 => Algorithm::Rc4_128,
+                EncryptionAlgorithm::Aes128 => Algorithm::Aes128,
+                EncryptionAlgorithm::Aes256 => Algorithm::Aes256,
             };
+
+            let encrypt_dict = EncryptDictBuilder::new(algorithm)
+                .user_password(config.user_password.as_bytes())
+                .owner_password(config.owner_password.as_bytes())
+                .permissions(config.permissions.to_bits())
+                .encrypt_metadata(true)
+                .build(&id1)?;
+
+            let handler = EncryptionWriteHandler::new(
+                config.user_password.as_bytes(),
+                &encrypt_dict.owner_password,
+                encrypt_dict.permissions,
+                &id1,
+                algorithm,
+                true,
+            )?;
+
+            (Some((id1, id2)), Some(encrypt_dict), Some(handler))
+        } else {
+            (None, None, None)
+        };
 
         let serialize_obj = |s: &ObjectSerializer,
                              id: u32,
@@ -1953,11 +1896,7 @@ impl DocumentEditor {
             None
         };
 
-        let mut catalog_obj = self
-            .modified_objects
-            .get(&catalog_ref.id)
-            .cloned()
-            .unwrap_or(catalog);
+        let mut catalog_obj = self.modified_objects.get(&catalog_ref.id).cloned().unwrap_or(catalog);
 
         if self.remove_acroform {
             if let Some(catalog_dict) = catalog_obj.as_dict() {
@@ -2090,10 +2029,7 @@ impl DocumentEditor {
                         .and_then(|d| d.get("AcroForm"))
                         .and_then(|o| o.as_reference())
                     && let Ok(af) = self.load_source_object(af_ref)
-                    && let Some(orig_fields) = af
-                        .as_dict()
-                        .and_then(|d| d.get("Fields"))
-                        .and_then(|o| o.as_array())
+                    && let Some(orig_fields) = af.as_dict().and_then(|d| d.get("Fields")).and_then(|o| o.as_array())
                 {
                     for r in orig_fields {
                         if let Some(rf) = r.as_reference() {
@@ -2131,8 +2067,7 @@ impl DocumentEditor {
                     data: file.data.clone().into(),
                 };
                 let offset = writer.stream_position()?;
-                let bytes =
-                    serialize_obj(&serializer, stream_id, 0, &stream_obj, &encryption_handler);
+                let bytes = serialize_obj(&serializer, stream_id, 0, &stream_obj, &encryption_handler);
                 writer.write_all(&bytes)?;
                 xref_entries.push((stream_id, offset, 0, true));
 
@@ -2143,8 +2078,7 @@ impl DocumentEditor {
                 let filespec_dict = file.build_filespec(stream_ref);
                 let filespec_obj = Object::Dictionary(filespec_dict);
                 let offset = writer.stream_position()?;
-                let bytes =
-                    serialize_obj(&serializer, filespec_id, 0, &filespec_obj, &encryption_handler);
+                let bytes = serialize_obj(&serializer, filespec_id, 0, &filespec_obj, &encryption_handler);
                 writer.write_all(&bytes)?;
                 xref_entries.push((filespec_id, offset, 0, true));
 
@@ -2176,8 +2110,7 @@ impl DocumentEditor {
                     Some(Object::Dictionary(d)) => d.clone(),
                     _ => HashMap::new(),
                 };
-                names_dict
-                    .insert("EmbeddedFiles".to_string(), Object::Dictionary(embedded_files_dict));
+                names_dict.insert("EmbeddedFiles".to_string(), Object::Dictionary(embedded_files_dict));
                 new_catalog.insert("Names".to_string(), Object::Dictionary(names_dict));
 
                 catalog_obj = Object::Dictionary(new_catalog);
@@ -2185,8 +2118,7 @@ impl DocumentEditor {
         }
 
         let offset = writer.stream_position()?;
-        let bytes =
-            serialize_obj(&serializer, catalog_ref.id, 0, &catalog_obj, &encryption_handler);
+        let bytes = serialize_obj(&serializer, catalog_ref.id, 0, &catalog_obj, &encryption_handler);
         writer.write_all(&bytes)?;
         xref_entries.push((catalog_ref.id, offset, 0, true));
 
@@ -2207,8 +2139,7 @@ impl DocumentEditor {
                 // Collect flattened leaf page refs from the (possibly multi-level) page tree.
                 // page_order indices refer to leaf pages, not Kids array entries.
                 // Single tree walk — calling get_page_ref(i) in a loop is O(n²). ~keep
-                let original_page_refs: Vec<ObjectRef> =
-                    self.source.all_page_refs().unwrap_or_default();
+                let original_page_refs: Vec<ObjectRef> = self.source.all_page_refs().unwrap_or_default();
 
                 // Build visible kids in page_order sequence
                 // page_order contains original leaf-page indices; -1 means removed ~keep
@@ -2235,8 +2166,7 @@ impl DocumentEditor {
             };
 
             let offset = writer.stream_position()?;
-            let bytes =
-                serialize_obj(&serializer, pages_ref.id, 0, &final_pages_obj, &encryption_handler);
+            let bytes = serialize_obj(&serializer, pages_ref.id, 0, &final_pages_obj, &encryption_handler);
             writer.write_all(&bytes)?;
             xref_entries.push((pages_ref.id, offset, 0, true));
 
@@ -2280,53 +2210,44 @@ impl DocumentEditor {
                             .get(&source_page_index)
                             .map(|anns| anns.iter().filter(|a| a.is_new()).count())
                             .unwrap_or(0);
-                        let new_annotation_ids: Vec<u32> = (0..new_annotation_count)
-                            .map(|_| self.allocate_object_id())
-                            .collect();
+                        let new_annotation_ids: Vec<u32> =
+                            (0..new_annotation_count).map(|_| self.allocate_object_id()).collect();
 
                         // Get pre-allocated form field data for this page
                         // Only include terminal fields (not parent-only) that have widgets ~keep
                         let page_form_fields: Vec<(u32, FormFieldWrapper)> = all_form_field_data
                             .iter()
-                            .filter(|(pg_idx, _, wrapper, _)| {
-                                *pg_idx == source_page_index && !wrapper.is_parent_only()
-                            })
+                            .filter(|(pg_idx, _, wrapper, _)| *pg_idx == source_page_index && !wrapper.is_parent_only())
                             .map(|(_, id, wrapper, _)| (*id, wrapper.clone()))
                             .collect();
-                        let new_form_field_ids: Vec<u32> =
-                            page_form_fields.iter().map(|(id, _)| *id).collect();
+                        let new_form_field_ids: Vec<u32> = page_form_fields.iter().map(|(id, _)| *id).collect();
                         let new_form_field_wrappers: Vec<FormFieldWrapper> =
                             page_form_fields.iter().map(|(_, w)| w.clone()).collect();
 
-                        let should_flatten =
-                            self.flatten_annotations_pages.contains(&source_page_index);
-                        let flatten_data: Option<(
-                            Vec<AnnotationAppearance>,
-                            u32,
-                            Vec<(u32, String)>,
-                        )> = if should_flatten {
-                            let appearances = self.get_annotation_appearances(source_page_index)?;
-                            if !appearances.is_empty() {
-                                let overlay_id = self.allocate_object_id();
-                                let xobj_ids: Vec<(u32, String)> = appearances
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, _)| {
-                                        let id = self.allocate_object_id();
-                                        let name = format!("FlatAnnot{}", i);
-                                        (id, name)
-                                    })
-                                    .collect();
-                                Some((appearances, overlay_id, xobj_ids))
+                        let should_flatten = self.flatten_annotations_pages.contains(&source_page_index);
+                        let flatten_data: Option<(Vec<AnnotationAppearance>, u32, Vec<(u32, String)>)> =
+                            if should_flatten {
+                                let appearances = self.get_annotation_appearances(source_page_index)?;
+                                if !appearances.is_empty() {
+                                    let overlay_id = self.allocate_object_id();
+                                    let xobj_ids: Vec<(u32, String)> = appearances
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, _)| {
+                                            let id = self.allocate_object_id();
+                                            let name = format!("FlatAnnot{}", i);
+                                            (id, name)
+                                        })
+                                        .collect();
+                                    Some((appearances, overlay_id, xobj_ids))
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
-                            }
-                        } else {
-                            None
-                        };
+                            };
 
-                        let should_apply_redactions =
-                            self.apply_redactions_pages.contains(&source_page_index);
+                        let should_apply_redactions = self.apply_redactions_pages.contains(&source_page_index);
                         // Destructive redaction: pre-computed
                         // replacement content for this page. Takes
                         // precedence over the legacy cosmetic overlay
@@ -2338,43 +2259,15 @@ impl DocumentEditor {
                             .cloned()
                             .map(|bytes| (bytes, self.allocate_object_id()));
 
-                        let redaction_data: Option<(Vec<RedactionData>, u32)> =
-                            if destructive_redaction.is_some() {
-                                // Destructive path owns Contents/Annots; skip
-                                // the cosmetic overlay entirely. ~keep
-                                None
-                            } else if should_apply_redactions {
-                                let redactions = self.get_redaction_data(source_page_index)?;
-                                if !redactions.is_empty() {
-                                    let overlay_id = self.allocate_object_id();
-                                    Some((redactions, overlay_id))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
-
-                        let should_flatten_forms =
-                            self.flatten_forms_pages.contains(&source_page_index);
-                        let form_flatten_data: Option<(
-                            Vec<AnnotationAppearance>,
-                            u32,
-                            Vec<(u32, String)>,
-                        )> = if should_flatten_forms {
-                            let appearances = self.get_widget_appearances(source_page_index)?;
-                            if !appearances.is_empty() {
+                        let redaction_data: Option<(Vec<RedactionData>, u32)> = if destructive_redaction.is_some() {
+                            // Destructive path owns Contents/Annots; skip
+                            // the cosmetic overlay entirely. ~keep
+                            None
+                        } else if should_apply_redactions {
+                            let redactions = self.get_redaction_data(source_page_index)?;
+                            if !redactions.is_empty() {
                                 let overlay_id = self.allocate_object_id();
-                                let xobj_ids: Vec<(u32, String)> = appearances
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, _)| {
-                                        let id = self.allocate_object_id();
-                                        let name = format!("FlatForm{}", i);
-                                        (id, name)
-                                    })
-                                    .collect();
-                                Some((appearances, overlay_id, xobj_ids))
+                                Some((redactions, overlay_id))
                             } else {
                                 None
                             }
@@ -2382,13 +2275,35 @@ impl DocumentEditor {
                             None
                         };
 
-                        let modified_content_id: Option<u32> = if self.structure_modified
-                            && self.modified_content.contains_key(&source_page_index)
-                        {
-                            Some(self.allocate_object_id())
-                        } else {
-                            None
-                        };
+                        let should_flatten_forms = self.flatten_forms_pages.contains(&source_page_index);
+                        let form_flatten_data: Option<(Vec<AnnotationAppearance>, u32, Vec<(u32, String)>)> =
+                            if should_flatten_forms {
+                                let appearances = self.get_widget_appearances(source_page_index)?;
+                                if !appearances.is_empty() {
+                                    let overlay_id = self.allocate_object_id();
+                                    let xobj_ids: Vec<(u32, String)> = appearances
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, _)| {
+                                            let id = self.allocate_object_id();
+                                            let name = format!("FlatForm{}", i);
+                                            (id, name)
+                                        })
+                                        .collect();
+                                    Some((appearances, overlay_id, xobj_ids))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+
+                        let modified_content_id: Option<u32> =
+                            if self.structure_modified && self.modified_content.contains_key(&source_page_index) {
+                                Some(self.allocate_object_id())
+                            } else {
+                                None
+                            };
 
                         let overlay_additions_id: Option<u32> =
                             if self.overlay_additions.contains_key(&source_page_index) {
@@ -2420,11 +2335,8 @@ impl DocumentEditor {
                                 .iter()
                                 .filter_map(|el| match el {
                                     ContentElement::Text(t) => {
-                                        Some(crate::writer::map_base14_font_name(
-                                            &t.font.name,
-                                            t.is_bold(),
-                                        ))
-                                    },
+                                        Some(crate::writer::map_base14_font_name(&t.font.name, t.is_bold()))
+                                    }
                                     _ => None,
                                 })
                                 .collect();
@@ -2435,28 +2347,22 @@ impl DocumentEditor {
                             }
                         }
 
-                        let mut final_page_obj =
-                            if let Some(props) = self.modified_page_props.get(&source_page_index) {
-                                self.apply_page_props_to_object(&page_obj, props)?
-                            } else {
-                                page_obj.clone()
-                            };
+                        let mut final_page_obj = if let Some(props) = self.modified_page_props.get(&source_page_index) {
+                            self.apply_page_props_to_object(&page_obj, props)?
+                        } else {
+                            page_obj.clone()
+                        };
 
-                        if let (Some(overlay_obj_id), Some(page_dict)) =
-                            (erase_overlay_id, final_page_obj.as_dict())
-                        {
+                        if let (Some(overlay_obj_id), Some(page_dict)) = (erase_overlay_id, final_page_obj.as_dict()) {
                             let mut new_dict = page_dict.clone();
                             if let Some(contents) = new_dict.get("Contents").cloned() {
-                                let overlay_ref =
-                                    Object::Reference(ObjectRef::new(overlay_obj_id, 0));
+                                let overlay_ref = Object::Reference(ObjectRef::new(overlay_obj_id, 0));
                                 let contents_array = match contents {
-                                    Object::Reference(_) => {
-                                        Object::Array(vec![contents, overlay_ref])
-                                    },
+                                    Object::Reference(_) => Object::Array(vec![contents, overlay_ref]),
                                     Object::Array(mut arr) => {
                                         arr.push(overlay_ref);
                                         Object::Array(arr)
-                                    },
+                                    }
                                     _ => Object::Array(vec![contents, overlay_ref]),
                                 };
                                 new_dict.insert("Contents".to_string(), contents_array);
@@ -2466,21 +2372,17 @@ impl DocumentEditor {
 
                         // If we have overlay additions (add_text on existing page), append
                         // a new stream after the original content rather than replacing it. ~keep
-                        if let (Some(additions_id), Some(page_dict)) =
-                            (overlay_additions_id, final_page_obj.as_dict())
+                        if let (Some(additions_id), Some(page_dict)) = (overlay_additions_id, final_page_obj.as_dict())
                         {
                             let mut new_dict = page_dict.clone();
                             if let Some(contents) = new_dict.get("Contents").cloned() {
-                                let additions_ref =
-                                    Object::Reference(ObjectRef::new(additions_id, 0));
+                                let additions_ref = Object::Reference(ObjectRef::new(additions_id, 0));
                                 let contents_array = match contents {
-                                    Object::Reference(_) => {
-                                        Object::Array(vec![contents, additions_ref])
-                                    },
+                                    Object::Reference(_) => Object::Array(vec![contents, additions_ref]),
                                     Object::Array(mut arr) => {
                                         arr.push(additions_ref);
                                         Object::Array(arr)
-                                    },
+                                    }
                                     _ => Object::Array(vec![contents, additions_ref]),
                                 };
                                 new_dict.insert("Contents".to_string(), contents_array);
@@ -2502,18 +2404,17 @@ impl DocumentEditor {
                         {
                             let mut new_dict = page_dict.clone();
 
-                            let resolve_dict =
-                                |obj: &Object, src: &PdfDocument| -> HashMap<String, Object> {
-                                    match obj {
-                                        Object::Dictionary(d) => d.clone(),
-                                        Object::Reference(r) => src
-                                            .load_object(*r)
-                                            .ok()
-                                            .and_then(|o| o.as_dict().cloned())
-                                            .unwrap_or_default(),
-                                        _ => HashMap::new(),
-                                    }
-                                };
+                            let resolve_dict = |obj: &Object, src: &PdfDocument| -> HashMap<String, Object> {
+                                match obj {
+                                    Object::Dictionary(d) => d.clone(),
+                                    Object::Reference(r) => src
+                                        .load_object(*r)
+                                        .ok()
+                                        .and_then(|o| o.as_dict().cloned())
+                                        .unwrap_or_default(),
+                                    _ => HashMap::new(),
+                                }
+                            };
 
                             // /Resources is an inheritable attribute (ISO 32000-1
                             // §7.7.3.4): a page may legally omit its own /Resources
@@ -2539,81 +2440,67 @@ impl DocumentEditor {
                             // inherited XObject still inherits it at render time via
                             // the /Pages chain — we are not removing that path, only
                             // declining to inline-copy it onto the page. ~keep
-                            let mut resources_dict: HashMap<String, Object> =
-                                match new_dict.get("Resources") {
-                                    Some(obj) => resolve_dict(obj, &self.source),
-                                    None => {
-                                        let mut node = new_dict
+                            let mut resources_dict: HashMap<String, Object> = match new_dict.get("Resources") {
+                                Some(obj) => resolve_dict(obj, &self.source),
+                                None => {
+                                    let mut node = new_dict
+                                        .get("Parent")
+                                        .and_then(|p| p.as_reference())
+                                        .and_then(|r| self.load_source_object(r).ok());
+                                    let mut inherited_font: Option<Object> = None;
+                                    let mut guard = 0;
+                                    while let Some(obj) = node {
+                                        guard += 1;
+                                        if guard > 64 {
+                                            break; // cyclic /Parent — bail ~keep
+                                        }
+                                        let Some(dict) = obj.as_dict() else {
+                                            break;
+                                        };
+                                        if let Some(res) = dict.get("Resources") {
+                                            // Found the inherited /Resources:
+                                            // take ONLY its /Font sub-dict. ~keep
+                                            let res_dict = resolve_dict(res, &self.source);
+                                            inherited_font = res_dict.get("Font").cloned();
+                                            break;
+                                        }
+                                        node = dict
                                             .get("Parent")
                                             .and_then(|p| p.as_reference())
                                             .and_then(|r| self.load_source_object(r).ok());
-                                        let mut inherited_font: Option<Object> = None;
-                                        let mut guard = 0;
-                                        while let Some(obj) = node {
-                                            guard += 1;
-                                            if guard > 64 {
-                                                break; // cyclic /Parent — bail ~keep
-                                            }
-                                            let Some(dict) = obj.as_dict() else {
-                                                break;
-                                            };
-                                            if let Some(res) = dict.get("Resources") {
-                                                // Found the inherited /Resources:
-                                                // take ONLY its /Font sub-dict. ~keep
-                                                let res_dict = resolve_dict(res, &self.source);
-                                                inherited_font = res_dict.get("Font").cloned();
-                                                break;
-                                            }
-                                            node = dict
-                                                .get("Parent")
-                                                .and_then(|p| p.as_reference())
-                                                .and_then(|r| self.load_source_object(r).ok());
-                                        }
-                                        let mut seeded: HashMap<String, Object> = HashMap::new();
-                                        if let Some(font) = inherited_font {
-                                            seeded.insert("Font".to_string(), font);
-                                        }
-                                        seeded
-                                    },
-                                };
-                            let mut font_dict: HashMap<String, Object> =
-                                match resources_dict.get("Font") {
-                                    Some(obj) => resolve_dict(obj, &self.source),
-                                    None => HashMap::new(),
-                                };
+                                    }
+                                    let mut seeded: HashMap<String, Object> = HashMap::new();
+                                    if let Some(font) = inherited_font {
+                                        seeded.insert("Font".to_string(), font);
+                                    }
+                                    seeded
+                                }
+                            };
+                            let mut font_dict: HashMap<String, Object> = match resources_dict.get("Font") {
+                                Some(obj) => resolve_dict(obj, &self.source),
+                                None => HashMap::new(),
+                            };
                             for (name, id) in &overlay_font_ids {
-                                font_dict.insert(
-                                    name.clone(),
-                                    Object::Reference(ObjectRef::new(*id, 0)),
-                                );
+                                font_dict.insert(name.clone(), Object::Reference(ObjectRef::new(*id, 0)));
                             }
-                            resources_dict
-                                .insert("Font".to_string(), Object::Dictionary(font_dict));
-                            new_dict.insert(
-                                "Resources".to_string(),
-                                Object::Dictionary(resources_dict),
-                            );
+                            resources_dict.insert("Font".to_string(), Object::Dictionary(font_dict));
+                            new_dict.insert("Resources".to_string(), Object::Dictionary(resources_dict));
                             final_page_obj = Object::Dictionary(new_dict);
                         }
 
-                        if let (
-                            Some((appearances, flatten_overlay_id, xobj_ids)),
-                            Some(page_dict),
-                        ) = (&flatten_data, final_page_obj.as_dict())
+                        if let (Some((appearances, flatten_overlay_id, xobj_ids)), Some(page_dict)) =
+                            (&flatten_data, final_page_obj.as_dict())
                         {
                             let mut new_dict = page_dict.clone();
 
                             if let Some(contents) = new_dict.get("Contents").cloned() {
-                                let overlay_ref =
-                                    Object::Reference(ObjectRef::new(*flatten_overlay_id, 0));
+                                let overlay_ref = Object::Reference(ObjectRef::new(*flatten_overlay_id, 0));
                                 let contents_array = match contents {
-                                    Object::Reference(_) => {
-                                        Object::Array(vec![contents, overlay_ref])
-                                    },
+                                    Object::Reference(_) => Object::Array(vec![contents, overlay_ref]),
                                     Object::Array(mut arr) => {
                                         arr.push(overlay_ref);
                                         Object::Array(arr)
-                                    },
+                                    }
                                     _ => Object::Array(vec![contents, overlay_ref]),
                                 };
                                 new_dict.insert("Contents".to_string(), contents_array);
@@ -2622,39 +2509,28 @@ impl DocumentEditor {
                             let resources = new_dict.get("Resources").cloned();
                             let mut resources_dict = match resources {
                                 Some(Object::Dictionary(d)) => d,
-                                Some(Object::Reference(res_ref)) => {
-                                    match self.load_source_object(res_ref) {
-                                        Ok(Object::Dictionary(d)) => d,
-                                        _ => HashMap::new(),
-                                    }
+                                Some(Object::Reference(res_ref)) => match self.load_source_object(res_ref) {
+                                    Ok(Object::Dictionary(d)) => d,
+                                    _ => HashMap::new(),
                                 },
                                 _ => HashMap::new(),
                             };
 
                             let mut xobject_dict = match resources_dict.get("XObject") {
                                 Some(Object::Dictionary(d)) => d.clone(),
-                                Some(Object::Reference(xobj_ref)) => {
-                                    match self.load_source_object(*xobj_ref) {
-                                        Ok(Object::Dictionary(d)) => d,
-                                        _ => HashMap::new(),
-                                    }
+                                Some(Object::Reference(xobj_ref)) => match self.load_source_object(*xobj_ref) {
+                                    Ok(Object::Dictionary(d)) => d,
+                                    _ => HashMap::new(),
                                 },
                                 _ => HashMap::new(),
                             };
 
                             for (obj_id, name) in xobj_ids {
-                                xobject_dict.insert(
-                                    name.clone(),
-                                    Object::Reference(ObjectRef::new(*obj_id, 0)),
-                                );
+                                xobject_dict.insert(name.clone(), Object::Reference(ObjectRef::new(*obj_id, 0)));
                             }
 
-                            resources_dict
-                                .insert("XObject".to_string(), Object::Dictionary(xobject_dict));
-                            new_dict.insert(
-                                "Resources".to_string(),
-                                Object::Dictionary(resources_dict),
-                            );
+                            resources_dict.insert("XObject".to_string(), Object::Dictionary(xobject_dict));
+                            new_dict.insert("Resources".to_string(), Object::Dictionary(resources_dict));
 
                             new_dict.remove("Annots");
 
@@ -2667,16 +2543,13 @@ impl DocumentEditor {
                             let mut new_dict = page_dict.clone();
 
                             if let Some(contents) = new_dict.get("Contents").cloned() {
-                                let overlay_ref =
-                                    Object::Reference(ObjectRef::new(*redact_overlay_id, 0));
+                                let overlay_ref = Object::Reference(ObjectRef::new(*redact_overlay_id, 0));
                                 let contents_array = match contents {
-                                    Object::Reference(_) => {
-                                        Object::Array(vec![contents, overlay_ref])
-                                    },
+                                    Object::Reference(_) => Object::Array(vec![contents, overlay_ref]),
                                     Object::Array(mut arr) => {
                                         arr.push(overlay_ref);
                                         Object::Array(arr)
-                                    },
+                                    }
                                     _ => Object::Array(vec![contents, overlay_ref]),
                                 };
                                 new_dict.insert("Contents".to_string(), contents_array);
@@ -2731,24 +2604,19 @@ impl DocumentEditor {
                             final_page_obj = Object::Dictionary(new_dict);
                         }
 
-                        if let (
-                            Some((form_appearances, form_overlay_id, form_xobj_ids)),
-                            Some(page_dict),
-                        ) = (&form_flatten_data, final_page_obj.as_dict())
+                        if let (Some((form_appearances, form_overlay_id, form_xobj_ids)), Some(page_dict)) =
+                            (&form_flatten_data, final_page_obj.as_dict())
                         {
                             let mut new_dict = page_dict.clone();
 
                             if let Some(contents) = new_dict.get("Contents").cloned() {
-                                let overlay_ref =
-                                    Object::Reference(ObjectRef::new(*form_overlay_id, 0));
+                                let overlay_ref = Object::Reference(ObjectRef::new(*form_overlay_id, 0));
                                 let contents_array = match contents {
-                                    Object::Reference(_) => {
-                                        Object::Array(vec![contents, overlay_ref])
-                                    },
+                                    Object::Reference(_) => Object::Array(vec![contents, overlay_ref]),
                                     Object::Array(mut arr) => {
                                         arr.push(overlay_ref);
                                         Object::Array(arr)
-                                    },
+                                    }
                                     _ => Object::Array(vec![contents, overlay_ref]),
                                 };
                                 new_dict.insert("Contents".to_string(), contents_array);
@@ -2757,48 +2625,35 @@ impl DocumentEditor {
                             let resources = new_dict.get("Resources").cloned();
                             let mut resources_dict = match resources {
                                 Some(Object::Dictionary(d)) => d,
-                                Some(Object::Reference(res_ref)) => {
-                                    match self.load_source_object(res_ref) {
-                                        Ok(Object::Dictionary(d)) => d,
-                                        _ => HashMap::new(),
-                                    }
+                                Some(Object::Reference(res_ref)) => match self.load_source_object(res_ref) {
+                                    Ok(Object::Dictionary(d)) => d,
+                                    _ => HashMap::new(),
                                 },
                                 _ => HashMap::new(),
                             };
 
                             let mut xobject_dict = match resources_dict.get("XObject") {
                                 Some(Object::Dictionary(d)) => d.clone(),
-                                Some(Object::Reference(xobj_ref)) => {
-                                    match self.load_source_object(*xobj_ref) {
-                                        Ok(Object::Dictionary(d)) => d,
-                                        _ => HashMap::new(),
-                                    }
+                                Some(Object::Reference(xobj_ref)) => match self.load_source_object(*xobj_ref) {
+                                    Ok(Object::Dictionary(d)) => d,
+                                    _ => HashMap::new(),
                                 },
                                 _ => HashMap::new(),
                             };
 
                             for (obj_id, name) in form_xobj_ids {
-                                xobject_dict.insert(
-                                    name.clone(),
-                                    Object::Reference(ObjectRef::new(*obj_id, 0)),
-                                );
+                                xobject_dict.insert(name.clone(), Object::Reference(ObjectRef::new(*obj_id, 0)));
                             }
 
-                            resources_dict
-                                .insert("XObject".to_string(), Object::Dictionary(xobject_dict));
-                            new_dict.insert(
-                                "Resources".to_string(),
-                                Object::Dictionary(resources_dict),
-                            );
+                            resources_dict.insert("XObject".to_string(), Object::Dictionary(xobject_dict));
+                            new_dict.insert("Resources".to_string(), Object::Dictionary(resources_dict));
 
                             if let Some(annots) = new_dict.get("Annots").cloned() {
                                 let annots_array = match annots {
                                     Object::Array(arr) => arr,
-                                    Object::Reference(annots_ref) => {
-                                        match self.load_source_object(annots_ref) {
-                                            Ok(Object::Array(arr)) => arr,
-                                            _ => vec![],
-                                        }
+                                    Object::Reference(annots_ref) => match self.load_source_object(annots_ref) {
+                                        Ok(Object::Array(arr)) => arr,
+                                        _ => vec![],
                                     },
                                     _ => vec![],
                                 };
@@ -2809,8 +2664,7 @@ impl DocumentEditor {
                                         && let Ok(annot_obj) = self.load_source_object(ref_obj)
                                         && let Some(annot_dict) = annot_obj.as_dict()
                                     {
-                                        let subtype =
-                                            annot_dict.get("Subtype").and_then(|s| s.as_name());
+                                        let subtype = annot_dict.get("Subtype").and_then(|s| s.as_name());
                                         if subtype != Some("Widget") {
                                             filtered_annots.push(annot_ref);
                                         }
@@ -2820,10 +2674,7 @@ impl DocumentEditor {
                                 if filtered_annots.is_empty() {
                                     new_dict.remove("Annots");
                                 } else {
-                                    new_dict.insert(
-                                        "Annots".to_string(),
-                                        Object::Array(filtered_annots),
-                                    );
+                                    new_dict.insert("Annots".to_string(), Object::Array(filtered_annots));
                                 }
                             }
 
@@ -2837,11 +2688,9 @@ impl DocumentEditor {
 
                             let mut annots_array = match new_dict.get("Annots").cloned() {
                                 Some(Object::Array(arr)) => arr,
-                                Some(Object::Reference(annots_ref)) => {
-                                    match self.load_source_object(annots_ref) {
-                                        Ok(Object::Array(arr)) => arr,
-                                        _ => vec![],
-                                    }
+                                Some(Object::Reference(annots_ref)) => match self.load_source_object(annots_ref) {
+                                    Ok(Object::Array(arr)) => arr,
+                                    _ => vec![],
                                 },
                                 _ => vec![],
                             };
@@ -2870,49 +2719,29 @@ impl DocumentEditor {
                         }
 
                         let offset = writer.stream_position()?;
-                        let bytes = serialize_obj(
-                            &serializer,
-                            page_ref.id,
-                            0,
-                            &final_page_obj,
-                            &encryption_handler,
-                        );
+                        let bytes = serialize_obj(&serializer, page_ref.id, 0, &final_page_obj, &encryption_handler);
                         writer.write_all(&bytes)?;
                         xref_entries.push((page_ref.id, offset, 0, true));
 
                         let mut new_xobject_refs: Vec<(String, ObjectRef)> = Vec::new();
 
                         if let Some(page_dict) = page_obj.as_dict() {
-                            if self.structure_modified
-                                && self.modified_content.contains_key(&source_page_index)
-                            {
-                                if let Some(structure) =
-                                    self.modified_content.get(&source_page_index)
-                                {
-                                    let (content_bytes, pending_images) =
-                                        self.generate_content_stream(structure)?;
+                            if self.structure_modified && self.modified_content.contains_key(&source_page_index) {
+                                if let Some(structure) = self.modified_content.get(&source_page_index) {
+                                    let (content_bytes, pending_images) = self.generate_content_stream(structure)?;
 
                                     let mut xobject_refs: Vec<(String, ObjectRef)> = Vec::new();
                                     for pending_image in pending_images {
                                         let xobj_id = self.allocate_object_id();
 
-                                        let xobj_stream =
-                                            Self::build_image_xobject(&pending_image.image);
+                                        let xobj_stream = Self::build_image_xobject(&pending_image.image);
                                         let offset = writer.stream_position()?;
-                                        let bytes = serialize_obj(
-                                            &serializer,
-                                            xobj_id,
-                                            0,
-                                            &xobj_stream,
-                                            &encryption_handler,
-                                        );
+                                        let bytes =
+                                            serialize_obj(&serializer, xobj_id, 0, &xobj_stream, &encryption_handler);
                                         writer.write_all(&bytes)?;
                                         xref_entries.push((xobj_id, offset, 0, true));
 
-                                        xobject_refs.push((
-                                            pending_image.resource_id,
-                                            ObjectRef::new(xobj_id, 0),
-                                        ));
+                                        xobject_refs.push((pending_image.resource_id, ObjectRef::new(xobj_id, 0)));
                                     }
 
                                     let content_stream_obj = Object::Stream {
@@ -2936,34 +2765,25 @@ impl DocumentEditor {
                                     new_xobject_refs.extend(xobject_refs);
                                 }
                             } else {
-                                let has_image_mods =
-                                    self.image_modifications.contains_key(&source_page_index);
+                                let has_image_mods = self.image_modifications.contains_key(&source_page_index);
 
                                 if has_image_mods {
                                     if let Some(contents) = page_dict.get("Contents") {
                                         match contents {
                                             Object::Reference(contents_ref) => {
-                                                let contents_obj =
-                                                    self.source.load_object(*contents_ref)?;
-                                                if let Ok(content_data) =
-                                                    contents_obj.decode_stream_data()
-                                                {
-                                                    let mods = self
-                                                        .image_modifications
-                                                        .get(&source_page_index)
-                                                        .unwrap();
+                                                let contents_obj = self.source.load_object(*contents_ref)?;
+                                                if let Ok(content_data) = contents_obj.decode_stream_data() {
+                                                    let mods =
+                                                        self.image_modifications.get(&source_page_index).unwrap();
                                                     match self
-                                                        .rewrite_content_stream_with_image_mods(
-                                                            &content_data,
-                                                            mods,
-                                                        ) {
+                                                        .rewrite_content_stream_with_image_mods(&content_data, mods)
+                                                    {
                                                         Ok(modified_content) => {
                                                             let modified_stream = Object::Stream {
                                                                 dict: HashMap::new(),
                                                                 data: modified_content.into(),
                                                             };
-                                                            let offset =
-                                                                writer.stream_position()?;
+                                                            let offset = writer.stream_position()?;
                                                             let bytes = serialize_obj(
                                                                 &serializer,
                                                                 contents_ref.id,
@@ -2972,16 +2792,10 @@ impl DocumentEditor {
                                                                 &encryption_handler,
                                                             );
                                                             writer.write_all(&bytes)?;
-                                                            xref_entries.push((
-                                                                contents_ref.id,
-                                                                offset,
-                                                                0,
-                                                                true,
-                                                            ));
-                                                        },
+                                                            xref_entries.push((contents_ref.id, offset, 0, true));
+                                                        }
                                                         Err(_) => {
-                                                            let offset =
-                                                                writer.stream_position()?;
+                                                            let offset = writer.stream_position()?;
                                                             let bytes = serialize_obj(
                                                                 &serializer,
                                                                 contents_ref.id,
@@ -2990,13 +2804,8 @@ impl DocumentEditor {
                                                                 &encryption_handler,
                                                             );
                                                             writer.write_all(&bytes)?;
-                                                            xref_entries.push((
-                                                                contents_ref.id,
-                                                                offset,
-                                                                0,
-                                                                true,
-                                                            ));
-                                                        },
+                                                            xref_entries.push((contents_ref.id, offset, 0, true));
+                                                        }
                                                     }
                                                 } else {
                                                     let offset = writer.stream_position()?;
@@ -3008,57 +2817,50 @@ impl DocumentEditor {
                                                         &encryption_handler,
                                                     );
                                                     writer.write_all(&bytes)?;
-                                                    xref_entries.push((
-                                                        contents_ref.id,
-                                                        offset,
-                                                        0,
-                                                        true,
-                                                    ));
+                                                    xref_entries.push((contents_ref.id, offset, 0, true));
                                                 }
-                                            },
+                                            }
                                             Object::Array(arr) => {
-                                                let mods = self
-                                                    .image_modifications
-                                                    .get(&source_page_index)
-                                                    .unwrap();
+                                                let mods = self.image_modifications.get(&source_page_index).unwrap();
                                                 for item in arr {
                                                     if let Object::Reference(ref_obj) = item {
-                                                        let stream_obj =
-                                                            self.source.load_object(*ref_obj)?;
-                                                        if let Ok(content_data) =
-                                                            stream_obj.decode_stream_data()
-                                                        {
-                                                            match self.rewrite_content_stream_with_image_mods(&content_data, mods) {
-                                                                        Ok(modified_content) => {
-                                                                            let modified_stream = Object::Stream {
-                                                                                dict: HashMap::new(),
-                                                                                data: modified_content.into(),
-                                                                            };
-                                                                            let offset = writer.stream_position()?;
-                                                                            let bytes = serialize_obj(&serializer,
-                                                                                ref_obj.id,
-                                                                                0,
-                                                                                &modified_stream,
-                                                                                &encryption_handler,
-                                                                            );
-                                                                            writer.write_all(&bytes)?;
-                                                                            xref_entries.push((ref_obj.id, offset, 0, true));
-                                                                        }
-                                                                        Err(_) => {
-                                                                            let offset = writer.stream_position()?;
-                                                                            let bytes = serialize_obj(&serializer,
-                                                                                ref_obj.id,
-                                                                                0,
-                                                                                &stream_obj,
-                                                                                &encryption_handler,
-                                                                            );
-                                                                            writer.write_all(&bytes)?;
-                                                                            xref_entries.push((ref_obj.id, offset, 0, true));
-                                                                        }
-                                                                    }
+                                                        let stream_obj = self.source.load_object(*ref_obj)?;
+                                                        if let Ok(content_data) = stream_obj.decode_stream_data() {
+                                                            match self.rewrite_content_stream_with_image_mods(
+                                                                &content_data,
+                                                                mods,
+                                                            ) {
+                                                                Ok(modified_content) => {
+                                                                    let modified_stream = Object::Stream {
+                                                                        dict: HashMap::new(),
+                                                                        data: modified_content.into(),
+                                                                    };
+                                                                    let offset = writer.stream_position()?;
+                                                                    let bytes = serialize_obj(
+                                                                        &serializer,
+                                                                        ref_obj.id,
+                                                                        0,
+                                                                        &modified_stream,
+                                                                        &encryption_handler,
+                                                                    );
+                                                                    writer.write_all(&bytes)?;
+                                                                    xref_entries.push((ref_obj.id, offset, 0, true));
+                                                                }
+                                                                Err(_) => {
+                                                                    let offset = writer.stream_position()?;
+                                                                    let bytes = serialize_obj(
+                                                                        &serializer,
+                                                                        ref_obj.id,
+                                                                        0,
+                                                                        &stream_obj,
+                                                                        &encryption_handler,
+                                                                    );
+                                                                    writer.write_all(&bytes)?;
+                                                                    xref_entries.push((ref_obj.id, offset, 0, true));
+                                                                }
+                                                            }
                                                         } else {
-                                                            let offset =
-                                                                writer.stream_position()?;
+                                                            let offset = writer.stream_position()?;
                                                             let bytes = serialize_obj(
                                                                 &serializer,
                                                                 ref_obj.id,
@@ -3067,14 +2869,12 @@ impl DocumentEditor {
                                                                 &encryption_handler,
                                                             );
                                                             writer.write_all(&bytes)?;
-                                                            xref_entries.push((
-                                                                ref_obj.id, offset, 0, true,
-                                                            ));
+                                                            xref_entries.push((ref_obj.id, offset, 0, true));
                                                         }
                                                     }
                                                 }
-                                            },
-                                            _ => {},
+                                            }
+                                            _ => {}
                                         }
                                     }
                                 } else if destructive_redaction.is_none() {
@@ -3084,8 +2884,7 @@ impl DocumentEditor {
                                     // and the page /Contents now points to it;
                                     // emitting the original here would re-introduce
                                     // the secret bytes. ~keep
-                                    if let Some(contents_ref) =
-                                        page_dict.get("Contents").and_then(|c| c.as_reference())
+                                    if let Some(contents_ref) = page_dict.get("Contents").and_then(|c| c.as_reference())
                                     {
                                         let contents_obj = self.load_source_object(contents_ref)?;
                                         let offset = writer.stream_position()?;
@@ -3102,9 +2901,7 @@ impl DocumentEditor {
                                 }
                             }
 
-                            if let Some(resources_ref) =
-                                page_dict.get("Resources").and_then(|r| r.as_reference())
-                            {
+                            if let Some(resources_ref) = page_dict.get("Resources").and_then(|r| r.as_reference()) {
                                 let mut resources_obj = self.load_source_object(resources_ref)?;
 
                                 if !new_xobject_refs.is_empty()
@@ -3122,13 +2919,9 @@ impl DocumentEditor {
                                         _ => HashMap::new(),
                                     };
                                     for (name, obj_ref) in &new_xobject_refs {
-                                        xobj_entries
-                                            .insert(name.clone(), Object::Reference(*obj_ref));
+                                        xobj_entries.insert(name.clone(), Object::Reference(*obj_ref));
                                     }
-                                    new_res.insert(
-                                        "XObject".to_string(),
-                                        Object::Dictionary(xobj_entries),
-                                    );
+                                    new_res.insert("XObject".to_string(), Object::Dictionary(xobj_entries));
                                     resources_obj = Object::Dictionary(new_res);
                                 }
 
@@ -3157,30 +2950,24 @@ impl DocumentEditor {
                             if let Some(resources) = page_dict.get("Resources") {
                                 let resources_dict = match resources {
                                     Object::Dictionary(d) => Some(d.clone()),
-                                    Object::Reference(r) => self
-                                        .source
-                                        .load_object(*r)
-                                        .ok()
-                                        .and_then(|o| o.as_dict().cloned()),
+                                    Object::Reference(r) => {
+                                        self.source.load_object(*r).ok().and_then(|o| o.as_dict().cloned())
+                                    }
                                     _ => None,
                                 };
                                 if let Some(res_dict) = resources_dict {
                                     if let Some(fonts) = res_dict.get("Font") {
                                         let font_dict = match fonts {
                                             Object::Dictionary(d) => Some(d.clone()),
-                                            Object::Reference(r) => self
-                                                .source
-                                                .load_object(*r)
-                                                .ok()
-                                                .and_then(|o| o.as_dict().cloned()),
+                                            Object::Reference(r) => {
+                                                self.source.load_object(*r).ok().and_then(|o| o.as_dict().cloned())
+                                            }
                                             _ => None,
                                         };
                                         if let Some(fdict) = font_dict {
                                             // Rebuild written_ids for O(1) dedup lookups ~keep
                                             written_ids.clear();
-                                            written_ids.extend(
-                                                xref_entries.iter().map(|(id, _, _, _)| *id),
-                                            );
+                                            written_ids.extend(xref_entries.iter().map(|(id, _, _, _)| *id));
                                             for font_ref in fdict.values() {
                                                 if let Some(ref_obj) = font_ref.as_reference()
                                                     && !written_ids.contains(&ref_obj.id)
@@ -3192,9 +2979,7 @@ impl DocumentEditor {
                                                         .get(&ref_obj.id)
                                                         .cloned()
                                                         .map(Ok)
-                                                        .unwrap_or_else(|| {
-                                                            self.source.load_object(ref_obj)
-                                                        });
+                                                        .unwrap_or_else(|| self.source.load_object(ref_obj));
                                                     if let Ok(font_obj) = font_obj {
                                                         let offset = writer.stream_position()?;
                                                         let bytes = serialize_obj(
@@ -3205,8 +2990,7 @@ impl DocumentEditor {
                                                             &encryption_handler,
                                                         );
                                                         writer.write_all(&bytes)?;
-                                                        xref_entries
-                                                            .push((ref_obj.id, offset, 0, true));
+                                                        xref_entries.push((ref_obj.id, offset, 0, true));
                                                         written_ids.insert(ref_obj.id);
                                                     }
                                                 }
@@ -3218,40 +3002,36 @@ impl DocumentEditor {
                                         let xobject_dict = match xobjects {
                                             Object::Dictionary(d) => Some(d.clone()),
                                             Object::Reference(r) => {
-                                                let loaded =
-                                                            self.load_source_object(*r).map_err(|e| {
-                                                                tracing::warn!(
-                                                                    object_id = r.id,
-                                                                    error = %e,
-                                                                    "failed to load resource object during save"
-                                                                );
-                                                                e
-                                                            }).ok();
+                                                let loaded = self
+                                                    .load_source_object(*r)
+                                                    .map_err(|e| {
+                                                        tracing::warn!(
+                                                            object_id = r.id,
+                                                            error = %e,
+                                                            "failed to load resource object during save"
+                                                        );
+                                                        e
+                                                    })
+                                                    .ok();
                                                 if !written_ids.contains(&r.id)
                                                     && let Some(ref obj) = loaded
                                                 {
                                                     let offset = writer.stream_position()?;
-                                                    let bytes = serialize_obj(
-                                                        &serializer,
-                                                        r.id,
-                                                        0,
-                                                        obj,
-                                                        &encryption_handler,
-                                                    );
+                                                    let bytes =
+                                                        serialize_obj(&serializer, r.id, 0, obj, &encryption_handler);
                                                     writer.write_all(&bytes)?;
                                                     xref_entries.push((r.id, offset, 0, true));
                                                     written_ids.insert(r.id);
                                                 }
                                                 loaded.and_then(|o| o.as_dict().cloned())
-                                            },
+                                            }
                                             _ => None,
                                         };
                                         if let Some(xobj_dict) = xobject_dict {
                                             for xobj_ref in xobj_dict.values() {
                                                 if let Some(ref_obj) = xobj_ref.as_reference()
                                                     && !written_ids.contains(&ref_obj.id)
-                                                    && let Ok(xobj_obj) =
-                                                        self.load_source_object(ref_obj)
+                                                    && let Ok(xobj_obj) = self.load_source_object(ref_obj)
                                                 {
                                                     let offset = writer.stream_position()?;
                                                     let bytes = serialize_obj(
@@ -3262,8 +3042,7 @@ impl DocumentEditor {
                                                         &encryption_handler,
                                                     );
                                                     writer.write_all(&bytes)?;
-                                                    xref_entries
-                                                        .push((ref_obj.id, offset, 0, true));
+                                                    xref_entries.push((ref_obj.id, offset, 0, true));
                                                     written_ids.insert(ref_obj.id);
                                                 }
                                             }
@@ -3274,40 +3053,36 @@ impl DocumentEditor {
                                         let gs_dict = match gs_obj {
                                             Object::Dictionary(d) => Some(d.clone()),
                                             Object::Reference(r) => {
-                                                let loaded =
-                                                            self.load_source_object(*r).map_err(|e| {
-                                                                tracing::warn!(
-                                                                    object_id = r.id,
-                                                                    error = %e,
-                                                                    "failed to load resource object during save"
-                                                                );
-                                                                e
-                                                            }).ok();
+                                                let loaded = self
+                                                    .load_source_object(*r)
+                                                    .map_err(|e| {
+                                                        tracing::warn!(
+                                                            object_id = r.id,
+                                                            error = %e,
+                                                            "failed to load resource object during save"
+                                                        );
+                                                        e
+                                                    })
+                                                    .ok();
                                                 if !written_ids.contains(&r.id)
                                                     && let Some(ref obj) = loaded
                                                 {
                                                     let offset = writer.stream_position()?;
-                                                    let bytes = serialize_obj(
-                                                        &serializer,
-                                                        r.id,
-                                                        0,
-                                                        obj,
-                                                        &encryption_handler,
-                                                    );
+                                                    let bytes =
+                                                        serialize_obj(&serializer, r.id, 0, obj, &encryption_handler);
                                                     writer.write_all(&bytes)?;
                                                     xref_entries.push((r.id, offset, 0, true));
                                                     written_ids.insert(r.id);
                                                 }
                                                 loaded.and_then(|o| o.as_dict().cloned())
-                                            },
+                                            }
                                             _ => None,
                                         };
                                         if let Some(gsd) = gs_dict {
                                             for gs_ref in gsd.values() {
                                                 if let Some(ref_obj) = gs_ref.as_reference()
                                                     && !written_ids.contains(&ref_obj.id)
-                                                    && let Ok(obj) =
-                                                        self.load_source_object(ref_obj)
+                                                    && let Ok(obj) = self.load_source_object(ref_obj)
                                                 {
                                                     let offset = writer.stream_position()?;
                                                     let bytes = serialize_obj(
@@ -3318,8 +3093,7 @@ impl DocumentEditor {
                                                         &encryption_handler,
                                                     );
                                                     writer.write_all(&bytes)?;
-                                                    xref_entries
-                                                        .push((ref_obj.id, offset, 0, true));
+                                                    xref_entries.push((ref_obj.id, offset, 0, true));
                                                     written_ids.insert(ref_obj.id);
                                                 }
                                             }
@@ -3330,21 +3104,15 @@ impl DocumentEditor {
                         }
 
                         if let Some(overlay_obj_id) = erase_overlay_id
-                            && let Some(overlay_content) =
-                                self.generate_erase_overlay(source_page_index)
+                            && let Some(overlay_content) = self.generate_erase_overlay(source_page_index)
                         {
                             let overlay_stream = Object::Stream {
                                 dict: HashMap::new(),
                                 data: overlay_content.into(),
                             };
                             let offset = writer.stream_position()?;
-                            let bytes = serialize_obj(
-                                &serializer,
-                                overlay_obj_id,
-                                0,
-                                &overlay_stream,
-                                &encryption_handler,
-                            );
+                            let bytes =
+                                serialize_obj(&serializer, overlay_obj_id, 0, &overlay_stream, &encryption_handler);
                             writer.write_all(&bytes)?;
                             xref_entries.push((overlay_obj_id, offset, 0, true));
                         }
@@ -3360,21 +3128,14 @@ impl DocumentEditor {
                                 alt_text: None,
                                 language: None,
                             };
-                            if let Ok((content_bytes, _pending)) =
-                                self.generate_content_stream(&wrapper)
-                            {
+                            if let Ok((content_bytes, _pending)) = self.generate_content_stream(&wrapper) {
                                 let additions_stream = Object::Stream {
                                     dict: HashMap::new(),
                                     data: content_bytes.into(),
                                 };
                                 let offset = writer.stream_position()?;
-                                let bytes = serialize_obj(
-                                    &serializer,
-                                    additions_id,
-                                    0,
-                                    &additions_stream,
-                                    &encryption_handler,
-                                );
+                                let bytes =
+                                    serialize_obj(&serializer, additions_id, 0, &additions_stream, &encryption_handler);
                                 writer.write_all(&bytes)?;
                                 xref_entries.push((additions_id, offset, 0, true));
                             }
@@ -3382,25 +3143,13 @@ impl DocumentEditor {
 
                         for (name, font_id) in &overlay_font_ids {
                             let mut font_obj_dict: HashMap<String, Object> = HashMap::new();
-                            font_obj_dict
-                                .insert("Type".to_string(), Object::Name("Font".to_string()));
-                            font_obj_dict
-                                .insert("Subtype".to_string(), Object::Name("Type1".to_string()));
-                            font_obj_dict
-                                .insert("BaseFont".to_string(), Object::Name(name.clone()));
-                            font_obj_dict.insert(
-                                "Encoding".to_string(),
-                                Object::Name("WinAnsiEncoding".to_string()),
-                            );
+                            font_obj_dict.insert("Type".to_string(), Object::Name("Font".to_string()));
+                            font_obj_dict.insert("Subtype".to_string(), Object::Name("Type1".to_string()));
+                            font_obj_dict.insert("BaseFont".to_string(), Object::Name(name.clone()));
+                            font_obj_dict.insert("Encoding".to_string(), Object::Name("WinAnsiEncoding".to_string()));
                             let font_obj = Object::Dictionary(font_obj_dict);
                             let offset = writer.stream_position()?;
-                            let bytes = serialize_obj(
-                                &serializer,
-                                *font_id,
-                                0,
-                                &font_obj,
-                                &encryption_handler,
-                            );
+                            let bytes = serialize_obj(&serializer, *font_id, 0, &font_obj, &encryption_handler);
                             writer.write_all(&bytes)?;
                             xref_entries.push((*font_id, offset, 0, true));
                         }
@@ -3414,9 +3163,7 @@ impl DocumentEditor {
                             // a scope that releases the `modified_annotations`
                             // borrow before we allocate ids / mutate `self`. ~keep
                             let built_annots: Vec<(u32, HashMap<String, Object>)> =
-                                if let Some(annotations) =
-                                    self.modified_annotations.get(&source_page_index)
-                                {
+                                if let Some(annotations) = self.modified_annotations.get(&source_page_index) {
                                     new_annotation_ids
                                         .iter()
                                         .zip(annotations.iter().filter(|a| a.is_new()))
@@ -3434,19 +3181,11 @@ impl DocumentEditor {
                                 // Hoist any inline appearance stream (e.g. a
                                 // watermark's `/AP /N`) into its own indirect
                                 // object; a stream may not be a direct dict value. ~keep
-                                let hoisted = hoist_appearance_streams(
-                                    &mut annot_dict,
-                                    &mut self.next_object_id,
-                                );
+                                let hoisted = hoist_appearance_streams(&mut annot_dict, &mut self.next_object_id);
                                 for (stream_id, stream_obj) in hoisted {
                                     let offset = writer.stream_position()?;
-                                    let bytes = serialize_obj(
-                                        &serializer,
-                                        stream_id,
-                                        0,
-                                        &stream_obj,
-                                        &encryption_handler,
-                                    );
+                                    let bytes =
+                                        serialize_obj(&serializer, stream_id, 0, &stream_obj, &encryption_handler);
                                     writer.write_all(&bytes)?;
                                     xref_entries.push((stream_id, offset, 0, true));
                                 }
@@ -3467,10 +3206,7 @@ impl DocumentEditor {
                         if !new_form_field_ids.is_empty() {
                             let page_ref_for_fields = ObjectRef::new(page_ref.id, 0);
 
-                            for (field_id, wrapper) in new_form_field_ids
-                                .iter()
-                                .zip(new_form_field_wrappers.iter())
-                            {
+                            for (field_id, wrapper) in new_form_field_ids.iter().zip(new_form_field_wrappers.iter()) {
                                 let field_dict = wrapper.build_field_dict(page_ref_for_fields);
 
                                 let offset = writer.stream_position()?;
@@ -3487,18 +3223,10 @@ impl DocumentEditor {
                         }
 
                         if let Some((ref appearances, overlay_id, ref xobj_ids)) = flatten_data {
-                            for ((obj_id, _name), appearance) in
-                                xobj_ids.iter().zip(appearances.iter())
-                            {
+                            for ((obj_id, _name), appearance) in xobj_ids.iter().zip(appearances.iter()) {
                                 let mut form_dict = HashMap::new();
-                                form_dict.insert(
-                                    "Type".to_string(),
-                                    Object::Name("XObject".to_string()),
-                                );
-                                form_dict.insert(
-                                    "Subtype".to_string(),
-                                    Object::Name("Form".to_string()),
-                                );
+                                form_dict.insert("Type".to_string(), Object::Name("XObject".to_string()));
+                                form_dict.insert("Subtype".to_string(), Object::Name("Form".to_string()));
                                 form_dict.insert("FormType".to_string(), Object::Integer(1));
                                 form_dict.insert(
                                     "BBox".to_string(),
@@ -3534,13 +3262,7 @@ impl DocumentEditor {
                                 };
 
                                 let offset = writer.stream_position()?;
-                                let bytes = serialize_obj(
-                                    &serializer,
-                                    *obj_id,
-                                    0,
-                                    &form_stream,
-                                    &encryption_handler,
-                                );
+                                let bytes = serialize_obj(&serializer, *obj_id, 0, &form_stream, &encryption_handler);
                                 writer.write_all(&bytes)?;
                                 xref_entries.push((*obj_id, offset, 0, true));
 
@@ -3548,22 +3270,14 @@ impl DocumentEditor {
                                 // on (e.g. an embedded fallback-font graph). ~keep
                                 for (extra_id, extra_obj) in &appearance.extra_objects {
                                     let off = writer.stream_position()?;
-                                    let b = serialize_obj(
-                                        &serializer,
-                                        *extra_id,
-                                        0,
-                                        extra_obj,
-                                        &encryption_handler,
-                                    );
+                                    let b = serialize_obj(&serializer, *extra_id, 0, extra_obj, &encryption_handler);
                                     writer.write_all(&b)?;
                                     xref_entries.push((*extra_id, off, 0, true));
                                 }
                             }
 
-                            let xobj_names: Vec<String> =
-                                xobj_ids.iter().map(|(_, name)| name.clone()).collect();
-                            let overlay_content =
-                                self.generate_flatten_overlay(appearances, &xobj_names);
+                            let xobj_names: Vec<String> = xobj_ids.iter().map(|(_, name)| name.clone()).collect();
+                            let overlay_content = self.generate_flatten_overlay(appearances, &xobj_names);
 
                             let overlay_stream = Object::Stream {
                                 dict: HashMap::new(),
@@ -3571,13 +3285,7 @@ impl DocumentEditor {
                             };
 
                             let offset = writer.stream_position()?;
-                            let bytes = serialize_obj(
-                                &serializer,
-                                overlay_id,
-                                0,
-                                &overlay_stream,
-                                &encryption_handler,
-                            );
+                            let bytes = serialize_obj(&serializer, overlay_id, 0, &overlay_stream, &encryption_handler);
                             writer.write_all(&bytes)?;
                             xref_entries.push((overlay_id, offset, 0, true));
                         }
@@ -3591,13 +3299,8 @@ impl DocumentEditor {
                             };
 
                             let offset = writer.stream_position()?;
-                            let bytes = serialize_obj(
-                                &serializer,
-                                redact_overlay_id,
-                                0,
-                                &overlay_stream,
-                                &encryption_handler,
-                            );
+                            let bytes =
+                                serialize_obj(&serializer, redact_overlay_id, 0, &overlay_stream, &encryption_handler);
                             writer.write_all(&bytes)?;
                             xref_entries.push((redact_overlay_id, offset, 0, true));
                         }
@@ -3613,32 +3316,17 @@ impl DocumentEditor {
                                 data: redacted_bytes.clone().into(),
                             };
                             let offset = writer.stream_position()?;
-                            let bytes = serialize_obj(
-                                &serializer,
-                                *redacted_id,
-                                0,
-                                &redacted_stream,
-                                &encryption_handler,
-                            );
+                            let bytes =
+                                serialize_obj(&serializer, *redacted_id, 0, &redacted_stream, &encryption_handler);
                             writer.write_all(&bytes)?;
                             xref_entries.push((*redacted_id, offset, 0, true));
                         }
 
-                        if let Some((ref form_appearances, form_overlay_id, ref form_xobj_ids)) =
-                            form_flatten_data
-                        {
-                            for ((obj_id, _), appearance) in
-                                form_xobj_ids.iter().zip(form_appearances.iter())
-                            {
+                        if let Some((ref form_appearances, form_overlay_id, ref form_xobj_ids)) = form_flatten_data {
+                            for ((obj_id, _), appearance) in form_xobj_ids.iter().zip(form_appearances.iter()) {
                                 let mut form_dict: HashMap<String, Object> = HashMap::new();
-                                form_dict.insert(
-                                    "Type".to_string(),
-                                    Object::Name("XObject".to_string()),
-                                );
-                                form_dict.insert(
-                                    "Subtype".to_string(),
-                                    Object::Name("Form".to_string()),
-                                );
+                                form_dict.insert("Type".to_string(), Object::Name("XObject".to_string()));
+                                form_dict.insert("Subtype".to_string(), Object::Name("Form".to_string()));
                                 form_dict.insert("FormType".to_string(), Object::Integer(1));
                                 form_dict.insert(
                                     "BBox".to_string(),
@@ -3674,13 +3362,7 @@ impl DocumentEditor {
                                 };
 
                                 let offset = writer.stream_position()?;
-                                let bytes = serialize_obj(
-                                    &serializer,
-                                    *obj_id,
-                                    0,
-                                    &form_stream,
-                                    &encryption_handler,
-                                );
+                                let bytes = serialize_obj(&serializer, *obj_id, 0, &form_stream, &encryption_handler);
                                 writer.write_all(&bytes)?;
                                 xref_entries.push((*obj_id, offset, 0, true));
 
@@ -3688,22 +3370,14 @@ impl DocumentEditor {
                                 // on (e.g. an embedded fallback-font graph). ~keep
                                 for (extra_id, extra_obj) in &appearance.extra_objects {
                                     let off = writer.stream_position()?;
-                                    let b = serialize_obj(
-                                        &serializer,
-                                        *extra_id,
-                                        0,
-                                        extra_obj,
-                                        &encryption_handler,
-                                    );
+                                    let b = serialize_obj(&serializer, *extra_id, 0, extra_obj, &encryption_handler);
                                     writer.write_all(&b)?;
                                     xref_entries.push((*extra_id, off, 0, true));
                                 }
                             }
 
-                            let xobj_names: Vec<String> =
-                                form_xobj_ids.iter().map(|(_, name)| name.clone()).collect();
-                            let overlay_content =
-                                self.generate_flatten_overlay(form_appearances, &xobj_names);
+                            let xobj_names: Vec<String> = form_xobj_ids.iter().map(|(_, name)| name.clone()).collect();
+                            let overlay_content = self.generate_flatten_overlay(form_appearances, &xobj_names);
 
                             let overlay_stream = Object::Stream {
                                 dict: HashMap::new(),
@@ -3711,13 +3385,8 @@ impl DocumentEditor {
                             };
 
                             let offset = writer.stream_position()?;
-                            let bytes = serialize_obj(
-                                &serializer,
-                                form_overlay_id,
-                                0,
-                                &overlay_stream,
-                                &encryption_handler,
-                            );
+                            let bytes =
+                                serialize_obj(&serializer, form_overlay_id, 0, &overlay_stream, &encryption_handler);
                             writer.write_all(&bytes)?;
                             xref_entries.push((form_overlay_id, offset, 0, true));
                         }
@@ -3739,7 +3408,7 @@ impl DocumentEditor {
                         Object::Dictionary(mut dict) => {
                             dict.insert("Parent".to_string(), Object::Reference(pages_ref));
                             Object::Dictionary(dict)
-                        },
+                        }
                         _ => page_data.page_object.clone(),
                     }
                 } else {
@@ -3750,8 +3419,7 @@ impl DocumentEditor {
             };
 
             let offset = writer.stream_position()?;
-            let bytes =
-                serialize_obj(&serializer, page_id, 0, &final_page_obj, &encryption_handler);
+            let bytes = serialize_obj(&serializer, page_id, 0, &final_page_obj, &encryption_handler);
             writer.write_all(&bytes)?;
             xref_entries.push((page_id, offset, 0, true));
             written_ids.insert(page_id);
@@ -3875,14 +3543,14 @@ impl DocumentEditor {
                     writer.write_all(&bytes)?;
                     xref_entries.push((obj_id, offset, 0, true));
                     written_ids.insert(obj_id);
-                },
+                }
                 Err(e) => {
                     tracing::warn!(
                         object_id = obj_id,
                         error = %e,
                         "skipping unloadable object during sweep"
                     );
-                },
+                }
             }
         }
 
@@ -3910,11 +3578,7 @@ impl DocumentEditor {
         let xref_offset = writer.stream_position()?;
         write!(writer, "xref\n")?;
 
-        let max_id = xref_entries
-            .iter()
-            .map(|(id, _, _, _)| *id)
-            .max()
-            .unwrap_or(0);
+        let max_id = xref_entries.iter().map(|(id, _, _, _)| *id).max().unwrap_or(0);
         write!(writer, "0 {}\n", max_id + 1)?;
 
         let mut entry_map: HashMap<u32, (u64, u16, bool)> = xref_entries
@@ -4121,10 +3785,7 @@ impl DocumentEditor {
             // call instead of accumulating them, silently dropping all but the
             // last call's additions. Extend the existing Vec instead. ~keep
             if !added.is_empty() {
-                self.overlay_additions
-                    .entry(page_index)
-                    .or_default()
-                    .extend(added);
+                self.overlay_additions.entry(page_index).or_default().extend(added);
             }
 
             // Pre-existing content that was edited/removed via the DOM can't be
@@ -4143,10 +3804,7 @@ impl DocumentEditor {
                         None,
                     ));
                 }
-                self.apply_redactions_destructive_for_page(
-                    page_index,
-                    &crate::redaction::RedactionOptions::default(),
-                )?;
+                self.apply_redactions_destructive_for_page(page_index, &crate::redaction::RedactionOptions::default())?;
             }
         } else {
             // Freshly created page — replace the entire content stream. ~keep
@@ -4162,10 +3820,7 @@ impl DocumentEditor {
     }
 
     /// Get the modified annotations for a page (if any).
-    pub fn get_page_annotations(
-        &self,
-        page_index: usize,
-    ) -> Option<&Vec<crate::editor::dom::AnnotationWrapper>> {
+    pub fn get_page_annotations(&self, page_index: usize) -> Option<&Vec<crate::editor::dom::AnnotationWrapper>> {
         self.modified_annotations.get(&page_index)
     }
 
@@ -4499,9 +4154,7 @@ impl DocumentEditor {
             let width = rect[2] - rect[0];
             let height = rect[3] - rect[1];
 
-            content.extend_from_slice(
-                format!("{:.2} {:.2} {:.2} {:.2} re f\n", x, y, width, height).as_bytes(),
-            );
+            content.extend_from_slice(format!("{:.2} {:.2} {:.2} {:.2} re f\n", x, y, width, height).as_bytes());
         }
 
         content.extend_from_slice(b"Q\n");
@@ -4632,10 +4285,7 @@ impl DocumentEditor {
     ///
     /// Returns `None` if the original catalog has no AcroForm, or if the AcroForm
     /// contains `/XFA` (in which case we leave it untouched and emit a warning).
-    fn rebuild_partial_acroform(
-        &mut self,
-        catalog_dict: &HashMap<String, Object>,
-    ) -> Result<Option<Object>> {
+    fn rebuild_partial_acroform(&mut self, catalog_dict: &HashMap<String, Object>) -> Result<Option<Object>> {
         let acroform_obj = match catalog_dict.get("AcroForm") {
             Some(o) => o.clone(),
             None => return Ok(None),
@@ -4715,17 +4365,13 @@ impl DocumentEditor {
             Some(Object::Array(kids)) => {
                 for kid in &kids {
                     if let Object::Reference(kid_ref) = kid
-                        && self.field_has_surviving_widgets(
-                            kid_ref,
-                            flattened_pages,
-                            page_ref_to_index,
-                        )?
+                        && self.field_has_surviving_widgets(kid_ref, flattened_pages, page_ref_to_index)?
                     {
                         return Ok(true);
                     }
                 }
                 Ok(false)
-            },
+            }
             _ => {
                 match dict.get("P") {
                     Some(Object::Reference(page_ref)) => {
@@ -4734,10 +4380,10 @@ impl DocumentEditor {
                             // Page ref not in map — keep the field (unknown page) ~keep
                             None => Ok(true),
                         }
-                    },
+                    }
                     _ => Ok(true),
                 }
-            },
+            }
         }
     }
 
@@ -4857,10 +4503,7 @@ impl DocumentEditor {
     ///     std::fs::write("converted.pdf", acroform_bytes)?;
     /// }
     /// ```
-    pub fn convert_xfa_to_acroform(
-        &mut self,
-        options: Option<crate::xfa::XfaConversionOptions>,
-    ) -> Result<Vec<u8>> {
+    pub fn convert_xfa_to_acroform(&mut self, options: Option<crate::xfa::XfaConversionOptions>) -> Result<Vec<u8>> {
         crate::xfa::convert_xfa_document(&mut self.source, options)
     }
 
@@ -4921,19 +4564,13 @@ impl DocumentEditor {
                         dict.get("Kids")
                             .and_then(|k| match k {
                                 Object::Array(arr) => Some(arr.clone()),
-                                Object::Reference(r) => self
-                                    .source
-                                    .load_object(*r)
-                                    .ok()
-                                    .and_then(|o| o.as_array().cloned()),
+                                Object::Reference(r) => {
+                                    self.source.load_object(*r).ok().and_then(|o| o.as_array().cloned())
+                                }
                                 _ => None,
                             })
                             .and_then(|kids| kids.first().cloned())
-                            .and_then(|kid_ref| {
-                                kid_ref
-                                    .as_reference()
-                                    .and_then(|r| self.source.load_object(r).ok())
-                            })
+                            .and_then(|kid_ref| kid_ref.as_reference().and_then(|r| self.source.load_object(r).ok()))
                             .and_then(|kid_obj| kid_obj.as_dict().cloned())
                             .and_then(|kid_dict| kid_dict.get("P").and_then(|p| p.as_reference()))
                     })
@@ -4972,10 +4609,7 @@ impl DocumentEditor {
     ///     println!("Email: {:?}", value);
     /// }
     /// ```
-    pub fn get_form_field_value(
-        &mut self,
-        name: &str,
-    ) -> Result<Option<crate::editor::form_fields::FormFieldValue>> {
+    pub fn get_form_field_value(&mut self, name: &str) -> Result<Option<crate::editor::form_fields::FormFieldValue>> {
         use crate::editor::form_fields::FormFieldValue;
         use crate::extractors::forms::FormExtractor;
 
@@ -5138,10 +4772,7 @@ impl DocumentEditor {
     ///
     /// editor.save("output.pdf")?;
     /// ```
-    pub fn add_parent_field(
-        &mut self,
-        config: crate::editor::form_fields::ParentFieldConfig,
-    ) -> Result<String> {
+    pub fn add_parent_field(&mut self, config: crate::editor::form_fields::ParentFieldConfig) -> Result<String> {
         let name = config.full_name();
 
         if self.has_form_field(&name)? {
@@ -5341,7 +4972,10 @@ impl DocumentEditor {
         use crate::extractors::forms::FormExtractor;
 
         if self.deleted_form_fields.contains(name) {
-            return Err(Error::InvalidPdf(format!("Cannot set value on deleted field: {}", name)));
+            return Err(Error::InvalidPdf(format!(
+                "Cannot set value on deleted field: {}",
+                name
+            )));
         }
 
         if let Some(wrapper) = self.modified_form_fields.get_mut(name) {
@@ -5543,11 +5177,7 @@ impl DocumentEditor {
     ///
     /// * `name` - The full qualified name of the field
     /// * `da` - The default appearance string
-    pub fn set_form_field_default_appearance(
-        &mut self,
-        name: &str,
-        da: impl Into<String>,
-    ) -> Result<()> {
+    pub fn set_form_field_default_appearance(&mut self, name: &str, da: impl Into<String>) -> Result<()> {
         let da_str = da.into();
         self.modify_form_field(name, |wrapper| {
             wrapper.set_default_appearance(da_str);
@@ -5649,10 +5279,7 @@ impl DocumentEditor {
     /// let mut editor = DocumentEditor::open("filled_form.pdf")?;
     /// editor.export_form_data_xfdf("form_data.xfdf")?;
     /// ```
-    pub fn export_form_data_xfdf(
-        &mut self,
-        output_path: impl AsRef<std::path::Path>,
-    ) -> Result<()> {
+    pub fn export_form_data_xfdf(&mut self, output_path: impl AsRef<std::path::Path>) -> Result<()> {
         use crate::extractors::forms::FormExtractor;
         FormExtractor::export_xfdf(&self.source, output_path)
     }
@@ -5692,19 +5319,16 @@ impl DocumentEditor {
                 }
                 let mut updated = annotation.clone();
                 match updated.field_type {
-                    Some(crate::annotation_types::WidgetFieldType::Choice {
-                        ref options, ..
-                    }) => {
+                    Some(crate::annotation_types::WidgetFieldType::Choice { ref options, .. }) => {
                         let options = options.clone();
-                        updated.field_type =
-                            Some(crate::annotation_types::WidgetFieldType::Choice {
-                                options,
-                                selected: Some(text),
-                            });
-                    },
+                        updated.field_type = Some(crate::annotation_types::WidgetFieldType::Choice {
+                            options,
+                            selected: Some(text),
+                        });
+                    }
                     _ => {
                         updated.field_value = Some(text);
-                    },
+                    }
                 }
                 if let Some(generated) = self.generate_widget_appearance(&updated)? {
                     appearances.push(generated);
@@ -5720,7 +5344,7 @@ impl DocumentEditor {
                     match self.generate_widget_appearance(&annotation)? {
                         Some(generated) => {
                             appearances.push(generated);
-                        },
+                        }
                         _ => {
                             // Widget has neither /AP nor a generatable appearance — flattening
                             // it produces a blank rectangle. Record field name as a warning. ~keep
@@ -5734,12 +5358,12 @@ impl DocumentEditor {
                                 })
                                 .unwrap_or_else(|| format!("widget@page{}", page));
                             self.flatten_warnings.push(format!(
-                            "field '{}' has no /AP appearance stream — flattening produces blank rectangle",
-                            field_name
-                        ));
-                        },
+                                "field '{}' has no /AP appearance stream — flattening produces blank rectangle",
+                                field_name
+                            ));
+                        }
                     }
-                },
+                }
                 Err(_) => continue,
             }
         }
@@ -5813,12 +5437,12 @@ impl DocumentEditor {
                     if let Ok(s) = toks[i - 1].parse::<f32>() {
                         size = s;
                     }
-                },
+                }
                 "g" if i >= 1 => {
                     if let Ok(v) = toks[i - 1].parse::<f32>() {
                         color = (v, v, v);
                     }
-                },
+                }
                 "rg" if i >= 3 => {
                     if let (Ok(r), Ok(g), Ok(b)) = (
                         toks[i - 3].parse::<f32>(),
@@ -5827,8 +5451,8 @@ impl DocumentEditor {
                     ) {
                         color = (r, g, b);
                     }
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
         (font, size, color)
@@ -5908,7 +5532,7 @@ impl DocumentEditor {
             Object::Reference(ref_obj) => {
                 let obj = self.source.load_object(ref_obj)?;
                 (obj, Some(ref_obj))
-            },
+            }
             Object::Dictionary(ref dict) => {
                 if dict.get("Type").and_then(|t| t.as_name()) == Some("XObject") {
                     (Object::Dictionary(dict.clone()), None)
@@ -5918,7 +5542,7 @@ impl DocumentEditor {
                         Some(Object::Reference(ref_obj)) => {
                             let obj = self.source.load_object(*ref_obj)?;
                             (obj, Some(*ref_obj))
-                        },
+                        }
                         Some(obj) => (obj.clone(), None),
                         None => {
                             if state == "Off" {
@@ -5928,14 +5552,14 @@ impl DocumentEditor {
                                 Some(Object::Reference(ref_obj)) => {
                                     let obj = self.source.load_object(*ref_obj)?;
                                     (obj, Some(*ref_obj))
-                                },
+                                }
                                 Some(obj) => (obj.clone(), None),
                                 None => return Ok(None),
                             }
-                        },
+                        }
                     }
                 }
-            },
+            }
             _ => return Ok(None),
         };
 
@@ -5951,16 +5575,11 @@ impl DocumentEditor {
                     .filter_map(|o| o.as_real().or_else(|| o.as_integer().map(|i| i as f64)))
                     .collect();
                 if values.len() >= 4 {
-                    [
-                        values[0] as f32,
-                        values[1] as f32,
-                        values[2] as f32,
-                        values[3] as f32,
-                    ]
+                    [values[0] as f32, values[1] as f32, values[2] as f32, values[3] as f32]
                 } else {
                     return Ok(None);
                 }
-            },
+            }
             _ => return Ok(None),
         };
 
@@ -5982,7 +5601,7 @@ impl DocumentEditor {
                 } else {
                     None
                 }
-            },
+            }
             _ => None,
         };
 
@@ -6051,9 +5670,7 @@ impl DocumentEditor {
         use crate::fonts::form_fallback;
 
         match annotation.field_type {
-            Some(WidgetFieldType::Text)
-            | Some(WidgetFieldType::Choice { .. })
-            | Some(WidgetFieldType::Button) => {},
+            Some(WidgetFieldType::Text) | Some(WidgetFieldType::Choice { .. }) | Some(WidgetFieldType::Button) => {}
             _ => return Ok(None),
         }
         if text.is_empty() || !text.chars().any(|c| form_fallback::classify(c).is_some()) {
@@ -6094,8 +5711,7 @@ impl DocumentEditor {
         let width = (rect[2] - rect[0]) as f32;
         let height = (rect[3] - rect[1]) as f32;
 
-        let (da_font, da_size, da_color) =
-            Self::parse_da(&self.effective_da(annotation).unwrap_or_default());
+        let (da_font, da_size, da_color) = Self::parse_da(&self.effective_da(annotation).unwrap_or_default());
         let font_size = if da_size > 0.0 {
             da_size
         } else {
@@ -6118,7 +5734,7 @@ impl DocumentEditor {
                 match EmbeddedFont::from_data(None, form_fallback::font_bytes(kind).to_vec()) {
                     Ok(f) => {
                         e.insert(f);
-                    },
+                    }
                     // A font that won't parse → give up, use the /DA path. ~keep
                     Err(_) => return Ok(None),
                 }
@@ -6128,12 +5744,9 @@ impl DocumentEditor {
         for run in &runs {
             match run.fallback {
                 Some(kind) => {
-                    let gids = fonts
-                        .get_mut(&kind)
-                        .expect("font present")
-                        .encode_string(&run.text);
+                    let gids = fonts.get_mut(&kind).expect("font present").encode_string(&run.text);
                     run_gids.push(gids);
-                },
+                }
                 None => run_gids.push(Vec::new()),
             }
         }
@@ -6141,8 +5754,7 @@ impl DocumentEditor {
         let mut extra_objects: Vec<(u32, Object)> = Vec::new();
         let mut placed: BTreeMap<Fallback, (String, crate::fonts::GlyphRemapper)> = BTreeMap::new();
         for (kind, font) in fonts.iter_mut() {
-            let (ids, objs, remapper) =
-                build_embedded_font_objects(font, || self.allocate_object_id())?;
+            let (ids, objs, remapper) = build_embedded_font_objects(font, || self.allocate_object_id())?;
             let res_name = match kind {
                 Fallback::Cjk => "FbCJK",
                 Fallback::Emoji => "FbEmoji",
@@ -6165,7 +5777,7 @@ impl DocumentEditor {
                 None => {
                     content.push_str(&format!("{} {} Tf\n", da_font, font_size));
                     content.push_str(&format!("({}) Tj\n", Self::escape_pdf_literal(&run.text)));
-                },
+                }
                 Some(kind) => {
                     let (res_name, remapper) = placed.get(&kind).expect("placed font");
                     content.push_str(&format!("/{} {} Tf\n", res_name, font_size));
@@ -6175,7 +5787,7 @@ impl DocumentEditor {
                         content.push_str(&format!("{:04X}", sub));
                     }
                     content.push_str("> Tj\n");
-                },
+                }
             }
         }
         content.push_str("ET\nQ\nEMC\n");
@@ -6186,12 +5798,7 @@ impl DocumentEditor {
         Ok(Some(AnnotationAppearance {
             content: content.into_bytes(),
             bbox: [0.0, 0.0, width, height],
-            annot_rect: [
-                rect[0] as f32,
-                rect[1] as f32,
-                rect[2] as f32,
-                rect[3] as f32,
-            ],
+            annot_rect: [rect[0] as f32, rect[1] as f32, rect[2] as f32, rect[3] as f32],
             matrix: None,
             resources: Some(Object::Dictionary(res)),
             extra_objects,
@@ -6212,12 +5819,7 @@ impl DocumentEditor {
             None => return Ok(None),
         };
 
-        let annot_rect = [
-            rect[0] as f32,
-            rect[1] as f32,
-            rect[2] as f32,
-            rect[3] as f32,
-        ];
+        let annot_rect = [rect[0] as f32, rect[1] as f32, rect[2] as f32, rect[3] as f32];
         let width = annot_rect[2] - annot_rect[0];
         let height = annot_rect[3] - annot_rect[1];
         let geom_rect = Rect::new(0.0, 0.0, width, height);
@@ -6233,8 +5835,7 @@ impl DocumentEditor {
             .with_border(1.0, 0.0, 0.0, 0.0);
         let text_generator = FormAppearanceGenerator::new();
 
-        let (da_font, da_size, da_color) =
-            Self::parse_da(&self.effective_da(annotation).unwrap_or_default());
+        let (da_font, da_size, da_color) = Self::parse_da(&self.effective_da(annotation).unwrap_or_default());
         // Auto-size (/DA size 0) → fit the annotation height with padding. ~keep
         let font_size = if da_size > 0.0 {
             da_size
@@ -6248,34 +5849,34 @@ impl DocumentEditor {
                 let text = annotation.field_value.as_deref().unwrap_or("");
                 text_resources = Some(self.build_text_appearance_resources(&da_font));
                 text_generator.text_field_appearance(geom_rect, text, &da_font, font_size, da_color)
-            },
+            }
             Some(WidgetFieldType::Checkbox { checked }) => {
                 if *checked {
                     shape_generator.checkbox_on_appearance(geom_rect, (0.0, 0.0, 0.0))
                 } else {
                     shape_generator.checkbox_off_appearance(geom_rect)
                 }
-            },
+            }
             Some(WidgetFieldType::Radio { selected }) => {
                 if selected.is_some() {
                     shape_generator.radio_on_appearance(geom_rect, (0.0, 0.0, 0.0))
                 } else {
                     shape_generator.radio_off_appearance(geom_rect)
                 }
-            },
+            }
             Some(WidgetFieldType::Button) => {
                 let caption = annotation.field_value.as_deref().unwrap_or("");
                 text_resources = Some(self.build_text_appearance_resources(&da_font));
                 text_generator.button_appearance(geom_rect, caption, &da_font, font_size, da_color)
-            },
+            }
             Some(WidgetFieldType::Choice { selected, .. }) => {
                 let text = selected.as_deref().unwrap_or("");
                 text_resources = Some(self.build_text_appearance_resources(&da_font));
                 text_generator.text_field_appearance(geom_rect, text, &da_font, font_size, da_color)
-            },
+            }
             Some(WidgetFieldType::Signature) | Some(WidgetFieldType::Unknown) | None => {
                 return Ok(None);
-            },
+            }
         };
 
         let content_bytes = content_str.into_bytes();
@@ -6323,7 +5924,7 @@ impl DocumentEditor {
                 Object::Reference(ref_obj) => {
                     let obj = self.source.load_object(ref_obj)?;
                     (obj, Some(ref_obj))
-                },
+                }
                 Object::Dictionary(ref dict) => {
                     if dict.get("Type").and_then(|t| t.as_name()) == Some("XObject") {
                         (Object::Dictionary(dict.clone()), None)
@@ -6333,12 +5934,12 @@ impl DocumentEditor {
                             Some(Object::Reference(ref_obj)) => {
                                 let obj = self.source.load_object(*ref_obj)?;
                                 (obj, Some(*ref_obj))
-                            },
+                            }
                             Some(obj) => (obj.clone(), None),
                             None => continue,
                         }
                     }
-                },
+                }
                 _ => continue,
             };
 
@@ -6354,16 +5955,11 @@ impl DocumentEditor {
                         .filter_map(|o| o.as_real().or_else(|| o.as_integer().map(|i| i as f64)))
                         .collect();
                     if values.len() >= 4 {
-                        [
-                            values[0] as f32,
-                            values[1] as f32,
-                            values[2] as f32,
-                            values[3] as f32,
-                        ]
+                        [values[0] as f32, values[1] as f32, values[2] as f32, values[3] as f32]
                     } else {
                         continue;
                     }
-                },
+                }
                 _ => continue,
             };
 
@@ -6385,7 +5981,7 @@ impl DocumentEditor {
                     } else {
                         None
                     }
-                },
+                }
                 _ => None,
             };
 
@@ -6432,11 +6028,7 @@ impl DocumentEditor {
     ///
     /// This creates PDF operators that invoke each annotation's appearance
     /// as a Form XObject at the correct position.
-    fn generate_flatten_overlay(
-        &self,
-        appearances: &[AnnotationAppearance],
-        xobject_names: &[String],
-    ) -> Vec<u8> {
+    fn generate_flatten_overlay(&self, appearances: &[AnnotationAppearance], xobject_names: &[String]) -> Vec<u8> {
         let mut content = Vec::new();
 
         for (appearance, xobj_name) in appearances.iter().zip(xobject_names.iter()) {
@@ -6464,9 +6056,7 @@ impl DocumentEditor {
             let tx = rect[0] - bbox[0] * sx;
             let ty = rect[1] - bbox[1] * sy;
 
-            content.extend_from_slice(
-                format!("{:.6} 0 0 {:.6} {:.6} {:.6} cm\n", sx, sy, tx, ty).as_bytes(),
-            );
+            content.extend_from_slice(format!("{:.6} 0 0 {:.6} {:.6} {:.6} cm\n", sx, sy, tx, ty).as_bytes());
 
             if let Some(m) = appearance.matrix {
                 content.extend_from_slice(
@@ -6514,19 +6104,17 @@ impl DocumentEditor {
     ///
     /// # Errors
     /// [`Error::InvalidPdf`] if `page` is out of range.
-    pub fn add_redaction(
-        &mut self,
-        page: usize,
-        rect: [f32; 4],
-        fill: Option<[f32; 3]>,
-    ) -> Result<()> {
+    pub fn add_redaction(&mut self, page: usize, rect: [f32; 4], fill: Option<[f32; 3]>) -> Result<()> {
         if page >= self.current_page_count() {
             return Err(Error::InvalidPdf(format!("Page index {} out of range", page)));
         }
         let source_page = self.output_to_source_index(page);
-        self.redaction_regions.entry(source_page).or_default().push(
-            crate::redaction::RedactionRegion::from_rect(rect[0], rect[1], rect[2], rect[3], fill),
-        );
+        self.redaction_regions
+            .entry(source_page)
+            .or_default()
+            .push(crate::redaction::RedactionRegion::from_rect(
+                rect[0], rect[1], rect[2], rect[3], fill,
+            ));
         self.apply_redactions_pages.insert(source_page);
         self.is_modified = true;
         Ok(())
@@ -6546,10 +6134,7 @@ impl DocumentEditor {
         }
         let source_page = self.output_to_source_index(page);
         let annots = self.get_redaction_data(source_page)?.len();
-        let prog = self
-            .redaction_regions
-            .get(&source_page)
-            .map_or(0, |v| v.len());
+        let prog = self.redaction_regions.get(&source_page).map_or(0, |v| v.len());
         Ok(annots + prog)
     }
 
@@ -6579,7 +6164,7 @@ impl DocumentEditor {
                     }
                 }
                 Ok(data)
-            },
+            }
             _ => Ok(Vec::new()),
         }
     }
@@ -6588,10 +6173,7 @@ impl DocumentEditor {
     /// from its (possibly inherited) `/Resources/Font`. A font that fails
     /// to parse is simply omitted — the engine then reports it
     /// non-simple and *refuses* rather than under-redacting.
-    fn build_page_font_metrics(
-        &mut self,
-        source_page: usize,
-    ) -> Result<crate::redaction::FontInfoMetrics> {
+    fn build_page_font_metrics(&mut self, source_page: usize) -> Result<crate::redaction::FontInfoMetrics> {
         use std::collections::HashMap as Map;
         let mut map: Map<String, std::sync::Arc<crate::fonts::FontInfo>> = Map::new();
 
@@ -6734,15 +6316,15 @@ impl DocumentEditor {
             match d.get("Contents") {
                 Some(Object::Reference(r)) => {
                     self.redacted_orphan_ids.insert(r.id);
-                },
+                }
                 Some(Object::Array(arr)) => {
                     for it in arr {
                         if let Object::Reference(r) = it {
                             self.redacted_orphan_ids.insert(r.id);
                         }
                     }
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
         self.redacted_content.insert(src, bytes);
@@ -6800,9 +6382,7 @@ impl DocumentEditor {
             .clone();
 
         let scrub = crate::redaction::sanitize_catalog(&catalog_dict, &opts, |id| {
-            self.source
-                .load_object(ObjectRef { id, generation: 0 })
-                .ok()
+            self.source.load_object(ObjectRef { id, generation: 0 }).ok()
         });
         let counts = scrub.counts;
         let removed_roots = scrub.removed_roots.clone();
@@ -6842,7 +6422,7 @@ impl DocumentEditor {
                         Object::Array(a) => a.iter().for_each(|x| walk(x, q)),
                         Object::Dictionary(d) => d.values().for_each(|x| walk(x, q)),
                         Object::Stream { dict, .. } => dict.values().for_each(|x| walk(x, q)),
-                        _ => {},
+                        _ => {}
                     }
                 }
                 walk(&obj, &mut queue);
@@ -6936,9 +6516,7 @@ impl DocumentEditor {
             };
 
             let color = match &annotation.interior_color {
-                Some(color) if color.len() >= 3 => {
-                    [color[0] as f32, color[1] as f32, color[2] as f32]
-                },
+                Some(color) if color.len() >= 3 => [color[0] as f32, color[1] as f32, color[2] as f32],
                 _ => [0.0, 0.0, 0.0],
             };
 
@@ -6988,9 +6566,7 @@ impl DocumentEditor {
             let width = redaction.rect[2] - redaction.rect[0];
             let height = redaction.rect[3] - redaction.rect[1];
 
-            content.extend_from_slice(
-                format!("{:.2} {:.2} {:.2} {:.2} re f\n", x, y, width, height).as_bytes(),
-            );
+            content.extend_from_slice(format!("{:.2} {:.2} {:.2} {:.2} re f\n", x, y, width, height).as_bytes());
 
             content.extend_from_slice(b"Q\n");
         }
@@ -7042,7 +6618,7 @@ impl DocumentEditor {
             Object::Reference(ref_obj) => {
                 let obj = self.source.load_object(ref_obj)?;
                 obj.decode_stream_data()?
-            },
+            }
             Object::Array(arr) => {
                 let mut data = Vec::new();
                 for item in arr {
@@ -7055,7 +6631,7 @@ impl DocumentEditor {
                     }
                 }
                 data
-            },
+            }
             _ => return Ok(Vec::new()),
         };
 
@@ -7069,12 +6645,12 @@ impl DocumentEditor {
             match op {
                 crate::content::operators::Operator::SaveState => {
                     ctm_stack.push(current_ctm);
-                },
+                }
                 crate::content::operators::Operator::RestoreState => {
                     if let Some(saved) = ctm_stack.pop() {
                         current_ctm = saved;
                     }
-                },
+                }
                 crate::content::operators::Operator::Cm { a, b, c, d, e, f } => {
                     // Concatenate transformation matrix
                     // New CTM = [a,b,c,d,e,f] * current_ctm ~keep
@@ -7085,7 +6661,7 @@ impl DocumentEditor {
                     let new_e = e * current_ctm[0] + f * current_ctm[2] + current_ctm[4];
                     let new_f = e * current_ctm[1] + f * current_ctm[3] + current_ctm[5];
                     current_ctm = [new_a, new_b, new_c, new_d, new_e, new_f];
-                },
+                }
                 crate::content::operators::Operator::Do { ref name } => {
                     // Check if this is an image XObject (vs Form XObject)
                     // For now, include all XObjects; a more refined implementation
@@ -7104,8 +6680,8 @@ impl DocumentEditor {
                         bounds: [x, y, width, height],
                         matrix,
                     });
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
 
@@ -7126,27 +6702,19 @@ impl DocumentEditor {
     /// editor.reposition_image(0, "Im1", 100.0, 200.0)?;
     /// editor.save("output.pdf")?;
     /// ```
-    pub fn reposition_image(
-        &mut self,
-        page: usize,
-        image_name: &str,
-        x: f32,
-        y: f32,
-    ) -> Result<()> {
+    pub fn reposition_image(&mut self, page: usize, image_name: &str, x: f32, y: f32) -> Result<()> {
         if page >= self.current_page_count() {
             return Err(Error::InvalidPdf(format!("Page index {} out of range", page)));
         }
 
         let source_page = self.output_to_source_index(page);
         let page_mods = self.image_modifications.entry(source_page).or_default();
-        let modification = page_mods
-            .entry(image_name.to_string())
-            .or_insert(ImageModification {
-                x: None,
-                y: None,
-                width: None,
-                height: None,
-            });
+        let modification = page_mods.entry(image_name.to_string()).or_insert(ImageModification {
+            x: None,
+            y: None,
+            width: None,
+            height: None,
+        });
         modification.x = Some(x);
         modification.y = Some(y);
 
@@ -7168,27 +6736,19 @@ impl DocumentEditor {
     /// editor.resize_image(0, "Im1", 200.0, 150.0)?;
     /// editor.save("output.pdf")?;
     /// ```
-    pub fn resize_image(
-        &mut self,
-        page: usize,
-        image_name: &str,
-        width: f32,
-        height: f32,
-    ) -> Result<()> {
+    pub fn resize_image(&mut self, page: usize, image_name: &str, width: f32, height: f32) -> Result<()> {
         if page >= self.current_page_count() {
             return Err(Error::InvalidPdf(format!("Page index {} out of range", page)));
         }
 
         let source_page = self.output_to_source_index(page);
         let page_mods = self.image_modifications.entry(source_page).or_default();
-        let modification = page_mods
-            .entry(image_name.to_string())
-            .or_insert(ImageModification {
-                x: None,
-                y: None,
-                width: None,
-                height: None,
-            });
+        let modification = page_mods.entry(image_name.to_string()).or_insert(ImageModification {
+            x: None,
+            y: None,
+            width: None,
+            height: None,
+        });
         modification.width = Some(width);
         modification.height = Some(height);
 
@@ -7273,11 +6833,11 @@ impl DocumentEditor {
                             crate::content::operators::Operator::Do { name } => {
                                 found_do = Some(name.clone());
                                 break;
-                            },
+                            }
                             crate::content::operators::Operator::RestoreState => break,
                             crate::content::operators::Operator::SaveState => break,
                             crate::content::operators::Operator::Cm { .. } => break,
-                            _ => {},
+                            _ => {}
                         }
                         j += 1;
                     }
@@ -7302,13 +6862,12 @@ impl DocumentEditor {
                     }
 
                     output.extend_from_slice(
-                        format!("{:.6} {:.6} {:.6} {:.6} {:.6} {:.6} cm\n", a, b, c, d, e, f)
-                            .as_bytes(),
+                        format!("{:.6} {:.6} {:.6} {:.6} {:.6} {:.6} cm\n", a, b, c, d, e, f).as_bytes(),
                     );
-                },
+                }
                 _ => {
                     self.serialize_operator(&mut output, op);
-                },
+                }
             }
             i += 1;
         }
@@ -7393,10 +6952,7 @@ impl EditableDocument for DocumentEditor {
             (612.0, 792.0)
         };
 
-        let rotation = page_dict
-            .get("Rotate")
-            .and_then(|r| r.as_integer())
-            .unwrap_or(0) as i32;
+        let rotation = page_dict.get("Rotate").and_then(|r| r.as_integer()).unwrap_or(0) as i32;
 
         Ok(PageInfo {
             index,
@@ -7440,12 +6996,7 @@ impl EditableDocument for DocumentEditor {
             )));
         }
 
-        let visible: Vec<i32> = self
-            .page_order
-            .iter()
-            .filter(|&&i| i >= 0)
-            .copied()
-            .collect();
+        let visible: Vec<i32> = self.page_order.iter().filter(|&&i| i >= 0).copied().collect();
 
         let mut new_visible = visible.clone();
         let moved = new_visible.remove(from);
@@ -7465,12 +7016,7 @@ impl EditableDocument for DocumentEditor {
             )));
         }
 
-        let visible: Vec<i32> = self
-            .page_order
-            .iter()
-            .filter(|&&i| i >= 0)
-            .copied()
-            .collect();
+        let visible: Vec<i32> = self.page_order.iter().filter(|&&i| i >= 0).copied().collect();
         let original_index = visible[index];
 
         self.page_order.push(original_index);
@@ -7539,10 +7085,7 @@ impl DocumentEditor {
     /// # PDF Spec Compliance
     ///
     /// - ISO 32000-1:2008, Section 14.7.4 - Marked Content Sequences
-    fn generate_content_stream(
-        &self,
-        elem: &StructureElement,
-    ) -> Result<(Vec<u8>, Vec<crate::writer::PendingImage>)> {
+    fn generate_content_stream(&self, elem: &StructureElement) -> Result<(Vec<u8>, Vec<crate::writer::PendingImage>)> {
         let mut builder = ContentStreamBuilder::new();
         builder.add_structure_element(elem);
         let bytes = builder.build()?;
@@ -7580,17 +7123,17 @@ impl DocumentEditor {
         match image.format {
             ElemImageFormat::Jpeg => {
                 dict.insert("Filter".to_string(), Object::Name("DCTDecode".to_string()));
-            },
+            }
             ElemImageFormat::Png | ElemImageFormat::Raw => {
                 dict.insert("Filter".to_string(), Object::Name("FlateDecode".to_string()));
-            },
+            }
             ElemImageFormat::Jpeg2000 => {
                 dict.insert("Filter".to_string(), Object::Name("JPXDecode".to_string()));
-            },
+            }
             ElemImageFormat::Jbig2 => {
                 dict.insert("Filter".to_string(), Object::Name("JBIG2Decode".to_string()));
-            },
-            ElemImageFormat::Unknown => {},
+            }
+            ElemImageFormat::Unknown => {}
         }
 
         dict.insert("Length".to_string(), Object::Integer(image.data.len() as i64));
@@ -7992,9 +7535,7 @@ mod tests {
             crop_box: None,
         };
 
-        let result = editor
-            .apply_page_props_to_object(&page_obj, &props)
-            .unwrap();
+        let result = editor.apply_page_props_to_object(&page_obj, &props).unwrap();
         let dict = result.as_dict().unwrap();
         assert_eq!(dict.get("Rotate").unwrap().as_integer().unwrap(), 90);
     }
@@ -8013,9 +7554,7 @@ mod tests {
             crop_box: None,
         };
 
-        let result = editor
-            .apply_page_props_to_object(&page_obj, &props)
-            .unwrap();
+        let result = editor.apply_page_props_to_object(&page_obj, &props).unwrap();
         let dict = result.as_dict().unwrap();
         let mb = dict.get("MediaBox").unwrap().as_array().unwrap();
         assert_eq!(mb.len(), 4);
@@ -8035,9 +7574,7 @@ mod tests {
             crop_box: Some([10.0, 10.0, 602.0, 782.0]),
         };
 
-        let result = editor
-            .apply_page_props_to_object(&page_obj, &props)
-            .unwrap();
+        let result = editor.apply_page_props_to_object(&page_obj, &props).unwrap();
         let dict = result.as_dict().unwrap();
         assert!(dict.contains_key("CropBox"));
     }
@@ -8056,9 +7593,7 @@ mod tests {
             crop_box: Some([20.0, 20.0, 480.0, 680.0]),
         };
 
-        let result = editor
-            .apply_page_props_to_object(&page_obj, &props)
-            .unwrap();
+        let result = editor.apply_page_props_to_object(&page_obj, &props).unwrap();
         let dict = result.as_dict().unwrap();
         assert!(dict.contains_key("Rotate"));
         assert!(dict.contains_key("MediaBox"));
@@ -8093,9 +7628,7 @@ mod tests {
     #[test]
     fn test_generate_erase_overlay_single_region() {
         let mut editor = create_test_editor();
-        editor
-            .erase_regions
-            .insert(0, vec![[10.0, 20.0, 100.0, 200.0]]);
+        editor.erase_regions.insert(0, vec![[10.0, 20.0, 100.0, 200.0]]);
 
         let content = editor.generate_erase_overlay(0).unwrap();
         let content_str = String::from_utf8(content).unwrap();
@@ -8396,11 +7929,7 @@ mod tests {
         let mut output = Vec::new();
         editor.serialize_operator(
             &mut output,
-            &crate::content::operators::Operator::SetFillRgb {
-                r: 1.0,
-                g: 0.0,
-                b: 0.0,
-            },
+            &crate::content::operators::Operator::SetFillRgb { r: 1.0, g: 0.0, b: 0.0 },
         );
         let s = String::from_utf8(output).unwrap();
         assert!(s.ends_with("rg\n"));
@@ -8452,8 +7981,7 @@ mod tests {
         assert_eq!(&output, b"h\n");
 
         output.clear();
-        editor
-            .serialize_operator(&mut output, &crate::content::operators::Operator::CloseFillStroke);
+        editor.serialize_operator(&mut output, &crate::content::operators::Operator::CloseFillStroke);
         assert_eq!(&output, b"b\n");
     }
 
@@ -8494,17 +8022,12 @@ mod tests {
         let mut output = Vec::new();
         editor.serialize_operator(
             &mut output,
-            &crate::content::operators::Operator::BeginMarkedContent {
-                tag: "P".to_string(),
-            },
+            &crate::content::operators::Operator::BeginMarkedContent { tag: "P".to_string() },
         );
         assert_eq!(&output, b"/P BMC\n");
 
         output.clear();
-        editor.serialize_operator(
-            &mut output,
-            &crate::content::operators::Operator::EndMarkedContent,
-        );
+        editor.serialize_operator(&mut output, &crate::content::operators::Operator::EndMarkedContent);
         assert_eq!(&output, b"EMC\n");
     }
 
@@ -9412,7 +8935,10 @@ mod tests {
         assert!(!editor.is_modified());
         editor.set_title("New Title");
         assert!(editor.is_modified());
-        assert_eq!(editor.modified_info.as_ref().unwrap().title, Some("New Title".to_string()));
+        assert_eq!(
+            editor.modified_info.as_ref().unwrap().title,
+            Some("New Title".to_string())
+        );
     }
 
     #[test]
@@ -9420,7 +8946,10 @@ mod tests {
         let mut editor = create_test_editor();
         editor.set_author("New Author");
         assert!(editor.is_modified());
-        assert_eq!(editor.modified_info.as_ref().unwrap().author, Some("New Author".to_string()));
+        assert_eq!(
+            editor.modified_info.as_ref().unwrap().author,
+            Some("New Author".to_string())
+        );
     }
 
     #[test]
@@ -9428,7 +8957,10 @@ mod tests {
         let mut editor = create_test_editor();
         editor.set_subject("New Subject");
         assert!(editor.is_modified());
-        assert_eq!(editor.modified_info.as_ref().unwrap().subject, Some("New Subject".to_string()));
+        assert_eq!(
+            editor.modified_info.as_ref().unwrap().subject,
+            Some("New Subject".to_string())
+        );
     }
 
     #[test]
@@ -9436,7 +8968,10 @@ mod tests {
         let mut editor = create_test_editor();
         editor.set_keywords("kw1, kw2");
         assert!(editor.is_modified());
-        assert_eq!(editor.modified_info.as_ref().unwrap().keywords, Some("kw1, kw2".to_string()));
+        assert_eq!(
+            editor.modified_info.as_ref().unwrap().keywords,
+            Some("kw1, kw2".to_string())
+        );
     }
 
     #[test]
@@ -9618,11 +9153,7 @@ mod tests {
     #[test]
     fn test_set_image_bounds_out_of_range() {
         let mut editor = create_test_editor();
-        assert!(
-            editor
-                .set_image_bounds(99, "Im1", 10.0, 20.0, 300.0, 200.0)
-                .is_err()
-        );
+        assert!(editor.set_image_bounds(99, "Im1", 10.0, 20.0, 300.0, 200.0).is_err());
     }
 
     #[test]
@@ -9700,11 +9231,7 @@ mod tests {
     #[test]
     fn test_set_page_media_box_out_of_range() {
         let mut editor = create_test_editor();
-        assert!(
-            editor
-                .set_page_media_box(99, [0.0, 0.0, 500.0, 700.0])
-                .is_err()
-        );
+        assert!(editor.set_page_media_box(99, [0.0, 0.0, 500.0, 700.0]).is_err());
     }
 
     #[test]
@@ -9718,11 +9245,7 @@ mod tests {
     #[test]
     fn test_set_page_crop_box_out_of_range() {
         let mut editor = create_test_editor();
-        assert!(
-            editor
-                .set_page_crop_box(99, [10.0, 10.0, 602.0, 782.0])
-                .is_err()
-        );
+        assert!(editor.set_page_crop_box(99, [10.0, 10.0, 602.0, 782.0]).is_err());
     }
 
     #[test]
@@ -9746,9 +9269,7 @@ mod tests {
     fn test_editable_get_info_returns_modified() {
         let mut editor = create_test_editor();
 
-        let info = DocumentInfo::new()
-            .title("Modified Title")
-            .author("Modified Author");
+        let info = DocumentInfo::new().title("Modified Title").author("Modified Author");
         EditableDocument::set_info(&mut editor, info).unwrap();
 
         let result = EditableDocument::get_info(&mut editor).unwrap();
@@ -9799,9 +9320,7 @@ mod tests {
         let editor = create_test_editor();
         let content = b"q\n100 0 0 50 10 20 cm\n/Im1 Do\nQ\n";
         let mods = HashMap::new();
-        let result = editor
-            .rewrite_content_stream_with_image_mods(content, &mods)
-            .unwrap();
+        let result = editor.rewrite_content_stream_with_image_mods(content, &mods).unwrap();
         let s = String::from_utf8(result).unwrap();
         assert!(s.contains("cm\n"));
         assert!(s.contains("/Im1 Do\n"));
@@ -9821,9 +9340,7 @@ mod tests {
                 height: None,
             },
         );
-        let result = editor
-            .rewrite_content_stream_with_image_mods(content, &mods)
-            .unwrap();
+        let result = editor.rewrite_content_stream_with_image_mods(content, &mods).unwrap();
         let s = String::from_utf8(result).unwrap();
         assert!(s.contains("200.0"));
         assert!(s.contains("300.0"));
@@ -9843,9 +9360,7 @@ mod tests {
                 height: Some(300.0),
             },
         );
-        let result = editor
-            .rewrite_content_stream_with_image_mods(content, &mods)
-            .unwrap();
+        let result = editor.rewrite_content_stream_with_image_mods(content, &mods).unwrap();
         let s = String::from_utf8(result).unwrap();
         assert!(s.contains("400.0"));
         assert!(s.contains("300.0"));
@@ -9875,8 +9390,7 @@ mod tests {
         kids.push(']');
 
         let pages_offset = pdf.len();
-        let pages_str =
-            format!("2 0 obj\n<< /Type /Pages /Kids {} /Count {} >>\nendobj\n", kids, n);
+        let pages_str = format!("2 0 obj\n<< /Type /Pages /Kids {} /Count {} >>\nendobj\n", kids, n);
         pdf.extend_from_slice(pages_str.as_bytes());
 
         let mut page_offsets = Vec::new();
@@ -10034,9 +9548,7 @@ mod tests {
     #[test]
     fn test_extract_page_ranges_to_bytes_batch() {
         let mut editor = create_multi_page_editor(10);
-        let chunks = editor
-            .extract_page_ranges_to_bytes(&[(0, 3), (3, 6), (6, 10)])
-            .unwrap();
+        let chunks = editor.extract_page_ranges_to_bytes(&[(0, 3), (3, 6), (6, 10)]).unwrap();
         assert_eq!(chunks.len(), 3);
         for (i, bytes) in chunks.into_iter().enumerate() {
             let mut chunk = DocumentEditor::from_bytes(bytes).unwrap();
@@ -10243,11 +9755,7 @@ mod tests {
         let mut output = Vec::new();
         editor.serialize_operator(
             &mut output,
-            &crate::content::operators::Operator::SetStrokeRgb {
-                r: 0.0,
-                g: 0.5,
-                b: 1.0,
-            },
+            &crate::content::operators::Operator::SetStrokeRgb { r: 0.0, g: 0.5, b: 1.0 },
         );
         let s = String::from_utf8(output).unwrap();
         assert!(s.ends_with("RG\n"));
@@ -10346,12 +9854,8 @@ mod tests {
     /// each page of the merged document.
     #[test]
     fn test_merge_text_extractable() {
-        let pdf_a = crate::api::Pdf::from_text("Hello from A")
-            .unwrap()
-            .into_bytes();
-        let pdf_b = crate::api::Pdf::from_text("Hello from B")
-            .unwrap()
-            .into_bytes();
+        let pdf_a = crate::api::Pdf::from_text("Hello from A").unwrap().into_bytes();
+        let pdf_b = crate::api::Pdf::from_text("Hello from B").unwrap().into_bytes();
 
         let mut editor = DocumentEditor::from_bytes(pdf_a).unwrap();
         let pages_merged = editor.merge_from_bytes(&pdf_b).unwrap();
@@ -10376,8 +9880,14 @@ mod tests {
             text_page1
         );
 
-        assert!(!text_page0.contains("Hello from B"), "Page 0 should NOT contain text from B");
-        assert!(!text_page1.contains("Hello from A"), "Page 1 should NOT contain text from A");
+        assert!(
+            !text_page0.contains("Hello from B"),
+            "Page 0 should NOT contain text from B"
+        );
+        assert!(
+            !text_page1.contains("Hello from A"),
+            "Page 1 should NOT contain text from A"
+        );
     }
 
     /// A minimal single-page PDF with two separate text-showing (`Tj`) runs
@@ -10403,9 +9913,7 @@ mod tests {
             ]
             .concat(),
         );
-        objs.push(
-            b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_vec(),
-        );
+        objs.push(b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_vec());
 
         let header = b"%PDF-1.4\n".to_vec();
         let mut body = header.clone();
@@ -10463,9 +9971,7 @@ mod tests {
             matches[0].bbox()
         };
         let rect = [bbox.x, bbox.y, bbox.x + bbox.width, bbox.y + bbox.height];
-        editor
-            .add_redaction(0, rect, Some([0.0, 0.0, 0.0]))
-            .unwrap();
+        editor.add_redaction(0, rect, Some([0.0, 0.0, 0.0])).unwrap();
         let report = editor
             .apply_redactions_destructive(crate::redaction::RedactionOptions::default())
             .unwrap();
@@ -10601,9 +10107,7 @@ mod tests {
         );
         objs.push(b"6 0 obj\n<< /Font 7 0 R >>\nendobj\n".to_vec());
         objs.push(b"7 0 obj\n<< /F1 8 0 R >>\nendobj\n".to_vec());
-        objs.push(
-            b"8 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_vec(),
-        );
+        objs.push(b"8 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_vec());
 
         let header = b"%PDF-1.4\n".to_vec();
         let mut body = header.clone();
@@ -10686,8 +10190,7 @@ mod tests {
         assert!(!ids.is_empty(), "no object references parsed from /Contents array");
 
         for id in ids {
-            let defined =
-                text.contains(&format!("\n{id} 0 obj")) || text.starts_with(&format!("{id} 0 obj"));
+            let defined = text.contains(&format!("\n{id} 0 obj")) || text.starts_with(&format!("{id} 0 obj"));
             assert!(
                 defined,
                 "dangling /Contents reference to object {id}: it appears in the \
@@ -10707,8 +10210,7 @@ mod tests {
     /// the earlier tests did not cover.
     #[test]
     fn destructive_redaction_multi_stream_contents_no_dangling_ref() {
-        let mut editor =
-            open_editor_from_bytes(&multi_stream_indirect_resources_pdf_bytes(), "multistream");
+        let mut editor = open_editor_from_bytes(&multi_stream_indirect_resources_pdf_bytes(), "multistream");
 
         let bbox = {
             let pe = editor.page_editor(0).unwrap();
@@ -10717,9 +10219,7 @@ mod tests {
             matches[0].bbox()
         };
         let rect = [bbox.x, bbox.y, bbox.x + bbox.width, bbox.y + bbox.height];
-        editor
-            .add_redaction(0, rect, Some([0.0, 0.0, 0.0]))
-            .unwrap();
+        editor.add_redaction(0, rect, Some([0.0, 0.0, 0.0])).unwrap();
         let report = editor
             .apply_redactions_destructive(crate::redaction::RedactionOptions::default())
             .unwrap();
@@ -10804,8 +10304,7 @@ mod tests {
 
         let haystack = String::from_utf8_lossy(&bytes);
         assert!(
-            haystack.contains("/BaseFont /Helvetica-Bold")
-                || haystack.contains("/BaseFont/Helvetica-Bold"),
+            haystack.contains("/BaseFont /Helvetica-Bold") || haystack.contains("/BaseFont/Helvetica-Bold"),
             "a Font object with /BaseFont /Helvetica-Bold must be written — the \
              overlay stream emits `/Helvetica-Bold Tf`, so registering the raw \
              \"Helvetica\" leaves that Tf dangling"
@@ -10841,9 +10340,7 @@ mod tests {
             ]
             .concat(),
         );
-        objs.push(
-            b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_vec(),
-        );
+        objs.push(b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".to_vec());
         objs.push(
             [
                 format!(
@@ -10893,8 +10390,7 @@ mod tests {
     /// text's `Tf` does not dangle.
     #[test]
     fn overlay_does_not_inline_inherited_xobject_into_page_resources() {
-        let mut editor =
-            open_editor_from_bytes(&inherited_resources_with_xobject_pdf_bytes(), "inherit_xobj");
+        let mut editor = open_editor_from_bytes(&inherited_resources_with_xobject_pdf_bytes(), "inherit_xobj");
 
         let bbox = crate::geometry::Rect {
             x: 100.0,
@@ -10928,13 +10424,7 @@ mod tests {
             .expect("page should have a materialised /Resources after overlay");
         let res_dict = match res_obj {
             Object::Dictionary(d) => d,
-            Object::Reference(r) => verify
-                .source
-                .load_object(r)
-                .unwrap()
-                .as_dict()
-                .cloned()
-                .unwrap(),
+            Object::Reference(r) => verify.source.load_object(r).unwrap().as_dict().cloned().unwrap(),
             other => panic!("unexpected /Resources object: {other:?}"),
         };
 

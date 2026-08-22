@@ -58,7 +58,10 @@ impl HashAlgorithm {
     /// (NIST SP 800-131A) but not for signing — that policy decision
     /// is made by the provider, not the algorithm enum.
     pub const fn is_fips_approved(self) -> bool {
-        matches!(self, HashAlgorithm::Sha256 | HashAlgorithm::Sha384 | HashAlgorithm::Sha512)
+        matches!(
+            self,
+            HashAlgorithm::Sha256 | HashAlgorithm::Sha384 | HashAlgorithm::Sha512
+        )
     }
 }
 
@@ -190,24 +193,14 @@ impl SigningAlgorithm {
     /// expected to render the asym + hash separately.
     pub const fn name(self) -> &'static str {
         match (self.asym, self.hash) {
-            (AsymmetricAlgorithm::Rsa(RsaScheme::Pkcs1v15), HashAlgorithm::Sha256) => {
-                "RSA-PKCS1v15-SHA256"
-            },
-            (AsymmetricAlgorithm::Rsa(RsaScheme::Pkcs1v15), HashAlgorithm::Sha384) => {
-                "RSA-PKCS1v15-SHA384"
-            },
-            (AsymmetricAlgorithm::Rsa(RsaScheme::Pkcs1v15), HashAlgorithm::Sha512) => {
-                "RSA-PKCS1v15-SHA512"
-            },
+            (AsymmetricAlgorithm::Rsa(RsaScheme::Pkcs1v15), HashAlgorithm::Sha256) => "RSA-PKCS1v15-SHA256",
+            (AsymmetricAlgorithm::Rsa(RsaScheme::Pkcs1v15), HashAlgorithm::Sha384) => "RSA-PKCS1v15-SHA384",
+            (AsymmetricAlgorithm::Rsa(RsaScheme::Pkcs1v15), HashAlgorithm::Sha512) => "RSA-PKCS1v15-SHA512",
             (AsymmetricAlgorithm::Rsa(RsaScheme::Pss), HashAlgorithm::Sha256) => "RSA-PSS-SHA256",
             (AsymmetricAlgorithm::Rsa(RsaScheme::Pss), HashAlgorithm::Sha384) => "RSA-PSS-SHA384",
             (AsymmetricAlgorithm::Rsa(RsaScheme::Pss), HashAlgorithm::Sha512) => "RSA-PSS-SHA512",
-            (AsymmetricAlgorithm::Ecdsa(EcCurve::P256), HashAlgorithm::Sha256) => {
-                "ECDSA-P256-SHA256"
-            },
-            (AsymmetricAlgorithm::Ecdsa(EcCurve::P384), HashAlgorithm::Sha384) => {
-                "ECDSA-P384-SHA384"
-            },
+            (AsymmetricAlgorithm::Ecdsa(EcCurve::P256), HashAlgorithm::Sha256) => "ECDSA-P256-SHA256",
+            (AsymmetricAlgorithm::Ecdsa(EcCurve::P384), HashAlgorithm::Sha384) => "ECDSA-P384-SHA384",
             _ => "signing-algorithm",
         }
     }

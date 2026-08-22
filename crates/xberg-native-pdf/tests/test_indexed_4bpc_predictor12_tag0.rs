@@ -47,16 +47,15 @@ fn make_4bpc_indexed_pdf_with_predictor12_tag0() -> Vec<u8> {
         out.extend_from_slice(b"\nendobj\n");
     };
 
-    let push_stream =
-        |out: &mut Vec<u8>, offsets: &mut Vec<usize>, dict: &str, stream_bytes: &[u8]| {
-            offsets.push(out.len());
-            let id = offsets.len() - 1;
-            out.extend_from_slice(format!("{id} 0 obj\n").as_bytes());
-            out.extend_from_slice(dict.as_bytes());
-            out.extend_from_slice(b"\nstream\n");
-            out.extend_from_slice(stream_bytes);
-            out.extend_from_slice(b"\nendstream\nendobj\n");
-        };
+    let push_stream = |out: &mut Vec<u8>, offsets: &mut Vec<usize>, dict: &str, stream_bytes: &[u8]| {
+        offsets.push(out.len());
+        let id = offsets.len() - 1;
+        out.extend_from_slice(format!("{id} 0 obj\n").as_bytes());
+        out.extend_from_slice(dict.as_bytes());
+        out.extend_from_slice(b"\nstream\n");
+        out.extend_from_slice(stream_bytes);
+        out.extend_from_slice(b"\nendstream\nendobj\n");
+    };
 
     push_simple(&mut out, &mut offsets, b"<< /Type /Catalog /Pages 2 0 R >>");
     push_simple(&mut out, &mut offsets, b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>");

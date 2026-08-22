@@ -34,36 +34,68 @@ fn page_and_form_share_mcids_pdf() -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, dict: &str, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
 
     buf.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
-    obj(&mut buf, &mut off, 1,
-        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 10 0 R /MarkInfo << /Marked true >> >>");
+    obj(
+        &mut buf,
+        &mut off,
+        1,
+        "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 10 0 R /MarkInfo << /Marked true >> >>",
+    );
     obj(&mut buf, &mut off, 2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-    obj(&mut buf, &mut off, 3,
+    obj(
+        &mut buf,
+        &mut off,
+        3,
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R \
-         /Resources << /Font << /F1 5 0 R >> /XObject << /Fm1 6 0 R >> >> /StructParents 0 >>");
+         /Resources << /Font << /F1 5 0 R >> /XObject << /Fm1 6 0 R >> >> /StructParents 0 >>",
+    );
     stream(&mut buf, &mut off, 4, "", page_content);
-    obj(&mut buf, &mut off, 5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-    stream(&mut buf, &mut off, 6,
+    obj(
+        &mut buf,
+        &mut off,
+        5,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
+    stream(
+        &mut buf,
+        &mut off,
+        6,
         "/Type /XObject /Subtype /Form /BBox [0 0 612 792] \
-         /Resources << /Font << /F1 5 0 R >> >>", form_content);
+         /Resources << /Font << /F1 5 0 R >> >>",
+        form_content,
+    );
     obj(&mut buf, &mut off, 10, "<< /Type /StructTreeRoot /K [11 0 R] >>");
-    obj(&mut buf, &mut off, 11,
-        "<< /Type /StructElem /S /Table /P 10 0 R /Pg 3 0 R /K [12 0 R] >>");
-    obj(&mut buf, &mut off, 12,
-        "<< /Type /StructElem /S /TR /P 11 0 R /Pg 3 0 R /K [13 0 R 14 0 R] >>");
-    obj(&mut buf, &mut off, 13,
+    obj(
+        &mut buf,
+        &mut off,
+        11,
+        "<< /Type /StructElem /S /Table /P 10 0 R /Pg 3 0 R /K [12 0 R] >>",
+    );
+    obj(
+        &mut buf,
+        &mut off,
+        12,
+        "<< /Type /StructElem /S /TR /P 11 0 R /Pg 3 0 R /K [13 0 R 14 0 R] >>",
+    );
+    obj(
+        &mut buf,
+        &mut off,
+        13,
         "<< /Type /StructElem /S /TD /P 12 0 R /Pg 3 0 R \
-         /K [<< /Type /MCR /Pg 3 0 R /MCID 0 >>] >>");
-    obj(&mut buf, &mut off, 14,
+         /K [<< /Type /MCR /Pg 3 0 R /MCID 0 >>] >>",
+    );
+    obj(
+        &mut buf,
+        &mut off,
+        14,
         "<< /Type /StructElem /S /TD /P 12 0 R /Pg 3 0 R \
-         /K [<< /Type /MCR /Pg 3 0 R /MCID 1 >>] >>");
+         /K [<< /Type /MCR /Pg 3 0 R /MCID 1 >>] >>",
+    );
 
     let ids = [1usize, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14];
     let xref = buf.len();

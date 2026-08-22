@@ -63,22 +63,20 @@ pub(crate) fn serialize_operator(output: &mut Vec<u8>, op: &Operator) {
         Operator::SaveState => output.extend_from_slice(b"q\n"),
         Operator::RestoreState => output.extend_from_slice(b"Q\n"),
         Operator::Cm { a, b, c, d, e, f } => {
-            output.extend_from_slice(
-                format!("{:.6} {:.6} {:.6} {:.6} {:.6} {:.6} cm\n", a, b, c, d, e, f).as_bytes(),
-            );
-        },
+            output.extend_from_slice(format!("{:.6} {:.6} {:.6} {:.6} {:.6} {:.6} cm\n", a, b, c, d, e, f).as_bytes());
+        }
         Operator::SetLineWidth { width } => {
             output.extend_from_slice(format!("{:.6} w\n", width).as_bytes());
-        },
+        }
         Operator::SetLineCap { cap_style } => {
             output.extend_from_slice(format!("{} J\n", cap_style).as_bytes());
-        },
+        }
         Operator::SetLineJoin { join_style } => {
             output.extend_from_slice(format!("{} j\n", join_style).as_bytes());
-        },
+        }
         Operator::SetMiterLimit { limit } => {
             output.extend_from_slice(format!("{:.6} M\n", limit).as_bytes());
-        },
+        }
         Operator::SetDash { array, phase } => {
             output.push(b'[');
             for (i, v) in array.iter().enumerate() {
@@ -88,57 +86,38 @@ pub(crate) fn serialize_operator(output: &mut Vec<u8>, op: &Operator) {
                 output.extend_from_slice(format!("{:.6}", v).as_bytes());
             }
             output.extend_from_slice(format!("] {:.6} d\n", phase).as_bytes());
-        },
+        }
         Operator::SetFlatness { tolerance } => {
             output.extend_from_slice(format!("{:.6} i\n", tolerance).as_bytes());
-        },
+        }
         Operator::SetRenderingIntent { intent } => {
             output.extend_from_slice(format!("/{} ri\n", intent).as_bytes());
-        },
+        }
         Operator::SetExtGState { dict_name } => {
             output.extend_from_slice(format!("/{} gs\n", dict_name).as_bytes());
-        },
+        }
 
         Operator::MoveTo { x, y } => {
             output.extend_from_slice(format!("{:.6} {:.6} m\n", x, y).as_bytes());
-        },
+        }
         Operator::LineTo { x, y } => {
             output.extend_from_slice(format!("{:.6} {:.6} l\n", x, y).as_bytes());
-        },
-        Operator::CurveTo {
-            x1,
-            y1,
-            x2,
-            y2,
-            x3,
-            y3,
-        } => {
+        }
+        Operator::CurveTo { x1, y1, x2, y2, x3, y3 } => {
             output.extend_from_slice(
-                format!("{:.6} {:.6} {:.6} {:.6} {:.6} {:.6} c\n", x1, y1, x2, y2, x3, y3)
-                    .as_bytes(),
+                format!("{:.6} {:.6} {:.6} {:.6} {:.6} {:.6} c\n", x1, y1, x2, y2, x3, y3).as_bytes(),
             );
-        },
+        }
         Operator::CurveToV { x2, y2, x3, y3 } => {
-            output.extend_from_slice(
-                format!("{:.6} {:.6} {:.6} {:.6} v\n", x2, y2, x3, y3).as_bytes(),
-            );
-        },
+            output.extend_from_slice(format!("{:.6} {:.6} {:.6} {:.6} v\n", x2, y2, x3, y3).as_bytes());
+        }
         Operator::CurveToY { x1, y1, x3, y3 } => {
-            output.extend_from_slice(
-                format!("{:.6} {:.6} {:.6} {:.6} y\n", x1, y1, x3, y3).as_bytes(),
-            );
-        },
+            output.extend_from_slice(format!("{:.6} {:.6} {:.6} {:.6} y\n", x1, y1, x3, y3).as_bytes());
+        }
         Operator::ClosePath => output.extend_from_slice(b"h\n"),
-        Operator::Rectangle {
-            x,
-            y,
-            width,
-            height,
-        } => {
-            output.extend_from_slice(
-                format!("{:.6} {:.6} {:.6} {:.6} re\n", x, y, width, height).as_bytes(),
-            );
-        },
+        Operator::Rectangle { x, y, width, height } => {
+            output.extend_from_slice(format!("{:.6} {:.6} {:.6} {:.6} re\n", x, y, width, height).as_bytes());
+        }
 
         Operator::Stroke => output.extend_from_slice(b"S\n"),
         Operator::Fill => output.extend_from_slice(b"f\n"),
@@ -157,43 +136,41 @@ pub(crate) fn serialize_operator(output: &mut Vec<u8>, op: &Operator) {
 
         Operator::Tc { char_space } => {
             output.extend_from_slice(format!("{:.6} Tc\n", char_space).as_bytes());
-        },
+        }
         Operator::Tw { word_space } => {
             output.extend_from_slice(format!("{:.6} Tw\n", word_space).as_bytes());
-        },
+        }
         Operator::Tz { scale } => {
             output.extend_from_slice(format!("{:.6} Tz\n", scale).as_bytes());
-        },
+        }
         Operator::TL { leading } => {
             output.extend_from_slice(format!("{:.6} TL\n", leading).as_bytes());
-        },
+        }
         Operator::Tf { font, size } => {
             output.extend_from_slice(format!("/{} {:.6} Tf\n", font, size).as_bytes());
-        },
+        }
         Operator::Tr { render } => {
             output.extend_from_slice(format!("{} Tr\n", render).as_bytes());
-        },
+        }
         Operator::Ts { rise } => {
             output.extend_from_slice(format!("{:.6} Ts\n", rise).as_bytes());
-        },
+        }
 
         Operator::Td { tx, ty } => {
             output.extend_from_slice(format!("{:.6} {:.6} Td\n", tx, ty).as_bytes());
-        },
+        }
         Operator::TD { tx, ty } => {
             output.extend_from_slice(format!("{:.6} {:.6} TD\n", tx, ty).as_bytes());
-        },
+        }
         Operator::Tm { a, b, c, d, e, f } => {
-            output.extend_from_slice(
-                format!("{:.6} {:.6} {:.6} {:.6} {:.6} {:.6} Tm\n", a, b, c, d, e, f).as_bytes(),
-            );
-        },
+            output.extend_from_slice(format!("{:.6} {:.6} {:.6} {:.6} {:.6} {:.6} Tm\n", a, b, c, d, e, f).as_bytes());
+        }
         Operator::TStar => output.extend_from_slice(b"T*\n"),
 
         Operator::Tj { text } => {
             write_pdf_string(output, text);
             output.extend_from_slice(b" Tj\n");
-        },
+        }
         Operator::TJ { array } => {
             output.push(b'[');
             for item in array {
@@ -201,15 +178,15 @@ pub(crate) fn serialize_operator(output: &mut Vec<u8>, op: &Operator) {
                     TextElement::String(text) => write_pdf_string(output, text),
                     TextElement::Offset(offset) => {
                         output.extend_from_slice(format!("{:.6}", offset).as_bytes());
-                    },
+                    }
                 }
             }
             output.extend_from_slice(b"] TJ\n");
-        },
+        }
         Operator::Quote { text } => {
             write_pdf_string(output, text);
             output.extend_from_slice(b" '\n");
-        },
+        }
         Operator::DoubleQuote {
             word_space,
             char_space,
@@ -218,26 +195,26 @@ pub(crate) fn serialize_operator(output: &mut Vec<u8>, op: &Operator) {
             output.extend_from_slice(format!("{:.6} {:.6} ", word_space, char_space).as_bytes());
             write_pdf_string(output, text);
             output.extend_from_slice(b" \"\n");
-        },
+        }
 
         Operator::SetStrokeColorSpace { name } => {
             output.extend_from_slice(format!("/{} CS\n", name).as_bytes());
-        },
+        }
         Operator::SetFillColorSpace { name } => {
             output.extend_from_slice(format!("/{} cs\n", name).as_bytes());
-        },
+        }
         Operator::SetStrokeColor { components } => {
             for c in components {
                 output.extend_from_slice(format!("{:.6} ", c).as_bytes());
             }
             output.extend_from_slice(b"SC\n");
-        },
+        }
         Operator::SetFillColor { components } => {
             for c in components {
                 output.extend_from_slice(format!("{:.6} ", c).as_bytes());
             }
             output.extend_from_slice(b"sc\n");
-        },
+        }
         Operator::SetStrokeColorN { components, name } => {
             for c in components {
                 output.extend_from_slice(format!("{:.6} ", c).as_bytes());
@@ -246,7 +223,7 @@ pub(crate) fn serialize_operator(output: &mut Vec<u8>, op: &Operator) {
                 output.extend_from_slice(format!("/{} ", p).as_bytes());
             }
             output.extend_from_slice(b"SCN\n");
-        },
+        }
         Operator::SetFillColorN { components, name } => {
             for c in components {
                 output.extend_from_slice(format!("{:.6} ", c).as_bytes());
@@ -255,43 +232,43 @@ pub(crate) fn serialize_operator(output: &mut Vec<u8>, op: &Operator) {
                 output.extend_from_slice(format!("/{} ", p).as_bytes());
             }
             output.extend_from_slice(b"scn\n");
-        },
+        }
         Operator::SetStrokeGray { gray } => {
             output.extend_from_slice(format!("{:.6} G\n", gray).as_bytes());
-        },
+        }
         Operator::SetFillGray { gray } => {
             output.extend_from_slice(format!("{:.6} g\n", gray).as_bytes());
-        },
+        }
         Operator::SetStrokeRgb { r, g, b } => {
             output.extend_from_slice(format!("{:.6} {:.6} {:.6} RG\n", r, g, b).as_bytes());
-        },
+        }
         Operator::SetFillRgb { r, g, b } => {
             output.extend_from_slice(format!("{:.6} {:.6} {:.6} rg\n", r, g, b).as_bytes());
-        },
+        }
         Operator::SetStrokeCmyk { c, m, y, k } => {
             output.extend_from_slice(format!("{:.6} {:.6} {:.6} {:.6} K\n", c, m, y, k).as_bytes());
-        },
+        }
         Operator::SetFillCmyk { c, m, y, k } => {
             output.extend_from_slice(format!("{:.6} {:.6} {:.6} {:.6} k\n", c, m, y, k).as_bytes());
-        },
+        }
 
         Operator::Do { name } => {
             output.extend_from_slice(format!("/{} Do\n", name).as_bytes());
-        },
+        }
 
         Operator::BeginMarkedContent { tag } => {
             output.extend_from_slice(format!("/{} BMC\n", tag).as_bytes());
-        },
+        }
         Operator::BeginMarkedContentDict { tag, properties } => {
             output.extend_from_slice(format!("/{} ", tag).as_bytes());
             serialize_object(output, properties);
             output.extend_from_slice(b" BDC\n");
-        },
+        }
         Operator::EndMarkedContent => output.extend_from_slice(b"EMC\n"),
 
         Operator::PaintShading { name } => {
             output.extend_from_slice(format!("/{} sh\n", name).as_bytes());
-        },
+        }
 
         Operator::InlineImage { dict, data } => {
             output.extend_from_slice(b"BI\n");
@@ -311,7 +288,7 @@ pub(crate) fn serialize_operator(output: &mut Vec<u8>, op: &Operator) {
             output.extend_from_slice(b"ID ");
             output.extend_from_slice(data);
             output.extend_from_slice(b"\nEI\n");
-        },
+        }
 
         Operator::Other { name, operands } => {
             for operand in operands.iter() {
@@ -320,7 +297,7 @@ pub(crate) fn serialize_operator(output: &mut Vec<u8>, op: &Operator) {
             }
             output.extend_from_slice(name.as_bytes());
             output.push(b'\n');
-        },
+        }
     }
 }
 
@@ -332,7 +309,7 @@ pub(crate) fn serialize_object(output: &mut Vec<u8>, obj: &Object) {
         Object::Null => output.extend_from_slice(b"null"),
         Object::Boolean(b) => {
             output.extend_from_slice(if *b { b"true" } else { b"false" });
-        },
+        }
         Object::Integer(i) => output.extend_from_slice(format!("{}", i).as_bytes()),
         Object::Real(r) => output.extend_from_slice(format!("{:.6}", r).as_bytes()),
         Object::Name(n) => output.extend_from_slice(format!("/{}", n).as_bytes()),
@@ -346,7 +323,7 @@ pub(crate) fn serialize_object(output: &mut Vec<u8>, obj: &Object) {
                 serialize_object(output, item);
             }
             output.push(b']');
-        },
+        }
         Object::Dictionary(dict) => {
             output.extend_from_slice(b"<<");
             // Sort keys for deterministic output. `Object::Dictionary` is a
@@ -365,15 +342,15 @@ pub(crate) fn serialize_object(output: &mut Vec<u8>, obj: &Object) {
                 }
             }
             output.extend_from_slice(b">>");
-        },
+        }
         Object::Stream { .. } => {
             // Streams are complex; inline serialization is a placeholder
             // (matches the prior editor behavior — not a real string). ~keep
             output.extend_from_slice(b"(stream)");
-        },
+        }
         Object::Reference(obj_ref) => {
             output.extend_from_slice(format!("{} {} R", obj_ref.id, obj_ref.generation).as_bytes());
-        },
+        }
     }
 }
 
@@ -421,12 +398,7 @@ mod tests {
     #[test]
     fn tj_uses_binary_safe_string() {
         let mut out = Vec::new();
-        serialize_operator(
-            &mut out,
-            &Operator::Tj {
-                text: vec![0xDE, 0xAD],
-            },
-        );
+        serialize_operator(&mut out, &Operator::Tj { text: vec![0xDE, 0xAD] });
         assert_eq!(s(&out), "<DEAD> Tj\n");
     }
 
@@ -485,7 +457,10 @@ mod tests {
             },
         );
         serialize_operator(&mut out, &Operator::RestoreState);
-        assert_eq!(s(&out), "q\n1.000000 0.000000 0.000000 1.000000 10.000000 20.000000 cm\nQ\n");
+        assert_eq!(
+            s(&out),
+            "q\n1.000000 0.000000 0.000000 1.000000 10.000000 20.000000 cm\nQ\n"
+        );
     }
 
     /// A dictionary with several keys must serialize in sorted key order every

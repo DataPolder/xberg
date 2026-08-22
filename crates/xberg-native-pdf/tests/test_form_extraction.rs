@@ -5,9 +5,7 @@ use tempfile::NamedTempFile;
 use xberg_native_pdf::document::PdfDocument;
 use xberg_native_pdf::extractors::forms::{FieldType, FieldValue, FormExtractor};
 use xberg_native_pdf::geometry::Rect;
-use xberg_native_pdf::writer::{
-    CheckboxWidget, ComboBoxWidget, ListBoxWidget, PdfWriter, TextFieldWidget,
-};
+use xberg_native_pdf::writer::{CheckboxWidget, ComboBoxWidget, ListBoxWidget, PdfWriter, TextFieldWidget};
 
 /// Create a test PDF with various form field types and return bytes.
 fn create_form_pdf_bytes() -> Vec<u8> {
@@ -28,9 +26,7 @@ fn create_form_pdf_bytes() -> Vec<u8> {
                 .with_max_length(11),
         );
 
-        page.add_checkbox(
-            CheckboxWidget::new("agree", Rect::new(72.0, 640.0, 15.0, 15.0)).checked(),
-        );
+        page.add_checkbox(CheckboxWidget::new("agree", Rect::new(72.0, 640.0, 15.0, 15.0)).checked());
 
         page.add_checkbox(CheckboxWidget::new("newsletter", Rect::new(72.0, 610.0, 15.0, 15.0)));
 
@@ -93,7 +89,10 @@ fn test_extract_text_field_readonly_flag() {
     assert!(ssn_field.is_some(), "Should find 'ssn' field");
     let ssn_field = ssn_field.unwrap();
 
-    assert!(ssn_field.flags.is_some_and(|f| f & 1 != 0), "SSN field should be read-only");
+    assert!(
+        ssn_field.flags.is_some_and(|f| f & 1 != 0),
+        "SSN field should be read-only"
+    );
 }
 
 #[test]
@@ -205,11 +204,15 @@ fn test_editor_get_form_fields() {
     let mut temp = NamedTempFile::new().expect("Failed to create temp file");
     temp.write_all(&bytes).expect("Failed to write temp file");
 
-    let mut editor = xberg_native_pdf::editor::DocumentEditor::open(temp.path().to_str().unwrap())
-        .expect("Failed to open editor");
+    let mut editor =
+        xberg_native_pdf::editor::DocumentEditor::open(temp.path().to_str().unwrap()).expect("Failed to open editor");
 
     let fields = editor.get_form_fields().expect("Failed to get form fields");
-    assert!(fields.len() >= 6, "Expected at least 6 fields via editor, got {}", fields.len());
+    assert!(
+        fields.len() >= 6,
+        "Expected at least 6 fields via editor, got {}",
+        fields.len()
+    );
 }
 
 #[test]
@@ -218,12 +221,10 @@ fn test_editor_get_set_form_field_value() {
     let mut temp = NamedTempFile::new().expect("Failed to create temp file");
     temp.write_all(&bytes).expect("Failed to write temp file");
 
-    let mut editor = xberg_native_pdf::editor::DocumentEditor::open(temp.path().to_str().unwrap())
-        .expect("Failed to open editor");
+    let mut editor =
+        xberg_native_pdf::editor::DocumentEditor::open(temp.path().to_str().unwrap()).expect("Failed to open editor");
 
-    let value = editor
-        .get_form_field_value("name")
-        .expect("Failed to get field value");
+    let value = editor.get_form_field_value("name").expect("Failed to get field value");
     assert!(value.is_some(), "Should find 'name' field value");
 
     use xberg_native_pdf::editor::form_fields::FormFieldValue;
@@ -242,21 +243,17 @@ fn test_has_xfa_on_non_xfa_pdf() {
     let bytes = create_form_pdf_bytes();
     let (_temp, mut doc) = open_pdf_from_bytes(&bytes);
 
-    let has_xfa =
-        xberg_native_pdf::xfa::XfaExtractor::has_xfa(&mut doc).expect("Failed to check XFA");
+    let has_xfa = xberg_native_pdf::xfa::XfaExtractor::has_xfa(&mut doc).expect("Failed to check XFA");
 
     assert!(!has_xfa, "Writer-created form should not have XFA");
 }
 
 #[test]
 fn test_has_xfa_on_plain_pdf() {
-    let bytes = xberg_native_pdf::api::Pdf::from_text("No forms")
-        .unwrap()
-        .into_bytes();
+    let bytes = xberg_native_pdf::api::Pdf::from_text("No forms").unwrap().into_bytes();
     let (_temp, mut doc) = open_pdf_from_bytes(&bytes);
 
-    let has_xfa =
-        xberg_native_pdf::xfa::XfaExtractor::has_xfa(&mut doc).expect("Failed to check XFA");
+    let has_xfa = xberg_native_pdf::xfa::XfaExtractor::has_xfa(&mut doc).expect("Failed to check XFA");
 
     assert!(!has_xfa, "Plain text PDF should not have XFA");
 }
@@ -390,8 +387,7 @@ fn test_save_incremental_persists_checkbox() {
     assert!(newsletter.is_some(), "newsletter field should exist");
 
     let val = &newsletter.unwrap().value;
-    let is_checked = matches!(val, FieldValue::Boolean(true))
-        || matches!(val, FieldValue::Name(n) if n == "Yes");
+    let is_checked = matches!(val, FieldValue::Boolean(true)) || matches!(val, FieldValue::Name(n) if n == "Yes");
     assert!(is_checked, "Checkbox should be checked after save, got {:?}", val);
 
     let text = reopened.extract_text(0).expect("extract text");

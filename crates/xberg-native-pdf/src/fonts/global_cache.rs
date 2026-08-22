@@ -75,7 +75,7 @@ impl FifoFontCache {
             match self.order.pop_front() {
                 Some(old) => {
                     self.entries.remove(&old);
-                },
+                }
                 None => break,
             }
         }
@@ -100,7 +100,7 @@ impl FifoFontCache {
             match self.order.pop_front() {
                 Some(old) => {
                     self.entries.remove(&old);
-                },
+                }
                 None => break,
             }
         }
@@ -234,9 +234,7 @@ mod tests {
             cff_gid_map: None,
             multi_char_map: HashMap::new(),
             byte_to_char_table: std::sync::OnceLock::new(),
-            type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::HashMap::new(),
-            )),
+            type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             byte_to_width_table: std::sync::OnceLock::new(),
             weight_memo: std::sync::OnceLock::new(),
             italic_memo: std::sync::OnceLock::new(),

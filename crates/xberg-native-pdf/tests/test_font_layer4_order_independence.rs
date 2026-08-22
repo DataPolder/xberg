@@ -85,7 +85,11 @@ fn two_page_same_font_key_different_cmap(char1: char, char2: char) -> Vec<u8> {
     };
 
     push(&mut out, &mut offsets, "<< /Type /Catalog /Pages 2 0 R >>".into());
-    push(&mut out, &mut offsets, "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".into());
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".into(),
+    );
 
     // 3: Page 1  — font key /F1 → object 10 ~keep
     push(

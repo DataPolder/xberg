@@ -66,9 +66,7 @@ pub struct MediaPermissions {
 impl MediaPermissions {
     /// Create default permissions.
     pub fn new() -> Self {
-        Self {
-            temp_file_access: true,
-        }
+        Self { temp_file_access: true }
     }
 
     /// Build the permissions dictionary.

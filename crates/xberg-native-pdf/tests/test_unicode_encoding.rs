@@ -29,7 +29,11 @@ fn encode_latin1_extended_char_preserves_bytes() {
 fn encode_portuguese_sentence() {
     let bytes = encode_pdf_text_string("Ação é lógica");
     for (i, ch) in "Ação é lógica".chars().enumerate() {
-        assert_eq!(bytes[i], ch as u8, "byte {} should be 0x{:02X} for '{}'", i, ch as u8, ch);
+        assert_eq!(
+            bytes[i], ch as u8,
+            "byte {} should be 0x{:02X} for '{}'",
+            i, ch as u8, ch
+        );
     }
 }
 
@@ -111,9 +115,7 @@ fn metadata_title_with_accents_uses_pdfdocencoding_not_utf8() {
     let mut builder = builder;
     builder.a4_page().done();
 
-    let pdf_bytes = builder
-        .build()
-        .expect("DocumentBuilder::build should succeed");
+    let pdf_bytes = builder.build().expect("DocumentBuilder::build should succeed");
 
     // UTF-8 encoding of é is 0xC3 0xA9 — must NOT appear ~keep
     let utf8_e_acute: &[u8] = &[0xC3, 0xA9];

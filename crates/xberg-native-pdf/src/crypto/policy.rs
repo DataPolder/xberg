@@ -182,9 +182,9 @@ impl AlgorithmId {
             | AlgorithmId::HashSha256
             | AlgorithmId::HashSha384
             | AlgorithmId::HashSha512 => AlgorithmKind::Hash,
-            AlgorithmId::CipherRc4
-            | AlgorithmId::CipherAes128Cbc
-            | AlgorithmId::CipherAes256Cbc => AlgorithmKind::SymmetricCipher,
+            AlgorithmId::CipherRc4 | AlgorithmId::CipherAes128Cbc | AlgorithmId::CipherAes256Cbc => {
+                AlgorithmKind::SymmetricCipher
+            }
             AlgorithmId::SigRsaPkcs1v15Sha1
             | AlgorithmId::SigRsaPkcs1v15Sha256
             | AlgorithmId::SigRsaPkcs1v15Sha384
@@ -202,7 +202,7 @@ impl AlgorithmId {
             // key) so no new `AlgorithmKind` variant / match ripple. ~keep
             AlgorithmId::KemMlKem512 | AlgorithmId::KemMlKem768 | AlgorithmId::KemMlKem1024 => {
                 AlgorithmKind::KeyDerivation
-            },
+            }
         }
     }
 
@@ -390,7 +390,7 @@ impl PolicyMode {
                     } else {
                         Decision::Deny
                     }
-                },
+                }
             },
             PolicyMode::FipsStrict => {
                 if alg.is_fips_approved() {
@@ -403,7 +403,7 @@ impl PolicyMode {
                         _ => Decision::Deny,
                     }
                 }
-            },
+            }
             // `PqcReady` == `Strict`'s matrix (read
             // legacy OK; write must be FIPS-approved — which now
             // includes ML-DSA/ML-KEM, enabling classical+PQC
@@ -418,7 +418,7 @@ impl PolicyMode {
                     } else {
                         Decision::Deny
                     }
-                },
+                }
             },
             // CNSA 2.0: read legacy OK, but new crypto must be
             // FIPS-approved **and** 192-bit-class or stronger — denies
@@ -432,7 +432,7 @@ impl PolicyMode {
                     } else {
                         Decision::Deny
                     }
-                },
+                }
             },
         }
     }
@@ -564,7 +564,7 @@ impl SecurityPolicy {
                     } else {
                         return Decision::Allow;
                     }
-                },
+                }
             }
         }
 
@@ -577,7 +577,7 @@ impl SecurityPolicy {
                 } else {
                     Decision::Allow
                 }
-            },
+            }
         }
     }
 
@@ -695,7 +695,7 @@ impl FromStr for SecurityPolicy {
                 return Err(PolicyParseError(format!(
                     "unknown mode '{other}' (expected compat|strict|fips-strict|cnsa2|pqc-ready)"
                 )));
-            },
+            }
         };
         let mut b = SecurityPolicy::builder(mode);
         for raw in parts {
@@ -703,17 +703,16 @@ impl FromStr for SecurityPolicy {
             if clause.is_empty() {
                 continue;
             }
-            let (verb, rest) = clause.split_once(':').ok_or_else(|| {
-                PolicyParseError(format!("clause '{clause}' must be '<allow|deny>:<alg>@<use>'"))
-            })?;
-            let (alg_tok, use_tok) = rest.split_once('@').ok_or_else(|| {
-                PolicyParseError(format!("clause '{clause}' missing '@<read|write>'"))
-            })?;
+            let (verb, rest) = clause
+                .split_once(':')
+                .ok_or_else(|| PolicyParseError(format!("clause '{clause}' must be '<allow|deny>:<alg>@<use>'")))?;
+            let (alg_tok, use_tok) = rest
+                .split_once('@')
+                .ok_or_else(|| PolicyParseError(format!("clause '{clause}' missing '@<read|write>'")))?;
             let alg = AlgorithmId::from_token(alg_tok.trim())
                 .ok_or_else(|| PolicyParseError(format!("unknown algorithm token '{alg_tok}'")))?;
-            let use_ = AlgorithmUse::from_token(use_tok.trim()).ok_or_else(|| {
-                PolicyParseError(format!("unknown use token '{use_tok}' (expected read|write)"))
-            })?;
+            let use_ = AlgorithmUse::from_token(use_tok.trim())
+                .ok_or_else(|| PolicyParseError(format!("unknown use token '{use_tok}' (expected read|write)")))?;
             b = match verb.trim() {
                 "allow" => b.allow(alg, use_),
                 "deny" => b.deny(alg, use_),
@@ -721,7 +720,7 @@ impl FromStr for SecurityPolicy {
                     return Err(PolicyParseError(format!(
                         "unknown verb '{other}' (expected allow|deny)"
                     )));
-                },
+                }
             };
         }
         Ok(b.build())
@@ -837,7 +836,10 @@ mod tests {
             p.evaluate(AlgorithmId::SigRsaPkcs1v15Sha1, AlgorithmUse::Write),
             Decision::Deny
         );
-        assert_eq!(p.evaluate(AlgorithmId::CipherAes256Cbc, AlgorithmUse::Write), Decision::Allow);
+        assert_eq!(
+            p.evaluate(AlgorithmId::CipherAes256Cbc, AlgorithmUse::Write),
+            Decision::Allow
+        );
         assert_eq!(
             p.evaluate(AlgorithmId::SigEcdsaP256Sha256, AlgorithmUse::Write),
             Decision::Allow
@@ -893,7 +895,10 @@ mod tests {
         let p2 = SecurityPolicy::builder(PolicyMode::FipsStrict)
             .allow(AlgorithmId::CipherAes256Cbc, AlgorithmUse::Write)
             .build();
-        assert_eq!(p2.evaluate(AlgorithmId::CipherAes256Cbc, AlgorithmUse::Write), Decision::Allow);
+        assert_eq!(
+            p2.evaluate(AlgorithmId::CipherAes256Cbc, AlgorithmUse::Write),
+            Decision::Allow
+        );
     }
 
     #[test]
@@ -901,18 +906,33 @@ mod tests {
         let p = SecurityPolicy::builder(PolicyMode::Strict)
             .min_security_bits(256)
             .build();
-        assert_eq!(p.evaluate(AlgorithmId::CipherAes128Cbc, AlgorithmUse::Write), Decision::Deny);
-        assert_eq!(p.evaluate(AlgorithmId::CipherAes128Cbc, AlgorithmUse::Read), Decision::Allow);
-        assert_eq!(p.evaluate(AlgorithmId::CipherAes256Cbc, AlgorithmUse::Write), Decision::Allow);
+        assert_eq!(
+            p.evaluate(AlgorithmId::CipherAes128Cbc, AlgorithmUse::Write),
+            Decision::Deny
+        );
+        assert_eq!(
+            p.evaluate(AlgorithmId::CipherAes128Cbc, AlgorithmUse::Read),
+            Decision::Allow
+        );
+        assert_eq!(
+            p.evaluate(AlgorithmId::CipherAes256Cbc, AlgorithmUse::Write),
+            Decision::Allow
+        );
         let d = SecurityPolicy::strict();
-        assert_eq!(d.evaluate(AlgorithmId::CipherAes128Cbc, AlgorithmUse::Write), Decision::Allow);
+        assert_eq!(
+            d.evaluate(AlgorithmId::CipherAes128Cbc, AlgorithmUse::Write),
+            Decision::Allow
+        );
     }
 
     #[test]
     fn parse_modes() {
         assert_eq!("compat".parse::<SecurityPolicy>().unwrap().mode(), PolicyMode::Compat);
         assert_eq!("strict".parse::<SecurityPolicy>().unwrap().mode(), PolicyMode::Strict);
-        assert_eq!("fips-strict".parse::<SecurityPolicy>().unwrap().mode(), PolicyMode::FipsStrict);
+        assert_eq!(
+            "fips-strict".parse::<SecurityPolicy>().unwrap().mode(),
+            PolicyMode::FipsStrict
+        );
     }
 
     #[test]
@@ -1065,16 +1085,25 @@ mod tests {
         let cnsa2: SecurityPolicy = "cnsa2".parse().unwrap();
         let pqc: SecurityPolicy = "pqc-ready".parse().unwrap();
 
-        assert_eq!(cnsa2.evaluate_token("rsa-pkcs1-sha256", AlgorithmUse::Read), Decision::Allow);
+        assert_eq!(
+            cnsa2.evaluate_token("rsa-pkcs1-sha256", AlgorithmUse::Read),
+            Decision::Allow
+        );
 
         assert_eq!(cnsa2.evaluate_token("ml-dsa-65", AlgorithmUse::Write), Decision::Allow);
         assert_eq!(cnsa2.evaluate_token("ml-dsa-87", AlgorithmUse::Write), Decision::Allow);
-        assert_eq!(cnsa2.evaluate_token("rsa-pss-sha256", AlgorithmUse::Write), Decision::Deny);
+        assert_eq!(
+            cnsa2.evaluate_token("rsa-pss-sha256", AlgorithmUse::Write),
+            Decision::Deny
+        );
         assert_eq!(cnsa2.evaluate_token("ml-dsa-44", AlgorithmUse::Write), Decision::Deny);
         assert_eq!(cnsa2.evaluate_token("md5", AlgorithmUse::Write), Decision::Deny);
 
         assert_eq!(pqc.evaluate_token("ml-dsa-44", AlgorithmUse::Write), Decision::Allow);
-        assert_eq!(pqc.evaluate_token("rsa-pss-sha256", AlgorithmUse::Write), Decision::Allow);
+        assert_eq!(
+            pqc.evaluate_token("rsa-pss-sha256", AlgorithmUse::Write),
+            Decision::Allow
+        );
         assert_eq!(pqc.evaluate_token("rc4", AlgorithmUse::Write), Decision::Deny);
     }
 
@@ -1086,19 +1115,10 @@ mod tests {
         assert_eq!(SecurityPolicy::strict().min_rsa_modulus_bits(), 2048);
         assert_eq!(SecurityPolicy::fips_strict().min_rsa_modulus_bits(), 3072);
         assert_eq!(
-            "pqc-ready"
-                .parse::<SecurityPolicy>()
-                .unwrap()
-                .min_rsa_modulus_bits(),
+            "pqc-ready".parse::<SecurityPolicy>().unwrap().min_rsa_modulus_bits(),
             2048
         );
-        assert_eq!(
-            "cnsa2"
-                .parse::<SecurityPolicy>()
-                .unwrap()
-                .min_rsa_modulus_bits(),
-            3072
-        );
+        assert_eq!("cnsa2".parse::<SecurityPolicy>().unwrap().min_rsa_modulus_bits(), 3072);
 
         assert_eq!(SecurityPolicy::compat().rsa_modulus_allowed(1024), Decision::Allow);
 

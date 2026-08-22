@@ -98,10 +98,7 @@ mod tests {
 
     #[test]
     fn test_reading_order_same_line() {
-        let blocks = vec![
-            mock_block("Right", 100.0, 1.0),
-            mock_block("Left", 0.0, 0.0),
-        ];
+        let blocks = vec![mock_block("Right", 100.0, 1.0), mock_block("Left", 0.0, 0.0)];
 
         let order = graph_based_reading_order(&blocks);
         assert_eq!(order, vec![1, 0]);
@@ -110,10 +107,7 @@ mod tests {
     #[test]
     fn test_reading_order_different_lines() {
         // PDF coordinates: Y increases upward, so top has LARGER Y ~keep
-        let blocks = vec![
-            mock_block("Bottom", 0.0, 50.0),
-            mock_block("Top", 0.0, 100.0),
-        ];
+        let blocks = vec![mock_block("Bottom", 0.0, 50.0), mock_block("Top", 0.0, 100.0)];
 
         let order = graph_based_reading_order(&blocks);
         assert_eq!(order, vec![1, 0]);

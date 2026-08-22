@@ -252,9 +252,7 @@ fn test_table_3x3() {
         table_elem.add_child(StructChild::StructElem(Box::new(row)));
     }
 
-    let text_blocks: Vec<TextBlock> = (0..9)
-        .map(|i| mock_text_block(&format!("Cell{}", i), i))
-        .collect();
+    let text_blocks: Vec<TextBlock> = (0..9).map(|i| mock_text_block(&format!("Cell{}", i), i)).collect();
 
     let table = extract_table(&table_elem, &text_blocks).unwrap();
 

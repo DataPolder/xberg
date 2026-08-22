@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1406542978;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 939365216;
 
 // Section: executor
 
@@ -1073,7 +1073,6 @@ fn wire__crate__ValidatorDartImpl_auto_accessor_set_field0_impl(
         },
     )
 }
-#[cfg(feature = "transcription")]
 fn wire__crate__build_decoder_prompt_tokens_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7956,7 +7955,6 @@ fn wire__crate__extract_batch_impl(
         },
     )
 }
-#[cfg(feature = "markdown-footnotes")]
 fn wire__crate__find_unmarked_claims_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7985,7 +7983,6 @@ fn wire__crate__find_unmarked_claims_impl(
         },
     )
 }
-#[cfg(feature = "pdf")]
 fn wire__crate__install_pdf_render_diagnostics_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8286,7 +8283,6 @@ fn wire__crate__list_validators_impl(
         },
     )
 }
-#[cfg(feature = "url-ingestion")]
 fn wire__crate__map_url_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8319,10 +8315,6 @@ fn wire__crate__map_url_impl(
         },
     )
 }
-#[cfg(any(
-    any(feature = "late-interaction-presets", feature = "late-interaction"),
-    feature = "late-interaction-presets"
-))]
 fn wire__crate__max_sim_rank_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8352,10 +8344,6 @@ fn wire__crate__max_sim_rank_impl(
         },
     )
 }
-#[cfg(any(
-    any(feature = "late-interaction-presets", feature = "late-interaction"),
-    feature = "late-interaction-presets"
-))]
 fn wire__crate__max_sim_score_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8609,8 +8597,7 @@ fn wire__crate__register_validator_impl(
         },
     )
 }
-#[cfg(feature = "pdf")]
-fn wire__crate__take_pdf_oxide_render_warnings_impl(
+fn wire__crate__take_xberg_native_pdf_render_warnings_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -8618,7 +8605,7 @@ fn wire__crate__take_pdf_oxide_render_warnings_impl(
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "take_pdf_oxide_render_warnings",
+            debug_name: "take_xberg_native_pdf_render_warnings",
             port: Some(port_),
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
@@ -8630,14 +8617,13 @@ fn wire__crate__take_pdf_oxide_render_warnings_impl(
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, ()>((move || {
-                    let output_ok = Result::<_, ()>::Ok(crate::take_pdf_oxide_render_warnings())?;
+                    let output_ok = Result::<_, ()>::Ok(crate::take_xberg_native_pdf_render_warnings())?;
                     Ok(output_ok)
                 })())
             }
         },
     )
 }
-#[cfg(feature = "transcription")]
 fn wire__crate__timestamp_token_to_ms_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8892,7 +8878,6 @@ fn wire__crate__unregister_validator_impl(
         },
     )
 }
-#[cfg(feature = "markdown-footnotes")]
 fn wire__crate__verify_excerpt_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -9299,6 +9284,10 @@ const _: fn() = || {
         let _: Option<i64> = CrawlConfig.max_pages;
         let _: Option<i64> = CrawlConfig.max_links_per_page;
         let _: Option<i64> = CrawlConfig.max_concurrent;
+        let _: crate::CrawlStrategyKind = CrawlConfig.crawl_strategy;
+        let _: Option<crate::ContentFilterKind> = CrawlConfig.content_filter;
+        let _: Option<String> = CrawlConfig.bm25_query;
+        let _: Option<f64> = CrawlConfig.bm25_threshold;
         let _: bool = CrawlConfig.respect_robots_txt;
         let _: bool = CrawlConfig.soft_http_errors;
         let _: Option<String> = CrawlConfig.user_agent;
@@ -10344,6 +10333,7 @@ const _: fn() = || {
         let _: Option<i64> = LlmConfig.health_check_secs;
         let _: Option<crate::BedrockConfig> = LlmConfig.bedrock;
         let _: Option<crate::CredentialProviderConfig> = LlmConfig.credential_provider;
+        let _: Option<i64> = LlmConfig.max_concurrency;
     }
     {
         let LlmProviderConfig = None::<crate::LlmProviderConfig>.unwrap();
@@ -10658,6 +10648,7 @@ const _: fn() = || {
         let _: f64 = OcrQualityThresholds.max_ocr_output_fragmented_word_ratio;
         let _: f64 = OcrQualityThresholds.min_ocr_mean_confidence;
         let _: i64 = OcrQualityThresholds.min_words_for_ocr_output_check;
+        let _: f64 = OcrQualityThresholds.max_ocr_output_dict_invalid_word_ratio;
         let _: f64 = OcrQualityThresholds.min_avg_word_length;
         let _: i64 = OcrQualityThresholds.min_words_for_avg_length_check;
         let _: f64 = OcrQualityThresholds.min_consecutive_repeat_ratio;
@@ -11142,6 +11133,7 @@ const _: fn() = || {
         let _: i64 = SecurityLimits.max_iterations;
         let _: i64 = SecurityLimits.max_xml_depth;
         let _: i64 = SecurityLimits.max_table_cells;
+        let _: Option<i64> = SecurityLimits.max_pages;
     }
     {
         let ServerConfig = None::<crate::ServerConfig>.unwrap();
@@ -13413,6 +13405,17 @@ impl SseDecode for crate::ContentFilterConfig {
     }
 }
 
+impl SseDecode for crate::ContentFilterKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::ContentFilterKind::Bm25,
+            _ => unreachable!("Invalid variant for ContentFilterKind: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::ContentLayer {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -13570,6 +13573,10 @@ impl SseDecode for crate::CrawlConfig {
         let mut var_maxPages = <Option<i64>>::sse_decode(deserializer);
         let mut var_maxLinksPerPage = <Option<i64>>::sse_decode(deserializer);
         let mut var_maxConcurrent = <Option<i64>>::sse_decode(deserializer);
+        let mut var_crawlStrategy = <crate::CrawlStrategyKind>::sse_decode(deserializer);
+        let mut var_contentFilter = <Option<crate::ContentFilterKind>>::sse_decode(deserializer);
+        let mut var_bm25Query = <Option<String>>::sse_decode(deserializer);
+        let mut var_bm25Threshold = <Option<f64>>::sse_decode(deserializer);
         let mut var_respectRobotsTxt = <bool>::sse_decode(deserializer);
         let mut var_softHttpErrors = <bool>::sse_decode(deserializer);
         let mut var_userAgent = <Option<String>>::sse_decode(deserializer);
@@ -13614,6 +13621,10 @@ impl SseDecode for crate::CrawlConfig {
             max_pages: var_maxPages,
             max_links_per_page: var_maxLinksPerPage,
             max_concurrent: var_maxConcurrent,
+            crawl_strategy: var_crawlStrategy,
+            content_filter: var_contentFilter,
+            bm25_query: var_bm25Query,
+            bm25_threshold: var_bm25Threshold,
             respect_robots_txt: var_respectRobotsTxt,
             soft_http_errors: var_softHttpErrors,
             user_agent: var_userAgent,
@@ -13653,6 +13664,20 @@ impl SseDecode for crate::CrawlConfig {
             save_browser_profile: var_saveBrowserProfile,
             ssrf: var_ssrf,
             ssrf_deny_private_explicit: var_ssrfDenyPrivateExplicit,
+        };
+    }
+}
+
+impl SseDecode for crate::CrawlStrategyKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::CrawlStrategyKind::Bfs,
+            1 => crate::CrawlStrategyKind::Dfs,
+            2 => crate::CrawlStrategyKind::BestFirst,
+            3 => crate::CrawlStrategyKind::Adaptive,
+            _ => unreachable!("Invalid variant for CrawlStrategyKind: {}", inner),
         };
     }
 }
@@ -17187,6 +17212,7 @@ impl SseDecode for crate::LlmConfig {
         let mut var_healthCheckSecs = <Option<i64>>::sse_decode(deserializer);
         let mut var_bedrock = <Option<crate::BedrockConfig>>::sse_decode(deserializer);
         let mut var_credentialProvider = <Option<crate::CredentialProviderConfig>>::sse_decode(deserializer);
+        let mut var_maxConcurrency = <Option<i64>>::sse_decode(deserializer);
         return crate::LlmConfig {
             model: var_model,
             api_key: var_apiKey,
@@ -17214,6 +17240,7 @@ impl SseDecode for crate::LlmConfig {
             health_check_secs: var_healthCheckSecs,
             bedrock: var_bedrock,
             credential_provider: var_credentialProvider,
+            max_concurrency: var_maxConcurrency,
         };
     }
 }
@@ -17900,6 +17927,7 @@ impl SseDecode for crate::OcrQualityThresholds {
         let mut var_maxOcrOutputFragmentedWordRatio = <f64>::sse_decode(deserializer);
         let mut var_minOcrMeanConfidence = <f64>::sse_decode(deserializer);
         let mut var_minWordsForOcrOutputCheck = <i64>::sse_decode(deserializer);
+        let mut var_maxOcrOutputDictInvalidWordRatio = <f64>::sse_decode(deserializer);
         let mut var_minAvgWordLength = <f64>::sse_decode(deserializer);
         let mut var_minWordsForAvgLengthCheck = <i64>::sse_decode(deserializer);
         let mut var_minConsecutiveRepeatRatio = <f64>::sse_decode(deserializer);
@@ -17923,6 +17951,7 @@ impl SseDecode for crate::OcrQualityThresholds {
             max_ocr_output_fragmented_word_ratio: var_maxOcrOutputFragmentedWordRatio,
             min_ocr_mean_confidence: var_minOcrMeanConfidence,
             min_words_for_ocr_output_check: var_minWordsForOcrOutputCheck,
+            max_ocr_output_dict_invalid_word_ratio: var_maxOcrOutputDictInvalidWordRatio,
             min_avg_word_length: var_minAvgWordLength,
             min_words_for_avg_length_check: var_minWordsForAvgLengthCheck,
             min_consecutive_repeat_ratio: var_minConsecutiveRepeatRatio,
@@ -18175,6 +18204,17 @@ impl SseDecode for Option<crate::ContentFilterConfig> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<crate::ContentFilterConfig>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::ContentFilterKind> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::ContentFilterKind>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -19718,7 +19758,7 @@ impl SseDecode for crate::PdfBackend {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut inner = <i32>::sse_decode(deserializer);
         return match inner {
-            0 => crate::PdfBackend::PdfOxide,
+            0 => crate::PdfBackend::Native,
             1 => crate::PdfBackend::Pdfium,
             _ => unreachable!("Invalid variant for PdfBackend: {}", inner),
         };
@@ -20656,6 +20696,7 @@ impl SseDecode for crate::SecurityLimits {
         let mut var_maxIterations = <i64>::sse_decode(deserializer);
         let mut var_maxXmlDepth = <i64>::sse_decode(deserializer);
         let mut var_maxTableCells = <i64>::sse_decode(deserializer);
+        let mut var_maxPages = <Option<i64>>::sse_decode(deserializer);
         return crate::SecurityLimits {
             max_archive_size: var_maxArchiveSize,
             max_compression_ratio: var_maxCompressionRatio,
@@ -20666,6 +20707,7 @@ impl SseDecode for crate::SecurityLimits {
             max_iterations: var_maxIterations,
             max_xml_depth: var_maxXmlDepth,
             max_table_cells: var_maxTableCells,
+            max_pages: var_maxPages,
         };
     }
 }
@@ -21624,7 +21666,6 @@ fn pde_ffi_dispatcher_primary_impl(
         17 => wire__crate__Registry_sample_bytes_impl(port, ptr, rust_vec_len, data_len),
         18 => wire__crate__Registry_summaries_impl(port, ptr, rust_vec_len, data_len),
         23 => wire__crate__TokenCounter_new_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(feature = "transcription")]
         28 => wire__crate__build_decoder_prompt_tokens_impl(port, ptr, rust_vec_len, data_len),
         29 => wire__crate__classify_chunks_impl(port, ptr, rust_vec_len, data_len),
         30 => wire__crate__clear_document_extractors_impl(port, ptr, rust_vec_len, data_len),
@@ -21865,9 +21906,7 @@ fn pde_ffi_dispatcher_primary_impl(
         265 => wire__crate__ensure_initialized_impl(port, ptr, rust_vec_len, data_len),
         266 => wire__crate__extract_impl(port, ptr, rust_vec_len, data_len),
         267 => wire__crate__extract_batch_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(feature = "markdown-footnotes")]
         268 => wire__crate__find_unmarked_claims_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(feature = "pdf")]
         269 => wire__crate__install_pdf_render_diagnostics_impl(port, ptr, rust_vec_len, data_len),
         270 => wire__crate__layout_wastes_plain_output_impl(port, ptr, rust_vec_len, data_len),
         271 => wire__crate__list_document_extractors_impl(port, ptr, rust_vec_len, data_len),
@@ -21879,17 +21918,8 @@ fn pde_ffi_dispatcher_primary_impl(
         277 => wire__crate__list_supported_formats_impl(port, ptr, rust_vec_len, data_len),
         278 => wire__crate__list_tokenizer_backends_impl(port, ptr, rust_vec_len, data_len),
         279 => wire__crate__list_validators_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(feature = "url-ingestion")]
         280 => wire__crate__map_url_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(any(
-            any(feature = "late-interaction-presets", feature = "late-interaction"),
-            feature = "late-interaction-presets"
-        ))]
         281 => wire__crate__max_sim_rank_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(any(
-            any(feature = "late-interaction-presets", feature = "late-interaction"),
-            feature = "late-interaction-presets"
-        ))]
         282 => wire__crate__max_sim_score_impl(port, ptr, rust_vec_len, data_len),
         283 => wire__crate__register_document_extractor_impl(port, ptr, rust_vec_len, data_len),
         284 => wire__crate__register_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
@@ -21899,9 +21929,7 @@ fn pde_ffi_dispatcher_primary_impl(
         288 => wire__crate__register_reranker_backend_impl(port, ptr, rust_vec_len, data_len),
         289 => wire__crate__register_tokenizer_backend_impl(port, ptr, rust_vec_len, data_len),
         290 => wire__crate__register_validator_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(feature = "pdf")]
-        291 => wire__crate__take_pdf_oxide_render_warnings_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(feature = "transcription")]
+        291 => wire__crate__take_xberg_native_pdf_render_warnings_impl(port, ptr, rust_vec_len, data_len),
         292 => wire__crate__timestamp_token_to_ms_impl(port, ptr, rust_vec_len, data_len),
         293 => wire__crate__unregister_document_extractor_impl(port, ptr, rust_vec_len, data_len),
         294 => wire__crate__unregister_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
@@ -21911,7 +21939,6 @@ fn pde_ffi_dispatcher_primary_impl(
         298 => wire__crate__unregister_reranker_backend_impl(port, ptr, rust_vec_len, data_len),
         299 => wire__crate__unregister_tokenizer_backend_impl(port, ptr, rust_vec_len, data_len),
         300 => wire__crate__unregister_validator_impl(port, ptr, rust_vec_len, data_len),
-        #[cfg(feature = "markdown-footnotes")]
         301 => wire__crate__verify_excerpt_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
@@ -23184,6 +23211,21 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::ContentFilterConfig>> f
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::ContentFilterKind> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self.0 {
+            crate::ContentFilterKind::Bm25 => 0.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::ContentFilterKind> {}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::ContentFilterKind>> for crate::ContentFilterKind {
+    fn into_into_dart(self) -> FrbWrapper<crate::ContentFilterKind> {
+        self.into()
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::ContentLayer> {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self.0 {
@@ -23307,6 +23349,10 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::CrawlConfig> {
             self.0.max_pages.into_into_dart().into_dart(),
             self.0.max_links_per_page.into_into_dart().into_dart(),
             self.0.max_concurrent.into_into_dart().into_dart(),
+            self.0.crawl_strategy.into_into_dart().into_dart(),
+            self.0.content_filter.into_into_dart().into_dart(),
+            self.0.bm25_query.into_into_dart().into_dart(),
+            self.0.bm25_threshold.into_into_dart().into_dart(),
             self.0.respect_robots_txt.into_into_dart().into_dart(),
             self.0.soft_http_errors.into_into_dart().into_dart(),
             self.0.user_agent.into_into_dart().into_dart(),
@@ -23353,6 +23399,24 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::CrawlConfig> {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::CrawlConfig> {}
 impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::CrawlConfig>> for crate::CrawlConfig {
     fn into_into_dart(self) -> FrbWrapper<crate::CrawlConfig> {
+        self.into()
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::CrawlStrategyKind> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self.0 {
+            crate::CrawlStrategyKind::Bfs => 0.into_dart(),
+            crate::CrawlStrategyKind::Dfs => 1.into_dart(),
+            crate::CrawlStrategyKind::BestFirst => 2.into_dart(),
+            crate::CrawlStrategyKind::Adaptive => 3.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::CrawlStrategyKind> {}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::CrawlStrategyKind>> for crate::CrawlStrategyKind {
+    fn into_into_dart(self) -> FrbWrapper<crate::CrawlStrategyKind> {
         self.into()
     }
 }
@@ -25821,6 +25885,7 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::LlmConfig> {
             self.0.health_check_secs.into_into_dart().into_dart(),
             self.0.bedrock.into_into_dart().into_dart(),
             self.0.credential_provider.into_into_dart().into_dart(),
+            self.0.max_concurrency.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -26490,6 +26555,10 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::OcrQualityThresholds> {
             self.0.max_ocr_output_fragmented_word_ratio.into_into_dart().into_dart(),
             self.0.min_ocr_mean_confidence.into_into_dart().into_dart(),
             self.0.min_words_for_ocr_output_check.into_into_dart().into_dart(),
+            self.0
+                .max_ocr_output_dict_invalid_word_ratio
+                .into_into_dart()
+                .into_dart(),
             self.0.min_avg_word_length.into_into_dart().into_dart(),
             self.0.min_words_for_avg_length_check.into_into_dart().into_dart(),
             self.0.min_consecutive_repeat_ratio.into_into_dart().into_dart(),
@@ -27010,7 +27079,7 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::PdfAnnotationType>> for
 impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::PdfBackend> {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self.0 {
-            crate::PdfBackend::PdfOxide => 0.into_dart(),
+            crate::PdfBackend::Native => 0.into_dart(),
             crate::PdfBackend::Pdfium => 1.into_dart(),
             _ => unreachable!(),
         }
@@ -27936,6 +28005,7 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::SecurityLimits> {
             self.0.max_iterations.into_into_dart().into_dart(),
             self.0.max_xml_depth.into_into_dart().into_dart(),
             self.0.max_table_cells.into_into_dart().into_dart(),
+            self.0.max_pages.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -30048,6 +30118,21 @@ impl SseEncode for crate::ContentFilterConfig {
     }
 }
 
+impl SseEncode for crate::ContentFilterKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::ContentFilterKind::Bm25 => 0,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::ContentLayer {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -30147,6 +30232,10 @@ impl SseEncode for crate::CrawlConfig {
         <Option<i64>>::sse_encode(self.max_pages, serializer);
         <Option<i64>>::sse_encode(self.max_links_per_page, serializer);
         <Option<i64>>::sse_encode(self.max_concurrent, serializer);
+        <crate::CrawlStrategyKind>::sse_encode(self.crawl_strategy, serializer);
+        <Option<crate::ContentFilterKind>>::sse_encode(self.content_filter, serializer);
+        <Option<String>>::sse_encode(self.bm25_query, serializer);
+        <Option<f64>>::sse_encode(self.bm25_threshold, serializer);
         <bool>::sse_encode(self.respect_robots_txt, serializer);
         <bool>::sse_encode(self.soft_http_errors, serializer);
         <Option<String>>::sse_encode(self.user_agent, serializer);
@@ -30186,6 +30275,24 @@ impl SseEncode for crate::CrawlConfig {
         <bool>::sse_encode(self.save_browser_profile, serializer);
         <crate::SsrfPolicy>::sse_encode(self.ssrf, serializer);
         <Option<bool>>::sse_encode(self.ssrf_deny_private_explicit, serializer);
+    }
+}
+
+impl SseEncode for crate::CrawlStrategyKind {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::CrawlStrategyKind::Bfs => 0,
+                crate::CrawlStrategyKind::Dfs => 1,
+                crate::CrawlStrategyKind::BestFirst => 2,
+                crate::CrawlStrategyKind::Adaptive => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 
@@ -32926,6 +33033,7 @@ impl SseEncode for crate::LlmConfig {
         <Option<i64>>::sse_encode(self.health_check_secs, serializer);
         <Option<crate::BedrockConfig>>::sse_encode(self.bedrock, serializer);
         <Option<crate::CredentialProviderConfig>>::sse_encode(self.credential_provider, serializer);
+        <Option<i64>>::sse_encode(self.max_concurrency, serializer);
     }
 }
 
@@ -33460,6 +33568,7 @@ impl SseEncode for crate::OcrQualityThresholds {
         <f64>::sse_encode(self.max_ocr_output_fragmented_word_ratio, serializer);
         <f64>::sse_encode(self.min_ocr_mean_confidence, serializer);
         <i64>::sse_encode(self.min_words_for_ocr_output_check, serializer);
+        <f64>::sse_encode(self.max_ocr_output_dict_invalid_word_ratio, serializer);
         <f64>::sse_encode(self.min_avg_word_length, serializer);
         <i64>::sse_encode(self.min_words_for_avg_length_check, serializer);
         <f64>::sse_encode(self.min_consecutive_repeat_ratio, serializer);
@@ -33676,6 +33785,16 @@ impl SseEncode for Option<crate::ContentFilterConfig> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::ContentFilterConfig>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::ContentFilterKind> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::ContentFilterKind>::sse_encode(value, serializer);
         }
     }
 }
@@ -35028,7 +35147,7 @@ impl SseEncode for crate::PdfBackend {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(
             match self {
-                crate::PdfBackend::PdfOxide => 0,
+                crate::PdfBackend::Native => 0,
                 crate::PdfBackend::Pdfium => 1,
                 _ => {
                     unimplemented!("");
@@ -35796,6 +35915,7 @@ impl SseEncode for crate::SecurityLimits {
         <i64>::sse_encode(self.max_iterations, serializer);
         <i64>::sse_encode(self.max_xml_depth, serializer);
         <i64>::sse_encode(self.max_table_cells, serializer);
+        <Option<i64>>::sse_encode(self.max_pages, serializer);
     }
 }
 

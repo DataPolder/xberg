@@ -27,10 +27,8 @@ fn header_only_cmyk_profile_bytes() -> Vec<u8> {
 
 #[test]
 fn cmyk_transform_anchor_samples_agree() {
-    let profile = Arc::new(
-        IccProfile::parse(header_only_cmyk_profile_bytes(), 4)
-            .expect("header-only profile should parse"),
-    );
+    let profile =
+        Arc::new(IccProfile::parse(header_only_cmyk_profile_bytes(), 4).expect("header-only profile should parse"));
     let t = Transform::new_srgb_target(profile, RenderingIntent::RelativeColorimetric);
 
     // (0,0,0,0) = paper white under every CMM + under §10.3.5. ~keep
@@ -48,18 +46,11 @@ fn cmyk_transform_bulk_path_matches_pixel_path() {
     // per-pixel conversion under the §10.3.5 fallback path. With a
     // real qcms transform the two paths may disagree by rounding in
     // the final sample but should agree on anchor values. ~keep
-    let profile = Arc::new(
-        IccProfile::parse(header_only_cmyk_profile_bytes(), 4)
-            .expect("header-only profile should parse"),
-    );
+    let profile =
+        Arc::new(IccProfile::parse(header_only_cmyk_profile_bytes(), 4).expect("header-only profile should parse"));
     let t = Transform::new_srgb_target(profile, RenderingIntent::RelativeColorimetric);
 
-    let samples: [(u8, u8, u8, u8); 4] = [
-        (0, 0, 0, 0),
-        (255, 255, 255, 255),
-        (64, 32, 16, 8),
-        (13, 12, 12, 4),
-    ];
+    let samples: [(u8, u8, u8, u8); 4] = [(0, 0, 0, 0), (255, 255, 255, 255), (64, 32, 16, 8), (13, 12, 12, 4)];
     let mut cmyk = Vec::with_capacity(samples.len() * 4);
     for s in &samples {
         cmyk.extend_from_slice(&[s.0, s.1, s.2, s.3]);

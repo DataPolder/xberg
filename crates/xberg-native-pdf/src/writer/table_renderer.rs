@@ -674,11 +674,7 @@ pub struct CellLayout {
 
 impl Table {
     /// Calculate the layout for this table.
-    pub fn calculate_layout(
-        &self,
-        available_width: f32,
-        font_metrics: &dyn FontMetrics,
-    ) -> TableLayout {
+    pub fn calculate_layout(&self, available_width: f32, font_metrics: &dyn FontMetrics) -> TableLayout {
         let num_cols = self.num_columns();
         if num_cols == 0 || self.rows.is_empty() {
             return TableLayout {
@@ -714,12 +710,7 @@ impl Table {
         }
     }
 
-    fn calculate_column_widths(
-        &self,
-        table_width: f32,
-        num_cols: usize,
-        font_metrics: &dyn FontMetrics,
-    ) -> Vec<f32> {
+    fn calculate_column_widths(&self, table_width: f32, num_cols: usize, font_metrics: &dyn FontMetrics) -> Vec<f32> {
         let padding = &self.style.cell_padding;
         let mut widths = vec![0.0f32; num_cols];
         let mut _fixed_width = 0.0f32;
@@ -731,15 +722,15 @@ impl Table {
                 ColumnWidth::Fixed(w) => {
                     widths[col] = *w;
                     _fixed_width += *w;
-                },
+                }
                 ColumnWidth::Percent(p) => {
                     let w = table_width * (*p / 100.0);
                     widths[col] = w;
                     _percent_total += *p;
-                },
+                }
                 ColumnWidth::Weight(w) => {
                     weight_total += *w;
-                },
+                }
                 ColumnWidth::Auto => {
                     let mut max_width = 0.0f32;
                     for row in &self.rows {
@@ -755,7 +746,7 @@ impl Table {
                         }
                     }
                     widths[col] = max_width.max(20.0);
-                },
+                }
             }
         }
 
@@ -801,11 +792,7 @@ impl Table {
     /// Wrap every cell's content to its resolved column width and measure
     /// each resulting line. Returns a per-row, per-cell matrix of
     /// `CellLayout` indexed identically to `self.rows[row].cells[cell]`.
-    fn wrap_all_cells(
-        &self,
-        column_widths: &[f32],
-        font_metrics: &dyn FontMetrics,
-    ) -> Vec<Vec<CellLayout>> {
+    fn wrap_all_cells(&self, column_widths: &[f32], font_metrics: &dyn FontMetrics) -> Vec<Vec<CellLayout>> {
         let padding = &self.style.cell_padding;
         let mut out = Vec::with_capacity(self.rows.len());
 
@@ -825,10 +812,7 @@ impl Table {
                 let font_size = cell.font_size.unwrap_or(self.style.font_size);
 
                 let lines = wrap_text(&cell.content, content_width, font_size, font_metrics);
-                let line_widths = lines
-                    .iter()
-                    .map(|l| font_metrics.text_width(l, font_size))
-                    .collect();
+                let line_widths = lines.iter().map(|l| font_metrics.text_width(l, font_size)).collect();
 
                 row_out.push(CellLayout { lines, line_widths });
                 col_idx += cell.colspan;
@@ -871,11 +855,7 @@ impl Table {
         heights
     }
 
-    fn calculate_cell_positions(
-        &self,
-        column_widths: &[f32],
-        row_heights: &[f32],
-    ) -> Vec<Vec<CellPosition>> {
+    fn calculate_cell_positions(&self, column_widths: &[f32], row_heights: &[f32]) -> Vec<Vec<CellPosition>> {
         let mut positions = Vec::with_capacity(self.rows.len());
         let mut y = 0.0;
 
@@ -888,12 +868,7 @@ impl Table {
                 let width: f32 = column_widths[col_idx..col_idx + cell.colspan].iter().sum();
                 let height: f32 = row_heights[row_idx..row_idx + cell.rowspan].iter().sum();
 
-                row_positions.push(CellPosition {
-                    x,
-                    y,
-                    width,
-                    height,
-                });
+                row_positions.push(CellPosition { x, y, width, height });
 
                 x += width;
                 col_idx += cell.colspan;
@@ -918,15 +893,8 @@ impl Table {
     /// The low-level `render()` method is retained as an escape hatch for
     /// callers that already have a `ContentStreamBuilder` in hand, and
     /// for the renderer's own unit tests which inspect emitted PDF ops.
-    pub fn to_content_elements(
-        &self,
-        x: f32,
-        y: f32,
-        layout: &TableLayout,
-    ) -> Vec<crate::elements::ContentElement> {
-        use crate::elements::{
-            ContentElement, FontSpec, PathContent, PathOperation, TextContent, TextStyle,
-        };
+    pub fn to_content_elements(&self, x: f32, y: f32, layout: &TableLayout) -> Vec<crate::elements::ContentElement> {
+        use crate::elements::{ContentElement, FontSpec, PathContent, PathOperation, TextContent, TextStyle};
         use crate::geometry::Rect;
         use crate::layout::Color;
 
@@ -946,19 +914,14 @@ impl Table {
                     if row.is_header {
                         self.style.header_background
                     } else if let Some(stripe) = self.style.stripe_color {
-                        if row_idx % 2 == 1 {
-                            Some(stripe)
-                        } else {
-                            row.background
-                        }
+                        if row_idx % 2 == 1 { Some(stripe) } else { row.background }
                     } else {
                         row.background
                     }
                 });
 
                 if let Some((r, g, b)) = bg {
-                    let mut path =
-                        PathContent::new(Rect::new(cell_x, cell_y, pos.width, pos.height));
+                    let mut path = PathContent::new(Rect::new(cell_x, cell_y, pos.width, pos.height));
                     path.operations
                         .push(PathOperation::Rectangle(cell_x, cell_y, pos.width, pos.height));
                     path.fill_color = Some(Color { r, g, b });
@@ -968,14 +931,7 @@ impl Table {
                 }
 
                 let borders = cell.borders.as_ref().unwrap_or(&self.style.cell_borders);
-                Self::push_cell_border_elements(
-                    &mut elements,
-                    cell_x,
-                    cell_y,
-                    pos.width,
-                    pos.height,
-                    borders,
-                );
+                Self::push_cell_border_elements(&mut elements, cell_x, cell_y, pos.width, pos.height, borders);
             }
         }
 
@@ -994,10 +950,7 @@ impl Table {
                 let align = if cell.align != CellAlign::Left {
                     cell.align
                 } else {
-                    self.column_aligns
-                        .get(cell_idx)
-                        .copied()
-                        .unwrap_or(CellAlign::Left)
+                    self.column_aligns.get(cell_idx).copied().unwrap_or(CellAlign::Left)
                 };
 
                 let font_name = cell.font_name.as_deref().unwrap_or(&self.style.font_name);
@@ -1016,11 +969,8 @@ impl Table {
                 let line_height = font_size * 1.2;
                 let cell_layout = &layout.cell_layouts[row_idx][cell_idx];
 
-                for (line_idx, (line, line_width)) in cell_layout
-                    .lines
-                    .iter()
-                    .zip(cell_layout.line_widths.iter())
-                    .enumerate()
+                for (line_idx, (line, line_width)) in
+                    cell_layout.lines.iter().zip(cell_layout.line_widths.iter()).enumerate()
                 {
                     if line.is_empty() {
                         continue;
@@ -1058,8 +1008,7 @@ impl Table {
             && outer.width > 0.0
         {
             let outer_y = table_top - layout.total_height;
-            let mut path =
-                PathContent::new(Rect::new(x, outer_y, layout.total_width, layout.total_height));
+            let mut path = PathContent::new(Rect::new(x, outer_y, layout.total_width, layout.total_height));
             path.operations.push(PathOperation::Rectangle(
                 x,
                 outer_y,
@@ -1131,13 +1080,7 @@ impl Table {
     }
 
     /// Render the table to a content stream.
-    pub fn render(
-        &self,
-        builder: &mut ContentStreamBuilder,
-        x: f32,
-        y: f32,
-        layout: &TableLayout,
-    ) -> Result<()> {
+    pub fn render(&self, builder: &mut ContentStreamBuilder, x: f32, y: f32, layout: &TableLayout) -> Result<()> {
         // Y is top of table, PDF coordinates are bottom-up ~keep
         let table_top = y;
 
@@ -1151,11 +1094,7 @@ impl Table {
                     if row.is_header {
                         self.style.header_background
                     } else if let Some(stripe) = self.style.stripe_color {
-                        if row_idx % 2 == 1 {
-                            Some(stripe)
-                        } else {
-                            row.background
-                        }
+                        if row_idx % 2 == 1 { Some(stripe) } else { row.background }
                     } else {
                         row.background
                     }
@@ -1189,10 +1128,7 @@ impl Table {
                 let align = if cell.align != CellAlign::Left {
                     cell.align
                 } else {
-                    self.column_aligns
-                        .get(cell_idx)
-                        .copied()
-                        .unwrap_or(CellAlign::Left)
+                    self.column_aligns.get(cell_idx).copied().unwrap_or(CellAlign::Left)
                 };
 
                 let font_name = cell.font_name.as_deref().unwrap_or(&self.style.font_name);
@@ -1213,11 +1149,8 @@ impl Table {
                 let line_height = font_size * 1.2;
                 let cell_layout = &layout.cell_layouts[row_idx][cell_idx];
 
-                for (line_idx, (line, line_width)) in cell_layout
-                    .lines
-                    .iter()
-                    .zip(cell_layout.line_widths.iter())
-                    .enumerate()
+                for (line_idx, (line, line_width)) in
+                    cell_layout.lines.iter().zip(cell_layout.line_widths.iter()).enumerate()
                 {
                     if line.is_empty() {
                         continue;
@@ -1335,9 +1268,7 @@ impl Default for SimpleFontMetrics {
 impl SimpleFontMetrics {
     /// Create metrics for monospace fonts.
     pub fn monospace() -> Self {
-        Self {
-            char_width_ratio: 0.6,
-        }
+        Self { char_width_ratio: 0.6 }
     }
 }
 
@@ -1576,8 +1507,7 @@ mod tests {
         use super::super::content_stream::ContentStreamBuilder;
 
         let long = "alpha beta gamma delta epsilon zeta eta theta";
-        let table = Table::new(vec![vec![TableCell::text(long)]])
-            .with_column_widths(vec![ColumnWidth::Fixed(40.0)]);
+        let table = Table::new(vec![vec![TableCell::text(long)]]).with_column_widths(vec![ColumnWidth::Fixed(40.0)]);
 
         let metrics = SimpleFontMetrics::default();
         let layout = table.calculate_layout(40.0, &metrics);
@@ -1585,9 +1515,7 @@ mod tests {
         assert!(expected_lines >= 3, "fixture must wrap to >=3 lines to be meaningful");
 
         let mut builder = ContentStreamBuilder::new();
-        table
-            .render(&mut builder, 0.0, 800.0, &layout)
-            .expect("render");
+        table.render(&mut builder, 0.0, 800.0, &layout).expect("render");
 
         let bytes = builder.build().expect("build content stream");
         let text = String::from_utf8_lossy(&bytes);
@@ -1705,9 +1633,7 @@ mod tests {
         let layout = table.calculate_layout(180.0, &metrics);
 
         let mut builder = ContentStreamBuilder::new();
-        table
-            .render(&mut builder, 0.0, 800.0, &layout)
-            .expect("render");
+        table.render(&mut builder, 0.0, 800.0, &layout).expect("render");
         let bytes = builder.build().expect("build");
         let text = String::from_utf8_lossy(&bytes);
 

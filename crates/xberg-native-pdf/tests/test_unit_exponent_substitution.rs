@@ -40,7 +40,10 @@ fn signed_unit_exponent_stays_ascii() {
         !collapsed.contains('\u{2081}') && !collapsed.contains('\u{208B}'),
         "signed unit exponent wrongly rewritten to subscript: {collapsed:?}"
     );
-    assert!(collapsed.contains("-1"), "expected ASCII '-1' to survive, got: {collapsed:?}");
+    assert!(
+        collapsed.contains("-1"),
+        "expected ASCII '-1' to survive, got: {collapsed:?}"
+    );
 }
 
 #[test]

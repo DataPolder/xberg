@@ -34,8 +34,8 @@ fn signed_pdf_renders_first_page_without_error() {
     let doc = PdfDocument::from_bytes(bytes).expect("open");
 
     let opts = RenderOptions::with_dpi(72);
-    let img = rendering::render_page(&doc, 0, &opts)
-        .expect("render_page must not return Err for the regression fixture");
+    let img =
+        rendering::render_page(&doc, 0, &opts).expect("render_page must not return Err for the regression fixture");
 
     assert!(img.data.len() > 128, "rendered image should be non-trivial");
     assert!(img.width > 0 && img.height > 0);

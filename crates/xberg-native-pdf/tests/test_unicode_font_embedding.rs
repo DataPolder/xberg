@@ -225,8 +225,7 @@ fn test_subset_dejavu_for_english_under_30kb() {
         used.insert(gid);
     }
 
-    let (subset, remapper) =
-        subset_font_bytes(DEJAVU_SANS, 0, &used).expect("subsetting must succeed");
+    let (subset, remapper) = subset_font_bytes(DEJAVU_SANS, 0, &used).expect("subsetting must succeed");
 
     assert!(
         subset.len() < 30_000,
@@ -240,7 +239,11 @@ fn test_subset_dejavu_for_english_under_30kb() {
         DEJAVU_SANS.len()
     );
 
-    assert_eq!(remapper.get(0), Some(0), ".notdef must remain at GID 0 after subsetting");
+    assert_eq!(
+        remapper.get(0),
+        Some(0),
+        ".notdef must remain at GID 0 after subsetting"
+    );
     for &original_gid in &used {
         assert!(
             remapper.get(original_gid).is_some(),
@@ -253,8 +256,7 @@ fn test_subset_dejavu_for_english_under_30kb() {
 fn test_subset_always_includes_notdef_even_when_caller_omits_it() {
     let mut used = BTreeSet::new();
     used.insert(36u16);
-    let (subset, remapper) =
-        subset_font_bytes(DEJAVU_SANS, 0, &used).expect("subsetting must succeed");
+    let (subset, remapper) = subset_font_bytes(DEJAVU_SANS, 0, &used).expect("subsetting must succeed");
     assert_eq!(remapper.get(0), Some(0), ".notdef auto-included");
     assert!(remapper.get(36).is_some());
     assert!(!subset.is_empty());

@@ -73,11 +73,7 @@ fn build_offset_coded_pdf(with_tounicode: bool) -> Vec<u8> {
     );
     let cmap_b = cmap.into_bytes();
 
-    let tounicode_entry = if with_tounicode {
-        " /ToUnicode 8 0 R"
-    } else {
-        ""
-    };
+    let tounicode_entry = if with_tounicode { " /ToUnicode 8 0 R" } else { "" };
 
     let basefont = "AAAAAA+Sub";
     let objs: Vec<String> = vec![

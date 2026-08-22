@@ -27,15 +27,7 @@ use xberg_native_pdf::converters::ConversionOptions;
 const LINES: &[&[&str]] = &[
     &["JOHN", "DOE", "Boston", "MA"],
     &["Master", "of", "Science", "in", "Information", "Systems"],
-    &[
-        "Results",
-        "driven",
-        "engineer",
-        "with",
-        "expertise",
-        "in",
-        "data",
-    ],
+    &["Results", "driven", "engineer", "with", "expertise", "in", "data"],
 ];
 
 /// Build a Type0/CIDFontType2 PDF that draws `LINES` one glyph per `Tj`, with a

@@ -194,20 +194,20 @@ impl EncryptionWriteHandler {
                     );
                     data.to_vec()
                 })
-            },
+            }
             Algorithm::Aes128 => match Self::generate_iv() {
                 Ok(iv) => match aes::aes128_encrypt(key, &iv, data) {
                     Ok(ciphertext) => {
                         let mut result = iv.to_vec();
                         result.extend(ciphertext);
                         result
-                    },
+                    }
                     Err(_) => data.to_vec(),
                 },
                 Err(e) => {
                     tracing::error!(algorithm = "AES-128", error = %e, "IV generation failed; returning plaintext");
                     data.to_vec()
-                },
+                }
             },
             Algorithm::Aes256 => match Self::generate_iv() {
                 Ok(iv) => match aes::aes256_encrypt(key, &iv, data) {
@@ -215,13 +215,13 @@ impl EncryptionWriteHandler {
                         let mut result = iv.to_vec();
                         result.extend(ciphertext);
                         result
-                    },
+                    }
                     Err(_) => data.to_vec(),
                 },
                 Err(e) => {
                     tracing::error!(algorithm = "AES-256", error = %e, "IV generation failed; returning plaintext");
                     data.to_vec()
-                },
+                }
             },
         }
     }

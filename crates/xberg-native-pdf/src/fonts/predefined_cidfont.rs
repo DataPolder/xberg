@@ -378,7 +378,7 @@ pub fn is_predefined(base_font: &str) -> Option<CharacterCollection> {
             } else {
                 base_font
             }
-        },
+        }
         _ => base_font,
     };
     let bare = strip_cmap_suffix(after_prefix);
@@ -392,11 +392,20 @@ mod tests {
     #[test]
     fn bare_japanese_names_resolve_to_japan1() {
         assert_eq!(is_predefined("Ryumin-Light"), Some(CharacterCollection::AdobeJapan1));
-        assert_eq!(is_predefined("GothicBBB-Medium"), Some(CharacterCollection::AdobeJapan1));
+        assert_eq!(
+            is_predefined("GothicBBB-Medium"),
+            Some(CharacterCollection::AdobeJapan1)
+        );
         assert_eq!(is_predefined("HeiseiMin-W3"), Some(CharacterCollection::AdobeJapan1));
         assert_eq!(is_predefined("HeiseiKakuGo-W5"), Some(CharacterCollection::AdobeJapan1));
-        assert_eq!(is_predefined("KozMinPro-Regular"), Some(CharacterCollection::AdobeJapan1));
-        assert_eq!(is_predefined("Kozuka-Mincho-Pro-VI-R"), Some(CharacterCollection::AdobeJapan1));
+        assert_eq!(
+            is_predefined("KozMinPro-Regular"),
+            Some(CharacterCollection::AdobeJapan1)
+        );
+        assert_eq!(
+            is_predefined("Kozuka-Mincho-Pro-VI-R"),
+            Some(CharacterCollection::AdobeJapan1)
+        );
     }
 
     #[test]
@@ -434,9 +443,18 @@ mod tests {
 
     #[test]
     fn suffixed_chinese_simplified_names_resolve_to_gb1() {
-        assert_eq!(is_predefined("STSong-Light-GBK-EUC-H"), Some(CharacterCollection::AdobeGB1));
-        assert_eq!(is_predefined("STSong-Light-UniGB-UCS2-H"), Some(CharacterCollection::AdobeGB1));
-        assert_eq!(is_predefined("STHeiti-Light-Identity-V"), Some(CharacterCollection::AdobeGB1));
+        assert_eq!(
+            is_predefined("STSong-Light-GBK-EUC-H"),
+            Some(CharacterCollection::AdobeGB1)
+        );
+        assert_eq!(
+            is_predefined("STSong-Light-UniGB-UCS2-H"),
+            Some(CharacterCollection::AdobeGB1)
+        );
+        assert_eq!(
+            is_predefined("STHeiti-Light-Identity-V"),
+            Some(CharacterCollection::AdobeGB1)
+        );
     }
 
     #[test]
@@ -450,14 +468,23 @@ mod tests {
 
     #[test]
     fn suffixed_chinese_traditional_names_resolve_to_cns1() {
-        assert_eq!(is_predefined("MHei-Medium-B5pc-H"), Some(CharacterCollection::AdobeCNS1));
-        assert_eq!(is_predefined("MSung-Light-Identity-H"), Some(CharacterCollection::AdobeCNS1));
+        assert_eq!(
+            is_predefined("MHei-Medium-B5pc-H"),
+            Some(CharacterCollection::AdobeCNS1)
+        );
+        assert_eq!(
+            is_predefined("MSung-Light-Identity-H"),
+            Some(CharacterCollection::AdobeCNS1)
+        );
         assert_eq!(is_predefined("MingLiU-ETen-B5-V"), Some(CharacterCollection::AdobeCNS1));
     }
 
     #[test]
     fn bare_korean_names_resolve_to_korea1() {
-        assert_eq!(is_predefined("HYSMyeongJo-Medium"), Some(CharacterCollection::AdobeKorea1));
+        assert_eq!(
+            is_predefined("HYSMyeongJo-Medium"),
+            Some(CharacterCollection::AdobeKorea1)
+        );
         assert_eq!(is_predefined("HYGoThic-Medium"), Some(CharacterCollection::AdobeKorea1));
         assert_eq!(
             is_predefined("Adobe-MyungjoStd-Medium"),
@@ -484,7 +511,10 @@ mod tests {
             is_predefined("ABCDEF+Ryumin-Light-Identity-V"),
             Some(CharacterCollection::AdobeJapan1)
         );
-        assert_eq!(is_predefined("XEAACC+STSong-Light"), Some(CharacterCollection::AdobeGB1));
+        assert_eq!(
+            is_predefined("XEAACC+STSong-Light"),
+            Some(CharacterCollection::AdobeGB1)
+        );
     }
 
     #[test]

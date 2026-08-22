@@ -153,18 +153,14 @@ impl EmbeddedFile {
         if let Some(ref creation) = self.creation_date {
             params.insert(
                 "CreationDate".to_string(),
-                Object::String(
-                    format!("D:{}", creation.replace(['-', ':', 'T', 'Z'], "")).into_bytes(),
-                ),
+                Object::String(format!("D:{}", creation.replace(['-', ':', 'T', 'Z'], "")).into_bytes()),
             );
         }
 
         if let Some(ref modification) = self.modification_date {
             params.insert(
                 "ModDate".to_string(),
-                Object::String(
-                    format!("D:{}", modification.replace(['-', ':', 'T', 'Z'], "")).into_bytes(),
-                ),
+                Object::String(format!("D:{}", modification.replace(['-', ':', 'T', 'Z'], "")).into_bytes()),
             );
         }
 
@@ -269,10 +265,7 @@ impl EmbeddedFilesBuilder {
     }
 
     /// Build the EmbeddedFiles dictionary for the Names tree.
-    pub fn build_embedded_files_dict(
-        &self,
-        filespec_refs: &[(String, ObjectRef)],
-    ) -> HashMap<String, Object> {
+    pub fn build_embedded_files_dict(&self, filespec_refs: &[(String, ObjectRef)]) -> HashMap<String, Object> {
         let mut dict = HashMap::new();
         dict.insert("Names".to_string(), self.build_names_array(filespec_refs));
         dict

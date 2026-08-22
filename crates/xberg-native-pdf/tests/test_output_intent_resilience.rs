@@ -24,20 +24,13 @@ fn rgb_icc_profile() -> Vec<u8> {
 
 /// Build a classic xref-table PDF from base objects 1–4 plus `tail_objects`.
 /// `bad_offsets` corrupts an object's xref offset so that object fails to load.
-fn build_pdf(
-    catalog_entries: &str,
-    tail_objects: &[(u32, Vec<u8>)],
-    bad_offsets: &[(u32, u64)],
-) -> Vec<u8> {
+fn build_pdf(catalog_entries: &str, tail_objects: &[(u32, Vec<u8>)], bad_offsets: &[(u32, u64)]) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     let mut offsets: Vec<(u32, usize)> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
 
     offsets.push((1, buf.len()));
-    buf.extend_from_slice(
-        format!("1 0 obj\n<< /Type /Catalog /Pages 2 0 R {catalog_entries} >>\nendobj\n")
-            .as_bytes(),
-    );
+    buf.extend_from_slice(format!("1 0 obj\n<< /Type /Catalog /Pages 2 0 R {catalog_entries} >>\nendobj\n").as_bytes());
     offsets.push((2, buf.len()));
     buf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
     offsets.push((3, buf.len()));
@@ -64,16 +57,11 @@ fn build_pdf(
     let xref_off = buf.len();
     buf.extend_from_slice(format!("xref\n0 {size}\n0000000000 65535 f \n").as_bytes());
     for n in 1..size {
-        let off = offsets
-            .iter()
-            .find(|(o, _)| *o == n)
-            .map(|(_, o)| *o)
-            .unwrap_or(0);
+        let off = offsets.iter().find(|(o, _)| *o == n).map(|(_, o)| *o).unwrap_or(0);
         buf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
     }
     buf.extend_from_slice(
-        format!("trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n")
-            .as_bytes(),
+        format!("trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n").as_bytes(),
     );
     buf
 }
@@ -86,9 +74,7 @@ fn icc_stream_obj(num: u32, n: u8, profile: &[u8]) -> (u32, Vec<u8>) {
 }
 
 fn good_cmyk_oi(icc_num: u32) -> String {
-    format!(
-        "<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (CMYK) /DestOutputProfile {icc_num} 0 R >>"
-    )
+    format!("<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (CMYK) /DestOutputProfile {icc_num} 0 R >>")
 }
 
 #[test]
@@ -113,14 +99,16 @@ fn corrupt_entry_does_not_abort_remaining_search() {
 
 #[test]
 fn undecodable_profile_stream_entry_skipped_then_good() {
-    let bad_stream =
-        b"<< /N 4 /Filter /FlateDecode /Length 9 >>\nstream\nnot-flate\nendstream".to_vec();
+    let bad_stream = b"<< /N 4 /Filter /FlateDecode /Length 9 >>\nstream\nnot-flate\nendstream".to_vec();
     let catalog = format!(
         "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /DestOutputProfile 5 0 R >> {}]",
         good_cmyk_oi(6)
     );
-    let pdf =
-        build_pdf(&catalog, &[(5, bad_stream), icc_stream_obj(6, 4, &cmyk_icc_profile())], &[]);
+    let pdf = build_pdf(
+        &catalog,
+        &[(5, bad_stream), icc_stream_obj(6, 4, &cmyk_icc_profile())],
+        &[],
+    );
     let doc = PdfDocument::from_bytes(pdf).expect("open synthetic PDF");
     assert!(
         doc.output_intent_cmyk_profile().is_some(),
@@ -167,8 +155,7 @@ fn no_output_intents_returns_none() {
 
 #[test]
 fn rgb_only_output_intent_returns_none() {
-    let catalog =
-        "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /DestOutputProfile 5 0 R >>]";
+    let catalog = "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /DestOutputProfile 5 0 R >>]";
     let pdf = build_pdf(catalog, &[icc_stream_obj(5, 3, &rgb_icc_profile())], &[]);
     let doc = PdfDocument::from_bytes(pdf).expect("open synthetic PDF");
     assert!(doc.output_intent_cmyk_profile().is_none());

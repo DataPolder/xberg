@@ -79,14 +79,8 @@ fn helvetica_bold_b_is_wider_than_regular() {
     let bold_chars = bold_doc.extract_chars(0).expect("extract bold");
     let regular_chars = regular_doc.extract_chars(0).expect("extract regular");
 
-    let bold_b = bold_chars
-        .iter()
-        .find(|c| c.char == 'b')
-        .expect("'b' in bold");
-    let regular_b = regular_chars
-        .iter()
-        .find(|c| c.char == 'b')
-        .expect("'b' in regular");
+    let bold_b = bold_chars.iter().find(|c| c.char == 'b').expect("'b' in bold");
+    let regular_b = regular_chars.iter().find(|c| c.char == 'b').expect("'b' in regular");
 
     // Adobe AFM: Helvetica-Bold 'b' = 611 units; Helvetica 'b' = 556 units.
     // With font_size=1000, advance_width is proportional to the AFM width. ~keep
@@ -128,14 +122,8 @@ fn times_bold_a_is_wider_than_roman() {
     let bold_chars = bold_doc.extract_chars(0).expect("extract bold");
     let roman_chars = roman_doc.extract_chars(0).expect("extract roman");
 
-    let bold_a = bold_chars
-        .iter()
-        .find(|c| c.char == 'a')
-        .expect("'a' in bold");
-    let roman_a = roman_chars
-        .iter()
-        .find(|c| c.char == 'a')
-        .expect("'a' in roman");
+    let bold_a = bold_chars.iter().find(|c| c.char == 'a').expect("'a' in bold");
+    let roman_a = roman_chars.iter().find(|c| c.char == 'a').expect("'a' in roman");
 
     // Adobe AFM: Times-Bold 'a' = 500, Times-Roman 'a' = 444. ~keep
     assert!(
@@ -175,14 +163,8 @@ fn times_bold_italic_differs_from_bold() {
     let bi_w_chars = bi_w_doc.extract_chars(0).expect("extract bold-italic");
     let bold_w_chars = bold_w_doc.extract_chars(0).expect("extract bold");
 
-    let bi_w = bi_w_chars
-        .iter()
-        .find(|c| c.char == 'W')
-        .expect("'W' in bold-italic");
-    let bold_w = bold_w_chars
-        .iter()
-        .find(|c| c.char == 'W')
-        .expect("'W' in bold");
+    let bi_w = bi_w_chars.iter().find(|c| c.char == 'W').expect("'W' in bold-italic");
+    let bold_w = bold_w_chars.iter().find(|c| c.char == 'W').expect("'W' in bold");
 
     // Adobe AFM: Times-BoldItalic 'W' = 889, Times-Bold 'W' = 1000. ~keep
     assert!(
@@ -214,14 +196,8 @@ fn times_italic_w_differs_from_roman() {
     let italic_chars = italic_doc.extract_chars(0).expect("extract italic");
     let roman_chars = roman_doc.extract_chars(0).expect("extract roman");
 
-    let italic_w = italic_chars
-        .iter()
-        .find(|c| c.char == 'W')
-        .expect("'W' in italic");
-    let roman_w = roman_chars
-        .iter()
-        .find(|c| c.char == 'W')
-        .expect("'W' in roman");
+    let italic_w = italic_chars.iter().find(|c| c.char == 'W').expect("'W' in italic");
+    let roman_w = roman_chars.iter().find(|c| c.char == 'W').expect("'W' in roman");
 
     // Adobe AFM: Times-Italic 'W' = 833, Times-Roman 'W' = 944. ~keep
     assert!(

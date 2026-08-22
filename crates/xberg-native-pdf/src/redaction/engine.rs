@@ -60,9 +60,9 @@ impl FontInfoMetrics {
     /// custom CMaps (their code lengths and code→CID mapping are not
     /// reconstructable here), so those stay fail-closed.
     fn is_identity_h(&self, font: &str) -> bool {
-        self.fonts.get(font).is_some_and(|fi| {
-            fi.subtype == "Type0" && matches!(fi.encoding, Encoding::Identity) && fi.wmode == 0
-        })
+        self.fonts
+            .get(font)
+            .is_some_and(|fi| fi.subtype == "Type0" && matches!(fi.encoding, Encoding::Identity) && fi.wmode == 0)
     }
 }
 
@@ -223,9 +223,7 @@ mod tests {
     fn secret_fully_in_region_is_removed_and_overlaid() {
         // "TOPSECRET" 9 glyphs ×5pt from x=100 → 100..145 at y≈700. ~keep
         let regions = one_region(90.0, 695.0, 160.0, 715.0);
-        let (out, report) =
-            redact_content_stream(SECRET_DOC, &regions, &RedactionOptions::default(), &Stub)
-                .unwrap();
+        let (out, report) = redact_content_stream(SECRET_DOC, &regions, &RedactionOptions::default(), &Stub).unwrap();
         assert_absent(&out, b"TOPSECRET");
         assert_absent(&out, b"SECRET");
         assert_eq!(report.glyphs_removed, 9);
@@ -244,8 +242,7 @@ mod tests {
     fn public_text_outside_region_survives_verbatim() {
         let doc = b"BT\n/F1 10 Tf\n1 0 0 1 100 700 Tm\n(PUBLIC) Tj\nET\n";
         let regions = one_region(0.0, 0.0, 5.0, 5.0);
-        let (out, report) =
-            redact_content_stream(doc, &regions, &RedactionOptions::default(), &Stub).unwrap();
+        let (out, report) = redact_content_stream(doc, &regions, &RedactionOptions::default(), &Stub).unwrap();
         assert_eq!(report.glyphs_removed, 0);
         assert!(
             out.windows(6).any(|w| w == b"PUBLIC"),
@@ -260,8 +257,7 @@ mod tests {
         // keeps "PUB". Glyph i at x = 100 + 5i: P100 U105 B110 S115… ~keep
         let doc = b"BT\n/F1 10 Tf\n1 0 0 1 100 700 Tm\n(PUBSECRET) Tj\nET\n";
         let regions = one_region(120.0, 695.0, 400.0, 715.0);
-        let (out, report) =
-            redact_content_stream(doc, &regions, &RedactionOptions::default(), &Stub).unwrap();
+        let (out, report) = redact_content_stream(doc, &regions, &RedactionOptions::default(), &Stub).unwrap();
         assert_absent(&out, b"SECRET");
         assert!(report.glyphs_removed >= 6);
         assert!(
@@ -283,21 +279,14 @@ mod tests {
             }
         }
         let regions = one_region(0.0, 0.0, 1000.0, 1000.0);
-        let err =
-            redact_content_stream(SECRET_DOC, &regions, &RedactionOptions::default(), &Composite)
-                .unwrap_err();
+        let err = redact_content_stream(SECRET_DOC, &regions, &RedactionOptions::default(), &Composite).unwrap_err();
         assert!(matches!(err, Error::Unsupported(_)), "expected refusal, got {err:?}");
     }
 
     #[test]
     fn no_regions_keeps_content_and_draws_nothing() {
-        let (out, report) = redact_content_stream(
-            SECRET_DOC,
-            &RegionSet::new(0),
-            &RedactionOptions::default(),
-            &Stub,
-        )
-        .unwrap();
+        let (out, report) =
+            redact_content_stream(SECRET_DOC, &RegionSet::new(0), &RedactionOptions::default(), &Stub).unwrap();
         assert_eq!(report.glyphs_removed, 0);
         assert_eq!(report.regions, 0);
         assert!(out.windows(9).any(|w| w == b"TOPSECRET"));
@@ -308,12 +297,7 @@ mod tests {
         // parse_content_stream is tolerant; ensure no panic and that if
         // it does parse, an empty/garbage stream yields no secret. ~keep
         let regions = one_region(0.0, 0.0, 1000.0, 1000.0);
-        let _ = redact_content_stream(
-            b"q Q (unbalanced",
-            &regions,
-            &RedactionOptions::default(),
-            &Stub,
-        );
+        let _ = redact_content_stream(b"q Q (unbalanced", &regions, &RedactionOptions::default(), &Stub);
         let _ = redact_content_stream(b"", &regions, &RedactionOptions::default(), &Stub);
     }
 
@@ -327,14 +311,11 @@ mod tests {
         // so the overlay always starts from the stream's original CTM. ~keep
         let doc = b"1 0 0 -1 0 792 cm\n";
         let regions = one_region(90.0, 695.0, 160.0, 715.0);
-        let (out, _report) =
-            redact_content_stream(doc, &regions, &RedactionOptions::default(), &Stub).unwrap();
+        let (out, _report) = redact_content_stream(doc, &regions, &RedactionOptions::default(), &Stub).unwrap();
 
         let s = String::from_utf8_lossy(&out);
         assert!(s.starts_with("q\n"), "pruned body must open with q: {s}");
-        let wrapper_q_close = s
-            .find("Q\n")
-            .expect("closing Q for the pruned-body wrapper");
+        let wrapper_q_close = s.find("Q\n").expect("closing Q for the pruned-body wrapper");
         let overlay_rg = s.find("rg\n").expect("overlay rg op");
         assert!(
             wrapper_q_close < overlay_rg,

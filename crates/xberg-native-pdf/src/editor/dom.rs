@@ -33,8 +33,8 @@
 use crate::annotation_types::AnnotationSubtype;
 use crate::annotations::Annotation as ReadAnnotation;
 use crate::elements::{
-    ContentElement, ImageContent, LineCap, LineJoin, PathContent, PathOperation, StructureElement,
-    TableCellContent, TableContent, TextContent,
+    ContentElement, ImageContent, LineCap, LineJoin, PathContent, PathOperation, StructureElement, TableCellContent,
+    TableContent, TextContent,
 };
 use crate::geometry::Rect;
 use crate::layout::Color;
@@ -428,13 +428,13 @@ impl PdfPath {
             match op {
                 PathOperation::MoveTo(x, y) => {
                     d.push_str(&format!("M {} {} ", x, y));
-                },
+                }
                 PathOperation::LineTo(x, y) => {
                     d.push_str(&format!("L {} {} ", x, y));
-                },
+                }
                 PathOperation::CurveTo(x1, y1, x2, y2, x3, y3) => {
                     d.push_str(&format!("C {} {} {} {} {} {} ", x1, y1, x2, y2, x3, y3));
-                },
+                }
                 PathOperation::Rectangle(x, y, w, h) => {
                     // SVG doesn't have a rectangle path command, so we expand it ~keep
                     d.push_str(&format!(
@@ -448,10 +448,10 @@ impl PdfPath {
                         x,
                         y + h
                     ));
-                },
+                }
                 PathOperation::ClosePath => {
                     d.push_str("Z ");
-                },
+                }
             }
         }
 
@@ -500,7 +500,10 @@ impl PdfPath {
             LineJoin::Bevel => " stroke-linejoin=\"bevel\"",
         };
 
-        format!("<path d=\"{}\" {} {}{}{}/>", d, stroke, fill, line_cap_attr, line_join_attr)
+        format!(
+            "<path d=\"{}\" {} {}{}{}/>",
+            d, stroke, fill, line_cap_attr, line_join_attr
+        )
     }
 
     /// Convert this path to an SVG document.
@@ -879,7 +882,7 @@ impl AnnotationWrapper {
                     TextMarkupType::StrikeOut => AnnotationSubtype::StrikeOut,
                     TextMarkupType::Squiggly => AnnotationSubtype::Squiggly,
                 }
-            },
+            }
             WriteAnnotation::Text(_) => AnnotationSubtype::Text,
             WriteAnnotation::FreeText(_) => AnnotationSubtype::FreeText,
             WriteAnnotation::Line(_) => AnnotationSubtype::Line,
@@ -889,14 +892,14 @@ impl AnnotationWrapper {
                     ShapeType::Square => AnnotationSubtype::Square,
                     ShapeType::Circle => AnnotationSubtype::Circle,
                 }
-            },
+            }
             WriteAnnotation::Polygon(p) => {
                 use crate::writer::PolygonType;
                 match p.polygon_type {
                     PolygonType::Polygon => AnnotationSubtype::Polygon,
                     PolygonType::PolyLine => AnnotationSubtype::PolyLine,
                 }
-            },
+            }
             WriteAnnotation::Ink(_) => AnnotationSubtype::Ink,
             WriteAnnotation::Stamp(_) => AnnotationSubtype::Stamp,
             WriteAnnotation::Popup(_) => AnnotationSubtype::Popup,
@@ -940,12 +943,7 @@ pub struct PdfPage {
 
 impl PdfPage {
     /// Create a new PdfPage from a StructureElement.
-    pub fn from_structure(
-        page_index: usize,
-        root: StructureElement,
-        width: f32,
-        height: f32,
-    ) -> Self {
+    pub fn from_structure(page_index: usize, root: StructureElement, width: f32, height: f32) -> Self {
         let mut page = Self {
             page_index,
             root,
@@ -1102,12 +1100,7 @@ impl PdfPage {
     }
 
     /// Wrap a ContentElement with ID and path information.
-    fn wrap_element(
-        &self,
-        id: ElementId,
-        path: ElementPath,
-        element: &ContentElement,
-    ) -> PdfElement {
+    fn wrap_element(&self, id: ElementId, path: ElementPath, element: &ContentElement) -> PdfElement {
         match element {
             ContentElement::Text(t) => PdfElement::Text(PdfText {
                 id,
@@ -1148,12 +1141,7 @@ impl PdfPage {
         F: Fn(&PdfText) -> bool,
     {
         let mut results = Vec::new();
-        self.collect_text_recursive(
-            &self.root.children,
-            ElementPath::new(),
-            &predicate,
-            &mut results,
-        );
+        self.collect_text_recursive(&self.root.children, ElementPath::new(), &predicate, &mut results);
         results
     }
 
@@ -1180,11 +1168,11 @@ impl PdfPage {
                     if predicate(&pdf_text) {
                         results.push(pdf_text);
                     }
-                },
+                }
                 ContentElement::Structure(s) => {
                     self.collect_text_recursive(&s.children, child_path, predicate, results);
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
     }
@@ -1215,12 +1203,7 @@ impl PdfPage {
         results
     }
 
-    fn collect_images_recursive(
-        &self,
-        children: &[ContentElement],
-        path: ElementPath,
-        results: &mut Vec<PdfImage>,
-    ) {
+    fn collect_images_recursive(&self, children: &[ContentElement], path: ElementPath, results: &mut Vec<PdfImage>) {
         for (idx, child) in children.iter().enumerate() {
             let child_path = path.with_child(idx);
             match child {
@@ -1231,11 +1214,11 @@ impl PdfPage {
                         content: i.clone(),
                         path: child_path,
                     });
-                },
+                }
                 ContentElement::Structure(s) => {
                     self.collect_images_recursive(&s.children, child_path, results);
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
     }
@@ -1243,12 +1226,7 @@ impl PdfPage {
     /// Find elements in a specific region.
     pub fn find_in_region(&self, region: Rect) -> Vec<PdfElement> {
         let mut results = Vec::new();
-        self.collect_in_region_recursive(
-            &self.root.children,
-            ElementPath::new(),
-            region,
-            &mut results,
-        );
+        self.collect_in_region_recursive(&self.root.children, ElementPath::new(), region, &mut results);
         results
     }
 
@@ -1293,11 +1271,7 @@ impl PdfPage {
     }
 
     /// Set text content by ID.
-    pub fn set_text(
-        &mut self,
-        id: ElementId,
-        new_text: impl Into<String>,
-    ) -> crate::error::Result<()> {
+    pub fn set_text(&mut self, id: ElementId, new_text: impl Into<String>) -> crate::error::Result<()> {
         self.modify_text(id, |t| {
             t.text = new_text.into();
         })
@@ -1333,11 +1307,7 @@ impl PdfPage {
     }
 
     /// Set image alt text by ID.
-    pub fn set_image_alt_text(
-        &mut self,
-        id: ElementId,
-        alt: impl Into<String>,
-    ) -> crate::error::Result<()> {
+    pub fn set_image_alt_text(&mut self, id: ElementId, alt: impl Into<String>) -> crate::error::Result<()> {
         if let Some(path) = self.element_map.get(&id).cloned() {
             self.modify_image_by_path(&path, |img| {
                 img.alt_text = Some(alt.into());
@@ -1594,11 +1564,7 @@ impl PdfPage {
     }
 
     /// Set an element at a specific path in the tree (internal use for fluent API).
-    fn set_element_at_path(
-        &mut self,
-        path: &ElementPath,
-        element: ContentElement,
-    ) -> crate::error::Result<()> {
+    fn set_element_at_path(&mut self, path: &ElementPath, element: ContentElement) -> crate::error::Result<()> {
         let mut current = &mut self.root.children;
 
         for (i, &idx) in path.path.iter().enumerate() {
@@ -1626,13 +1592,11 @@ impl PdfPage {
     fn get_id_for_path(&self, path: &ElementPath) -> ElementId {
         self.element_map
             .iter()
-            .find_map(|(id, stored_path)| {
-                if stored_path.path == path.path {
-                    Some(*id)
-                } else {
-                    None
-                }
-            })
+            .find_map(
+                |(id, stored_path)| {
+                    if stored_path.path == path.path { Some(*id) } else { None }
+                },
+            )
             .unwrap_or_else(ElementId::new)
     }
 
@@ -1738,12 +1702,7 @@ impl PdfPage {
     }
 
     /// Recursively collect path elements.
-    fn collect_paths_recursive(
-        &self,
-        children: &[ContentElement],
-        path: ElementPath,
-        results: &mut Vec<PdfPath>,
-    ) {
+    fn collect_paths_recursive(&self, children: &[ContentElement], path: ElementPath, results: &mut Vec<PdfPath>) {
         for (idx, child) in children.iter().enumerate() {
             let child_path = path.with_child(idx);
             match child {
@@ -1754,11 +1713,11 @@ impl PdfPage {
                         content: p.clone(),
                         path: child_path,
                     });
-                },
+                }
                 ContentElement::Structure(s) => {
                     self.collect_paths_recursive(&s.children, child_path, results);
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
     }
@@ -1771,12 +1730,7 @@ impl PdfPage {
     }
 
     /// Recursively collect table elements.
-    fn collect_tables_recursive(
-        &self,
-        children: &[ContentElement],
-        path: ElementPath,
-        results: &mut Vec<PdfTable>,
-    ) {
+    fn collect_tables_recursive(&self, children: &[ContentElement], path: ElementPath, results: &mut Vec<PdfTable>) {
         for (idx, child) in children.iter().enumerate() {
             let child_path = path.with_child(idx);
             match child {
@@ -1787,11 +1741,11 @@ impl PdfPage {
                         content: t.clone(),
                         path: child_path,
                     });
-                },
+                }
                 ContentElement::Structure(s) => {
                     self.collect_tables_recursive(&s.children, child_path, results);
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
     }
@@ -1912,10 +1866,7 @@ pub struct PageEditor {
 
 impl PageEditor {
     /// Find text elements containing a needle string.
-    pub fn find_text_containing(
-        self,
-        needle: &str,
-    ) -> crate::error::Result<TextElementCollectionEditor> {
+    pub fn find_text_containing(self, needle: &str) -> crate::error::Result<TextElementCollectionEditor> {
         let elements = self.page.find_text_containing(needle);
         let element_ids = elements.iter().map(|e| e.id()).collect();
         Ok(TextElementCollectionEditor {
@@ -2099,9 +2050,8 @@ mod tests {
     use crate::annotation_types::AnnotationSubtype;
     use crate::annotations::Annotation as ReadAnnotation;
     use crate::elements::{
-        ColorSpace, FontSpec, ImageContent, ImageFormat, LineCap, LineJoin, PathContent,
-        PathOperation, TableCellContent, TableContent, TableDetectionInfo, TableRowContent,
-        TextStyle,
+        ColorSpace, FontSpec, ImageContent, ImageFormat, LineCap, LineJoin, PathContent, PathOperation,
+        TableCellContent, TableContent, TableDetectionInfo, TableRowContent, TextStyle,
     };
     use crate::layout::Color;
     use crate::writer::LinkAnnotation;
@@ -2208,10 +2158,7 @@ mod tests {
         let inner_structure = StructureElement {
             structure_type: "P".to_string(),
             bbox: Rect::new(15.0, 350.0, 500.0, 300.0),
-            children: vec![
-                ContentElement::Text(nested_text),
-                ContentElement::Image(nested_image),
-            ],
+            children: vec![ContentElement::Text(nested_text), ContentElement::Image(nested_image)],
             reading_order: Some(1),
             alt_text: None,
             language: None,
@@ -2220,10 +2167,7 @@ mod tests {
         let root = StructureElement {
             structure_type: "Document".to_string(),
             bbox: Rect::new(0.0, 0.0, 612.0, 792.0),
-            children: vec![
-                ContentElement::Text(text1),
-                ContentElement::Structure(inner_structure),
-            ],
+            children: vec![ContentElement::Text(text1), ContentElement::Structure(inner_structure)],
             reading_order: Some(0),
             alt_text: None,
             language: None,
@@ -2753,13 +2697,7 @@ mod tests {
 
     #[test]
     fn test_pdf_image_resolution_classification() {
-        let high_res = ImageContent::new(
-            Rect::new(0.0, 0.0, 144.0, 144.0),
-            ImageFormat::Png,
-            vec![],
-            600,
-            600,
-        );
+        let high_res = ImageContent::new(Rect::new(0.0, 0.0, 144.0, 144.0), ImageFormat::Png, vec![], 600, 600);
         let image = PdfImage {
             id: ElementId::new(),
             content: high_res,
@@ -2772,8 +2710,7 @@ mod tests {
 
     #[test]
     fn test_pdf_image_low_resolution() {
-        let low_res =
-            ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 72, 72);
+        let low_res = ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 72, 72);
         let image = PdfImage {
             id: ElementId::new(),
             content: low_res,
@@ -2785,8 +2722,7 @@ mod tests {
 
     #[test]
     fn test_pdf_image_medium_resolution() {
-        let med_res =
-            ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 200, 200);
+        let med_res = ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 200, 200);
         let image = PdfImage {
             id: ElementId::new(),
             content: med_res,

@@ -199,11 +199,10 @@ fn is_valid_table(table: &Table) -> bool {
     }
 
     if table.col_count == 2 {
-        let has_continuation_row = table.rows.iter().any(|r| {
-            r.cells.len() == 2
-                && r.cells[0].text.trim().is_empty()
-                && !r.cells[1].text.trim().is_empty()
-        });
+        let has_continuation_row = table
+            .rows
+            .iter()
+            .any(|r| r.cells.len() == 2 && r.cells[0].text.trim().is_empty() && !r.cells[1].text.trim().is_empty());
         if has_continuation_row {
             return false;
         }
@@ -251,10 +250,7 @@ fn passes_spatial_quality_gate(table: &Table) -> bool {
     if data_values * 2 >= non_empty.len() {
         return true;
     }
-    let single_word_count = non_empty
-        .iter()
-        .filter(|t| t.split_whitespace().count() <= 1)
-        .count();
+    let single_word_count = non_empty.iter().filter(|t| t.split_whitespace().count() <= 1).count();
     let ratio = single_word_count as f32 / non_empty.len() as f32;
     ratio <= 0.7
 }
@@ -384,12 +380,7 @@ fn looks_like_prose_paragraph(table: &Table) -> bool {
     // letters — so this shape is essentially unique to misread rotated text. ~keep
     for row in &table.rows {
         for cell in &row.cells {
-            let lines: Vec<&str> = cell
-                .text
-                .split('\n')
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .collect();
+            let lines: Vec<&str> = cell.text.split('\n').map(str::trim).filter(|l| !l.is_empty()).collect();
             if lines.len() < 3 {
                 continue;
             }
@@ -506,10 +497,7 @@ fn detect_page_columns(spans: &[TextSpan]) -> Vec<(f32, f32)> {
     // outliers; pages wider than 10,000pt fall back to single column. ~keep
     const MAX_EXTENT_FROM_MEDIAN: f32 = 5_000.0;
 
-    let mut x_centers: Vec<f32> = spans
-        .iter()
-        .map(|s| s.bbox.x + s.bbox.width * 0.5)
-        .collect();
+    let mut x_centers: Vec<f32> = spans.iter().map(|s| s.bbox.x + s.bbox.width * 0.5).collect();
     x_centers.sort_by(|a, b| crate::utils::safe_float_cmp(*a, *b));
     let median_x = x_centers[x_centers.len() / 2];
 
@@ -534,10 +522,7 @@ fn detect_page_columns(spans: &[TextSpan]) -> Vec<(f32, f32)> {
         // All spans were outliers or no valid extent ~keep
         return vec![(
             spans.iter().map(|s| s.bbox.x).fold(f32::MAX, f32::min),
-            spans
-                .iter()
-                .map(|s| s.bbox.x + s.bbox.width)
-                .fold(f32::MIN, f32::max),
+            spans.iter().map(|s| s.bbox.x + s.bbox.width).fold(f32::MIN, f32::max),
         )];
     }
 
@@ -610,12 +595,10 @@ fn detect_page_columns(spans: &[TextSpan]) -> Vec<(f32, f32)> {
     let qualifying_indices: Vec<usize> = (0..gaps.len())
         .filter(|&gi| {
             let gap_left_x = page_x_min + gaps[gi].start_bucket as f32 * bucket_size;
-            let gap_right_x =
-                page_x_min + (gaps[gi].start_bucket + gaps[gi].len_buckets) as f32 * bucket_size;
+            let gap_right_x = page_x_min + (gaps[gi].start_bucket + gaps[gi].len_buckets) as f32 * bucket_size;
 
             let left_bound = if gi > 0 {
-                page_x_min
-                    + (gaps[gi - 1].start_bucket + gaps[gi - 1].len_buckets) as f32 * bucket_size
+                page_x_min + (gaps[gi - 1].start_bucket + gaps[gi - 1].len_buckets) as f32 * bucket_size
             } else {
                 page_x_min
             };
@@ -632,9 +615,7 @@ fn detect_page_columns(spans: &[TextSpan]) -> Vec<(f32, f32)> {
 
             let has_wide_right = spans.iter().any(|s| {
                 let center = s.bbox.x + s.bbox.width / 2.0;
-                center >= gap_right_x
-                    && center <= right_bound
-                    && s.bbox.width >= min_paragraph_width
+                center >= gap_right_x && center <= right_bound && s.bbox.width >= min_paragraph_width
             });
 
             has_wide_left || has_wide_right
@@ -663,10 +644,7 @@ fn detect_page_columns(spans: &[TextSpan]) -> Vec<(f32, f32)> {
         region_start = gap.start_bucket + gap.len_buckets;
     }
 
-    let last_occ = histogram
-        .iter()
-        .rposition(|&c| c > 0)
-        .unwrap_or(n_buckets - 1);
+    let last_occ = histogram.iter().rposition(|&c| c > 0).unwrap_or(n_buckets - 1);
     if region_start <= last_occ {
         let x_min = page_x_min + region_start as f32 * bucket_size;
         let x_max = page_x_min + (last_occ + 1) as f32 * bucket_size;
@@ -682,10 +660,7 @@ fn detect_page_columns(spans: &[TextSpan]) -> Vec<(f32, f32)> {
 /// `detect_tables_from_spans()` independently on each column partition.
 /// This prevents multi-column academic layouts from being misinterpreted
 /// as wide tables spanning the whole page.
-pub fn detect_tables_from_spans_column_aware(
-    spans: &[TextSpan],
-    config: &TableDetectionConfig,
-) -> Vec<Table> {
+pub fn detect_tables_from_spans_column_aware(spans: &[TextSpan], config: &TableDetectionConfig) -> Vec<Table> {
     if !config.enabled || spans.is_empty() {
         return Vec::new();
     }
@@ -756,10 +731,7 @@ pub fn detect_tables_from_spans(spans: &[TextSpan], config: &TableDetectionConfi
     // a coarser greedy set into more (still bounded) columns. The numeric-
     // predominance gate keeps prose / label-value tables (e.g. Google-Docs
     // exports) on the greedy path untouched. ~keep
-    let numeric_spans = spans
-        .iter()
-        .filter(|s| is_numeric_cell(s.text.trim()))
-        .count();
+    let numeric_spans = spans.iter().filter(|s| is_numeric_cell(s.text.trim())).count();
     if numeric_spans >= 10 && columns.len() <= config.max_table_columns {
         let te_columns = detect_text_edge_columns(spans, config);
         if te_columns.len() > columns.len()
@@ -951,17 +923,11 @@ impl GridStructure {
             return self.clone();
         }
 
-        let new_columns: Vec<ColumnCluster> = active_cols
-            .iter()
-            .map(|&c| self.columns[c].clone())
-            .collect();
+        let new_columns: Vec<ColumnCluster> = active_cols.iter().map(|&c| self.columns[c].clone()).collect();
 
         let mut new_cells = Vec::with_capacity(num_rows);
         for r in 0..num_rows {
-            let row_cells = active_cols
-                .iter()
-                .map(|&c| self.cells[r][c].clone())
-                .collect();
+            let row_cells = active_cols.iter().map(|&c| self.cells[r][c].clone()).collect();
             new_cells.push(row_cells);
         }
 
@@ -1009,11 +975,7 @@ fn filter_columns_by_row_coverage(
     let kept: Vec<ColumnCluster> = columns
         .iter()
         .filter(|col| {
-            let mut seen: Vec<usize> = col
-                .span_indices
-                .iter()
-                .filter_map(|&s| span_row(s))
-                .collect();
+            let mut seen: Vec<usize> = col.span_indices.iter().filter_map(|&s| span_row(s)).collect();
             seen.sort_unstable();
             seen.dedup();
             seen.len() >= min_cov
@@ -1024,22 +986,13 @@ fn filter_columns_by_row_coverage(
     // Safety: never return fewer than 2 columns from here — if the
     // coverage filter would collapse the table, fall back to the
     // original columns (the caller's min-columns guard then decides). ~keep
-    if kept.len() >= 2 {
-        kept
-    } else {
-        columns.to_vec()
-    }
+    if kept.len() >= 2 { kept } else { columns.to_vec() }
 }
 
-fn detect_columns(
-    spans: &[TextSpan],
-    column_tolerance: f32,
-    merge_threshold: f32,
-) -> Vec<ColumnCluster> {
+fn detect_columns(spans: &[TextSpan], column_tolerance: f32, merge_threshold: f32) -> Vec<ColumnCluster> {
     // Sort span indices by X coordinate before clustering for deterministic results. ~keep
     let mut sorted_indices: Vec<usize> = (0..spans.len()).collect();
-    sorted_indices
-        .sort_by(|&a, &b| crate::utils::safe_float_cmp(spans[a].bbox.left(), spans[b].bbox.left()));
+    sorted_indices.sort_by(|&a, &b| crate::utils::safe_float_cmp(spans[a].bbox.left(), spans[b].bbox.left()));
 
     let mut columns: Vec<ColumnCluster> = Vec::new();
     for idx in sorted_indices {
@@ -1102,8 +1055,7 @@ fn detect_columns(
     let mut merged: Vec<ColumnCluster> = Vec::new();
     for col in columns {
         let should_merge = merged.last().is_some_and(|prev: &ColumnCluster| {
-            (col.x_center - prev.x_center).abs() < effective_merge_threshold
-                || col.x_min <= prev.x_max
+            (col.x_center - prev.x_center).abs() < effective_merge_threshold || col.x_min <= prev.x_max
         });
         if should_merge {
             let prev = merged.last_mut().unwrap();
@@ -1171,17 +1123,11 @@ fn is_regular_lattice(cols: &[ColumnCluster]) -> bool {
     if median <= 0.0 {
         return false;
     }
-    let on_pitch = gaps
-        .iter()
-        .filter(|&&g| g >= median * 0.6 && g <= median * 1.6)
-        .count();
+    let on_pitch = gaps.iter().filter(|&&g| g >= median * 0.6 && g <= median * 1.6).count();
     on_pitch + 2 >= gaps.len()
 }
 
-fn detect_text_edge_columns(
-    spans: &[TextSpan],
-    config: &TableDetectionConfig,
-) -> Vec<ColumnCluster> {
+fn detect_text_edge_columns(spans: &[TextSpan], config: &TableDetectionConfig) -> Vec<ColumnCluster> {
     if spans.is_empty() {
         return Vec::new();
     }
@@ -1207,7 +1153,7 @@ fn detect_text_edge_columns(
             None => {
                 row_ids.push(row_centres.len());
                 row_centres.push(y);
-            },
+            }
         }
     }
 
@@ -1260,10 +1206,7 @@ fn detect_text_edge_columns(
     // Deduplicate edges that ended up very close after averaging. ~keep
     let mut deduped: Vec<f32> = Vec::new();
     for &e in &edges {
-        if deduped
-            .last()
-            .is_some_and(|prev| (e - prev).abs() < snap_tolerance)
-        {
+        if deduped.last().is_some_and(|prev| (e - prev).abs() < snap_tolerance) {
             let prev = deduped.last_mut().unwrap();
             *prev = (*prev + e) / 2.0;
         } else {
@@ -1307,9 +1250,7 @@ fn detect_text_edge_columns(
 fn detect_rows(spans: &[TextSpan], row_tolerance: f32) -> Vec<RowCluster> {
     // Sort span indices by Y coordinate before clustering for deterministic results. ~keep
     let mut sorted_indices: Vec<usize> = (0..spans.len()).collect();
-    sorted_indices.sort_by(|&a, &b| {
-        crate::utils::safe_float_cmp(spans[a].bbox.center().y, spans[b].bbox.center().y)
-    });
+    sorted_indices.sort_by(|&a, &b| crate::utils::safe_float_cmp(spans[a].bbox.center().y, spans[b].bbox.center().y));
 
     let mut rows: Vec<RowCluster> = Vec::new();
     for idx in sorted_indices {
@@ -1340,11 +1281,7 @@ fn detect_rows(spans: &[TextSpan], row_tolerance: f32) -> Vec<RowCluster> {
     rows
 }
 
-fn assign_spans_to_cells(
-    spans: &[TextSpan],
-    columns: &[ColumnCluster],
-    rows: &[RowCluster],
-) -> GridStructure {
+fn assign_spans_to_cells(spans: &[TextSpan], columns: &[ColumnCluster], rows: &[RowCluster]) -> GridStructure {
     let num_cols = columns.len();
     let num_rows = rows.len();
     let mut cells: Vec<Vec<Vec<usize>>> = vec![vec![Vec::new(); num_cols]; num_rows];
@@ -1398,12 +1335,7 @@ fn validate_table_structure_internal(grid: &GridStructure, config: &TableDetecti
     let cell_counts: Vec<usize> = grid
         .cells
         .iter()
-        .map(|row| {
-            row.iter()
-                .take(num_cols)
-                .filter(|cell| !cell.is_empty())
-                .count()
-        })
+        .map(|row| row.iter().take(num_cols).filter(|cell| !cell.is_empty()).count())
         .collect();
     if cell_counts.is_empty() {
         return false;
@@ -1415,10 +1347,7 @@ fn validate_table_structure_internal(grid: &GridStructure, config: &TableDetecti
     if most_common_count == 0 {
         return false;
     }
-    let regular_rows = cell_counts
-        .iter()
-        .filter(|&&count| count == most_common_count)
-        .count();
+    let regular_rows = cell_counts.iter().filter(|&&count| count == most_common_count).count();
     if (regular_rows as f32 / cell_counts.len() as f32) < config.regular_row_ratio {
         return false;
     }
@@ -1462,11 +1391,7 @@ fn has_split_modal_column_groups(grid: &GridStructure, most_common_count: usize)
         .cells
         .iter()
         .filter_map(|row| {
-            let populated = row
-                .iter()
-                .take(num_cols)
-                .filter(|cell| !cell.is_empty())
-                .count();
+            let populated = row.iter().take(num_cols).filter(|cell| !cell.is_empty()).count();
 
             if populated != most_common_count {
                 return None;
@@ -1479,11 +1404,7 @@ fn has_split_modal_column_groups(grid: &GridStructure, most_common_count: usize)
                 }
             }
 
-            if mask.count_ones() >= 2 {
-                Some(mask)
-            } else {
-                None
-            }
+            if mask.count_ones() >= 2 { Some(mask) } else { None }
         })
         .collect();
 
@@ -1494,8 +1415,7 @@ fn has_split_modal_column_groups(grid: &GridStructure, most_common_count: usize)
     // Floor at 2 rows so a single-row outlier with a wide/narrow mask
     // can never be classified as its own "significant" component
     // — when modal_masks.len() == 4 the share alone would round to 1. ~keep
-    let min_component_rows =
-        (((modal_masks.len() as f32) * MIN_SPLIT_GROUP_ROW_SHARE).ceil() as usize).max(2);
+    let min_component_rows = (((modal_masks.len() as f32) * MIN_SPLIT_GROUP_ROW_SHARE).ceil() as usize).max(2);
 
     let mut adjacency: Vec<u128> = vec![0u128; num_cols];
     let mut active_columns: u128 = 0;
@@ -1535,10 +1455,7 @@ fn has_split_modal_column_groups(grid: &GridStructure, most_common_count: usize)
         remaining &= !component;
 
         let component_cols = component.count_ones() as usize;
-        let component_row_support = modal_masks
-            .iter()
-            .filter(|&&mask| mask & component != 0)
-            .count();
+        let component_row_support = modal_masks.iter().filter(|&&mask| mask & component != 0).count();
 
         if component_cols >= 2 && component_row_support >= min_component_rows {
             significant_components += 1;
@@ -1577,11 +1494,7 @@ impl SpatialTableDetector {
             .collect()
     }
     /// Detect tables using visual lines and text (hybrid).
-    pub fn detect_tables_hybrid(
-        &self,
-        spans: &[TextSpan],
-        lines: &[crate::elements::PathContent],
-    ) -> Vec<Table> {
+    pub fn detect_tables_hybrid(&self, spans: &[TextSpan], lines: &[crate::elements::PathContent]) -> Vec<Table> {
         detect_tables_with_lines(spans, lines, &self.config)
     }
 }
@@ -1706,11 +1619,7 @@ fn group_lines_into_clusters(
             if path.is_vertical_line(LINE_AXIS_TOL) && rendered[idx].height.abs() > 5.0 {
                 let y_min = rendered[idx].y;
                 let y_max = rendered[idx].y + rendered[idx].height;
-                let (y_min, y_max) = if y_min <= y_max {
-                    (y_min, y_max)
-                } else {
-                    (y_max, y_min)
-                };
+                let (y_min, y_max) = if y_min <= y_max { (y_min, y_max) } else { (y_max, y_min) };
                 v_ranges.push((idx, y_min, y_max));
             }
         }
@@ -1833,8 +1742,7 @@ fn detect_header_row_above(spans: &[TextSpan], row_ys: &[f32], col_xs: &[f32]) -
         if cx < col_lo || cx > col_hi {
             continue;
         }
-        let Some(ci) = (0..col_xs.len() - 1).find(|&c| cx >= col_xs[c] && cx <= col_xs[c + 1])
-        else {
+        let Some(ci) = (0..col_xs.len() - 1).find(|&c| cx >= col_xs[c] && cx <= col_xs[c + 1]) else {
             continue;
         };
         if !cols_hit.contains(&ci) {
@@ -1900,8 +1808,7 @@ fn detect_tables_in_cluster(
         row_ys.insert(0, header_top);
         inserted_header_row = true;
         let new_height = (header_top - assign_bbox.y).max(assign_bbox.height);
-        assign_bbox =
-            crate::geometry::Rect::new(assign_bbox.x, assign_bbox.y, assign_bbox.width, new_height);
+        assign_bbox = crate::geometry::Rect::new(assign_bbox.x, assign_bbox.y, assign_bbox.width, new_height);
     }
     let num_rows = row_ys.len() - 1;
     let num_cols = col_xs.len() - 1;
@@ -1974,8 +1881,7 @@ fn detect_tables_in_cluster(
                 // (C) WS0.3b — the inserted header row (global row 0) lives in the
                 // first non-empty run, so it is local row 0 of this sub-table when
                 // `current_start_row == 0`. Protect it from colspan merging. ~keep
-                let protected_header_rows =
-                    usize::from(inserted_header_row && current_start_row == 0);
+                let protected_header_rows = usize::from(inserted_header_row && current_start_row == 0);
                 let mut table = grid_to_table(
                     &grid,
                     spans,
@@ -2287,8 +2193,7 @@ fn join_collinear_edges(edges: &mut Vec<Edge>) {
     // Sort by coord then start so a single sweep handles chains of touching
     // segments regardless of the order they were originally collected. ~keep
     edges.sort_by(|a, b| {
-        crate::utils::safe_float_cmp(a.coord, b.coord)
-            .then_with(|| crate::utils::safe_float_cmp(a.start, b.start))
+        crate::utils::safe_float_cmp(a.coord, b.coord).then_with(|| crate::utils::safe_float_cmp(a.start, b.start))
     });
 
     let mut merged: Vec<Edge> = Vec::new();
@@ -2413,16 +2318,11 @@ fn find_intersections(h_edges: &[Edge], v_edges: &[Edge]) -> Vec<Intersection> {
                 && h.coord >= v.start - SNAP_TOL
                 && h.coord <= v.end + SNAP_TOL
             {
-                pts.push(Intersection {
-                    x: v.coord,
-                    y: h.coord,
-                });
+                pts.push(Intersection { x: v.coord, y: h.coord });
             }
         }
     }
-    pts.sort_by(|a, b| {
-        crate::utils::safe_float_cmp(a.x, b.x).then_with(|| crate::utils::safe_float_cmp(a.y, b.y))
-    });
+    pts.sort_by(|a, b| crate::utils::safe_float_cmp(a.x, b.x).then_with(|| crate::utils::safe_float_cmp(a.y, b.y)));
     pts.dedup_by(|a, b| (a.x - b.x).abs() <= SNAP_TOL && (a.y - b.y).abs() <= SNAP_TOL);
     pts
 }
@@ -2697,18 +2597,11 @@ fn strip_form_numbering_artifacts(table_rows: &mut Vec<TableRow>) {
     table_rows.retain(|row| {
         let all_empty_or_digit = row.cells.iter().all(|c| {
             let t = c.text.trim();
-            t.is_empty()
-                || (t.len() == 1
-                    && t.as_bytes()
-                        .first()
-                        .is_some_and(|b| b.is_ascii_digit() && *b != b'0'))
+            t.is_empty() || (t.len() == 1 && t.as_bytes().first().is_some_and(|b| b.is_ascii_digit() && *b != b'0'))
         });
         let has_digit = row.cells.iter().any(|c| {
             let t = c.text.trim();
-            t.len() == 1
-                && t.as_bytes()
-                    .first()
-                    .is_some_and(|b| b.is_ascii_digit() && *b != b'0')
+            t.len() == 1 && t.as_bytes().first().is_some_and(|b| b.is_ascii_digit() && *b != b'0')
         });
         !(all_empty_or_digit && has_digit)
     });
@@ -2806,13 +2699,7 @@ fn detect_tables_from_intersections(
         else {
             continue;
         };
-        let sub_tables = finalize_intersection_tables(
-            table_rows,
-            &row_cell_span_indices,
-            spans,
-            config,
-            *num_cols,
-        );
+        let sub_tables = finalize_intersection_tables(table_rows, &row_cell_span_indices, spans, config, *num_cols);
         tables.extend(sub_tables);
     }
 
@@ -2834,10 +2721,7 @@ fn detect_tables_from_intersections(
     // to before this fix. Flip the constant to `false` to A/B against the
     // pre-fix behaviour with a one-line change. ~keep
     if BUCKET_TABLE_GRID_IN_ROTATED_FRAME {
-        tables = tables
-            .into_iter()
-            .map(reorient_table_to_rotated_frame)
-            .collect();
+        tables = tables.into_iter().map(reorient_table_to_rotated_frame).collect();
     }
 
     tables
@@ -2941,10 +2825,8 @@ fn assign_spans_to_intersection_grid(
         return None;
     };
 
-    let col_of =
-        |x: f32| -> Option<usize> { (0..num_cols).find(|&c| (xs[c] - x).abs() <= SNAP_TOL) };
-    let row_of =
-        |y: f32| -> Option<usize> { (0..num_rows).find(|&r| (ys[r] - y).abs() <= SNAP_TOL) };
+    let col_of = |x: f32| -> Option<usize> { (0..num_cols).find(|&c| (xs[c] - x).abs() <= SNAP_TOL) };
+    let row_of = |y: f32| -> Option<usize> { (0..num_rows).find(|&r| (ys[r] - y).abs() <= SNAP_TOL) };
 
     let mut grid_has_cell = vec![vec![false; num_cols]; num_rows];
     for c in group_cells {
@@ -3006,12 +2888,7 @@ fn assign_spans_to_intersection_grid(
                 .iter()
                 .filter_map(|&idx| spans.get(idx).and_then(|s| s.mcid))
                 .collect();
-            let cell_bbox = crate::geometry::Rect::new(
-                xs[ci],
-                ys[ri],
-                xs[ci + 1] - xs[ci],
-                ys[ri + 1] - ys[ri],
-            );
+            let cell_bbox = crate::geometry::Rect::new(xs[ci], ys[ri], xs[ci + 1] - xs[ci], ys[ri + 1] - ys[ri]);
             let cell_spans = grid_spans[ri][ci]
                 .iter()
                 .filter_map(|&idx| spans.get(idx).cloned())
@@ -3055,8 +2932,7 @@ fn grid_interval_for_point(point: f32, boundaries: &[f32]) -> Option<usize> {
 
     (0..interval_count).find(|&index| {
         point >= boundaries[index]
-            && (point < boundaries[index + 1]
-                || (index + 1 == interval_count && point <= boundaries[index + 1]))
+            && (point < boundaries[index + 1] || (index + 1 == interval_count && point <= boundaries[index + 1]))
     })
 }
 
@@ -3112,11 +2988,7 @@ fn dominant_table_rotation_quadrant(table: &Table) -> f32 {
     else {
         return 0.0;
     };
-    if count * 2 > total {
-        (index as f32) * 90.0
-    } else {
-        0.0
-    }
+    if count * 2 > total { (index as f32) * 90.0 } else { 0.0 }
 }
 
 /// Re-orient one finished table from the page's upright row/column axes to
@@ -3239,8 +3111,7 @@ fn finalize_intersection_tables(
     config: &TableDetectionConfig,
     num_cols: usize,
 ) -> Vec<Table> {
-    let mut table_rows =
-        split_rows_by_text_positions(table_rows, row_cell_span_indices, spans, config);
+    let mut table_rows = split_rows_by_text_positions(table_rows, row_cell_span_indices, spans, config);
 
     strip_form_numbering_artifacts(&mut table_rows);
 
@@ -3397,11 +3268,7 @@ fn split_table_at_section_dividers(
                     rmax = rmax.max(b.bottom());
                 }
             }
-            if rmin.is_finite() {
-                Some((rmin, rmax))
-            } else {
-                None
-            }
+            if rmin.is_finite() { Some((rmin, rmax)) } else { None }
         })
         .collect();
 
@@ -3538,11 +3405,9 @@ fn merge_vertically_adjacent_tables(tables: &mut Vec<Table>) {
             }
             match (prev.bbox, table.bbox) {
                 (Some(pb), Some(tb)) => {
-                    let gap = (tb.top() - pb.bottom())
-                        .abs()
-                        .min((pb.top() - tb.bottom()).abs());
+                    let gap = (tb.top() - pb.bottom()).abs().min((pb.top() - tb.bottom()).abs());
                     gap <= ADJACENT_TABLE_MERGE_GAP
-                },
+                }
                 _ => false,
             }
         });
@@ -3593,8 +3458,7 @@ fn merge_vertically_adjacent_tables(tables: &mut Vec<Table>) {
                 let min_y = pb.top().min(tb.top());
                 let max_x = pb.right().max(tb.right());
                 let max_y = pb.bottom().max(tb.bottom());
-                prev.bbox =
-                    Some(crate::geometry::Rect::new(min_x, min_y, max_x - min_x, max_y - min_y));
+                prev.bbox = Some(crate::geometry::Rect::new(min_x, min_y, max_x - min_x, max_y - min_y));
             }
             prev.has_header = prev.has_header || table.has_header;
         } else {
@@ -3635,12 +3499,7 @@ fn has_vertical_ruling_evidence(lines: &[crate::elements::PathContent], h_edges:
             // two rules while touching only one. ~keep
             let mut crossed_ys: Vec<f32> = h_edges
                 .iter()
-                .filter(|h| {
-                    r.y <= h.coord
-                        && (r.y + r.height) >= h.coord
-                        && (r.x + r.width) >= h.start
-                        && r.x <= h.end
-                })
+                .filter(|h| r.y <= h.coord && (r.y + r.height) >= h.coord && (r.x + r.width) >= h.start && r.x <= h.end)
                 .map(|h| h.coord)
                 .collect();
             crossed_ys.sort_by(|a, b| crate::utils::safe_float_cmp(*a, *b));
@@ -3693,8 +3552,7 @@ fn x_coherent_rule_families<'a>(wide: &[&'a Edge]) -> Vec<Vec<&'a Edge>> {
     // only on page geometry and edge input order. Each family's `Vec` is pushed
     // in ascending `wide` index order, so `a[0]` is still the family's first
     // rule and non-tied pages sort exactly as before (byte-identical). ~keep
-    let mut families: std::collections::BTreeMap<usize, Vec<&'a Edge>> =
-        std::collections::BTreeMap::new();
+    let mut families: std::collections::BTreeMap<usize, Vec<&'a Edge>> = std::collections::BTreeMap::new();
     for (i, e) in wide.iter().enumerate() {
         families.entry(uf.find(i)).or_default().push(e);
     }
@@ -3717,10 +3575,7 @@ fn detect_tables_from_horizontal_rules(
     const MIN_RULE_WIDTH: f32 = 100.0;
     const Y_SNAP: f32 = 4.0;
 
-    let wide: Vec<&Edge> = h_edges
-        .iter()
-        .filter(|e| (e.end - e.start) >= MIN_RULE_WIDTH)
-        .collect();
+    let wide: Vec<&Edge> = h_edges.iter().filter(|e| (e.end - e.start) >= MIN_RULE_WIDTH).collect();
     if wide.len() < 2 {
         return Vec::new();
     }
@@ -3732,9 +3587,7 @@ fn detect_tables_from_horizontal_rules(
     for family in &families {
         let mut y_coords: Vec<f32> = Vec::new();
         for e in family {
-            let merged = y_coords
-                .iter_mut()
-                .find(|y| (e.coord - **y).abs() <= Y_SNAP);
+            let merged = y_coords.iter_mut().find(|y| (e.coord - **y).abs() <= Y_SNAP);
             if merged.is_none() {
                 y_coords.push(e.coord);
             }
@@ -3892,7 +3745,7 @@ pub fn detect_tables_with_lines(
     match (config.horizontal_strategy, config.vertical_strategy) {
         (TableStrategy::Text, TableStrategy::Text) => {
             return detect_tables_from_spans_column_aware(spans, config);
-        },
+        }
         (TableStrategy::Lines, TableStrategy::Lines) => {
             let tables = detect_tables_from_intersections(spans, lines, config);
             if !tables.is_empty() {
@@ -3904,8 +3757,8 @@ pub fn detect_tables_with_lines(
                 tables.append(&mut detect_tables_in_cluster(spans, lines, &cluster, config));
             }
             return tables.into_iter().filter(is_valid_table).collect();
-        },
-        _ => {},
+        }
+        _ => {}
     }
     // Both / hybrid strategy: try intersection-based first, then cluster, then H-rule bounded,
     // then text fallback. ~keep
@@ -4087,11 +3940,7 @@ fn extract_cell_text(cell_span_indices: &[usize], spans: &[TextSpan]) -> String 
     // for table-heavy CJK documents. ~keep
     let mut span_entries: Vec<(f32, &TextSpan, String)> = cell_span_indices
         .iter()
-        .filter_map(|&idx| {
-            spans
-                .get(idx)
-                .map(|s| (s.bbox.center().y, s, span_text_for_cell(s)))
-        })
+        .filter_map(|&idx| spans.get(idx).map(|s| (s.bbox.center().y, s, span_text_for_cell(s))))
         .collect();
     if span_entries.is_empty() {
         return String::new();
@@ -4104,8 +3953,7 @@ fn extract_cell_text(cell_span_indices: &[usize], spans: &[TextSpan]) -> String 
     // Group into rows by y proximity, then within a row decide separator per
     // pair of spans using the same gap/CJK rules as inline text assembly. ~keep
     let mut lines: Vec<Vec<(&TextSpan, String)>> = Vec::new();
-    let mut current_line: Vec<(&TextSpan, String)> =
-        vec![(span_entries[0].1, span_entries[0].2.clone())];
+    let mut current_line: Vec<(&TextSpan, String)> = vec![(span_entries[0].1, span_entries[0].2.clone())];
     let mut current_y = span_entries[0].0;
     for (y, span, text) in &span_entries[1..] {
         if (current_y - y).abs() <= 2.0 {
@@ -4448,23 +4296,16 @@ fn detect_header_row(grid: &GridStructure, spans: &[TextSpan]) -> Option<usize> 
     if data_row_spans.is_empty() {
         return None;
     }
-    let first_row_bold_ratio = first_row_spans
-        .iter()
-        .filter(|s| s.font_weight.is_bold())
-        .count() as f32
-        / first_row_spans.len() as f32;
-    let data_bold_ratio = data_row_spans
-        .iter()
-        .filter(|s| s.font_weight.is_bold())
-        .count() as f32
-        / data_row_spans.len() as f32;
+    let first_row_bold_ratio =
+        first_row_spans.iter().filter(|s| s.font_weight.is_bold()).count() as f32 / first_row_spans.len() as f32;
+    let data_bold_ratio =
+        data_row_spans.iter().filter(|s| s.font_weight.is_bold()).count() as f32 / data_row_spans.len() as f32;
     if first_row_bold_ratio > 0.5 && data_bold_ratio < 0.3 {
         return Some(0);
     }
     let first_row_avg_size: f32 =
         first_row_spans.iter().map(|s| s.font_size).sum::<f32>() / first_row_spans.len() as f32;
-    let data_avg_size: f32 =
-        data_row_spans.iter().map(|s| s.font_size).sum::<f32>() / data_row_spans.len() as f32;
+    let data_avg_size: f32 = data_row_spans.iter().map(|s| s.font_size).sum::<f32>() / data_row_spans.len() as f32;
     if first_row_avg_size > data_avg_size + 1.5 {
         return Some(0);
     }
@@ -4482,16 +4323,7 @@ mod tests {
         for ok in ["0.69", "100", "-1.2", "52%", "0", "1.00", "\u{2212}3.5"] {
             assert!(is_numeric_cell(ok), "{ok:?} should be numeric");
         }
-        for no in [
-            "Ours",
-            "GLUE",
-            "v3",
-            "1e9",
-            "0.6.6",
-            "",
-            "12345678.9",
-            "p<0.05",
-        ] {
+        for no in ["Ours", "GLUE", "v3", "1e9", "0.6.6", "", "12345678.9", "p<0.05"] {
             assert!(!is_numeric_cell(no), "{no:?} should NOT be numeric");
         }
     }
@@ -4547,14 +4379,9 @@ mod tests {
             create_test_span("Europe", 66.0, 5.0, 10.0, 10.0),
         ];
 
-        let (rows, _) = assign_spans_to_intersection_grid(
-            &group_cells,
-            &[0.0, 40.0, 70.0, 100.0],
-            &[0.0, 20.0],
-            3,
-            &spans,
-        )
-        .expect("synthetic grid should be valid");
+        let (rows, _) =
+            assign_spans_to_intersection_grid(&group_cells, &[0.0, 40.0, 70.0, 100.0], &[0.0, 20.0], 3, &spans)
+                .expect("synthetic grid should be valid");
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].cells[0].text, "2731");
@@ -4636,9 +4463,7 @@ mod tests {
         let mut prose = Table::new();
         prose.col_count = 6;
         for _ in 0..3 {
-            prose
-                .rows
-                .push(row(&["the", "quick", "brown", "fox", "jumps", "over"]));
+            prose.rows.push(row(&["the", "quick", "brown", "fox", "jumps", "over"]));
         }
         assert!(
             !passes_spatial_quality_gate(&prose),
@@ -5056,8 +4881,7 @@ mod tests {
             create_test_span("$100", 600.0, 60.0, 50.0, 10.0),
         ];
         let config = TableDetectionConfig::default();
-        let columns =
-            detect_columns(&spans, config.column_tolerance, config.column_merge_threshold);
+        let columns = detect_columns(&spans, config.column_tolerance, config.column_merge_threshold);
         assert_eq!(
             columns.len(),
             4,
@@ -5077,8 +4901,7 @@ mod tests {
             create_test_span("F", 140.0, 60.0, 30.0, 10.0),
         ];
         let config = TableDetectionConfig::default();
-        let columns =
-            detect_columns(&spans, config.column_tolerance, config.column_merge_threshold);
+        let columns = detect_columns(&spans, config.column_tolerance, config.column_merge_threshold);
         assert_eq!(
             columns.len(),
             2,
@@ -5106,8 +4929,7 @@ mod tests {
             }
         }
         let config = TableDetectionConfig::default();
-        let columns =
-            detect_columns(&spans, config.column_tolerance, config.column_merge_threshold);
+        let columns = detect_columns(&spans, config.column_tolerance, config.column_merge_threshold);
         assert_eq!(
             columns.len(),
             6,
@@ -5136,23 +4958,15 @@ mod tests {
             create_test_span("A", 50.0, 100.0, 30.0, 10.0),
         ];
         let config = TableDetectionConfig::default();
-        let cols_ordered =
-            detect_columns(&spans_ordered, config.column_tolerance, config.column_merge_threshold);
-        let cols_reversed =
-            detect_columns(&spans_reversed, config.column_tolerance, config.column_merge_threshold);
+        let cols_ordered = detect_columns(&spans_ordered, config.column_tolerance, config.column_merge_threshold);
+        let cols_reversed = detect_columns(&spans_reversed, config.column_tolerance, config.column_merge_threshold);
         assert_eq!(
             cols_ordered.len(),
             cols_reversed.len(),
             "Column count should be independent of span order"
         );
-        let centers_ordered: Vec<f32> = cols_ordered
-            .iter()
-            .map(|c| (c.x_center * 10.0).round())
-            .collect();
-        let centers_reversed: Vec<f32> = cols_reversed
-            .iter()
-            .map(|c| (c.x_center * 10.0).round())
-            .collect();
+        let centers_ordered: Vec<f32> = cols_ordered.iter().map(|c| (c.x_center * 10.0).round()).collect();
+        let centers_reversed: Vec<f32> = cols_reversed.iter().map(|c| (c.x_center * 10.0).round()).collect();
         assert_eq!(
             centers_ordered, centers_reversed,
             "Column centers should match regardless of input order"
@@ -5232,16 +5046,8 @@ mod tests {
         // Higher y = higher on page, so rows sorted descending by y.
         // Row at y=[200,300] (higher) comes first in display order.
         // Row at y=[100,200] (lower) comes second. ~keep
-        let r0_texts: Vec<&str> = table.rows[0]
-            .cells
-            .iter()
-            .map(|c| c.text.as_str())
-            .collect();
-        let r1_texts: Vec<&str> = table.rows[1]
-            .cells
-            .iter()
-            .map(|c| c.text.as_str())
-            .collect();
+        let r0_texts: Vec<&str> = table.rows[0].cells.iter().map(|c| c.text.as_str()).collect();
+        let r1_texts: Vec<&str> = table.rows[1].cells.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(r0_texts, vec!["A2", "B2"], "Top row (higher y) should be A2, B2");
         assert_eq!(r1_texts, vec!["A1", "B1"], "Bottom row (lower y) should be A1, B1");
     }
@@ -5447,9 +5253,18 @@ mod tests {
         snap_and_merge(&mut edges);
 
         assert_eq!(edges.len(), 1, "Dotted segments should reconstitute into 1 edge");
-        assert!((edges[0].coord - 300.0).abs() < 0.01, "Reconstituted edge should be at y=300");
-        assert!((edges[0].start - 50.0).abs() < 0.01, "Reconstituted edge should start at x=50");
-        assert!((edges[0].end - 323.0).abs() < 0.01, "Reconstituted edge should end at x=323");
+        assert!(
+            (edges[0].coord - 300.0).abs() < 0.01,
+            "Reconstituted edge should be at y=300"
+        );
+        assert!(
+            (edges[0].start - 50.0).abs() < 0.01,
+            "Reconstituted edge should start at x=50"
+        );
+        assert!(
+            (edges[0].end - 323.0).abs() < 0.01,
+            "Reconstituted edge should end at x=323"
+        );
     }
 
     #[test]
@@ -5469,7 +5284,10 @@ mod tests {
             },
         ];
         snap_and_merge(&mut edges);
-        assert!(edges.is_empty(), "Two short segments should not be reconstituted or kept");
+        assert!(
+            edges.is_empty(),
+            "Two short segments should not be reconstituted or kept"
+        );
     }
 
     #[test]
@@ -5484,7 +5302,10 @@ mod tests {
             })
             .collect();
         snap_and_merge(&mut edges);
-        assert!(edges.is_empty(), "Short segments with narrow total span should be discarded");
+        assert!(
+            edges.is_empty(),
+            "Short segments with narrow total span should be discarded"
+        );
     }
 
     #[test]
@@ -5600,7 +5421,10 @@ mod tests {
         assert_eq!(families.len(), 8, "Disjoint x-ranges should stay separate families");
         for (k, family) in families.iter().enumerate() {
             assert_eq!(family.len(), 2);
-            assert!((family[0].coord - 700.0).abs() < 0.01, "First rule should be the top rule");
+            assert!(
+                (family[0].coord - 700.0).abs() < 0.01,
+                "First rule should be the top rule"
+            );
             assert!(
                 (family[0].start - 200.0 * k as f32).abs() < 0.01,
                 "Tied families should emit in input order, family {k} out of place"
@@ -5683,21 +5507,9 @@ mod tests {
         assert_eq!(table.col_count, 2, "Should have 2 columns");
 
         // Rows sorted top-to-bottom (descending Y in PDF coords). ~keep
-        let r0: Vec<&str> = table.rows[0]
-            .cells
-            .iter()
-            .map(|c| c.text.as_str())
-            .collect();
-        let r1: Vec<&str> = table.rows[1]
-            .cells
-            .iter()
-            .map(|c| c.text.as_str())
-            .collect();
-        let r2: Vec<&str> = table.rows[2]
-            .cells
-            .iter()
-            .map(|c| c.text.as_str())
-            .collect();
+        let r0: Vec<&str> = table.rows[0].cells.iter().map(|c| c.text.as_str()).collect();
+        let r1: Vec<&str> = table.rows[1].cells.iter().map(|c| c.text.as_str()).collect();
+        let r2: Vec<&str> = table.rows[2].cells.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(r0, vec!["A", "B"], "Top row should be A, B");
         assert_eq!(r1, vec!["C", "D"], "Middle row should be C, D");
         assert_eq!(r2, vec!["E", "F"], "Bottom row should be E, F");
@@ -5745,12 +5557,7 @@ mod tests {
             },
             // Row 3: digit prefix but remainder starts with digit -> NOT stripped ~keep
             TableRow {
-                cells: vec![
-                    make_cell("3 items"),
-                    make_cell(""),
-                    make_cell(""),
-                    make_cell(""),
-                ],
+                cells: vec![make_cell("3 items"), make_cell(""), make_cell(""), make_cell("")],
                 is_header: false,
             },
         ];
@@ -5801,19 +5608,11 @@ mod tests {
 
         let mut rows = vec![
             TableRow {
-                cells: vec![
-                    make_cell("------"),
-                    make_cell("Total"),
-                    make_cell("$500.00"),
-                ],
+                cells: vec![make_cell("------"), make_cell("Total"), make_cell("$500.00")],
                 is_header: false,
             },
             TableRow {
-                cells: vec![
-                    make_cell("____"),
-                    make_cell("Subtotal"),
-                    make_cell("$200.00"),
-                ],
+                cells: vec![make_cell("____"), make_cell("Subtotal"), make_cell("$200.00")],
                 is_header: false,
             },
             TableRow {
@@ -5825,11 +5624,7 @@ mod tests {
                 is_header: false,
             },
             TableRow {
-                cells: vec![
-                    make_cell("2025-01-01"),
-                    make_cell("Payment"),
-                    make_cell("$100.00"),
-                ],
+                cells: vec![make_cell("2025-01-01"), make_cell("Payment"), make_cell("$100.00")],
                 is_header: false,
             },
         ];
@@ -5840,7 +5635,11 @@ mod tests {
         assert_eq!(rows[0].cells[1].text, "Total");
         assert_eq!(rows[0].cells[2].text, "$500.00");
 
-        assert_eq!(rows[1].cells[0].text.trim(), "", "Underscore-only cell should be cleared");
+        assert_eq!(
+            rows[1].cells[0].text.trim(),
+            "",
+            "Underscore-only cell should be cleared"
+        );
 
         assert_eq!(
             rows[2].cells[0].text.trim(),
@@ -6118,8 +5917,7 @@ mod tests {
             ..TableDetectionConfig::default()
         };
 
-        let greedy_cols =
-            detect_columns(&spans, config.column_tolerance, config.column_merge_threshold);
+        let greedy_cols = detect_columns(&spans, config.column_tolerance, config.column_merge_threshold);
         assert!(
             greedy_cols.len() > 6,
             "Precondition: greedy should produce >6 columns, got {}",
@@ -6143,11 +5941,7 @@ mod tests {
         let mut header = TableRow::new(true);
         for c in 0..col_count {
             header.cells.push(TableCell {
-                text: if c < 3 {
-                    format!("H{c}")
-                } else {
-                    String::new()
-                },
+                text: if c < 3 { format!("H{c}") } else { String::new() },
                 spans: Vec::new(),
                 colspan: 1,
                 rowspan: 1,
@@ -6161,11 +5955,7 @@ mod tests {
             let mut row = TableRow::new(false);
             for c in 0..col_count {
                 row.cells.push(TableCell {
-                    text: if c < 2 {
-                        format!("R{r}C{c}")
-                    } else {
-                        String::new()
-                    },
+                    text: if c < 2 { format!("R{r}C{c}") } else { String::new() },
                     spans: Vec::new(),
                     colspan: 1,
                     rowspan: 1,
@@ -6183,7 +5973,10 @@ mod tests {
             bbox: None,
         };
         // 5 rows * 12 cols = 60 total, 3 + 4*2 = 11 filled, 49 empty → 81.7% empty ~keep
-        assert!(!is_valid_table(&table), "Table with >60% empty cells should be rejected");
+        assert!(
+            !is_valid_table(&table),
+            "Table with >60% empty cells should be rejected"
+        );
     }
 
     #[test]
@@ -6306,7 +6099,10 @@ mod tests {
             col_count,
             bbox: None,
         };
-        assert!(is_valid_table(&table), "A 2-col × 6-row data table should still be accepted");
+        assert!(
+            is_valid_table(&table),
+            "A 2-col × 6-row data table should still be accepted"
+        );
     }
 
     /// A sparse 2-column table with a missing value on the right is a
@@ -6504,7 +6300,11 @@ mod tests {
              (the physical row count), got {}",
             table.col_count
         );
-        assert_eq!(table.rows.len(), 3, "expected 3 rows after transposing 2 physical rows into 3");
+        assert_eq!(
+            table.rows.len(),
+            3,
+            "expected 3 rows after transposing 2 physical rows into 3"
+        );
 
         let row_texts: Vec<Vec<&str>> = table
             .rows
@@ -6513,11 +6313,7 @@ mod tests {
             .collect();
         assert_eq!(
             row_texts,
-            vec![
-                vec!["R1C0", "R0C0"],
-                vec!["R1C1", "R0C1"],
-                vec!["R1C2", "R0C2"],
-            ],
+            vec![vec!["R1C0", "R0C0"], vec!["R1C1", "R0C1"], vec!["R1C2", "R0C2"],],
             "90-degree rotation must rotate the grid 90 degrees clockwise \
              (new row = old column ascending, new column = old row reversed); got {row_texts:?}"
         );
@@ -6588,10 +6384,7 @@ mod tests {
         // majority. Must fall back to upright. ~keep
         let tied = Table {
             rows: vec![TableRow {
-                cells: vec![
-                    cell(&[("a", 0.0), ("b", 0.0)]),
-                    cell(&[("c", 90.0), ("d", 90.0)]),
-                ],
+                cells: vec![cell(&[("a", 0.0), ("b", 0.0)]), cell(&[("c", 90.0), ("d", 90.0)])],
                 is_header: false,
             }],
             has_header: false,
@@ -6607,10 +6400,7 @@ mod tests {
         // 3 spans at 90 degrees vs 1 at 0 degrees: a strict majority (75%). ~keep
         let majority = Table {
             rows: vec![TableRow {
-                cells: vec![
-                    cell(&[("a", 90.0), ("b", 90.0)]),
-                    cell(&[("c", 90.0), ("d", 0.0)]),
-                ],
+                cells: vec![cell(&[("a", 90.0), ("b", 90.0)]), cell(&[("c", 90.0), ("d", 0.0)])],
                 is_header: false,
             }],
             has_header: false,
@@ -6683,7 +6473,11 @@ mod tests {
              columns (the physical row count), got {}",
             table.col_count
         );
-        assert_eq!(table.rows.len(), 3, "expected 3 rows after transposing 2 physical rows into 3");
+        assert_eq!(
+            table.rows.len(),
+            3,
+            "expected 3 rows after transposing 2 physical rows into 3"
+        );
 
         let row_texts: Vec<Vec<&str>> = table
             .rows
@@ -6692,11 +6486,7 @@ mod tests {
             .collect();
         assert_eq!(
             row_texts,
-            vec![
-                vec!["R1C0", "R0C0"],
-                vec!["R1C1", "R0C1"],
-                vec!["R1C2", "R0C2"],
-            ],
+            vec![vec!["R1C0", "R0C0"], vec!["R1C1", "R0C1"], vec!["R1C2", "R0C2"],],
             "90-degree rotation must rotate the borderless grid 90 degrees clockwise \
              (new row = old column ascending, new column = old row reversed); got {row_texts:?}"
         );
@@ -6726,7 +6516,11 @@ mod tests {
              columns, got {}",
             table.col_count
         );
-        assert_eq!(table.rows.len(), 3, "expected 3 rows after transposing 2 physical rows into 3");
+        assert_eq!(
+            table.rows.len(),
+            3,
+            "expected 3 rows after transposing 2 physical rows into 3"
+        );
 
         let row_texts: Vec<Vec<&str>> = table
             .rows
@@ -6735,11 +6529,7 @@ mod tests {
             .collect();
         assert_eq!(
             row_texts,
-            vec![
-                vec!["R0C2", "R1C2"],
-                vec!["R0C1", "R1C1"],
-                vec!["R0C0", "R1C0"],
-            ],
+            vec![vec!["R0C2", "R1C2"], vec!["R0C1", "R1C1"], vec!["R0C0", "R1C0"],],
             "270-degree rotation must rotate the borderless grid the opposite way \
              round from 90 degrees (new row = old column reversed, new column = old \
              row ascending); got {row_texts:?}"
@@ -7121,10 +6911,7 @@ mod tests {
 
     #[test]
     fn test_h_rule_bounded_text_table() {
-        let lines = vec![
-            make_h_line(50.0, 750.0, 350.0),
-            make_h_line(50.0, 700.0, 350.0),
-        ];
+        let lines = vec![make_h_line(50.0, 750.0, 350.0), make_h_line(50.0, 700.0, 350.0)];
 
         let spans = vec![
             create_test_span("Model", 60.0, 740.0, 50.0, 10.0),
@@ -7148,8 +6935,16 @@ mod tests {
             "Should detect at least 1 table from text within H-line boundaries"
         );
         let table = &tables[0];
-        assert!(table.col_count >= 3, "Expected at least 3 columns, got {}", table.col_count);
-        assert!(table.rows.len() >= 3, "Expected at least 3 rows, got {}", table.rows.len());
+        assert!(
+            table.col_count >= 3,
+            "Expected at least 3 columns, got {}",
+            table.col_count
+        );
+        assert!(
+            table.rows.len() >= 3,
+            "Expected at least 3 rows, got {}",
+            table.rows.len()
+        );
     }
 
     #[test]
@@ -7234,11 +7029,7 @@ mod tests {
     /// fields of `ColumnCluster` / `RowCluster` are arbitrary —
     /// `validate_table_structure_internal` reads only
     /// `grid.columns.len()` and the emptiness of each cell.
-    fn make_uniform_grid(
-        num_cols: usize,
-        num_rows: usize,
-        populated_per_row: usize,
-    ) -> GridStructure {
+    fn make_uniform_grid(num_cols: usize, num_rows: usize, populated_per_row: usize) -> GridStructure {
         let columns = (0..num_cols)
             .map(|_| ColumnCluster {
                 x_center: 0.0,
@@ -7258,21 +7049,11 @@ mod tests {
         let cells = (0..num_rows)
             .map(|_| {
                 (0..num_cols)
-                    .map(|c| {
-                        if c < populated_per_row {
-                            vec![0usize]
-                        } else {
-                            vec![]
-                        }
-                    })
+                    .map(|c| if c < populated_per_row { vec![0usize] } else { vec![] })
                     .collect()
             })
             .collect();
-        GridStructure {
-            columns,
-            rows,
-            cells,
-        }
+        GridStructure { columns, rows, cells }
     }
 
     /// Build a GridStructure modelling two adjacent text flows
@@ -7307,20 +7088,12 @@ mod tests {
                 (0..num_cols)
                     .map(|c| {
                         let in_left_half = c < half;
-                        if left_row == in_left_half {
-                            vec![0usize]
-                        } else {
-                            vec![]
-                        }
+                        if left_row == in_left_half { vec![0usize] } else { vec![] }
                     })
                     .collect()
             })
             .collect();
-        GridStructure {
-            columns,
-            rows,
-            cells,
-        }
+        GridStructure { columns, rows, cells }
     }
 
     /// Build a GridStructure modelling a hierarchical scientific table.
@@ -7333,12 +7106,7 @@ mod tests {
     /// post-clustering grid the validator actually sees. Numeric
     /// cluster fields are arbitrary, matching the convention used by
     /// `make_uniform_grid` and `make_split_grid`.
-    fn make_grouped_grid(
-        total_cols: usize,
-        num_rows: usize,
-        group_cols: usize,
-        group_size: usize,
-    ) -> GridStructure {
+    fn make_grouped_grid(total_cols: usize, num_rows: usize, group_cols: usize, group_size: usize) -> GridStructure {
         assert!(group_cols < total_cols, "group_cols must be < total_cols");
         assert!(group_size > 0, "group_size must be positive");
         let columns = (0..total_cols)
@@ -7362,21 +7130,13 @@ mod tests {
                 let is_group_header = r % group_size == 0;
                 (0..total_cols)
                     .map(|c| {
-                        let populated = if c < group_cols {
-                            is_group_header
-                        } else {
-                            true
-                        };
+                        let populated = if c < group_cols { is_group_header } else { true };
                         if populated { vec![0usize] } else { vec![] }
                     })
                     .collect()
             })
             .collect();
-        GridStructure {
-            columns,
-            rows,
-            cells,
-        }
+        GridStructure { columns, rows, cells }
     }
 
     /// 6 columns, 6 rows, modal rows alternate between {0,1,2} and

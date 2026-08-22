@@ -34,8 +34,7 @@ fn test_custom_encoding_has_custom_method() {
         "Font with Custom encoding should return true"
     );
 
-    let font_with_standard =
-        create_font_with_encoding(Encoding::Standard("WinAnsiEncoding".to_string()));
+    let font_with_standard = create_font_with_encoding(Encoding::Standard("WinAnsiEncoding".to_string()));
     assert!(
         !font_with_standard.has_custom_encoding(),
         "Font with Standard encoding should return false"
@@ -182,8 +181,6 @@ fn create_font_with_encoding(encoding: Encoding) -> FontInfo {
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     }
 }

@@ -59,24 +59,12 @@ fn test_parse_color_operators() {
     let stream = b"1 0 0 rg 0 1 0 RG 0.5 g 0.3 G 0 1 0 1 k 1 0 1 0 K";
     let ops = parse_content_stream(stream).unwrap();
 
-    let has_fill_rgb = ops
-        .iter()
-        .any(|op| matches!(op, Operator::SetFillRgb { .. }));
-    let has_stroke_rgb = ops
-        .iter()
-        .any(|op| matches!(op, Operator::SetStrokeRgb { .. }));
-    let has_fill_gray = ops
-        .iter()
-        .any(|op| matches!(op, Operator::SetFillGray { .. }));
-    let has_stroke_gray = ops
-        .iter()
-        .any(|op| matches!(op, Operator::SetStrokeGray { .. }));
-    let has_fill_cmyk = ops
-        .iter()
-        .any(|op| matches!(op, Operator::SetFillCmyk { .. }));
-    let has_stroke_cmyk = ops
-        .iter()
-        .any(|op| matches!(op, Operator::SetStrokeCmyk { .. }));
+    let has_fill_rgb = ops.iter().any(|op| matches!(op, Operator::SetFillRgb { .. }));
+    let has_stroke_rgb = ops.iter().any(|op| matches!(op, Operator::SetStrokeRgb { .. }));
+    let has_fill_gray = ops.iter().any(|op| matches!(op, Operator::SetFillGray { .. }));
+    let has_stroke_gray = ops.iter().any(|op| matches!(op, Operator::SetStrokeGray { .. }));
+    let has_fill_cmyk = ops.iter().any(|op| matches!(op, Operator::SetFillCmyk { .. }));
+    let has_stroke_cmyk = ops.iter().any(|op| matches!(op, Operator::SetStrokeCmyk { .. }));
 
     assert!(has_fill_rgb, "Should have rg operator");
     assert!(has_stroke_rgb, "Should have RG operator");
@@ -161,9 +149,7 @@ fn test_parse_quote_and_double_quote() {
     let stream = b"BT /F1 12 Tf 14 TL 72 720 Td (line1) ' 1 2 (line2) \" ET";
     let ops = parse_content_stream(stream).unwrap();
     let has_quote = ops.iter().any(|op| matches!(op, Operator::Quote { .. }));
-    let has_dquote = ops
-        .iter()
-        .any(|op| matches!(op, Operator::DoubleQuote { .. }));
+    let has_dquote = ops.iter().any(|op| matches!(op, Operator::DoubleQuote { .. }));
     assert!(has_quote, "Should have ' operator");
     assert!(has_dquote, "Should have \" operator");
 }
@@ -234,9 +220,7 @@ fn test_parse_images_only_text_stream_ignored() {
 fn test_parse_inline_image() {
     let stream = b"BI /W 1 /H 1 /BPC 8 /CS /G ID \x80 EI";
     let ops = parse_content_stream(stream).unwrap();
-    let has_inline = ops
-        .iter()
-        .any(|op| matches!(op, Operator::InlineImage { .. }));
+    let has_inline = ops.iter().any(|op| matches!(op, Operator::InlineImage { .. }));
     assert!(has_inline, "Should parse inline image");
 }
 
@@ -245,14 +229,8 @@ fn test_parse_multiple_bt_et_blocks() {
     let stream = b"BT /F1 12 Tf 72 720 Td (Block1) Tj ET BT /F1 10 Tf 72 700 Td (Block2) Tj ET";
     let ops = parse_content_stream(stream).unwrap();
 
-    let bt_count = ops
-        .iter()
-        .filter(|op| matches!(op, Operator::BeginText))
-        .count();
-    let et_count = ops
-        .iter()
-        .filter(|op| matches!(op, Operator::EndText))
-        .count();
+    let bt_count = ops.iter().filter(|op| matches!(op, Operator::BeginText)).count();
+    let et_count = ops.iter().filter(|op| matches!(op, Operator::EndText)).count();
     assert_eq!(bt_count, 2);
     assert_eq!(et_count, 2);
 }
@@ -393,9 +371,7 @@ fn test_structure_tree_untagged_pdf() {
     let off2 = pdf.len();
     pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
     let off3 = pdf.len();
-    pdf.extend_from_slice(
-        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
     finalize_pdf(&mut pdf, &[0, off1, off2, off3]);
 
     let doc = PdfDocument::from_bytes(pdf).unwrap();
@@ -414,13 +390,9 @@ fn test_structure_tree_tagged_pdf() {
     let off2 = pdf.len();
     pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
     let off3 = pdf.len();
-    pdf.extend_from_slice(
-        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
     let off4 = pdf.len();
-    pdf.extend_from_slice(
-        b"4 0 obj\n<< /Type /StructTreeRoot /K 5 0 R /ParentTree 6 0 R >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"4 0 obj\n<< /Type /StructTreeRoot /K 5 0 R /ParentTree 6 0 R >>\nendobj\n");
     let off5 = pdf.len();
     pdf.extend_from_slice(b"5 0 obj\n<< /Type /StructElem /S /Document /K [] >>\nendobj\n");
     let off6 = pdf.len();
@@ -441,15 +413,16 @@ fn test_xref_reconstruction_corrupt_xref() {
     let _off2 = pdf.len();
     pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
     let _off3 = pdf.len();
-    pdf.extend_from_slice(
-        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
 
     let xref_offset = pdf.len();
     pdf.extend_from_slice(b"xref\n0 4\nCORRUPTED DATA HERE\n");
     pdf.extend_from_slice(
-        format!("trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_offset)
-            .as_bytes(),
+        format!(
+            "trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            xref_offset
+        )
+        .as_bytes(),
     );
 
     let result = PdfDocument::from_bytes(pdf);
@@ -461,9 +434,7 @@ fn test_xref_reconstruction_missing_xref() {
     let mut pdf = b"%PDF-1.7\n".to_vec();
     pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
     pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
-    pdf.extend_from_slice(
-        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
     pdf.extend_from_slice(b"startxref\n99999\n%%EOF\n");
 
     let result = PdfDocument::from_bytes(pdf);
@@ -494,9 +465,7 @@ fn test_mark_info_untagged() {
     let off2 = pdf.len();
     pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
     let off3 = pdf.len();
-    pdf.extend_from_slice(
-        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
     finalize_pdf(&mut pdf, &[0, off1, off2, off3]);
 
     let doc = PdfDocument::from_bytes(pdf).unwrap();

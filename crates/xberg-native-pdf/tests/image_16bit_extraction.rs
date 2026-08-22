@@ -85,8 +85,6 @@ fn sixteen_bit_image_extracts_to_png_without_panicking() {
     let img = &images[0];
     assert_eq!((img.width(), img.height()), (330, 95));
     // The crux: encoding must succeed (recoverable Result), not panic. ~keep
-    let png = img
-        .to_png_bytes()
-        .expect("16-bit image must encode to PNG, not panic");
+    let png = img.to_png_bytes().expect("16-bit image must encode to PNG, not panic");
     assert!(png.starts_with(&[0x89, b'P', b'N', b'G']), "valid PNG signature");
 }

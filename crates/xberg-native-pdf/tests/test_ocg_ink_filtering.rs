@@ -48,8 +48,7 @@ fn build_pdf_with_ocg_in_xobject() -> Vec<u8> {
     pdf.extend_from_slice(page_content);
     pdf.extend_from_slice(b"\nendstream\nendobj\n\n");
 
-    let form_stream =
-        b"/OC /MC0 BDC BT /F1 12 Tf 50 700 Td (LAYERED) Tj ET EMC BT /F1 12 Tf 50 650 Td (VISIBLE) Tj ET";
+    let form_stream = b"/OC /MC0 BDC BT /F1 12 Tf 50 700 Td (LAYERED) Tj ET EMC BT /F1 12 Tf 50 650 Td (VISIBLE) Tj ET";
     offsets.push(pdf.len());
     let form_hdr = format!(
         "5 0 obj\n<< /Type /XObject /Subtype /Form /BBox [0 0 612 792]\n\
@@ -116,8 +115,7 @@ fn build_pdf_with_ink_in_xobject() -> Vec<u8> {
            /Resources << /Font << /F1 6 0 R >> /XObject << /Fm0 5 0 R >> >> >>\nendobj\n\n",
     );
 
-    let page_content =
-        b"BT /F1 12 Tf 50 700 Td (BEFORE) Tj ET /Fm0 Do BT /F1 12 Tf 50 600 Td (AFTER) Tj ET";
+    let page_content = b"BT /F1 12 Tf 50 700 Td (BEFORE) Tj ET /Fm0 Do BT /F1 12 Tf 50 600 Td (AFTER) Tj ET";
     offsets.push(pdf.len());
     let hdr = format!("4 0 obj\n<< /Length {} >>\nstream\n", page_content.len());
     pdf.extend_from_slice(hdr.as_bytes());
@@ -543,7 +541,11 @@ fn test_extract_text_filtered_in_rect_uses_full_pipeline() {
 
     let s = text.find("Second").unwrap();
     let line_break = &text[w + "World".len()..s];
-    assert!(line_break.contains('\n'), "Expected line break before 'Second'; got {:?}", text);
+    assert!(
+        line_break.contains('\n'),
+        "Expected line break before 'Second'; got {:?}",
+        text
+    );
 }
 
 /// Build a minimal PDF with inline OCG-tagged text (no XObjects).
@@ -569,8 +571,7 @@ fn build_pdf_with_inline_ocg() -> Vec<u8> {
            /Resources << /Font << /F1 5 0 R >> /Properties << /MC0 6 0 R >> >> >>\nendobj\n\n",
     );
 
-    let content =
-        b"BT /F1 12 Tf 50 700 Td (ALWAYS) Tj ET /OC /MC0 BDC BT /F1 12 Tf 50 650 Td (HIDDEN) Tj ET EMC";
+    let content = b"BT /F1 12 Tf 50 700 Td (ALWAYS) Tj ET /OC /MC0 BDC BT /F1 12 Tf 50 650 Td (HIDDEN) Tj ET EMC";
     offsets.push(pdf.len());
     let hdr = format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len());
     pdf.extend_from_slice(hdr.as_bytes());
@@ -672,17 +673,11 @@ fn build_pdf_with_page_level_inks() -> Vec<u8> {
     offsets.push(pdf.len());
     pdf.extend_from_slice(b"4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n\n");
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        b"5 0 obj\n[/Separation /PANTONE#20185#20C /DeviceCMYK 7 0 R]\nendobj\n\n",
-    );
+    pdf.extend_from_slice(b"5 0 obj\n[/Separation /PANTONE#20185#20C /DeviceCMYK 7 0 R]\nendobj\n\n");
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        b"6 0 obj\n[/DeviceN [/Cyan /Magenta /SpotGold] /DeviceCMYK 7 0 R]\nendobj\n\n",
-    );
+    pdf.extend_from_slice(b"6 0 obj\n[/DeviceN [/Cyan /Magenta /SpotGold] /DeviceCMYK 7 0 R]\nendobj\n\n");
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        b"7 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 4 /C0 [0 0 0 0] /C1 [1 0 0 0] >>\nendobj\n\n",
-    );
+    pdf.extend_from_slice(b"7 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 4 /C0 [0 0 0 0] /C1 [1 0 0 0] >>\nendobj\n\n");
 
     let xref_offset = pdf.len();
     let n_obj = offsets.len() + 1;
@@ -706,13 +701,20 @@ fn test_get_page_inks_happy_path() {
     let inks = doc.get_page_inks(0).expect("get_page_inks");
 
     assert!(
-        inks.iter()
-            .any(|i| i == "PANTONE 185 C" || i == "PANTONE#20185#20C"),
+        inks.iter().any(|i| i == "PANTONE 185 C" || i == "PANTONE#20185#20C"),
         "Separation ink missing: {:?}",
         inks
     );
-    assert!(inks.contains(&"SpotGold".to_string()), "DeviceN ink missing: {:?}", inks);
-    assert!(inks.contains(&"Cyan".to_string()), "DeviceN component missing: {:?}", inks);
+    assert!(
+        inks.contains(&"SpotGold".to_string()),
+        "DeviceN ink missing: {:?}",
+        inks
+    );
+    assert!(
+        inks.contains(&"Cyan".to_string()),
+        "DeviceN component missing: {:?}",
+        inks
+    );
 }
 
 #[test]
@@ -878,7 +880,11 @@ fn test_devicen_excludes_entire_colorspace_if_any_ink_matches() {
         .extract_text_filtered(0, HashSet::new(), excluded_inks)
         .expect("filtered");
 
-    assert!(text.contains("PLAIN"), "PLAIN (DeviceGray) should survive, got: {:?}", text);
+    assert!(
+        text.contains("PLAIN"),
+        "PLAIN (DeviceGray) should survive, got: {:?}",
+        text
+    );
     assert!(
         !text.contains("MIXED_INK"),
         "MIXED_INK should be suppressed (DeviceN contains excluded SpotGold), got: {:?}",
@@ -996,8 +1002,7 @@ fn build_pdf_with_indirect_devicen_names_in_form() -> Vec<u8> {
            /Resources << /Font << /F1 6 0 R >> /XObject << /Fm0 5 0 R >> >> >>\nendobj\n\n",
     );
 
-    let page_content =
-        b"BT /F1 12 Tf 50 700 Td (BEFORE) Tj ET /Fm0 Do BT /F1 12 Tf 50 600 Td (AFTER) Tj ET";
+    let page_content = b"BT /F1 12 Tf 50 700 Td (BEFORE) Tj ET /Fm0 Do BT /F1 12 Tf 50 600 Td (AFTER) Tj ET";
     offsets.push(pdf.len());
     let hdr = format!("4 0 obj\n<< /Length {} >>\nstream\n", page_content.len());
     pdf.extend_from_slice(hdr.as_bytes());
@@ -1052,8 +1057,7 @@ fn build_pdf_with_indirect_devicen_names_in_form() -> Vec<u8> {
     }
     pdf.extend_from_slice(xref.as_bytes());
     pdf.extend_from_slice(
-        format!("trailer\n<< /Size {n_obj} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n")
-            .as_bytes(),
+        format!("trailer\n<< /Size {n_obj} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").as_bytes(),
     );
     pdf
 }

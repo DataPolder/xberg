@@ -184,11 +184,7 @@ impl BatchMetrics {
         if self.documents.is_empty() {
             return 0.0;
         }
-        let sum: f32 = self
-            .documents
-            .iter()
-            .map(|m| m.estimate_quality_score())
-            .sum();
+        let sum: f32 = self.documents.iter().map(|m| m.estimate_quality_score()).sum();
         sum / self.documents.len() as f32
     }
 

@@ -57,9 +57,7 @@ fn pdf_with_content(content: &str, transparency: bool) -> Vec<u8> {
     for o in off.iter().take(count).skip(1) {
         buf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size {count} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size {count} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     buf
 }
 
@@ -74,8 +72,7 @@ fn render_raw(content: &str) -> Vec<u8> {
 /// True when any pixel differs from the white background — i.e. some
 /// content actually painted.
 fn has_ink(rgba: &[u8]) -> bool {
-    rgba.chunks_exact(4)
-        .any(|px| px[0] < 250 || px[1] < 250 || px[2] < 250)
+    rgba.chunks_exact(4).any(|px| px[0] < 250 || px[1] < 250 || px[2] < 250)
 }
 
 #[test]
@@ -95,8 +92,7 @@ fn clip_with_beyond_precision_coords_renders_without_panic() {
     // tiny-skia's mask rasterizer, not the paint path. The degenerate
     // clip must be dropped — not materialized as an empty mask — so the
     // ordinary fill after it must still paint. ~keep
-    let content =
-        "0 0 m 47918050000 4528583000000000000 l 100 100 l W n 0 0 m 400 700 l 20 300 l h f";
+    let content = "0 0 m 47918050000 4528583000000000000 l 100 100 l W n 0 0 m 400 700 l 20 300 l h f";
     assert!(
         has_ink(&render_raw(content)),
         "fill under a dropped degenerate clip must still paint"
@@ -138,8 +134,7 @@ fn ordinary_geometry_still_renders() {
 
 /// True when every pixel is inked — the shape covered the whole page.
 fn fully_inked(rgba: &[u8]) -> bool {
-    rgba.chunks_exact(4)
-        .all(|px| px[0] < 250 && px[1] < 250 && px[2] < 250)
+    rgba.chunks_exact(4).all(|px| px[0] < 250 && px[1] < 250 && px[2] < 250)
 }
 
 #[test]
@@ -153,7 +148,9 @@ fn fill_whose_bounds_leave_the_page_still_covers_it() {
 
 #[test]
 fn fill_reaching_off_page_through_the_ctm_still_covers_it() {
-    assert!(fully_inked(&render_raw("q 2000000 0 0 2000000 0 0 cm 0 0 10 10 re f Q")));
+    assert!(fully_inked(&render_raw(
+        "q 2000000 0 0 2000000 0 0 cm 0 0 10 10 re f Q"
+    )));
 }
 
 #[test]

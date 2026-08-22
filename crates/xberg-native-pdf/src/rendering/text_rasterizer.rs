@@ -16,8 +16,7 @@ use crate::content::operators::TextElement;
 use crate::document::PdfDocument;
 use crate::error::{Error, Result};
 use crate::fonts::unicode_decode::{
-    ByteMode, DecodePolicy, GlyphDropTally, TextCharIter, char_codes, char_codes_with_len,
-    get_byte_mode,
+    ByteMode, DecodePolicy, GlyphDropTally, TextCharIter, char_codes, char_codes_with_len, get_byte_mode,
 };
 use crate::object::Object;
 use crate::vendor::fontdb;
@@ -81,9 +80,9 @@ fn classify_embedded_font(data: &Arc<Vec<u8>>) -> (bool, bool) {
                 PlatformId::Unicode => saw_unicode = true,
                 PlatformId::Windows if record.encoding_id() == 1 || record.encoding_id() == 10 => {
                     saw_unicode = true;
-                },
+                }
                 PlatformId::Macintosh if record.encoding_id() == 0 => saw_byte_indexed = true,
-                _ => {},
+                _ => {}
             }
         }
         Some((saw_byte_indexed && !saw_unicode, saw_unicode))
@@ -208,8 +207,7 @@ impl<'a> OutlineFace<'a> {
 /// without re-copying the full parsed font metadata. Callers that want
 /// a private / modified database can still construct one by hand and
 /// bypass this cache via `TextRasterizer::with_fontdb()`.
-static SYSTEM_FONTDB: std::sync::OnceLock<std::sync::Arc<fontdb::Database>> =
-    std::sync::OnceLock::new();
+static SYSTEM_FONTDB: std::sync::OnceLock<std::sync::Arc<fontdb::Database>> = std::sync::OnceLock::new();
 
 fn system_fontdb() -> std::sync::Arc<fontdb::Database> {
     SYSTEM_FONTDB
@@ -227,8 +225,7 @@ fn system_fontdb() -> std::sync::Arc<fontdb::Database> {
             // collections even when the PDF embeds no outlines for them. ~keep
             #[cfg(feature = "cjk-render-fallback")]
             db.load_font_data(
-                crate::fonts::form_fallback::font_bytes(crate::fonts::form_fallback::Fallback::Cjk)
-                    .to_vec(),
+                crate::fonts::form_fallback::font_bytes(crate::fonts::form_fallback::Fallback::Cjk).to_vec(),
             );
             std::sync::Arc::new(db)
         })
@@ -247,8 +244,7 @@ static FONT_BYTES_CACHE: std::sync::OnceLock<
 > = std::sync::OnceLock::new();
 
 fn cached_font_bytes(id: fontdb::ID, db: &fontdb::Database) -> Option<(Arc<Vec<u8>>, u32)> {
-    let cache =
-        FONT_BYTES_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let cache = FONT_BYTES_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
     {
         let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = guard.get(&id) {
@@ -335,8 +331,7 @@ fn cached_face(id: fontdb::ID, data: Arc<Vec<u8>>, index: u32) -> Option<Arc<Cac
 /// Before this cache, every glyph that fell through to the CJK path called
 /// `load_cjk_fallback()`, which iterated 7+ fontdb queries and cloned a
 /// 10–20 MB Noto CJK binary. Now that work is done exactly once.
-static CJK_FALLBACK: std::sync::OnceLock<Option<(fontdb::ID, Arc<Vec<u8>>, u32)>> =
-    std::sync::OnceLock::new();
+static CJK_FALLBACK: std::sync::OnceLock<Option<(fontdb::ID, Arc<Vec<u8>>, u32)>> = std::sync::OnceLock::new();
 
 fn get_cjk_fallback_cached(db: &fontdb::Database) -> Option<(fontdb::ID, Arc<Vec<u8>>, u32)> {
     CJK_FALLBACK
@@ -395,8 +390,7 @@ fn get_cjk_fallback_cached(db: &fontdb::Database) -> Option<(fontdb::ID, Arc<Vec
 /// system-font path. Cached once per process so we don't re-parse the 3.4 MB
 /// font on every glyph paint.
 #[cfg(feature = "cjk-render-fallback")]
-static RENDER_CJK_FALLBACK_FACE: std::sync::OnceLock<Option<Arc<CachedFace>>> =
-    std::sync::OnceLock::new();
+static RENDER_CJK_FALLBACK_FACE: std::sync::OnceLock<Option<Arc<CachedFace>>> = std::sync::OnceLock::new();
 
 #[cfg(feature = "cjk-render-fallback")]
 fn render_cjk_fallback_face() -> Option<Arc<CachedFace>> {
@@ -553,9 +547,7 @@ impl TextRasterizer {
         let mut paint = create_fill_paint(gs, "Normal");
         if let Some(overrides) = color_override {
             if let Some((r, g, b, a)) = overrides.fill {
-                paint.set_color(
-                    tiny_skia::Color::from_rgba(r, g, b, a).unwrap_or(tiny_skia::Color::BLACK),
-                );
+                paint.set_color(tiny_skia::Color::from_rgba(r, g, b, a).unwrap_or(tiny_skia::Color::BLACK));
             }
         }
         // Text rendering mode 3 = invisible text (searchable OCR layers).
@@ -653,8 +645,7 @@ impl TextRasterizer {
                         );
                         Some((None, Arc::clone(embedded), 0, true))
                     } else if info.cff_gid_map.is_some()
-                        || (info.subtype == "Type0"
-                            && info.cid_font_type.as_deref() == Some("CIDFontType0"))
+                        || (info.subtype == "Type0" && info.cid_font_type.as_deref() == Some("CIDFontType0"))
                     {
                         // CFF font — use direct GID rendering.
                         //
@@ -679,10 +670,7 @@ impl TextRasterizer {
                         // CFF outlines for sfnt-wrapped OpenType-CFF (OTTO); raw
                         // CFF streams were already wrapped by
                         // `font_dict::wrap_cff_in_opentype` at load time. ~keep
-                        tracing::trace!(
-                            "Using embedded CFF font '{}' with direct GID mapping",
-                            info.base_font
-                        );
+                        tracing::trace!("Using embedded CFF font '{}' with direct GID mapping", info.base_font);
                         Some((None, Arc::clone(embedded), 0, true))
                     } else {
                         tracing::trace!(
@@ -718,13 +706,8 @@ impl TextRasterizer {
                 ) {
                     Ok(advance) => return Ok(advance),
                     Err(e) => {
-                        tracing::warn!(
-                            "Direct CID/CFF rendering failed: {}, falling back to system font",
-                            e
-                        );
-                        if let Some((fb_id, fallback_data, fallback_idx)) =
-                            self.load_font_data(pdf_font_name)
-                        {
+                        tracing::warn!("Direct CID/CFF rendering failed: {}, falling back to system font", e);
+                        if let Some((fb_id, fallback_data, fallback_idx)) = self.load_font_data(pdf_font_name) {
                             if let Some(ref info) = font_info {
                                 self.report_omitted_drops(&decode_drops, &info.base_font);
                             }
@@ -744,7 +727,7 @@ impl TextRasterizer {
                                 false,
                             );
                         }
-                    },
+                    }
                 }
             }
             if let Some(ref info) = font_info {
@@ -766,10 +749,7 @@ impl TextRasterizer {
                 true,
             )?)
         } else {
-            let font_name = font_info
-                .as_ref()
-                .map(|i| i.base_font.as_str())
-                .unwrap_or("unknown");
+            let font_name = font_info.as_ref().map(|i| i.base_font.as_str()).unwrap_or("unknown");
             tracing::warn!(
                 "No font found for '{}', text may render incorrectly. \
                  Install common fonts (e.g., liberation-fonts, dejavu-fonts, or noto-fonts).",
@@ -778,14 +758,7 @@ impl TextRasterizer {
             if let Some(ref info) = font_info {
                 self.report_omitted_drops(&decode_drops, &info.base_font);
             }
-            Ok(self.render_text_fallback(
-                pixmap,
-                &unicode_text,
-                &paint,
-                base_transform,
-                gs,
-                clip_mask,
-            )?)
+            Ok(self.render_text_fallback(pixmap, &unicode_text, &paint, base_transform, gs, clip_mask)?)
         }
     }
 
@@ -799,11 +772,7 @@ impl TextRasterizer {
     /// from the decoded string (#991) — the CID-direct and CJK-substitution
     /// paths paint from the raw codes, so a decode miss alone says nothing
     /// about what they draw.
-    fn decode_text_to_unicode(
-        &self,
-        bytes: &[u8],
-        font: Option<&crate::fonts::FontInfo>,
-    ) -> (String, GlyphDropTally) {
+    fn decode_text_to_unicode(&self, bytes: &[u8], font: Option<&crate::fonts::FontInfo>) -> (String, GlyphDropTally) {
         let mut undecodable = GlyphDropTally::default();
         let result = crate::fonts::unicode_decode::decode_text_to_unicode(
             bytes,
@@ -835,10 +804,7 @@ impl TextRasterizer {
         gs: &GraphicsState,
         font_cache: &HashMap<String, Arc<crate::fonts::FontInfo>>,
     ) -> f32 {
-        let font_info = gs
-            .font_name
-            .as_ref()
-            .and_then(|n| font_cache.get(n).cloned());
+        let font_info = gs.font_name.as_ref().and_then(|n| font_cache.get(n).cloned());
         measure_text_bytes(text, gs, font_info.as_deref())
     }
 
@@ -851,16 +817,13 @@ impl TextRasterizer {
         gs: &GraphicsState,
         font_cache: &HashMap<String, Arc<crate::fonts::FontInfo>>,
     ) -> f32 {
-        let font_info = gs
-            .font_name
-            .as_ref()
-            .and_then(|n| font_cache.get(n).cloned());
+        let font_info = gs.font_name.as_ref().and_then(|n| font_cache.get(n).cloned());
         let mut total: f32 = 0.0;
         for element in array {
             match element {
                 TextElement::String(text) => {
                     total += measure_text_bytes(text, gs, font_info.as_deref());
-                },
+                }
                 TextElement::Offset(offset) => {
                     // PDF numeric offsets in a TJ array shift the cursor by
                     // -offset/1000 * font_size along the active writing
@@ -869,7 +832,7 @@ impl TextRasterizer {
                     // scalar magnitude. ~keep
                     let shift = (-offset / 1000.0) * gs.font_size;
                     total += shift;
-                },
+                }
             }
         }
         total
@@ -921,12 +884,12 @@ impl TextRasterizer {
                     )?;
                     current_gs.advance_text_matrix(advance);
                     total_advance += advance;
-                },
+                }
                 TextElement::Offset(offset) => {
                     let shift = (-offset / 1000.0) * current_gs.font_size;
                     current_gs.advance_text_matrix(shift);
                     total_advance += shift;
-                },
+                }
             }
         }
         Ok(total_advance)
@@ -934,12 +897,7 @@ impl TextRasterizer {
 
     /// Get font info for a specific font name from resources.
     #[allow(dead_code)]
-    fn get_font_info(
-        &self,
-        doc: &PdfDocument,
-        resources: &Object,
-        font_name: &str,
-    ) -> Result<crate::fonts::FontInfo> {
+    fn get_font_info(&self, doc: &PdfDocument, resources: &Object, font_name: &str) -> Result<crate::fonts::FontInfo> {
         if let Object::Dictionary(res_dict) = resources {
             if let Some(Object::Dictionary(fonts)) = res_dict.get("Font") {
                 if let Some(font_ref) = fonts.get(font_name) {
@@ -984,19 +942,13 @@ impl TextRasterizer {
             || clean_name.contains("KaiTi")
             || pdf_font_name == "F1";
 
-        let final_name = if clean_name.contains("楷体")
-            || clean_name.contains("æ¥·ä½")
-            || clean_name.contains("KaiTi")
+        let final_name = if clean_name.contains("楷体") || clean_name.contains("æ¥·ä½") || clean_name.contains("KaiTi")
         {
             "KaiTi"
-        } else if clean_name.contains("宋体")
-            || clean_name.contains("å®\u{008b}ä½")
-            || clean_name.contains("SimSun")
+        } else if clean_name.contains("宋体") || clean_name.contains("å®\u{008b}ä½") || clean_name.contains("SimSun")
         {
             "SimSun"
-        } else if clean_name.contains("黑体")
-            || clean_name.contains("é»\u{0091}ä½")
-            || clean_name.contains("SimHei")
+        } else if clean_name.contains("黑体") || clean_name.contains("é»\u{0091}ä½") || clean_name.contains("SimHei")
         {
             "SimHei"
         } else {
@@ -1019,10 +971,7 @@ impl TextRasterizer {
         } else if clean_name.contains("NimbusMonL") || clean_name.contains("NimbusMono") {
             variants.insert(0, "Nimbus Mono PS".to_string());
             variants.push("Courier New".to_string());
-        } else if clean_name.contains("CMSS")
-            || clean_name.contains("CMR")
-            || clean_name.contains("CMBX")
-        {
+        } else if clean_name.contains("CMSS") || clean_name.contains("CMR") || clean_name.contains("CMBX") {
             variants.push("Latin Modern Roman".to_string());
             variants.push("Computer Modern".to_string());
         } else if clean_name.contains("URWBookmanL") || clean_name.contains("Bookman") {
@@ -1138,8 +1087,7 @@ impl TextRasterizer {
         // 1. Resolve faces — prefer process-wide cache to avoid re-parsing font tables
         //    on every text segment.  Embedded fonts (font_id == None) are not cached
         //    because they are unique per-PDF and typically only rendered once. ~keep
-        let cached_arc: Option<Arc<CachedFace>> =
-            font_id.and_then(|id| cached_face(id, Arc::clone(&font_data), index));
+        let cached_arc: Option<Arc<CachedFace>> = font_id.and_then(|id| cached_face(id, Arc::clone(&font_data), index));
 
         // `FontRef` and the outline/charmap views are cheap table-directory
         // parses, so they are built here in both branches rather than stored.
@@ -1169,9 +1117,7 @@ impl TextRasterizer {
                         "Failed to create harfrust font from embedded data for '{}', falling back to system font",
                         pdf_font_name
                     );
-                    if let Some((fb_id, fallback_data, fallback_index)) =
-                        self.load_font_data(pdf_font_name)
-                    {
+                    if let Some((fb_id, fallback_data, fallback_index)) = self.load_font_data(pdf_font_name) {
                         return self.render_unicode_text(
                             pixmap,
                             text,
@@ -1189,14 +1135,7 @@ impl TextRasterizer {
                         );
                     }
                 }
-                return self.render_text_fallback(
-                    pixmap,
-                    text,
-                    paint,
-                    base_transform,
-                    gs,
-                    clip_mask,
-                );
+                return self.render_text_fallback(pixmap, text, paint, base_transform, gs, clip_mask);
             }
             font_ref = font_opt.unwrap();
             local_outline_bytes = outlineable_font_bytes(&font_data, index);
@@ -1214,10 +1153,7 @@ impl TextRasterizer {
         buffer.push_str(text);
 
         // Explicitly set script and direction for better CJK shaping ~keep
-        if text
-            .chars()
-            .any(|c| (c as u32) >= 0x4E00 && (c as u32) <= 0x9FFF)
-        {
+        if text.chars().any(|c| (c as u32) >= 0x4E00 && (c as u32) <= 0x9FFF) {
             if let Some(script) = harfrust::Script::from_iso15924_tag(harfrust::Tag::new(b"Hani")) {
                 buffer.set_script(script);
             }
@@ -1323,14 +1259,8 @@ impl TextRasterizer {
             // subsequent glyphs overwrite the tail of the ligature —
             // exactly the `Efficient` → `Effi ert` symptom reported in
             // #331 on arxiv-style LaTeX-embedded fonts. ~keep
-            let next_cluster_byte: usize = info
-                .get(i + 1)
-                .map(|n| n.cluster as usize)
-                .unwrap_or(text.len());
-            let cluster_chars: usize = text[cluster..next_cluster_byte.min(text.len())]
-                .chars()
-                .count()
-                .max(1);
+            let next_cluster_byte: usize = info.get(i + 1).map(|n| n.cluster as usize).unwrap_or(text.len());
+            let cluster_chars: usize = text[cluster..next_cluster_byte.min(text.len())].chars().count().max(1);
 
             // PDF Spec: tx = ((w0 * Tfs) + Tc + Tw) * Th
             // Priority:
@@ -1433,8 +1363,7 @@ impl TextRasterizer {
                     };
                     let px = (x_cursor + x_offset + paint_origin_dx) * h_scale + rise_x;
                     let py = y_cursor + y_offset + paint_origin_dy + rise_y;
-                    let glyph_transform =
-                        combined_base.pre_translate(px, py).pre_scale(scale, scale);
+                    let glyph_transform = combined_base.pre_translate(px, py).pre_scale(scale, scale);
 
                     guarded_fill_path(
                         pixmap,
@@ -1480,17 +1409,13 @@ impl TextRasterizer {
                 // Try to find character in fallback CJK fonts.
                 // get_cjk_fallback_cached() hits a process-wide OnceLock after the
                 // first call — no fontdb queries or font clones on subsequent glyphs. ~keep
-                if let Some((cjk_id, cjk_arc, cjk_index)) = get_cjk_fallback_cached(self.font_db())
-                {
+                if let Some((cjk_id, cjk_arc, cjk_index)) = get_cjk_fallback_cached(self.font_db()) {
                     if let Some(cjk_cached) = cached_face(cjk_id, cjk_arc, cjk_index) {
                         let cjk_face = cjk_cached.outline_face();
                         if let Some(cjk_glyph_id) = cjk_face.glyph_index(char_at_pos) {
                             let mut cjk_pb = PathBuilder::new();
                             let mut cjk_builder = SkiaOutlineBuilder(&mut cjk_pb);
-                            if cjk_face
-                                .outline_glyph(cjk_glyph_id, &mut cjk_builder)
-                                .is_some()
-                            {
+                            if cjk_face.outline_glyph(cjk_glyph_id, &mut cjk_builder).is_some() {
                                 if let Some(cjk_path) = cjk_pb.finish() {
                                     let cjk_scale = font_size / cjk_cached.units_per_em;
                                     let (rise_x, rise_y) = if wmode == 0 {
@@ -1498,12 +1423,10 @@ impl TextRasterizer {
                                     } else {
                                         (gs.text_rise, 0.0)
                                     };
-                                    let px =
-                                        (x_cursor + x_offset + paint_origin_dx) * h_scale + rise_x;
+                                    let px = (x_cursor + x_offset + paint_origin_dx) * h_scale + rise_x;
                                     let py = y_cursor + y_offset + paint_origin_dy + rise_y;
-                                    let cjk_transform = combined_base
-                                        .pre_translate(px, py)
-                                        .pre_scale(cjk_scale, -cjk_scale);
+                                    let cjk_transform =
+                                        combined_base.pre_translate(px, py).pre_scale(cjk_scale, -cjk_scale);
                                     guarded_fill_path(
                                         pixmap,
                                         &cjk_path,
@@ -1515,8 +1438,7 @@ impl TextRasterizer {
                                     has_outline = true;
 
                                     if let Some(adv) = cjk_face.glyph_hor_advance(cjk_glyph_id) {
-                                        x_advance_override =
-                                            Some(adv / cjk_cached.units_per_em * font_size);
+                                        x_advance_override = Some(adv / cjk_cached.units_per_em * font_size);
                                     }
                                 }
                             }
@@ -1556,9 +1478,7 @@ impl TextRasterizer {
 
         self.report_drops(
             &unicode_dropped,
-            font_info
-                .map(|f| f.base_font.as_str())
-                .unwrap_or("<system fallback>"),
+            font_info.map(|f| f.base_font.as_str()).unwrap_or("<system fallback>"),
         );
 
         // Return the magnitude of the accumulated advance along the active
@@ -1629,9 +1549,7 @@ impl TextRasterizer {
             let gid = if font_info.subtype == "Type0" {
                 match &font_info.cid_to_gid_map {
                     Some(crate::fonts::CIDToGIDMap::Identity) => char_code,
-                    Some(crate::fonts::CIDToGIDMap::Explicit(map)) => {
-                        *map.get(char_code as usize).unwrap_or(&0)
-                    },
+                    Some(crate::fonts::CIDToGIDMap::Explicit(map)) => *map.get(char_code as usize).unwrap_or(&0),
                     None => char_code,
                 }
             } else if let Some(cff_map) = &font_info.cff_gid_map {
@@ -1641,9 +1559,7 @@ impl TextRasterizer {
             } else {
                 match &font_info.cid_to_gid_map {
                     Some(crate::fonts::CIDToGIDMap::Identity) => char_code,
-                    Some(crate::fonts::CIDToGIDMap::Explicit(map)) => {
-                        *map.get(char_code as usize).unwrap_or(&0)
-                    },
+                    Some(crate::fonts::CIDToGIDMap::Explicit(map)) => *map.get(char_code as usize).unwrap_or(&0),
                     None => char_code,
                 }
             };
@@ -1683,9 +1599,7 @@ impl TextRasterizer {
                     let mut builder = SkiaOutlineBuilder(&mut pb);
                     // Outlined once: `outline_glyph` appends to the builder,
                     // so calling it twice would draw the glyph twice. ~keep
-                    let outlined = ttf_face
-                        .outline_glyph(GlyphId::from(gid), &mut builder)
-                        .is_some();
+                    let outlined = ttf_face.outline_glyph(GlyphId::from(gid), &mut builder).is_some();
                     if !outlined {
                         dropped.record("no outline", u32::from(char_code), gid);
                     }
@@ -1698,8 +1612,7 @@ impl TextRasterizer {
                             };
                             let px = (x_cursor + paint_origin_dx) * h_scale + rise_x;
                             let py = y_cursor + paint_origin_dy + rise_y;
-                            let glyph_transform =
-                                combined_base.pre_translate(px, py).pre_scale(scale, scale);
+                            let glyph_transform = combined_base.pre_translate(px, py).pre_scale(scale, scale);
                             guarded_fill_path(
                                 pixmap,
                                 &path,
@@ -1782,7 +1695,7 @@ impl TextRasterizer {
                     font_info.base_font
                 );
                 return self.measure_only_advance(bytes, font_info, gs);
-            },
+            }
         };
         let ttf_face = face.outline_face();
         let font_size = gs.font_size;
@@ -1870,10 +1783,7 @@ impl TextRasterizer {
             if gid != 0 && !is_whitespace {
                 let mut pb = PathBuilder::new();
                 let mut builder = SkiaOutlineBuilder(&mut pb);
-                if ttf_face
-                    .outline_glyph(GlyphId::from(gid), &mut builder)
-                    .is_some()
-                {
+                if ttf_face.outline_glyph(GlyphId::from(gid), &mut builder).is_some() {
                     if let Some(path) = pb.finish() {
                         let (rise_x, rise_y) = if wmode == 0 {
                             (0.0, gs.text_rise)
@@ -1882,8 +1792,7 @@ impl TextRasterizer {
                         };
                         let px = (x_cursor + paint_origin_dx) * h_scale + rise_x;
                         let py = y_cursor + paint_origin_dy + rise_y;
-                        let glyph_transform =
-                            combined_base.pre_translate(px, py).pre_scale(scale, scale);
+                        let glyph_transform = combined_base.pre_translate(px, py).pre_scale(scale, scale);
                         guarded_fill_path(
                             pixmap,
                             &path,
@@ -1934,11 +1843,7 @@ impl TextRasterizer {
         // returned text-space advance applies it here — matching
         // `measure_text_bytes`, which this function falls back to when the
         // bundled face is unavailable. ~keep
-        Ok(if wmode == 0 {
-            x_cursor * h_scale
-        } else {
-            y_cursor
-        })
+        Ok(if wmode == 0 { x_cursor * h_scale } else { y_cursor })
     }
 
     /// Advance-only fallback used when CJK substitution is requested but the
@@ -1985,22 +1890,12 @@ impl TextRasterizer {
         for c in text.chars() {
             if !c.is_whitespace() {
                 let mut pb = PathBuilder::new();
-                if let Some(rect) = tiny_skia::Rect::from_xywh(
-                    x_cursor * h_scale,
-                    0.0,
-                    char_width * 0.8,
-                    font_size * 0.8,
-                ) {
+                if let Some(rect) =
+                    tiny_skia::Rect::from_xywh(x_cursor * h_scale, 0.0, char_width * 0.8, font_size * 0.8)
+                {
                     pb.push_rect(rect);
                     if let Some(path) = pb.finish() {
-                        guarded_fill_path(
-                            pixmap,
-                            &path,
-                            paint,
-                            tiny_skia::FillRule::Winding,
-                            transform,
-                            clip_mask,
-                        );
+                        guarded_fill_path(pixmap, &path, paint, tiny_skia::FillRule::Winding, transform, clip_mask);
                     }
                 }
             }
@@ -2040,11 +1935,7 @@ impl Default for TextRasterizer {
 /// When no font metrics are available we fall back to a half-em estimate per
 /// character — same constant `render_text_fallback` uses for the visible path,
 /// so the suppressed branch stays consistent with the painted branch.
-fn measure_text_bytes(
-    bytes: &[u8],
-    gs: &GraphicsState,
-    font_info: Option<&crate::fonts::FontInfo>,
-) -> f32 {
+fn measure_text_bytes(bytes: &[u8], gs: &GraphicsState, font_info: Option<&crate::fonts::FontInfo>) -> f32 {
     let font_size = gs.font_size;
     let h_scale = gs.horizontal_scaling / 100.0;
     let wmode = gs.text_wmode;
@@ -2125,10 +2016,11 @@ mod tests {
         tally.record("no outline", 0x41, 7);
         tally.record("no glyph id", 0x42, 0);
         tally.record("no outline", 0x43, 9);
-        let warning = tally
-            .warning("AAAAAA+Broken")
-            .expect("recorded drops must warn");
-        assert_eq!(warning.category, crate::extractors::warnings::WarningCategory::GlyphDropped);
+        let warning = tally.warning("AAAAAA+Broken").expect("recorded drops must warn");
+        assert_eq!(
+            warning.category,
+            crate::extractors::warnings::WarningCategory::GlyphDropped
+        );
         assert!(warning.message.contains("AAAAAA+Broken"));
         assert!(warning.message.contains("3 glyph(s)"));
         assert!(warning.message.contains("0x41"));
@@ -2174,21 +2066,15 @@ mod tests {
     #[test]
     fn bundled_cjk_fallback_covers_cjk_without_system_fonts() {
         let mut db = fontdb::Database::new();
-        db.load_font_data(
-            crate::fonts::form_fallback::font_bytes(crate::fonts::form_fallback::Fallback::Cjk)
-                .to_vec(),
-        );
-        let id = query_droid_fallback(&db)
-            .expect("bundled Droid Sans Fallback must be queryable by family name");
+        db.load_font_data(crate::fonts::form_fallback::font_bytes(crate::fonts::form_fallback::Fallback::Cjk).to_vec());
+        let id = query_droid_fallback(&db).expect("bundled Droid Sans Fallback must be queryable by family name");
 
         // Representative Japanese kanji / Chinese hanzi / Korean hangul from
         // the Adobe-Japan1 / Adobe-GB1 / Adobe-Korea1 collections. ~keep
         let covered = db
             .with_face_data(id, |data, index| {
                 let face = OutlineFace::new(data, index).expect("parse bundled face");
-                ['東', '中', '가']
-                    .iter()
-                    .all(|&c| face.glyph_index(c).is_some())
+                ['東', '中', '가'].iter().all(|&c| face.glyph_index(c).is_some())
             })
             .expect("bundled face data must be present");
         assert!(covered, "bundled CJK fallback must cover representative CJK glyphs");
@@ -2450,8 +2336,7 @@ mod tests {
     fn substituted_cjk_advance_applies_horizontal_scaling() {
         let mut font = make_vertical_test_font();
         font.wmode = 0;
-        font.cjk_substitution =
-            Some(crate::fonts::predefined_cidfont::CharacterCollection::AdobeJapan1);
+        font.cjk_substitution = Some(crate::fonts::predefined_cidfont::CharacterCollection::AdobeJapan1);
 
         let rasterizer = TextRasterizer::with_fontdb(std::sync::Arc::new(fontdb::Database::new()));
         let mut pixmap = Pixmap::new(16, 16).expect("pixmap");

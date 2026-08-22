@@ -44,8 +44,8 @@ use xberg_native_pdf::converters::text_post_processor::TextPostProcessor;
 use xberg_native_pdf::encryption::PdfPermissions;
 use xberg_native_pdf::extractors::warnings::{Warning, WarningCategory, WarningSink};
 use xberg_native_pdf::pipeline::reading_order::{
-    DetectorGlyph, ReadingOrderClass, classify_region, detect_dense_single_line,
-    detect_dramatic_script, detect_narrow_tracked, detect_sub_super_glyphs,
+    DetectorGlyph, ReadingOrderClass, classify_region, detect_dense_single_line, detect_dramatic_script,
+    detect_narrow_tracked, detect_sub_super_glyphs,
 };
 
 /// Serialises tests that touch global state (`set_max_ops_per_stream`,
@@ -64,7 +64,11 @@ fn max_ops_per_stream_setter_round_trips() {
     let _guard = GLOBAL_FLAG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let prev = xberg_native_pdf::content::parser::set_max_ops_per_stream(Some(2_000_000));
     let returned = xberg_native_pdf::content::parser::set_max_ops_per_stream(None);
-    assert_eq!(returned, Some(2_000_000), "round-trip: setter returns the override we set",);
+    assert_eq!(
+        returned,
+        Some(2_000_000),
+        "round-trip: setter returns the override we set",
+    );
     xberg_native_pdf::content::parser::set_max_ops_per_stream(prev);
 }
 
@@ -225,8 +229,14 @@ fn structured_warnings_accessors_present() {
 /// tracked as follow-up work.
 #[test]
 fn ligature_repair_handles_three_token_split() {
-    assert_eq!(TextPostProcessor::repair_ligature_intra_space("di ff er today"), "differ today",);
-    assert_eq!(TextPostProcessor::repair_ligature_intra_space("the a ff ects"), "the affects",);
+    assert_eq!(
+        TextPostProcessor::repair_ligature_intra_space("di ff er today"),
+        "differ today",
+    );
+    assert_eq!(
+        TextPostProcessor::repair_ligature_intra_space("the a ff ects"),
+        "the affects",
+    );
     assert_eq!(TextPostProcessor::repair_ligature_intra_space("re fl ects"), "reflects",);
 }
 
@@ -318,7 +328,10 @@ fn run_boundary_repair_skips_code_camelcase() {
 fn monospace_code_punctuation_spacing_repaired() {
     let actual = "function add (a , b ) {\n  return a + b ;\n}";
     let expected = "function add(a, b) {\n  return a + b;\n}";
-    assert_eq!(TextPostProcessor::repair_monospace_punctuation_spacing(actual), expected,);
+    assert_eq!(
+        TextPostProcessor::repair_monospace_punctuation_spacing(actual),
+        expected,
+    );
 }
 
 #[test]
@@ -448,7 +461,10 @@ fn sub_super_detector_fires_on_baseline_offset() {
         },
     ];
     assert!(detect_sub_super_glyphs(&glyphs));
-    assert_eq!(classify_region(&glyphs, &[], &[]), ReadingOrderClass::SubSuperBaselineReattach,);
+    assert_eq!(
+        classify_region(&glyphs, &[], &[]),
+        ReadingOrderClass::SubSuperBaselineReattach,
+    );
 }
 
 /// NarrowTrackedJustified detector fires on stretched
@@ -469,7 +485,10 @@ fn narrow_tracked_detector_fires_on_stretched_spacing() {
         });
     }
     assert!(detect_narrow_tracked(&glyphs));
-    assert_eq!(classify_region(&glyphs, &[], &[]), ReadingOrderClass::NarrowTrackedJustified,);
+    assert_eq!(
+        classify_region(&glyphs, &[], &[]),
+        ReadingOrderClass::NarrowTrackedJustified,
+    );
 }
 
 /// DramaticScript detector fires on Macbeth-style speaker-
@@ -518,7 +537,10 @@ fn dramatic_script_detector_fires_on_speaker_tags() {
     // full-page glyph list and the per-row first-glyph list since
     // the synthetic shape has exactly one glyph per row. ~keep
     assert!(detect_dramatic_script(&glyphs, &rows));
-    assert_eq!(classify_region(&glyphs, &glyphs, &rows), ReadingOrderClass::DramaticScript);
+    assert_eq!(
+        classify_region(&glyphs, &glyphs, &rows),
+        ReadingOrderClass::DramaticScript
+    );
 }
 
 /// Uniform body text (the default case) classifies as
@@ -566,7 +588,10 @@ fn tj_heavy_extraction_profile_available() {
 
     // The CONSERVATIVE (default) profile stays at -120 for back-compat. ~keep
     let conservative = ExtractionProfile::CONSERVATIVE;
-    assert_eq!(conservative.tj_offset_threshold, -120.0, "conservative default preserved",);
+    assert_eq!(
+        conservative.tj_offset_threshold, -120.0,
+        "conservative default preserved",
+    );
 }
 
 /// Adobe-Arabic-1 / Adobe-Persian-1 stub lookup. The
@@ -597,7 +622,10 @@ fn descendant_fonts_inline_dict_accepted() {
         source.contains("Inline-dict path") || source.contains("inline the CIDFont dict"),
         "DescendantFonts parse must explicitly handle the inline-dict case",
     );
-    assert!(source.contains("DescendantFonts"), "DescendantFonts parse path must be present",);
+    assert!(
+        source.contains("DescendantFonts"),
+        "DescendantFonts parse path must be present",
+    );
 }
 
 /// Global warning sink wired into five
@@ -644,8 +672,7 @@ fn global_warning_sink_wired_into_log_warn_sites() {
 #[test]
 fn global_warning_sink_drain_round_trips() {
     use xberg_native_pdf::extractors::warnings::{
-        Warning, WarningCategory, drain_global_warnings, push_global_warning,
-        snapshot_global_warnings,
+        Warning, WarningCategory, drain_global_warnings, push_global_warning, snapshot_global_warnings,
     };
     let _ = drain_global_warnings();
     push_global_warning(Warning {
@@ -734,7 +761,10 @@ fn max_ops_setter_affects_parse_runtime() {
     xberg_native_pdf::content::parser::set_max_ops_per_stream(original);
     let doc2 = xberg_native_pdf::document::PdfDocument::open(path).expect("re-open simple.pdf");
     let text = doc2.extract_text(0).expect("normal extract_text");
-    assert!(!text.trim().is_empty(), "fixture must have extractable text under default cap",);
+    assert!(
+        !text.trim().is_empty(),
+        "fixture must have extractable text under default cap",
+    );
 }
 
 /// `permissions()` returns None for unencrypted
@@ -840,9 +870,7 @@ fn structured_warnings_round_trip_on_real_document() {
         spec_section: Some("7.3.8.1"),
     });
     assert!(
-        doc.structured_warnings()
-            .iter()
-            .any(|w| w.message == SENTINEL),
+        doc.structured_warnings().iter().any(|w| w.message == SENTINEL),
         "pushed warning must be surfaced by structured_warnings()",
     );
     let drained = doc.take_structured_warnings();
@@ -851,9 +879,7 @@ fn structured_warnings_round_trip_on_real_document() {
         "take_structured_warnings must return the pushed warning",
     );
     assert!(
-        !doc.structured_warnings()
-            .iter()
-            .any(|w| w.message == SENTINEL),
+        !doc.structured_warnings().iter().any(|w| w.message == SENTINEL),
         "take must remove the pushed warning from the sink",
     );
 }
@@ -926,8 +952,7 @@ fn build_synthetic_pdf_with_text(text: &str) -> Vec<u8> {
 #[test]
 fn synthetic_pdf_with_text_has_text_layer() {
     let bytes = build_synthetic_pdf_with_text("Hello v0356");
-    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes)
-        .expect("synthetic PDF must parse");
+    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes).expect("synthetic PDF must parse");
     let has = doc.has_text_layer(0).expect("has_text_layer call");
     assert!(has, "synthetic PDF with Tj content must report has_text_layer=true");
 }
@@ -938,8 +963,7 @@ fn synthetic_pdf_with_text_has_text_layer() {
 #[test]
 fn synthetic_pdf_assemble_via_reading_order() {
     let bytes = build_synthetic_pdf_with_text("Hello v0356");
-    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes)
-        .expect("synthetic PDF must parse");
+    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes).expect("synthetic PDF must parse");
     let (spans, class) = doc
         .assemble_text_via_reading_order(0)
         .expect("assemble_text_via_reading_order");
@@ -955,8 +979,7 @@ fn synthetic_pdf_extract_text_does_not_panic_with_flag_toggle() {
     let _guard = GLOBAL_FLAG_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     use xberg_native_pdf::extractors::text::set_preserve_unmapped_glyphs;
     let bytes = build_synthetic_pdf_with_text("ASCII text");
-    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes)
-        .expect("synthetic PDF must parse");
+    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes).expect("synthetic PDF must parse");
 
     let prev = set_preserve_unmapped_glyphs(false);
     let text_filtered = doc.extract_text(0).expect("filtered extract_text");
@@ -976,13 +999,11 @@ fn synthetic_pdf_max_ops_setter_affects_extraction() {
     let bytes = build_synthetic_pdf_with_text("Hello v0356 synthetic test");
 
     let original = xberg_native_pdf::content::parser::set_max_ops_per_stream(Some(1));
-    let doc_capped =
-        xberg_native_pdf::document::PdfDocument::from_bytes(bytes.clone()).expect("parse capped");
+    let doc_capped = xberg_native_pdf::document::PdfDocument::from_bytes(bytes.clone()).expect("parse capped");
     let _ = doc_capped.extract_text(0);
 
     xberg_native_pdf::content::parser::set_max_ops_per_stream(None);
-    let doc_default =
-        xberg_native_pdf::document::PdfDocument::from_bytes(bytes).expect("parse default");
+    let doc_default = xberg_native_pdf::document::PdfDocument::from_bytes(bytes).expect("parse default");
     let text_default = doc_default.extract_text(0).expect("default extract");
     assert!(
         !text_default.trim().is_empty(),
@@ -1070,19 +1091,15 @@ fn span_bbox_x_matches_first_char_after_tj_word_boundary() {
     // "Polish Academy". The fix keeps them as separate spans. ~keep
     let content = "BT /F1 12 Tf 100 700 Td [(Polish)-2000(Academy)] TJ ET";
     let bytes = build_pdf_with_tj_gap(content);
-    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes)
-        .expect("synthetic PDF must parse");
+    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes).expect("synthetic PDF must parse");
     let spans = doc.extract_spans(0).expect("extract_spans");
 
-    let academy = spans
-        .iter()
-        .find(|s| s.text == "Academy")
-        .unwrap_or_else(|| {
-            panic!(
-                "expected a separate 'Academy' span; spans were {:?}",
-                spans.iter().map(|s| &s.text).collect::<Vec<_>>()
-            )
-        });
+    let academy = spans.iter().find(|s| s.text == "Academy").unwrap_or_else(|| {
+        panic!(
+            "expected a separate 'Academy' span; spans were {:?}",
+            spans.iter().map(|s| &s.text).collect::<Vec<_>>()
+        )
+    });
 
     // Helvetica 'P','o','l','i','s','h' widths (per the Standard 14
     // AFM metrics) sum to 667+556+222+222+500+556 = 2723/1000 em →
@@ -1179,8 +1196,7 @@ fn superscript_digit_run_substitutes_unicode_codepoint() {
         /F1 12 Tf 1 0 0 1 113 700 Tm (X) Tj\n\
         ET";
     let bytes = build_pdf_with_tj_gap(content);
-    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes)
-        .expect("synthetic PDF must parse");
+    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes).expect("synthetic PDF must parse");
     let text = doc.extract_text(0).expect("extract_text");
 
     assert!(
@@ -1209,8 +1225,7 @@ fn spacing_acute_folds_into_following_base_letter() {
         /F1 12 Tf 1 0 0 1 100 700 Tm (Ecole) Tj\n\
         ET";
     let bytes = build_pdf_with_tj_gap(content);
-    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes)
-        .expect("synthetic PDF must parse");
+    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes).expect("synthetic PDF must parse");
     let text = doc.extract_text(0).expect("extract_text");
 
     assert!(
@@ -1242,8 +1257,7 @@ fn subscript_digit_run_substitutes_unicode_codepoint() {
         /F1 12 Tf 1 0 0 1 114 700 Tm (O) Tj\n\
         ET";
     let bytes = build_pdf_with_tj_gap(content);
-    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes)
-        .expect("synthetic PDF must parse");
+    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes).expect("synthetic PDF must parse");
     let text = doc.extract_text(0).expect("extract_text");
 
     assert!(
@@ -1277,13 +1291,8 @@ fn font_transition_with_small_positive_gap_inserts_space() {
         /F2 10.9 Tf 1 0 0 1 148.85 700 Tm (to) Tj\n\
         ET";
     let bytes = build_pdf_two_fonts(content);
-    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes)
-        .expect("synthetic PDF must parse");
-    let text = doc
-        .extract_text(0)
-        .expect("extract_text")
-        .trim()
-        .to_string();
+    let doc = xberg_native_pdf::document::PdfDocument::from_bytes(bytes).expect("synthetic PDF must parse");
+    let text = doc.extract_text(0).expect("extract_text").trim().to_string();
 
     // Should contain "submitted to" with a single space between the
     // two cross-font tokens. Without the font-transition arm the

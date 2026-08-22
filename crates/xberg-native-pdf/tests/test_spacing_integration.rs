@@ -20,14 +20,7 @@ use xberg_native_pdf::geometry::Rect;
 use xberg_native_pdf::layout::{Color, FontWeight, TextSpan};
 
 /// Create a test text span with spacing information
-fn create_test_span(
-    text: &str,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    _tj_space_signal: bool,
-) -> TextSpan {
+fn create_test_span(text: &str, x: f32, y: f32, width: f32, height: f32, _tj_space_signal: bool) -> TextSpan {
     TextSpan {
         provenance: None,
         artifact_type: None,
@@ -109,15 +102,15 @@ fn test_justified_text_variable_tj_offsets_no_false_spaces() {
     // Calculate coefficient of variation (measures distribution variance)
     // High CV > 0.5 indicates justified text with variable spacing ~keep
     let mean = tj_distribution.iter().sum::<f32>() / tj_distribution.len() as f32;
-    let variance = tj_distribution
-        .iter()
-        .map(|x| (x - mean).powi(2))
-        .sum::<f32>()
-        / tj_distribution.len() as f32;
+    let variance = tj_distribution.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / tj_distribution.len() as f32;
     let std_dev = variance.sqrt();
     let cv = std_dev.abs() / mean.abs();
 
-    assert!(cv > 0.5, "Justified text distribution should have high CV (got {:.4})", cv);
+    assert!(
+        cv > 0.5,
+        "Justified text distribution should have high CV (got {:.4})",
+        cv
+    );
 
     // Conservative threshold for justified text (3× std_dev)
     // This filters less aggressively to avoid false space insertion ~keep
@@ -170,8 +163,7 @@ fn test_multicolumn_line_break_spacing_with_hyphen() {
     let line1_bottom = line1_end.bbox.y + line1_end.bbox.height;
     let line2_top = line2_start.bbox.y;
     let vertical_gap = (line1_bottom - line2_top).abs();
-    let same_column =
-        (line1_end.bbox.left() - line2_start.bbox.left()).abs() < (line1_end.font_size * 2.0);
+    let same_column = (line1_end.bbox.left() - line2_start.bbox.left()).abs() < (line1_end.font_size * 2.0);
 
     // Should detect as line break (vertical gap > 0.5× font_size = 6.0 points) ~keep
     assert!(
@@ -198,9 +190,8 @@ fn test_multicolumn_line_break_spacing_with_hyphen() {
     // IF vertical_gap > 0.5×font_size AND same_column AND prev_text.ends_with('-')
     //   THEN no space (soft hyphen)
     // ELSE space (hard line break) ~keep
-    let should_insert_space = !(vertical_gap > (line1_end.font_size * 0.5)
-        && same_column
-        && line1_end.text.ends_with('-'));
+    let should_insert_space =
+        !(vertical_gap > (line1_end.font_size * 0.5) && same_column && line1_end.text.ends_with('-'));
 
     assert!(!should_insert_space, "Should NOT insert space at hyphenated line break");
 }
@@ -223,8 +214,7 @@ fn test_multicolumn_line_break_spacing_hard_break() {
     let line1_bottom = line1_end.bbox.y + line1_end.bbox.height;
     let line2_top = line2_start.bbox.y;
     let vertical_gap = (line1_bottom - line2_top).abs();
-    let same_column =
-        (line1_end.bbox.left() - line2_start.bbox.left()).abs() < (line1_end.font_size * 2.0);
+    let same_column = (line1_end.bbox.left() - line2_start.bbox.left()).abs() < (line1_end.font_size * 2.0);
 
     // Should detect as line break (vertical gap > 6.0 points) ~keep
     assert!(vertical_gap > (line1_end.font_size * 0.5));
@@ -236,11 +226,13 @@ fn test_multicolumn_line_break_spacing_hard_break() {
         "First line should not end with hyphen for hard line break"
     );
 
-    let should_insert_space = !(vertical_gap > (line1_end.font_size * 0.5)
-        && same_column
-        && line1_end.text.ends_with('-'));
+    let should_insert_space =
+        !(vertical_gap > (line1_end.font_size * 0.5) && same_column && line1_end.text.ends_with('-'));
 
-    assert!(should_insert_space, "Should insert space at hard line break (non-hyphenated)");
+    assert!(
+        should_insert_space,
+        "Should insert space at hard line break (non-hyphenated)"
+    );
 }
 
 // ============================================================================
@@ -378,7 +370,10 @@ fn test_spec_compliance_only_pdf_defined_signals() {
     let span = create_test_span("test", 0.0, 0.0, 5.0, 12.0, false);
 
     assert!(!span.text.is_empty(), "Text content (spec field)");
-    assert!(span.bbox.width > 0.0 && span.bbox.height > 0.0, "Bbox has valid dimensions");
+    assert!(
+        span.bbox.width > 0.0 && span.bbox.height > 0.0,
+        "Bbox has valid dimensions"
+    );
     assert!(!span.font_name.is_empty(), "Font name (spec field)");
     assert!(span.font_size > 0.0, "Font size (spec field)");
     assert_eq!(span.char_spacing, 0.0, "Char spacing Tc (spec field)");

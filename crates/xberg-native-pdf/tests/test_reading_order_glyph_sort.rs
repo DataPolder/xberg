@@ -63,7 +63,11 @@ fn helper_pdf(content: &str) -> Vec<u8> {
         &mut offsets,
         &format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len() + 1),
     );
-    push(&mut out, &mut offsets, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
 
     let xref_offset = out.len();
     out.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());

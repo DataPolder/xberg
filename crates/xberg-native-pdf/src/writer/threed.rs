@@ -238,9 +238,7 @@ pub struct ThreeDBackground {
 
 impl Default for ThreeDBackground {
     fn default() -> Self {
-        Self {
-            color: (1.0, 1.0, 1.0),
-        }
+        Self { color: (1.0, 1.0, 1.0) }
     }
 }
 
@@ -259,9 +257,7 @@ impl ThreeDBackground {
 
     /// Create a black background.
     pub fn black() -> Self {
-        Self {
-            color: (0.0, 0.0, 0.0),
-        }
+        Self { color: (0.0, 0.0, 0.0) }
     }
 
     /// Create a gray background.
@@ -463,9 +459,7 @@ impl ThreeDView {
     pub fn default_view() -> Self {
         Self {
             name: Some("Default".to_string()),
-            camera: ThreeDCamera::default()
-                .with_azimuth(45.0)
-                .with_elevation(30.0),
+            camera: ThreeDCamera::default().with_azimuth(45.0).with_elevation(30.0),
             projection: ThreeDProjection::Perspective,
             render_mode: ThreeDRenderMode::Solid,
             lighting: ThreeDLighting::White,
@@ -477,9 +471,7 @@ impl ThreeDView {
     pub fn front() -> Self {
         Self {
             name: Some("Front".to_string()),
-            camera: ThreeDCamera::default()
-                .with_azimuth(0.0)
-                .with_elevation(0.0),
+            camera: ThreeDCamera::default().with_azimuth(0.0).with_elevation(0.0),
             ..Default::default()
         }
     }
@@ -488,9 +480,7 @@ impl ThreeDView {
     pub fn top() -> Self {
         Self {
             name: Some("Top".to_string()),
-            camera: ThreeDCamera::default()
-                .with_azimuth(0.0)
-                .with_elevation(90.0),
+            camera: ThreeDCamera::default().with_azimuth(0.0).with_elevation(90.0),
             ..Default::default()
         }
     }
@@ -499,9 +489,7 @@ impl ThreeDView {
     pub fn right() -> Self {
         Self {
             name: Some("Right".to_string()),
-            camera: ThreeDCamera::default()
-                .with_azimuth(90.0)
-                .with_elevation(0.0),
+            camera: ThreeDCamera::default().with_azimuth(90.0).with_elevation(0.0),
             ..Default::default()
         }
     }
@@ -578,7 +566,10 @@ impl ThreeDView {
 
         // P - projection dictionary ~keep
         let mut proj = HashMap::new();
-        proj.insert("Subtype".to_string(), Object::Name(self.projection.pdf_name().to_string()));
+        proj.insert(
+            "Subtype".to_string(),
+            Object::Name(self.projection.pdf_name().to_string()),
+        );
         if matches!(self.projection, ThreeDProjection::Perspective) {
             proj.insert("FOV".to_string(), Object::Real(self.camera.fov as f64));
         }
@@ -587,13 +578,19 @@ impl ThreeDView {
         // RM - render mode dictionary ~keep
         let mut rm = HashMap::new();
         rm.insert("Type".to_string(), Object::Name("3DRenderMode".to_string()));
-        rm.insert("Subtype".to_string(), Object::Name(self.render_mode.pdf_name().to_string()));
+        rm.insert(
+            "Subtype".to_string(),
+            Object::Name(self.render_mode.pdf_name().to_string()),
+        );
         dict.insert("RM".to_string(), Object::Dictionary(rm));
 
         // LS - lighting scheme dictionary ~keep
         let mut ls = HashMap::new();
         ls.insert("Type".to_string(), Object::Name("3DLightingScheme".to_string()));
-        ls.insert("Subtype".to_string(), Object::Name(self.lighting.pdf_name().to_string()));
+        ls.insert(
+            "Subtype".to_string(),
+            Object::Name(self.lighting.pdf_name().to_string()),
+        );
         dict.insert("LS".to_string(), Object::Dictionary(ls));
 
         // BG - background ~keep
@@ -1086,7 +1083,10 @@ mod tests {
 
         assert_eq!(annot.title, Some("3D Model".to_string()));
         assert_eq!(annot.default_view.camera.distance, 200.0);
-        assert!(matches!(annot.default_view.render_mode, ThreeDRenderMode::SolidWireframe));
+        assert!(matches!(
+            annot.default_view.render_mode,
+            ThreeDRenderMode::SolidWireframe
+        ));
         assert!(matches!(annot.activation, ThreeDActivation::Explicit));
         assert!(annot.toolbar);
         assert!(annot.nav_panel);

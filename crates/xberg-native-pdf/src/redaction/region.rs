@@ -201,9 +201,7 @@ impl RegionSet {
 
     /// Whether any region intersects `mark` (conservative padded test).
     pub fn any_intersects(&self, mark: &Rect, min_padding: f32) -> bool {
-        self.regions
-            .iter()
-            .any(|r| r.intersects_rect(mark, min_padding))
+        self.regions.iter().any(|r| r.intersects_rect(mark, min_padding))
     }
 }
 

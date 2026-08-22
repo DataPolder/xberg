@@ -217,8 +217,8 @@ impl EncryptionHandler {
                 let (iv, ciphertext) = data.split_at(16);
                 return super::aes::aes256_decrypt(&key[..32], iv, ciphertext)
                     .map_err(|e| Error::InvalidPdf(format!("AES-256 decryption failed: {}", e)));
-            },
-            _ => {},
+            }
+            _ => {}
         }
 
         // Per-object key derivation via MD5 — required for RC4 and AES-128 (R≤4). ~keep
@@ -240,7 +240,7 @@ impl EncryptionHandler {
                 let (iv, ciphertext) = data.split_at(16);
                 super::aes::aes128_decrypt(&obj_key[..16], iv, ciphertext)
                     .map_err(|e| Error::InvalidPdf(format!("AES-128 decryption failed: {}", e)))
-            },
+            }
             Algorithm::None | Algorithm::Aes256 => unreachable!("handled above"),
         }
     }

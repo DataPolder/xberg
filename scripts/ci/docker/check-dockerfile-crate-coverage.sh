@@ -21,7 +21,7 @@
 # It also checks the REVERSE direction, which the member-driven pass above is
 # structurally incapable of seeing: a COPY line naming a crate that no longer
 # exists. That happened to this very crate — `crates/ttf-parser-compat` was
-# deleted when pdf_oxide became a path dependency and all ten COPY lines were
+# deleted when the PDF engine became a path dependency and all ten COPY lines were
 # left behind, so every Docker publish job died on
 #   "/crates/ttf-parser-compat": not found
 # before compiling anything, while this script reported full coverage. Iterating

@@ -148,12 +148,7 @@ impl NonTextDetector {
     /// # Returns
     ///
     /// Statistics about the sequence and whether it's likely non-text content.
-    pub fn analyze_sequence(
-        &self,
-        text: &str,
-        confidences: &[CharacterConfidence],
-        font_name: &str,
-    ) -> NonTextStats {
+    pub fn analyze_sequence(&self, text: &str, confidences: &[CharacterConfidence], font_name: &str) -> NonTextStats {
         if text.len() < self.min_sequence_length {
             return NonTextStats::default();
         }
@@ -210,12 +205,11 @@ impl NonTextDetector {
             .iter()
             .enumerate()
             .map(|(idx, span)| {
-                let non_ascii_ratio = span.text.chars().filter(|c| !c.is_ascii()).count() as f32
-                    / span.text.len().max(1) as f32;
+                let non_ascii_ratio =
+                    span.text.chars().filter(|c| !c.is_ascii()).count() as f32 / span.text.len().max(1) as f32;
 
                 let non_ascii_drop = non_ascii_ratio > self.non_ascii_drop_threshold;
-                let suspicious_drop =
-                    self.drop_suspicious_unicode && has_suspicious_patterns(&span.text);
+                let suspicious_drop = self.drop_suspicious_unicode && has_suspicious_patterns(&span.text);
                 let is_likely_non_text = non_ascii_drop || suspicious_drop;
 
                 SpanClassification {
@@ -269,11 +263,7 @@ fn has_suspicious_patterns(text: &str) -> bool {
 ///
 /// Analyzes how many characters in a sequence have valid Unicode mappings
 /// versus how many are unmapped or garbled.
-pub fn compute_sequence_confidence(
-    text: &str,
-    mapped_count: usize,
-    font_name: &str,
-) -> CharacterConfidence {
+pub fn compute_sequence_confidence(text: &str, mapped_count: usize, font_name: &str) -> CharacterConfidence {
     if text.is_empty() {
         return CharacterConfidence::unmapped();
     }
@@ -432,8 +422,7 @@ mod tests {
         // "suspicious" Unicode blocks, so this isolates the non-ASCII gate. ~keep
         let cjk = span_with_text("日本語のテキスト処理");
         assert!(
-            NonTextDetector::default().mark_non_text_spans(std::slice::from_ref(&cjk))[0]
-                .is_non_text,
+            NonTextDetector::default().mark_non_text_spans(std::slice::from_ref(&cjk))[0].is_non_text,
             "default: CJK dropped by the non-ASCII ratio gate"
         );
         let na_off = NonTextDetector {

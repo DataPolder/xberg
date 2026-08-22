@@ -46,7 +46,14 @@ fn subscript_after_long_base_does_not_float() {
         put(&mut page, "the NH", 100.0, 200.0, "Helvetica", 12.0);
         put(&mut page, "3", 134.0, 197.0, "Helvetica", 8.0);
         put(&mut page, "inversion transitions", 142.0, 200.0, "Helvetica", 12.0);
-        put(&mut page, "second line of body text here", 100.0, 186.0, "Helvetica", 12.0);
+        put(
+            &mut page,
+            "second line of body text here",
+            100.0,
+            186.0,
+            "Helvetica",
+            12.0,
+        );
     });
 
     assert!(

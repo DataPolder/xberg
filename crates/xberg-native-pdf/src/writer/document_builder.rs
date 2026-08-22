@@ -508,9 +508,7 @@ impl<'a> FluentPageBuilder<'a> {
         let height = current.height;
 
         let annotations = std::mem::take(&mut self.pending_annotations);
-        self.builder.pages[self.page_index]
-            .annotations
-            .extend(annotations);
+        self.builder.pages[self.page_index].annotations.extend(annotations);
 
         self.page_index = self.builder.pages.len();
         self.builder.pages.push(PageData {
@@ -605,20 +603,17 @@ impl<'a> FluentPageBuilder<'a> {
     /// embedded fonts, the measure honours the face's horizontal advances
     /// (HMTX). For base-14 fonts, it uses the AFM width tables.
     pub fn measure(&self, text: &str) -> f32 {
-        self.text_layout.font_manager().text_width(
-            text,
-            &self.text_config.font,
-            self.text_config.size,
-        )
+        self.text_layout
+            .font_manager()
+            .text_width(text, &self.text_config.font, self.text_config.size)
     }
 
     /// Add text at the current cursor position.
     pub fn text(mut self, text: &str) -> Self {
-        let text_width = self.text_layout.font_manager().text_width(
-            text,
-            &self.text_config.font,
-            self.text_config.size,
-        );
+        let text_width =
+            self.text_layout
+                .font_manager()
+                .text_width(text, &self.text_config.font, self.text_config.size);
 
         let text_rect = Rect::new(self.cursor_x, self.cursor_y, text_width, self.text_config.size);
         self.last_text_rect = Some(text_rect);
@@ -662,12 +657,9 @@ impl<'a> FluentPageBuilder<'a> {
     /// consumes. It is also usable standalone for
     /// box-constrained captions, labels, and pull-quotes.
     pub fn text_in_rect(mut self, rect: Rect, text: &str, align: TextAlign) -> Self {
-        let lines = self.text_layout.wrap_text(
-            text,
-            &self.text_config.font,
-            self.text_config.size,
-            rect.width,
-        );
+        let lines = self
+            .text_layout
+            .wrap_text(text, &self.text_config.font, self.text_config.size, rect.width);
 
         let line_height = self.text_config.size * self.text_config.line_height;
         let mut line_top = rect.y;
@@ -772,17 +764,12 @@ impl<'a> FluentPageBuilder<'a> {
                 },
             };
             let marker_x = self.cursor_x + indent;
-            self = self
-                .at(marker_x, line_y)
-                .font(&font, size)
-                .text(&marker_str);
+            self = self.at(marker_x, line_y).font(&font, size).text(&marker_str);
             // Undo the cursor-y advance `.text()` applied so we can
             // place the wrapped content lines at the correct ys below. ~keep
             self.cursor_y += line_height;
 
-            let wrapped = self
-                .text_layout
-                .wrap_text(item_text, &font, size, content_w);
+            let wrapped = self.text_layout.wrap_text(item_text, &font, size, content_w);
             if wrapped.is_empty() {
                 self.cursor_y -= line_height;
                 continue;
@@ -842,12 +829,9 @@ impl<'a> FluentPageBuilder<'a> {
         let all_lines: Vec<(String, f32)> = source
             .split('\n')
             .flat_map(|ln| {
-                let wrapped = self.text_layout.wrap_text(
-                    ln,
-                    &self.text_config.font,
-                    self.text_config.size,
-                    inner_w,
-                );
+                let wrapped = self
+                    .text_layout
+                    .wrap_text(ln, &self.text_config.font, self.text_config.size, inner_w);
                 if wrapped.is_empty() {
                     vec![(String::new(), 0.0)]
                 } else {
@@ -881,12 +865,9 @@ impl<'a> FluentPageBuilder<'a> {
         let page = &mut self.builder.pages[self.page_index];
         let max_width = page.width - self.cursor_x - 72.0;
 
-        let lines = self.text_layout.wrap_text(
-            text,
-            &self.text_config.font,
-            self.text_config.size,
-            max_width,
-        );
+        let lines = self
+            .text_layout
+            .wrap_text(text, &self.text_config.font, self.text_config.size, max_width);
 
         let line_height = self.text_config.size * self.text_config.line_height;
         const BOTTOM_MARGIN: f32 = 72.0;
@@ -927,28 +908,23 @@ impl<'a> FluentPageBuilder<'a> {
     pub fn horizontal_rule(mut self) -> Self {
         let page = &mut self.builder.pages[self.page_index];
         let line_y = self.cursor_y + self.text_config.size * 0.5;
-        page.elements
-            .push(ContentElement::Path(crate::elements::PathContent {
-                operations: vec![
-                    crate::elements::PathOperation::MoveTo(self.cursor_x, line_y),
-                    crate::elements::PathOperation::LineTo(page.width - 72.0, line_y),
-                ],
-                bbox: Rect::new(self.cursor_x, line_y, page.width - 72.0 - self.cursor_x, 1.0),
-                stroke_color: Some(crate::layout::Color {
-                    r: 0.5,
-                    g: 0.5,
-                    b: 0.5,
-                }),
-                fill_color: None,
-                stroke_width: 0.5,
-                line_cap: crate::elements::LineCap::Butt,
-                line_join: crate::elements::LineJoin::Miter,
-                dash_pattern: None,
-                matrix: None,
-                reading_order: None,
-                artifact_type: None,
-                layer: None,
-            }));
+        page.elements.push(ContentElement::Path(crate::elements::PathContent {
+            operations: vec![
+                crate::elements::PathOperation::MoveTo(self.cursor_x, line_y),
+                crate::elements::PathOperation::LineTo(page.width - 72.0, line_y),
+            ],
+            bbox: Rect::new(self.cursor_x, line_y, page.width - 72.0 - self.cursor_x, 1.0),
+            stroke_color: Some(crate::layout::Color { r: 0.5, g: 0.5, b: 0.5 }),
+            fill_color: None,
+            stroke_width: 0.5,
+            line_cap: crate::elements::LineCap::Butt,
+            line_join: crate::elements::LineJoin::Miter,
+            dash_pattern: None,
+            matrix: None,
+            reading_order: None,
+            artifact_type: None,
+            layer: None,
+        }));
         self.cursor_y -= self.text_config.size;
         self
     }
@@ -989,10 +965,10 @@ impl<'a> FluentPageBuilder<'a> {
         let base_size = self.text_config.size;
         let ref_size = (base_size * 0.65).max(6.0);
 
-        let ref_w =
-            self.text_layout
-                .font_manager()
-                .text_width(ref_mark, &self.text_config.font, ref_size);
+        let ref_w = self
+            .text_layout
+            .font_manager()
+            .text_width(ref_mark, &self.text_config.font, ref_size);
 
         let page = &mut self.builder.pages[self.page_index];
         let reading_order = page.elements.len();
@@ -1091,11 +1067,10 @@ impl<'a> FluentPageBuilder<'a> {
             // below (unchanged) — spacing between runs is guaranteed here
             // instead of relying on the caller to pad it correctly. ~keep
             if run_idx > 0 && (self.cursor_x - left_margin).abs() > 0.01 {
-                let space_w = self.text_layout.font_manager().text_width(
-                    " ",
-                    &font_name,
-                    self.text_config.size,
-                );
+                let space_w = self
+                    .text_layout
+                    .font_manager()
+                    .text_width(" ", &font_name, self.text_config.size);
                 if self.cursor_x + space_w <= max_right {
                     self.cursor_x += space_w;
                 } else {
@@ -1116,42 +1091,31 @@ impl<'a> FluentPageBuilder<'a> {
                 } else {
                     format!("{} {}", buf, word)
                 };
-                let cw = self.text_layout.font_manager().text_width(
-                    &candidate,
-                    &font_name,
-                    self.text_config.size,
-                );
+                let cw = self
+                    .text_layout
+                    .font_manager()
+                    .text_width(&candidate, &font_name, self.text_config.size);
                 if self.cursor_x + cw > max_right && !buf.is_empty() {
                     let line_height = self.text_config.size * self.text_config.line_height;
                     if self.cursor_y - line_height < 72.0 {
                         self.new_page_same_size_inplace();
                     }
-                    let bw = self.text_layout.font_manager().text_width(
-                        &buf,
-                        &font_name,
-                        self.text_config.size,
-                    );
+                    let bw = self
+                        .text_layout
+                        .font_manager()
+                        .text_width(&buf, &font_name, self.text_config.size);
                     let reading_order = self.builder.pages[self.page_index].elements.len();
                     self.builder.pages[self.page_index]
                         .elements
                         .push(ContentElement::Text(TextContent {
                             text: buf.clone(),
-                            bbox: Rect::new(
-                                self.cursor_x,
-                                self.cursor_y,
-                                bw,
-                                self.text_config.size,
-                            ),
+                            bbox: Rect::new(self.cursor_x, self.cursor_y, bw, self.text_config.size),
                             font: crate::elements::FontSpec {
                                 name: font_name.clone(),
                                 size: self.text_config.size,
                             },
                             style: crate::elements::TextStyle {
-                                color: color.unwrap_or(crate::layout::Color {
-                                    r: 0.0,
-                                    g: 0.0,
-                                    b: 0.0,
-                                }),
+                                color: color.unwrap_or(crate::layout::Color { r: 0.0, g: 0.0, b: 0.0 }),
                                 ..Default::default()
                             },
                             reading_order: Some(reading_order),
@@ -1168,11 +1132,10 @@ impl<'a> FluentPageBuilder<'a> {
                 }
             }
             if !buf.is_empty() {
-                let bw = self.text_layout.font_manager().text_width(
-                    &buf,
-                    &font_name,
-                    self.text_config.size,
-                );
+                let bw = self
+                    .text_layout
+                    .font_manager()
+                    .text_width(&buf, &font_name, self.text_config.size);
                 let reading_order = self.builder.pages[self.page_index].elements.len();
                 self.builder.pages[self.page_index]
                     .elements
@@ -1184,11 +1147,7 @@ impl<'a> FluentPageBuilder<'a> {
                             size: self.text_config.size,
                         },
                         style: crate::elements::TextStyle {
-                            color: color.unwrap_or(crate::layout::Color {
-                                r: 0.0,
-                                g: 0.0,
-                                b: 0.0,
-                            }),
+                            color: color.unwrap_or(crate::layout::Color { r: 0.0, g: 0.0, b: 0.0 }),
                             ..Default::default()
                         },
                         reading_order: Some(reading_order),
@@ -1207,12 +1166,7 @@ impl<'a> FluentPageBuilder<'a> {
     }
 
     /// Internal: emit one inline text run advancing cursor_x only.
-    fn emit_inline_run(
-        &mut self,
-        text: &str,
-        font_override: Option<String>,
-        color: Option<crate::layout::Color>,
-    ) {
+    fn emit_inline_run(&mut self, text: &str, font_override: Option<String>, color: Option<crate::layout::Color>) {
         let font_name = font_override.unwrap_or_else(|| self.text_config.font.clone());
         let w = self
             .text_layout
@@ -1229,11 +1183,7 @@ impl<'a> FluentPageBuilder<'a> {
                     size: self.text_config.size,
                 },
                 style: crate::elements::TextStyle {
-                    color: color.unwrap_or(crate::layout::Color {
-                        r: 0.0,
-                        g: 0.0,
-                        b: 0.0,
-                    }),
+                    color: color.unwrap_or(crate::layout::Color { r: 0.0, g: 0.0, b: 0.0 }),
                     ..Default::default()
                 },
                 reading_order: Some(reading_order),
@@ -1243,8 +1193,7 @@ impl<'a> FluentPageBuilder<'a> {
                 matrix: self.current_matrix,
             }));
         self.cursor_x += w;
-        self.last_text_rect =
-            Some(Rect::new(self.cursor_x - w, self.cursor_y, w, self.text_config.size));
+        self.last_text_rect = Some(Rect::new(self.cursor_x - w, self.cursor_y, w, self.text_config.size));
     }
 
     /// Add a URL link annotation to the last text element.
@@ -1352,8 +1301,8 @@ impl<'a> FluentPageBuilder<'a> {
     /// ```
     pub fn highlight(mut self, color: (f32, f32, f32)) -> Self {
         if let Some(rect) = self.last_text_rect {
-            let markup = TextMarkupAnnotation::from_rect(TextMarkupType::Highlight, rect)
-                .with_color(color.0, color.1, color.2);
+            let markup =
+                TextMarkupAnnotation::from_rect(TextMarkupType::Highlight, rect).with_color(color.0, color.1, color.2);
             self.pending_annotations.push(markup.into());
         }
         self
@@ -1366,8 +1315,8 @@ impl<'a> FluentPageBuilder<'a> {
     /// * `color` - RGB color tuple (0.0-1.0 for each component)
     pub fn underline(mut self, color: (f32, f32, f32)) -> Self {
         if let Some(rect) = self.last_text_rect {
-            let markup = TextMarkupAnnotation::from_rect(TextMarkupType::Underline, rect)
-                .with_color(color.0, color.1, color.2);
+            let markup =
+                TextMarkupAnnotation::from_rect(TextMarkupType::Underline, rect).with_color(color.0, color.1, color.2);
             self.pending_annotations.push(markup.into());
         }
         self
@@ -1380,8 +1329,8 @@ impl<'a> FluentPageBuilder<'a> {
     /// * `color` - RGB color tuple (0.0-1.0 for each component)
     pub fn strikeout(mut self, color: (f32, f32, f32)) -> Self {
         if let Some(rect) = self.last_text_rect {
-            let markup = TextMarkupAnnotation::from_rect(TextMarkupType::StrikeOut, rect)
-                .with_color(color.0, color.1, color.2);
+            let markup =
+                TextMarkupAnnotation::from_rect(TextMarkupType::StrikeOut, rect).with_color(color.0, color.1, color.2);
             self.pending_annotations.push(markup.into());
         }
         self
@@ -1394,8 +1343,8 @@ impl<'a> FluentPageBuilder<'a> {
     /// * `color` - RGB color tuple (0.0-1.0 for each component)
     pub fn squiggly(mut self, color: (f32, f32, f32)) -> Self {
         if let Some(rect) = self.last_text_rect {
-            let markup = TextMarkupAnnotation::from_rect(TextMarkupType::Squiggly, rect)
-                .with_color(color.0, color.1, color.2);
+            let markup =
+                TextMarkupAnnotation::from_rect(TextMarkupType::Squiggly, rect).with_color(color.0, color.1, color.2);
             self.pending_annotations.push(markup.into());
         }
         self
@@ -1525,8 +1474,7 @@ impl<'a> FluentPageBuilder<'a> {
     /// ```
     pub fn watermark(mut self, text: &str) -> Self {
         let page = &self.builder.pages[self.page_index];
-        let rect =
-            Rect::new(page.width * 0.1, page.height * 0.3, page.width * 0.8, page.height * 0.4);
+        let rect = Rect::new(page.width * 0.1, page.height * 0.3, page.width * 0.8, page.height * 0.4);
         let watermark = WatermarkAnnotation::new(text)
             .with_rect(rect)
             .with_rotation(45.0)
@@ -1539,8 +1487,7 @@ impl<'a> FluentPageBuilder<'a> {
     /// Add a "CONFIDENTIAL" watermark with preset styling.
     pub fn watermark_confidential(mut self) -> Self {
         let page = &self.builder.pages[self.page_index];
-        let rect =
-            Rect::new(page.width * 0.1, page.height * 0.3, page.width * 0.8, page.height * 0.4);
+        let rect = Rect::new(page.width * 0.1, page.height * 0.3, page.width * 0.8, page.height * 0.4);
         let watermark = WatermarkAnnotation::confidential().with_rect(rect);
         self.pending_annotations.push(watermark.into());
         self
@@ -1549,8 +1496,7 @@ impl<'a> FluentPageBuilder<'a> {
     /// Add a "DRAFT" watermark with preset styling.
     pub fn watermark_draft(mut self) -> Self {
         let page = &self.builder.pages[self.page_index];
-        let rect =
-            Rect::new(page.width * 0.1, page.height * 0.3, page.width * 0.8, page.height * 0.4);
+        let rect = Rect::new(page.width * 0.1, page.height * 0.3, page.width * 0.8, page.height * 0.4);
         let watermark = WatermarkAnnotation::draft().with_rect(rect);
         self.pending_annotations.push(watermark.into());
         self
@@ -1611,15 +1557,7 @@ impl<'a> FluentPageBuilder<'a> {
 
     /// Add a checkbox form field to the page. `checked` sets whether
     /// the box is initially ticked.
-    pub fn checkbox(
-        self,
-        name: impl Into<String>,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        checked: bool,
-    ) -> Self {
+    pub fn checkbox(self, name: impl Into<String>, x: f32, y: f32, w: f32, h: f32, checked: bool) -> Self {
         let page = &mut self.builder.pages[self.page_index];
         page.form_fields.push(PendingFormField::Checkbox {
             name: name.into(),
@@ -1879,7 +1817,7 @@ impl<'a> FluentPageBuilder<'a> {
             match &mut elem {
                 ContentElement::Text(t) => t.reading_order = Some(base_order + i),
                 ContentElement::Path(p) => p.reading_order = Some(base_order + i),
-                _ => {},
+                _ => {}
             }
             page.elements.push(elem);
         }
@@ -2021,8 +1959,7 @@ impl<'a> FluentPageBuilder<'a> {
     /// method if you need letterboxing.
     pub fn image_from_file(self, path: impl AsRef<Path>, rect: Rect) -> Result<Self> {
         use crate::writer::image_handler::ImageData;
-        let data =
-            ImageData::from_file(path).map_err(|e| crate::error::Error::Image(e.to_string()))?;
+        let data = ImageData::from_file(path).map_err(|e| crate::error::Error::Image(e.to_string()))?;
         Ok(self.image_with(data, rect))
     }
 
@@ -2030,8 +1967,7 @@ impl<'a> FluentPageBuilder<'a> {
     /// JPEG / PNG by magic number.
     pub fn image_from_bytes(self, bytes: &[u8], rect: Rect) -> Result<Self> {
         use crate::writer::image_handler::ImageData;
-        let data =
-            ImageData::from_bytes(bytes).map_err(|e| crate::error::Error::Image(e.to_string()))?;
+        let data = ImageData::from_bytes(bytes).map_err(|e| crate::error::Error::Image(e.to_string()))?;
         Ok(self.image_with(data, rect))
     }
 
@@ -2039,15 +1975,9 @@ impl<'a> FluentPageBuilder<'a> {
     /// The image is wrapped in a `/Figure` structure element carrying `/Alt`
     /// so assistive technology can describe it. Requires `tagged_pdf_ua1()` on
     /// the `DocumentBuilder` for the alt text to be wired into the StructTree.
-    pub fn image_from_bytes_with_alt(
-        self,
-        bytes: &[u8],
-        rect: Rect,
-        alt_text: impl Into<String>,
-    ) -> Result<Self> {
+    pub fn image_from_bytes_with_alt(self, bytes: &[u8], rect: Rect, alt_text: impl Into<String>) -> Result<Self> {
         use crate::writer::image_handler::ImageData;
-        let data =
-            ImageData::from_bytes(bytes).map_err(|e| crate::error::Error::Image(e.to_string()))?;
+        let data = ImageData::from_bytes(bytes).map_err(|e| crate::error::Error::Image(e.to_string()))?;
         Ok(self.image_with_alt(data, rect, alt_text))
     }
 
@@ -2055,8 +1985,7 @@ impl<'a> FluentPageBuilder<'a> {
     /// Assistive technology ignores artifact images; do not attach alt text.
     pub fn image_from_bytes_as_artifact(self, bytes: &[u8], rect: Rect) -> Result<Self> {
         use crate::writer::image_handler::ImageData;
-        let data =
-            ImageData::from_bytes(bytes).map_err(|e| crate::error::Error::Image(e.to_string()))?;
+        let data = ImageData::from_bytes(bytes).map_err(|e| crate::error::Error::Image(e.to_string()))?;
         Ok(self.image_with_artifact(data, rect))
     }
 
@@ -2072,11 +2001,7 @@ impl<'a> FluentPageBuilder<'a> {
     }
 
     /// Embed a pre-decoded decorative image as an `/Artifact` (PDF/UA-1 §7.1).
-    pub fn image_with_artifact(
-        self,
-        data: crate::writer::image_handler::ImageData,
-        rect: Rect,
-    ) -> Self {
+    pub fn image_with_artifact(self, data: crate::writer::image_handler::ImageData, rect: Rect) -> Self {
         self.image_with_options(data, rect, None, true)
     }
 
@@ -2094,12 +2019,8 @@ impl<'a> FluentPageBuilder<'a> {
         alt_text: Option<String>,
         is_artifact: bool,
     ) -> Self {
-        use crate::elements::{
-            ColorSpace as EColorSpace, ImageContent, ImageFormat as EImageFormat,
-        };
-        use crate::writer::image_handler::{
-            ColorSpace as WColorSpace, ImageFormat as WImageFormat,
-        };
+        use crate::elements::{ColorSpace as EColorSpace, ImageContent, ImageFormat as EImageFormat};
+        use crate::writer::image_handler::{ColorSpace as WColorSpace, ImageFormat as WImageFormat};
 
         let format = match data.format {
             WImageFormat::Jpeg => EImageFormat::Jpeg,
@@ -2188,12 +2109,7 @@ impl<'a> FluentPageBuilder<'a> {
     /// Draw a closed polygon through `points`. Requires at least 2
     /// points — fewer is a no-op. Same stroke/fill semantics as
     /// [`Self::circle`].
-    pub fn polygon(
-        self,
-        points: &[(f32, f32)],
-        stroke: Option<LineStyle>,
-        fill: Option<(f32, f32, f32)>,
-    ) -> Self {
+    pub fn polygon(self, points: &[(f32, f32)], stroke: Option<LineStyle>, fill: Option<(f32, f32, f32)>) -> Self {
         if points.len() < 2 {
             return self;
         }
@@ -2213,25 +2129,14 @@ impl<'a> FluentPageBuilder<'a> {
     /// stroke; arcs are not filled. Approximated by up to 4 cubic
     /// Beziers (one per quadrant), matching the accuracy of the
     /// [`Self::circle`] primitive.
-    pub fn arc(
-        self,
-        cx: f32,
-        cy: f32,
-        radius: f32,
-        start_angle: f32,
-        end_angle: f32,
-        stroke: LineStyle,
-    ) -> Self {
+    pub fn arc(self, cx: f32, cy: f32, radius: f32, start_angle: f32, end_angle: f32, stroke: LineStyle) -> Self {
         use crate::elements::{PathContent, PathOperation};
         // Subdivide into arcs of <= π/2 each so a single cubic Bezier
         // stays accurate. Magic ratio for quarter-arcs. ~keep
         const K_Q: f32 = 0.552_284_8;
         let (mut a, b) = (start_angle, end_angle);
         let step = std::f32::consts::FRAC_PI_2;
-        let mut ops: Vec<PathOperation> = vec![PathOperation::MoveTo(
-            cx + radius * a.cos(),
-            cy + radius * a.sin(),
-        )];
+        let mut ops: Vec<PathOperation> = vec![PathOperation::MoveTo(cx + radius * a.cos(), cy + radius * a.sin())];
         while a < b {
             let seg_end = (a + step).min(b);
             let sweep = seg_end - a;
@@ -2323,11 +2228,7 @@ impl<'a> FluentPageBuilder<'a> {
         use crate::elements::PathOperation;
         let mut path = PathContent::new(Rect::new(x, y, w, h));
         path.operations.push(PathOperation::Rectangle(x, y, w, h));
-        path.stroke_color = Some(crate::layout::Color {
-            r: 0.0,
-            g: 0.0,
-            b: 0.0,
-        });
+        path.stroke_color = Some(crate::layout::Color { r: 0.0, g: 0.0, b: 0.0 });
         path.fill_color = None;
         let page = &mut self.builder.pages[self.page_index];
         page.elements.push(ContentElement::Path(path));
@@ -2360,11 +2261,7 @@ impl<'a> FluentPageBuilder<'a> {
         let mut path = PathContent::new(Rect::new(min_x, min_y, w, h));
         path.operations.push(PathOperation::MoveTo(x1, y1));
         path.operations.push(PathOperation::LineTo(x2, y2));
-        path.stroke_color = Some(crate::layout::Color {
-            r: 0.0,
-            g: 0.0,
-            b: 0.0,
-        });
+        path.stroke_color = Some(crate::layout::Color { r: 0.0, g: 0.0, b: 0.0 });
         path.fill_color = None;
         let page = &mut self.builder.pages[self.page_index];
         page.elements.push(ContentElement::Path(path));
@@ -2412,11 +2309,7 @@ enum PendingFormField {
         default_value: Option<String>,
     },
     /// A checkbox, initially checked or not.
-    Checkbox {
-        name: String,
-        rect: Rect,
-        checked: bool,
-    },
+    Checkbox { name: String, rect: Rect, checked: bool },
     /// A dropdown combo-box with a fixed list of string options and an
     /// optional initial selection.
     ComboBox {
@@ -2434,11 +2327,7 @@ enum PendingFormField {
         selected: Option<String>,
     },
     /// A clickable push button with a visible caption.
-    PushButton {
-        name: String,
-        rect: Rect,
-        caption: String,
-    },
+    PushButton { name: String, rect: Rect, caption: String },
     /// A scrollable list-box.
     ListBox {
         name: String,
@@ -2795,9 +2684,7 @@ impl DocumentBuilder {
     /// Emitted in `/RoleMap` inside the StructTreeRoot when `tagged_pdf_ua1()` is
     /// set. Multiple calls accumulate entries.
     pub fn role_map(mut self, custom: impl Into<String>, standard: impl Into<String>) -> Self {
-        self.metadata
-            .role_map
-            .push((custom.into(), standard.into()));
+        self.metadata.role_map.push((custom.into(), standard.into()));
         self
     }
 
@@ -2920,10 +2807,9 @@ impl DocumentBuilder {
 
             if let Some(ref template) = self.template {
                 let page_number = idx + 1;
-                let context =
-                    crate::writer::page_template::PlaceholderContext::new(page_number, total_pages)
-                        .with_title(self.metadata.title.clone().unwrap_or_default())
-                        .with_author(self.metadata.author.clone().unwrap_or_default());
+                let context = crate::writer::page_template::PlaceholderContext::new(page_number, total_pages)
+                    .with_title(self.metadata.title.clone().unwrap_or_default())
+                    .with_author(self.metadata.author.clone().unwrap_or_default());
 
                 let layout_engine = TextLayout::new();
 
@@ -2937,21 +2823,15 @@ impl DocumentBuilder {
                             size: style.font_size,
                         };
 
-                        let (text_width, _) = layout_engine.text_bounds(
-                            &text,
-                            &font_spec.name,
-                            font_spec.size,
-                            page_data.width,
-                        );
+                        let (text_width, _) =
+                            layout_engine.text_bounds(&text, &font_spec.name, font_spec.size, page_data.width);
 
                         let x = match element.alignment {
                             crate::writer::ArtifactAlignment::Left => template.margin_left,
-                            crate::writer::ArtifactAlignment::Center => {
-                                (page_data.width - text_width) / 2.0
-                            },
+                            crate::writer::ArtifactAlignment::Center => (page_data.width - text_width) / 2.0,
                             crate::writer::ArtifactAlignment::Right => {
                                 page_data.width - template.margin_right - text_width
-                            },
+                            }
                         };
                         let y = page_data.height - header.offset;
 
@@ -2971,10 +2851,10 @@ impl DocumentBuilder {
                                 weight: match style.font_weight {
                                     crate::writer::font_manager::FontWeight::Normal => {
                                         crate::layout::text_block::FontWeight::Normal
-                                    },
+                                    }
                                     crate::writer::font_manager::FontWeight::Bold => {
                                         crate::layout::text_block::FontWeight::Bold
-                                    },
+                                    }
                                 },
                                 ..Default::default()
                             },
@@ -2996,21 +2876,15 @@ impl DocumentBuilder {
                             size: style.font_size,
                         };
 
-                        let (text_width, _) = layout_engine.text_bounds(
-                            &text,
-                            &font_spec.name,
-                            font_spec.size,
-                            page_data.width,
-                        );
+                        let (text_width, _) =
+                            layout_engine.text_bounds(&text, &font_spec.name, font_spec.size, page_data.width);
 
                         let x = match element.alignment {
                             crate::writer::ArtifactAlignment::Left => template.margin_left,
-                            crate::writer::ArtifactAlignment::Center => {
-                                (page_data.width - text_width) / 2.0
-                            },
+                            crate::writer::ArtifactAlignment::Center => (page_data.width - text_width) / 2.0,
                             crate::writer::ArtifactAlignment::Right => {
                                 page_data.width - template.margin_right - text_width
-                            },
+                            }
                         };
                         let y = footer.offset;
 
@@ -3030,10 +2904,10 @@ impl DocumentBuilder {
                                 weight: match style.font_weight {
                                     crate::writer::font_manager::FontWeight::Normal => {
                                         crate::layout::text_block::FontWeight::Normal
-                                    },
+                                    }
                                     crate::writer::font_manager::FontWeight::Bold => {
                                         crate::layout::text_block::FontWeight::Bold
-                                    },
+                                    }
                                 },
                                 ..Default::default()
                             },
@@ -3058,11 +2932,7 @@ impl DocumentBuilder {
             //    widget before the `add_*` call. ~keep
             for (field_idx, field) in page_data.form_fields.iter().enumerate() {
                 use super::form_fields::{CheckboxWidget, TextFieldWidget};
-                let meta = page_data
-                    .form_field_meta
-                    .get(field_idx)
-                    .cloned()
-                    .unwrap_or_default();
+                let meta = page_data.form_field_meta.get(field_idx).cloned().unwrap_or_default();
                 match field {
                     PendingFormField::TextField {
                         name,
@@ -3095,12 +2965,8 @@ impl DocumentBuilder {
                             widget = widget.with_calculate(s.clone());
                         }
                         page.add_text_field(widget);
-                    },
-                    PendingFormField::Checkbox {
-                        name,
-                        rect,
-                        checked,
-                    } => {
+                    }
+                    PendingFormField::Checkbox { name, rect, checked } => {
                         let mut widget = CheckboxWidget::new(name.clone(), *rect);
                         if *checked {
                             widget = widget.checked();
@@ -3115,7 +2981,7 @@ impl DocumentBuilder {
                             widget = widget.with_tooltip(tip.clone());
                         }
                         page.add_checkbox(widget);
-                    },
+                    }
                     PendingFormField::ComboBox {
                         name,
                         rect,
@@ -3123,8 +2989,7 @@ impl DocumentBuilder {
                         selected,
                     } => {
                         use super::form_fields::ComboBoxWidget;
-                        let mut widget =
-                            ComboBoxWidget::new(name.clone(), *rect).with_options(options.clone());
+                        let mut widget = ComboBoxWidget::new(name.clone(), *rect).with_options(options.clone());
                         if let Some(v) = selected {
                             widget = widget.with_value(v.clone());
                         }
@@ -3144,7 +3009,7 @@ impl DocumentBuilder {
                             widget = widget.with_validate(s.clone());
                         }
                         page.add_combo_box(widget);
-                    },
+                    }
                     PendingFormField::RadioGroup {
                         name,
                         buttons,
@@ -3168,15 +3033,10 @@ impl DocumentBuilder {
                             group = group.with_tooltip(tip.clone());
                         }
                         page.add_radio_group(group);
-                    },
-                    PendingFormField::PushButton {
-                        name,
-                        rect,
-                        caption,
-                    } => {
+                    }
+                    PendingFormField::PushButton { name, rect, caption } => {
                         use super::form_fields::PushButtonWidget;
-                        let mut widget = PushButtonWidget::new(name.clone(), *rect)
-                            .with_caption(caption.clone());
+                        let mut widget = PushButtonWidget::new(name.clone(), *rect).with_caption(caption.clone());
                         // PushButton has no `.required()` (it's a button,
                         // not a field a user fills in) — only read_only +
                         // tooltip apply. ~keep
@@ -3187,7 +3047,7 @@ impl DocumentBuilder {
                             widget = widget.with_tooltip(tip.clone());
                         }
                         page.add_push_button(widget);
-                    },
+                    }
                     PendingFormField::ListBox {
                         name,
                         rect,
@@ -3196,8 +3056,7 @@ impl DocumentBuilder {
                         multi_select,
                     } => {
                         use super::form_fields::ListBoxWidget;
-                        let mut widget =
-                            ListBoxWidget::new(name.clone(), *rect).with_options(options.clone());
+                        let mut widget = ListBoxWidget::new(name.clone(), *rect).with_options(options.clone());
                         if *multi_select {
                             widget = widget.multi_select();
                         }
@@ -3217,7 +3076,7 @@ impl DocumentBuilder {
                             widget = widget.with_validate(s.clone());
                         }
                         page.add_list_box(widget);
-                    },
+                    }
                     PendingFormField::SignatureField { name, rect } => {
                         use super::form_fields::SignatureWidget;
                         let mut widget = SignatureWidget::new(name.clone(), *rect);
@@ -3228,14 +3087,12 @@ impl DocumentBuilder {
                             widget = widget.with_tooltip(tip.clone());
                         }
                         page.add_signature_field(widget);
-                    },
+                    }
                 }
             }
 
             if !page_data.pending_footnotes.is_empty() {
-                use crate::elements::{
-                    FontSpec, PathContent, PathOperation, StructureElement, TextStyle,
-                };
+                use crate::elements::{FontSpec, PathContent, PathOperation, StructureElement, TextStyle};
                 use crate::extractors::text::ArtifactType;
 
                 let font_size = 8.0_f32;
@@ -3254,11 +3111,7 @@ impl DocumentBuilder {
                         PathOperation::LineTo(sep_x1, sep_y),
                     ],
                     bbox: Rect::new(sep_x0, sep_y, sep_x1 - sep_x0, 0.5),
-                    stroke_color: Some(crate::layout::Color {
-                        r: 0.3,
-                        g: 0.3,
-                        b: 0.3,
-                    }),
+                    stroke_color: Some(crate::layout::Color { r: 0.3, g: 0.3, b: 0.3 }),
                     fill_color: None,
                     stroke_width: 0.5,
                     line_cap: crate::elements::LineCap::Butt,
@@ -3338,12 +3191,7 @@ impl DocumentBuilder {
     /// builder.save_encrypted("out.pdf", "user-pw", "owner-pw")?;
     /// # Ok::<(), xberg_native_pdf::error::Error>(())
     /// ```
-    pub fn save_encrypted(
-        self,
-        path: impl AsRef<Path>,
-        user_password: &str,
-        owner_password: &str,
-    ) -> Result<()> {
+    pub fn save_encrypted(self, path: impl AsRef<Path>, user_password: &str, owner_password: &str) -> Result<()> {
         use crate::editor::{EncryptionAlgorithm, EncryptionConfig, Permissions};
         let config = EncryptionConfig {
             user_password: user_password.to_string(),
@@ -3359,11 +3207,7 @@ impl DocumentBuilder {
     /// Use this when you need a specific algorithm (RC4-128, AES-128,
     /// AES-256) or restricted permissions. For the common AES-256
     /// all-permissions case, prefer [`DocumentBuilder::save_encrypted`].
-    pub fn save_with_encryption(
-        self,
-        path: impl AsRef<Path>,
-        config: crate::editor::EncryptionConfig,
-    ) -> Result<()> {
+    pub fn save_with_encryption(self, path: impl AsRef<Path>, config: crate::editor::EncryptionConfig) -> Result<()> {
         use crate::editor::{DocumentEditor, EditableDocument, SaveOptions};
         let bytes = self.build()?;
         let mut editor = DocumentEditor::from_bytes(bytes)?;
@@ -3387,10 +3231,7 @@ impl DocumentBuilder {
 
     /// Build and return the PDF as encrypted bytes, using a custom
     /// configuration.
-    pub fn to_bytes_with_encryption(
-        self,
-        config: crate::editor::EncryptionConfig,
-    ) -> Result<Vec<u8>> {
+    pub fn to_bytes_with_encryption(self, config: crate::editor::EncryptionConfig) -> Result<Vec<u8>> {
         use crate::editor::{DocumentEditor, SaveOptions};
         let bytes = self.build()?;
         let mut editor = DocumentEditor::from_bytes(bytes)?;
@@ -3520,11 +3361,7 @@ mod tests {
     #[test]
     fn test_document_builder_basic() {
         let mut builder = DocumentBuilder::new();
-        builder
-            .letter_page()
-            .at(72.0, 720.0)
-            .text("Hello, World!")
-            .done();
+        builder.letter_page().at(72.0, 720.0).text("Hello, World!").done();
 
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
@@ -3541,11 +3378,7 @@ mod tests {
         let mut builder = DocumentBuilder::new();
         let wm = crate::writer::WatermarkAnnotation::new("CONFIDENTIAL")
             .with_rect(crate::geometry::Rect::new(50.0, 50.0, 200.0, 400.0));
-        builder
-            .letter_page()
-            .paragraph("body")
-            .watermark_custom(wm)
-            .done();
+        builder.letter_page().paragraph("body").watermark_custom(wm).done();
 
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
@@ -3570,11 +3403,8 @@ mod tests {
 
     #[test]
     fn test_document_builder_with_metadata() {
-        let mut builder = DocumentBuilder::new().metadata(
-            DocumentMetadata::new()
-                .title("Test Document")
-                .author("Test Author"),
-        );
+        let mut builder =
+            DocumentBuilder::new().metadata(DocumentMetadata::new().title("Test Document").author("Test Author"));
 
         builder.letter_page().text("Content").done();
 
@@ -3640,9 +3470,7 @@ mod tests {
 
     #[test]
     fn test_table_fluent_emits_elements_and_advances_cursor() {
-        use super::super::table_renderer::{
-            CellAlign, ColumnWidth, Table as RenderTable, TableCell,
-        };
+        use super::super::table_renderer::{CellAlign, ColumnWidth, Table as RenderTable, TableCell};
 
         let mut doc = DocumentBuilder::new();
         let page = doc.letter_page().font("Helvetica", 12.0);
@@ -3707,14 +3535,14 @@ mod tests {
             .text("After the table")
             .done();
 
-        let orders: Vec<usize> = doc.pages[0]
-            .elements
-            .iter()
-            .filter_map(|e| e.reading_order())
-            .collect();
+        let orders: Vec<usize> = doc.pages[0].elements.iter().filter_map(|e| e.reading_order()).collect();
 
         for pair in orders.windows(2) {
-            assert!(pair[1] > pair[0], "reading_order must be strictly monotone: {:?}", orders);
+            assert!(
+                pair[1] > pair[0],
+                "reading_order must be strictly monotone: {:?}",
+                orders
+            );
         }
     }
 
@@ -3746,8 +3574,7 @@ mod tests {
 
     #[test]
     fn test_image_from_bytes_roundtrip() {
-        let bytes =
-            std::fs::read("tests/fixtures/adobe_cmyk_10x11_white.jpg").expect("fixture must exist");
+        let bytes = std::fs::read("tests/fixtures/adobe_cmyk_10x11_white.jpg").expect("fixture must exist");
 
         let mut doc = DocumentBuilder::new();
         doc.letter_page()
@@ -3783,12 +3610,7 @@ mod tests {
             .circle(100.0, 100.0, 20.0, Some(LineStyle::new(1.5, 0.1, 0.2, 0.3)), None)
             .ellipse(200.0, 100.0, 30.0, 15.0, None, Some((0.9, 0.1, 0.1)))
             .polygon(
-                &[
-                    (300.0, 100.0),
-                    (320.0, 120.0),
-                    (340.0, 100.0),
-                    (320.0, 80.0),
-                ],
+                &[(300.0, 100.0), (320.0, 120.0), (340.0, 100.0), (320.0, 80.0)],
                 Some(LineStyle::default()),
                 Some((0.5, 0.5, 0.9)),
             )
@@ -3976,8 +3798,7 @@ mod tests {
         let before_y = {
             let p = doc.letter_page().at(72.0, 720.0);
             let y = p.cursor_y;
-            p.code_block("rust", "fn main() {\n    println!(\"hi\");\n}\n")
-                .done();
+            p.code_block("rust", "fn main() {\n    println!(\"hi\");\n}\n").done();
             y
         };
 
@@ -4105,10 +3926,7 @@ mod tests {
         let content = String::from_utf8_lossy(&bytes);
         let page_count = content.matches("/Type /Page").count();
         assert!(page_count >= 4, "expected >=4 pages (3+1 ToC), got {}", page_count);
-        assert!(
-            content.contains("(Table of Contents)")
-                || content.contains("<5461626C65206F6620436F6E74656E7473>")
-        );
+        assert!(content.contains("(Table of Contents)") || content.contains("<5461626C65206F6620436F6E74656E7473>"));
     }
 
     #[test]
@@ -4491,7 +4309,7 @@ mod tests {
                         first.bbox.x,
                         rect.x
                     );
-                },
+                }
                 TextAlign::Center => {
                     let expected = rect.x + (rect.width - first.bbox.width) / 2.0;
                     assert!(
@@ -4500,7 +4318,7 @@ mod tests {
                         expected,
                         first.bbox.x
                     );
-                },
+                }
                 TextAlign::Right => {
                     let expected = rect.x + rect.width - first.bbox.width;
                     assert!(
@@ -4509,7 +4327,7 @@ mod tests {
                         expected,
                         first.bbox.x
                     );
-                },
+                }
             }
 
             for pair in elements.windows(2) {
@@ -4671,11 +4489,7 @@ mod tests {
     #[test]
     fn test_stamp_annotation() {
         let mut builder = DocumentBuilder::new();
-        builder
-            .letter_page()
-            .at(72.0, 720.0)
-            .stamp(StampType::Approved)
-            .done();
+        builder.letter_page().at(72.0, 720.0).stamp(StampType::Approved).done();
 
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
@@ -4744,8 +4558,7 @@ mod tests {
     #[test]
     fn test_add_generic_annotation() {
         let mut builder = DocumentBuilder::new();
-        let link =
-            LinkAnnotation::uri(Rect::new(100.0, 700.0, 100.0, 20.0), "https://rust-lang.org");
+        let link = LinkAnnotation::uri(Rect::new(100.0, 700.0, 100.0, 20.0), "https://rust-lang.org");
         builder.letter_page().add_annotation(link).done();
 
         let bytes = builder.build().unwrap();
@@ -4773,12 +4586,7 @@ mod tests {
     #[test]
     fn test_tagged_pdf_ua1_emits_mark_info() {
         let mut builder = DocumentBuilder::new();
-        builder = builder.metadata(
-            DocumentMetadata::new()
-                .title("Test")
-                .tagged_pdf_ua1()
-                .language("en-US"),
-        );
+        builder = builder.metadata(DocumentMetadata::new().title("Test").tagged_pdf_ua1().language("en-US"));
         builder.letter_page().at(72.0, 720.0).text("Hello").done();
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
@@ -4789,17 +4597,18 @@ mod tests {
     #[test]
     fn test_tagged_pdf_ua1_emits_struct_tree_root() {
         let mut builder = DocumentBuilder::new();
-        builder = builder.metadata(
-            DocumentMetadata::new()
-                .title("Test")
-                .tagged_pdf_ua1()
-                .language("en-US"),
-        );
+        builder = builder.metadata(DocumentMetadata::new().title("Test").tagged_pdf_ua1().language("en-US"));
         builder.letter_page().at(72.0, 720.0).text("Hello").done();
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
-        assert!(content.contains("/StructTreeRoot"), "catalog must contain /StructTreeRoot");
-        assert!(content.contains("/ParentTree"), "StructTreeRoot must contain /ParentTree");
+        assert!(
+            content.contains("/StructTreeRoot"),
+            "catalog must contain /StructTreeRoot"
+        );
+        assert!(
+            content.contains("/ParentTree"),
+            "StructTreeRoot must contain /ParentTree"
+        );
         assert!(
             content.contains("/ParentTreeNextKey"),
             "StructTreeRoot must contain /ParentTreeNextKey"
@@ -4839,7 +4648,10 @@ mod tests {
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
         let count = content.matches("/StructParents").count();
-        assert_eq!(count, 2, "each page must carry /StructParents; found {count} occurrences");
+        assert_eq!(
+            count, 2,
+            "each page must carry /StructParents; found {count} occurrences"
+        );
     }
 
     #[test]
@@ -4869,7 +4681,10 @@ mod tests {
         builder.letter_page().at(72.0, 720.0).text("plain").done();
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
-        assert!(!content.contains("/MarkInfo"), "untagged PDF must NOT contain /MarkInfo");
+        assert!(
+            !content.contains("/MarkInfo"),
+            "untagged PDF must NOT contain /MarkInfo"
+        );
         assert!(
             !content.contains("/StructTreeRoot"),
             "untagged PDF must NOT contain /StructTreeRoot"
@@ -4912,8 +4727,7 @@ mod tests {
     #[test]
     fn test_image_with_alt_emits_figure_bdc() {
         use crate::geometry::Rect;
-        let img_bytes =
-            std::fs::read("tests/fixtures/adobe_cmyk_10x11_white.jpg").expect("fixture must exist");
+        let img_bytes = std::fs::read("tests/fixtures/adobe_cmyk_10x11_white.jpg").expect("fixture must exist");
         let mut builder = DocumentBuilder::new();
         builder = builder.metadata(DocumentMetadata::new().tagged_pdf_ua1());
         let page = builder.letter_page();
@@ -4933,8 +4747,7 @@ mod tests {
     #[test]
     fn test_image_as_artifact_emits_artifact_bdc() {
         use crate::geometry::Rect;
-        let img_bytes =
-            std::fs::read("tests/fixtures/adobe_cmyk_10x11_white.jpg").expect("fixture must exist");
+        let img_bytes = std::fs::read("tests/fixtures/adobe_cmyk_10x11_white.jpg").expect("fixture must exist");
         let mut builder = DocumentBuilder::new();
         builder = builder.metadata(DocumentMetadata::new().tagged_pdf_ua1());
         let page = builder.letter_page();

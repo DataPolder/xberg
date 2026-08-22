@@ -128,10 +128,7 @@ impl IccProfileVersion {
 /// the phase-6 ICC v4 verification probe to assert qcms 0.3.0 accepts
 /// the v4 header at parse time and drives the same constant-CLUT body
 /// to the same byte-exact RGB reference.
-fn build_minimal_cmyk_to_rgb_lut8_profile_with_version(
-    target_l_byte: u8,
-    version: IccProfileVersion,
-) -> Vec<u8> {
+fn build_minimal_cmyk_to_rgb_lut8_profile_with_version(target_l_byte: u8, version: IccProfileVersion) -> Vec<u8> {
     // LUT8 tag body for in=4 out=3 grid=2.
     // Sizes:
     //   header: 48
@@ -375,8 +372,10 @@ fn build_pdf_with_catalog_entries_and_content(
     buf.extend_from_slice(b"%PDF-1.4\n");
 
     let cat_off = buf.len();
-    let catalog =
-        format!("1 0 obj\n<< /Type /Catalog /Pages 2 0 R {} >>\nendobj\n", catalog_entries);
+    let catalog = format!(
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R {} >>\nendobj\n",
+        catalog_entries
+    );
     buf.extend_from_slice(catalog.as_bytes());
 
     let pages_off = buf.len();
@@ -432,11 +431,7 @@ fn build_pdf_with_catalog_entries_and_content(
 fn build_pdf_cmyk_with_output_intent(icc_profile_bytes: &[u8]) -> Vec<u8> {
     let catalog_entries = "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (Synthetic CMYK) /DestOutputProfile 5 0 R >>]";
     let content_ops = "0.25 0 0 0 k\n20 20 60 60 re\nf\n";
-    build_pdf_with_catalog_entries_and_content(
-        catalog_entries,
-        content_ops,
-        Some(icc_profile_bytes),
-    )
+    build_pdf_with_catalog_entries_and_content(catalog_entries, content_ops, Some(icc_profile_bytes))
 }
 
 /// Same paint operator as `build_pdf_cmyk_with_output_intent` but with
@@ -461,9 +456,7 @@ fn build_pdf_cmyk_without_output_intent() -> Vec<u8> {
 ///
 /// The Type-4 program `{ 0.0 exch 0.0 0.0 }` lifts the input tint into
 /// the M position so the alternate-space output is CMYK(0, tint, 0, 0).
-fn build_pdf_separation_type4_devicecmyk_with_output_intent(
-    output_intent_profile: &[u8],
-) -> Vec<u8> {
+fn build_pdf_separation_type4_devicecmyk_with_output_intent(output_intent_profile: &[u8]) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
 
@@ -617,15 +610,19 @@ fn build_pdf_embedded_iccbased_with_different_output_intent(
     buf.extend_from_slice(b"\nendstream\nendobj\n");
 
     let icc_a_off = buf.len();
-    let icc_a_hdr =
-        format!("5 0 obj\n<< /N 4 /Length {} >>\nstream\n", output_intent_profile_a.len());
+    let icc_a_hdr = format!(
+        "5 0 obj\n<< /N 4 /Length {} >>\nstream\n",
+        output_intent_profile_a.len()
+    );
     buf.extend_from_slice(icc_a_hdr.as_bytes());
     buf.extend_from_slice(output_intent_profile_a);
     buf.extend_from_slice(b"\nendstream\nendobj\n");
 
     let icc_b_off = buf.len();
-    let icc_b_hdr =
-        format!("6 0 obj\n<< /N 4 /Length {} >>\nstream\n", embedded_iccbased_profile_b.len());
+    let icc_b_hdr = format!(
+        "6 0 obj\n<< /N 4 /Length {} >>\nstream\n",
+        embedded_iccbased_profile_b.len()
+    );
     buf.extend_from_slice(icc_b_hdr.as_bytes());
     buf.extend_from_slice(embedded_iccbased_profile_b);
     buf.extend_from_slice(b"\nendstream\nendobj\n");
@@ -633,9 +630,7 @@ fn build_pdf_embedded_iccbased_with_different_output_intent(
     let xref_off = buf.len();
     let obj_count = 7;
     buf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", obj_count).as_bytes());
-    for off in [
-        cat_off, pages_off, page_off, stream_off, icc_a_off, icc_b_off,
-    ] {
+    for off in [cat_off, pages_off, page_off, stream_off, icc_a_off, icc_b_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     buf.extend_from_slice(
@@ -695,15 +690,16 @@ fn build_pdf_default_cmyk_overrides_output_intent(
     buf.extend_from_slice(b"\nendstream\nendobj\n");
 
     let icc_a_off = buf.len();
-    let icc_a_hdr =
-        format!("5 0 obj\n<< /N 4 /Length {} >>\nstream\n", output_intent_profile_a.len());
+    let icc_a_hdr = format!(
+        "5 0 obj\n<< /N 4 /Length {} >>\nstream\n",
+        output_intent_profile_a.len()
+    );
     buf.extend_from_slice(icc_a_hdr.as_bytes());
     buf.extend_from_slice(output_intent_profile_a);
     buf.extend_from_slice(b"\nendstream\nendobj\n");
 
     let icc_b_off = buf.len();
-    let icc_b_hdr =
-        format!("6 0 obj\n<< /N 4 /Length {} >>\nstream\n", default_cmyk_profile_b.len());
+    let icc_b_hdr = format!("6 0 obj\n<< /N 4 /Length {} >>\nstream\n", default_cmyk_profile_b.len());
     buf.extend_from_slice(icc_b_hdr.as_bytes());
     buf.extend_from_slice(default_cmyk_profile_b);
     buf.extend_from_slice(b"\nendstream\nendobj\n");
@@ -711,9 +707,7 @@ fn build_pdf_default_cmyk_overrides_output_intent(
     let xref_off = buf.len();
     let obj_count = 7;
     buf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", obj_count).as_bytes());
-    for off in [
-        cat_off, pages_off, page_off, stream_off, icc_a_off, icc_b_off,
-    ] {
+    for off in [cat_off, pages_off, page_off, stream_off, icc_a_off, icc_b_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     buf.extend_from_slice(
@@ -884,7 +878,11 @@ fn pixel_at(rgba: &[u8], x: u32, y: u32) -> (u8, u8, u8, u8) {
 /// covered opaque CMYK fill.
 fn process_ink_rgb(c: f32, m: f32, y: f32, k: f32) -> (u8, u8, u8) {
     let (r, g, b) = xberg_native_pdf::color::cmyk_to_rgb(c, m, y, k);
-    ((r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8)
+    (
+        (r * 255.0).round() as u8,
+        (g * 255.0).round() as u8,
+        (b * 255.0).round() as u8,
+    )
 }
 
 /// [`process_ink_rgb`] plus a fully-opaque alpha, for the `pixel_at`
@@ -918,10 +916,8 @@ fn device_cmyk_paint_with_output_intent_renders_via_icc_not_additive_clamp() {
     {
         use std::sync::Arc;
         use xberg_native_pdf::color::{IccProfile, RenderingIntent, Transform};
-        let prof = Arc::new(
-            IccProfile::parse(icc.clone(), 4)
-                .expect("synthesised profile parses through IccProfile::parse"),
-        );
+        let prof =
+            Arc::new(IccProfile::parse(icc.clone(), 4).expect("synthesised profile parses through IccProfile::parse"));
         let t = Transform::new_srgb_target(prof, RenderingIntent::RelativeColorimetric);
         assert!(
             t.has_cmm(),
@@ -1238,7 +1234,8 @@ fn process_ink_consistency_between_extractors_helper_and_no_output_intent_arm() 
 #[test]
 fn output_intent_survives_graphics_state_save_restore() {
     let icc = build_minimal_cmyk_to_rgb_lut8_profile(135);
-    let catalog_entries = "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
+    let catalog_entries =
+        "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
     let content = "q\n0.25 0 0 0 k\n20 20 60 60 re\nf\nQ\n";
     let pdf = build_pdf_with_catalog_entries_and_content(catalog_entries, content, Some(&icc));
     let doc = PdfDocument::from_bytes(pdf).expect("open");
@@ -1280,7 +1277,8 @@ fn output_intent_renders_at_alpha_one_edge() {
 #[test]
 fn output_intent_does_not_leak_into_subsequent_rgb_overpaint() {
     let icc = build_minimal_cmyk_to_rgb_lut8_profile(135);
-    let catalog_entries = "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
+    let catalog_entries =
+        "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
     let content = "0.25 0 0 0 k\n20 20 60 60 re\nf\n1 1 1 rg\n20 20 60 60 re\nf\n";
     let pdf = build_pdf_with_catalog_entries_and_content(catalog_entries, content, Some(&icc));
     let doc = PdfDocument::from_bytes(pdf).expect("open");
@@ -1542,8 +1540,7 @@ fn qa_round4_default_gray_iccbased_n1_routes_through_qcms() {
         use std::sync::Arc;
         use xberg_native_pdf::color::{IccProfile, RenderingIntent, Transform};
         let prof = Arc::new(
-            IccProfile::parse(profile.clone(), 1)
-                .expect("Gray TRC profile parses through IccProfile::parse(_, 1)"),
+            IccProfile::parse(profile.clone(), 1).expect("Gray TRC profile parses through IccProfile::parse(_, 1)"),
         );
         let t = Transform::new_srgb_target(prof, RenderingIntent::RelativeColorimetric);
         assert!(
@@ -1582,9 +1579,7 @@ fn qa_round4_default_gray_iccbased_n1_routes_through_qcms() {
     for off in [cat_off, pages_off, page_off, stream_off, icc_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
 
     let doc = PdfDocument::from_bytes(buf).expect("open synthetic PDF");
     assert!(
@@ -1646,7 +1641,10 @@ fn qa_round4_malformed_default_cmyk_falls_through_to_output_intent() {
         use xberg_native_pdf::color::{IccProfile, RenderingIntent, Transform};
         let prof = Arc::new(IccProfile::parse(icc.clone(), 4).expect("CMYK profile parses"));
         let t = Transform::new_srgb_target(prof, RenderingIntent::RelativeColorimetric);
-        assert!(t.has_cmm(), "synthesised CMYK profile must compile for the reference path");
+        assert!(
+            t.has_cmm(),
+            "synthesised CMYK profile must compile for the reference path"
+        );
         let rgb = t.convert_cmyk_pixel(64, 0, 0, 0);
         [rgb[0], rgb[1], rgb[2]]
     };
@@ -1677,9 +1675,7 @@ fn qa_round4_malformed_default_cmyk_falls_through_to_output_intent() {
     for off in [cat_off, pages_off, page_off, stream_off, icc_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
 
     let doc = PdfDocument::from_bytes(buf).expect("open synthetic PDF");
     assert!(
@@ -1731,7 +1727,8 @@ fn output_intent_thousand_cmyk_paints_build_one_transform() {
         let y = i % 100;
         ops.push_str(&format!("0.25 0 0 0 k\n0 {y} 1 1 re\nf\n"));
     }
-    let catalog_entries = "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
+    let catalog_entries =
+        "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
     let pdf = build_pdf_with_catalog_entries_and_content(catalog_entries, &ops, Some(&icc));
     let doc = PdfDocument::from_bytes(pdf).expect("open");
 
@@ -1779,7 +1776,8 @@ fn qa_round3_cache_keys_include_rendering_intent() {
     let ops = "0.25 0 0 0 k\n10 10 20 20 re\nf\n\
                /Perceptual ri\n\
                0.50 0 0 0 k\n40 10 20 20 re\nf\n";
-    let catalog_entries = "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
+    let catalog_entries =
+        "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
     let pdf = build_pdf_with_catalog_entries_and_content(catalog_entries, ops, Some(&icc));
     let doc = PdfDocument::from_bytes(pdf).expect("open");
 
@@ -1849,9 +1847,7 @@ fn qa_round4_thousand_rgb_paints_through_default_rgb_build_one_transform() {
     for off in [cat_off, pages_off, page_off, stream_off, icc_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
 
     let doc = PdfDocument::from_bytes(buf).expect("open");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72));
@@ -1999,8 +1995,14 @@ fn qa_round3_unknown_intent_name_falls_back_to_relative_colorimetric() {
         RenderingIntent::RelativeColorimetric,
         "empty intent name must fall back to /RelativeColorimetric"
     );
-    assert_eq!(RenderingIntent::from_pdf_name("Perceptual"), RenderingIntent::Perceptual);
-    assert_eq!(RenderingIntent::from_pdf_name("Saturation"), RenderingIntent::Saturation);
+    assert_eq!(
+        RenderingIntent::from_pdf_name("Perceptual"),
+        RenderingIntent::Perceptual
+    );
+    assert_eq!(
+        RenderingIntent::from_pdf_name("Saturation"),
+        RenderingIntent::Saturation
+    );
     assert_eq!(
         RenderingIntent::from_pdf_name("RelativeColorimetric"),
         RenderingIntent::RelativeColorimetric
@@ -2468,8 +2470,7 @@ fn qa_round2_header_only_cmyk_profile_parses_without_cmm() {
 fn qa_round2_iccbased_n4_no_cmm_falls_through_to_output_intent() {
     let profile_a = build_minimal_cmyk_to_rgb_lut8_profile(135);
     let profile_b_no_cmm = build_iccbased_header_only_cmyk_profile();
-    let pdf =
-        build_pdf_embedded_iccbased_with_different_output_intent(&profile_a, &profile_b_no_cmm);
+    let pdf = build_pdf_embedded_iccbased_with_different_output_intent(&profile_a, &profile_b_no_cmm);
     let doc = PdfDocument::from_bytes(pdf).expect("open synthetic PDF");
     let rgba = render_rgba(&doc);
     let (r, g, b, a) = pixel_at(&rgba, 50, 50);
@@ -2578,13 +2579,7 @@ fn qa_round2_bare_devicecmyk_paint_still_produces_separation_coverage() {
         let w = p.width as usize;
         p.data[50 * w + 50]
     };
-    let by_name = |name: &str| {
-        plates
-            .iter()
-            .find(|p| p.ink_name == name)
-            .map(sample)
-            .unwrap_or(0)
-    };
+    let by_name = |name: &str| plates.iter().find(|p| p.ink_name == name).map(sample).unwrap_or(0);
     let cyan = by_name("Cyan");
     assert!(
         (60..=68).contains(&cyan),
@@ -2638,9 +2633,7 @@ fn qa_round2_iccbased_n3_with_cmyk_output_intent_ignores_output_intent() {
     let xref_off = buf.len();
     let obj_count = 7;
     buf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", obj_count).as_bytes());
-    for off in [
-        cat_off, pages_off, page_off, stream_off, icc_a_off, icc_b_off,
-    ] {
+    for off in [cat_off, pages_off, page_off, stream_off, icc_a_off, icc_b_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     buf.extend_from_slice(
@@ -2699,9 +2692,7 @@ fn qa_round2_iccbased_n1_with_cmyk_output_intent_ignores_output_intent() {
     let xref_off = buf.len();
     let obj_count = 7;
     buf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", obj_count).as_bytes());
-    for off in [
-        cat_off, pages_off, page_off, stream_off, icc_a_off, icc_b_off,
-    ] {
+    for off in [cat_off, pages_off, page_off, stream_off, icc_a_off, icc_b_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     buf.extend_from_slice(
@@ -2769,9 +2760,7 @@ fn qa_round2_iccbased_n4_precedence_survives_form_xobject_scope() {
     let xref_off = buf.len();
     let obj_count = 8;
     buf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", obj_count).as_bytes());
-    for off in [
-        cat_off, pages_off, page_off, stream_off, icc_a_off, icc_b_off, form_off,
-    ] {
+    for off in [cat_off, pages_off, page_off, stream_off, icc_a_off, icc_b_off, form_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     buf.extend_from_slice(
@@ -2858,7 +2847,11 @@ fn qa_round3_iccbased_v4_profile_compiles_through_qcms_to_same_reference() {
     // the same header twice and the test would pass for the wrong reason. ~keep
     assert_eq!(v2[8..12], [0x02, 0x40, 0x00, 0x00], "v2 header bytes incorrect");
     assert_eq!(v4[8..12], [0x04, 0x00, 0x00, 0x00], "v4 header bytes incorrect");
-    assert_eq!(v2.len(), v4.len(), "v2 and v4 profiles must differ only in version bytes");
+    assert_eq!(
+        v2.len(),
+        v4.len(),
+        "v2 and v4 profiles must differ only in version bytes"
+    );
     for i in 0..v2.len() {
         if (8..12).contains(&i) {
             continue;
@@ -2868,8 +2861,7 @@ fn qa_round3_iccbased_v4_profile_compiles_through_qcms_to_same_reference() {
 
     let prof_v2 = Arc::new(IccProfile::parse(v2, 4).expect("v2 profile must parse"));
     let prof_v4 = Arc::new(
-        IccProfile::parse(v4, 4)
-            .expect("v4 profile must parse through IccProfile::parse — qcms 0.3.0 accepts v4"),
+        IccProfile::parse(v4, 4).expect("v4 profile must parse through IccProfile::parse — qcms 0.3.0 accepts v4"),
     );
 
     let t_v2 = Transform::new_srgb_target(prof_v2, RenderingIntent::RelativeColorimetric);
@@ -2930,10 +2922,7 @@ fn qa_round3_iccbased_v4_output_intent_drives_render_through_qcms() {
     {
         use std::sync::Arc;
         use xberg_native_pdf::color::{IccProfile, RenderingIntent, Transform};
-        let prof = Arc::new(
-            IccProfile::parse(icc_v4.clone(), 4)
-                .expect("v4 profile parses through IccProfile::parse"),
-        );
+        let prof = Arc::new(IccProfile::parse(icc_v4.clone(), 4).expect("v4 profile parses through IccProfile::parse"));
         let t = Transform::new_srgb_target(prof, RenderingIntent::RelativeColorimetric);
         assert!(t.has_cmm(), "v4 profile must compile into a real qcms CMM");
         assert_eq!(
@@ -3111,9 +3100,7 @@ fn qa_round4_bpc_paper_white_preservation_under_relative_colorimetric() {
 /// LUT outputs L*=l_range.start(), at K=255 it outputs L*=l_range.end().
 /// The two corners pin the ramp; intermediate grid points are linearly
 /// interpolated by qcms's tetrahedral CLUT lookup at runtime.
-fn build_minimal_cmyk_to_rgb_lut8_profile_with_shadow_ramp(
-    l_range: std::ops::RangeInclusive<u8>,
-) -> Vec<u8> {
+fn build_minimal_cmyk_to_rgb_lut8_profile_with_shadow_ramp(l_range: std::ops::RangeInclusive<u8>) -> Vec<u8> {
     let in_chan: u8 = 4;
     let out_chan: u8 = 3;
     let grid: u8 = 2;
@@ -3280,8 +3267,7 @@ fn qa_round4_branding_green_mark_routes_through_output_intent() {
 
     let content = "0.30 0.05 0.95 0.05 k\n20 20 60 60 re\nf\n";
     let catalog_entries = "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (Synthetic Press) /DestOutputProfile 5 0 R >>]";
-    let pdf =
-        build_pdf_with_catalog_entries_and_content(catalog_entries, content, Some(&profile_b));
+    let pdf = build_pdf_with_catalog_entries_and_content(catalog_entries, content, Some(&profile_b));
     let doc = PdfDocument::from_bytes(pdf).expect("open with-OI fixture");
     assert!(
         doc.output_intent_cmyk_profile().is_some(),
@@ -3373,7 +3359,9 @@ fn output_intent_n3_rgb_profile_rejected_at_reader_falls_through_to_process_inks
     let pages_off = buf.len();
     buf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
     let page_off = buf.len();
-    buf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << >> /Contents 4 0 R >>\nendobj\n");
+    buf.extend_from_slice(
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << >> /Contents 4 0 R >>\nendobj\n",
+    );
     let stream_off = buf.len();
     let content = "0.25 0 0 0 k\n20 20 60 60 re\nf\n";
     let stream_hdr = format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len());
@@ -3472,7 +3460,9 @@ fn output_intent_array_picks_first_cmyk_entry_skipping_rgb() {
     let pages_off = buf.len();
     buf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
     let page_off = buf.len();
-    buf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << >> /Contents 4 0 R >>\nendobj\n");
+    buf.extend_from_slice(
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources << >> /Contents 4 0 R >>\nendobj\n",
+    );
     let stream_off = buf.len();
     let content = "0.25 0 0 0 k\n20 20 60 60 re\nf\n";
     let stream_hdr = format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len());
@@ -3571,23 +3561,23 @@ fn output_intent_malformed_iccbased_stream_falls_through() {
 /// active → sidecar allocated → coverage path active). With the hoist,
 /// the cache must record exactly one build for the single (profile,
 /// intent) tuple in play.
-fn build_pdf_cmyk_with_transparency_and_repeated_paints(
-    icc_profile_bytes: &[u8],
-    paints: usize,
-) -> Vec<u8> {
+fn build_pdf_cmyk_with_transparency_and_repeated_paints(icc_profile_bytes: &[u8], paints: usize) -> Vec<u8> {
     let mut ops = String::new();
     ops.push_str("/T gs\n");
     for _ in 0..paints {
         ops.push_str("0.25 0 0 0 k\n0 0 100 100 re\nf\n");
     }
-    let catalog_entries = "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
+    let catalog_entries =
+        "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
 
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
 
     let cat_off = buf.len();
-    let catalog =
-        format!("1 0 obj\n<< /Type /Catalog /Pages 2 0 R {} >>\nendobj\n", catalog_entries);
+    let catalog = format!(
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R {} >>\nendobj\n",
+        catalog_entries
+    );
     buf.extend_from_slice(catalog.as_bytes());
 
     let pages_off = buf.len();
@@ -3617,9 +3607,7 @@ fn build_pdf_cmyk_with_transparency_and_repeated_paints(
     for off in [cat_off, pages_off, page_off, stream_off, icc_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -3676,23 +3664,23 @@ fn cmyk_transparency_compose_hoists_icc_transform_cache_lookup() {
 /// `/OP true` on the ExtGState so process-colour overprint composition
 /// routes through `apply_overprint_after_paint_with_coverage`. The
 /// build count must remain at 1 across many overprint paints.
-fn build_pdf_cmyk_with_overprint_and_repeated_paints(
-    icc_profile_bytes: &[u8],
-    paints: usize,
-) -> Vec<u8> {
+fn build_pdf_cmyk_with_overprint_and_repeated_paints(icc_profile_bytes: &[u8], paints: usize) -> Vec<u8> {
     let mut ops = String::new();
     ops.push_str("/T gs\n");
     for _ in 0..paints {
         ops.push_str("0.25 0 0 0 k\n0 0 100 100 re\nf\n");
     }
-    let catalog_entries = "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
+    let catalog_entries =
+        "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
 
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
 
     let cat_off = buf.len();
-    let catalog =
-        format!("1 0 obj\n<< /Type /Catalog /Pages 2 0 R {} >>\nendobj\n", catalog_entries);
+    let catalog = format!(
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R {} >>\nendobj\n",
+        catalog_entries
+    );
     buf.extend_from_slice(catalog.as_bytes());
 
     let pages_off = buf.len();
@@ -3722,9 +3710,7 @@ fn build_pdf_cmyk_with_overprint_and_repeated_paints(
     for off in [cat_off, pages_off, page_off, stream_off, icc_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -3790,11 +3776,7 @@ impl<S> tracing_subscriber::Layer<S> for WarnCapture
 where
     S: tracing::Subscriber,
 {
-    fn on_event(
-        &self,
-        event: &tracing::Event<'_>,
-        _ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
         if *event.metadata().level() > tracing::Level::WARN {
             return;
         }
@@ -3822,13 +3804,16 @@ impl tracing::field::Visit for MessageVisitor {
 fn build_pdf_rgb_with_unparseable_output_intent() -> Vec<u8> {
     let garbage: Vec<u8> = (0u8..=63u8).collect();
     let ops = "/T gs\n0.4 0.6 0.8 rg\n0 0 100 100 re\nf\n";
-    let catalog_entries = "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
+    let catalog_entries =
+        "/OutputIntents [<< /Type /OutputIntent /S /GTS_PDFX /OutputCondition (S) /DestOutputProfile 5 0 R >>]";
 
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
     let cat_off = buf.len();
-    let catalog =
-        format!("1 0 obj\n<< /Type /Catalog /Pages 2 0 R {} >>\nendobj\n", catalog_entries);
+    let catalog = format!(
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R {} >>\nendobj\n",
+        catalog_entries
+    );
     buf.extend_from_slice(catalog.as_bytes());
 
     let pages_off = buf.len();
@@ -3858,9 +3843,7 @@ fn build_pdf_rgb_with_unparseable_output_intent() -> Vec<u8> {
     for off in [cat_off, pages_off, page_off, stream_off, icc_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -3876,7 +3859,10 @@ fn h3b_rgb_paint_under_unparseable_output_intent_logs_k_zero_warning() {
     let pdf = build_pdf_rgb_with_unparseable_output_intent();
     let doc = PdfDocument::from_bytes(pdf).expect("open synthetic PDF");
 
-    assert!(doc.has_output_intents_declaration(), "fixture must declare /OutputIntents");
+    assert!(
+        doc.has_output_intents_declaration(),
+        "fixture must declare /OutputIntents"
+    );
     assert!(
         doc.output_intent_cmyk_profile().is_none(),
         "fixture's /DestOutputProfile is 64 bytes of garbage; \

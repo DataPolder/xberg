@@ -65,7 +65,7 @@ fn collect_ref_ids(obj: &Object, out: &mut Vec<u32>) {
         Object::Array(a) => a.iter().for_each(|o| collect_ref_ids(o, out)),
         Object::Dictionary(d) => d.values().for_each(|o| collect_ref_ids(o, out)),
         Object::Stream { dict, .. } => dict.values().for_each(|o| collect_ref_ids(o, out)),
-        _ => {},
+        _ => {}
     }
 }
 
@@ -87,7 +87,7 @@ fn as_owned_dict(
                 Some(Object::Stream { dict, .. }) => Some(dict),
                 _ => None,
             }
-        },
+        }
         _ => None,
     }
 }

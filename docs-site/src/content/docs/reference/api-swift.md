@@ -836,7 +836,7 @@ fails and this is a no-op: we do not fight over ownership of the global
 logger slot, and we do not touch `log.set_max_level` unless our install
 won, so we never silently raise or lower a level someone else configured.
 In that case `pdf_oxide`'s glyph-drop records go wherever that other
-logger sends them instead of into `take_pdf_oxide_render_warnings`.
+logger sends them instead of into `take_engine_render_warnings`.
 **Opt-in.** Nothing calls this automatically, and that is deliberate: xberg
 is a library, and `log` has exactly one global backend slot per process. A
 library that claims it on its own behalf breaks its embedder — a host that
@@ -848,7 +848,7 @@ call an application makes knowingly.
 Returns `true` if this call (or an earlier one) installed the capture, and
 `false` if some other component already owns the `log` backend — in which
 case `pdf_oxide`'s glyph-drop records go to that logger and
-`take_pdf_oxide_render_warnings` stays empty.
+`take_engine_render_warnings` stays empty.
 
 Without this call the #1364 warnings are not produced. The glyph drop
 itself is decided inside `pdf_oxide`, which reports it only through
@@ -870,7 +870,7 @@ let result = installPdfRenderDiagnostics()
 
 ---
 
-#### takePdfOxideRenderWarnings()
+#### takeEngineRenderWarnings()
 
 Drain the glyph-drop `ProcessingWarning`s accumulated on this thread by
 render calls since the last call to this function.
@@ -906,13 +906,13 @@ no longer silently lost.
 **Signature:**
 
 ```swift
-public static func takePdfOxideRenderWarnings() -> [ProcessingWarning]
+public static func takeEngineRenderWarnings() -> [ProcessingWarning]
 ```
 
 **Example:**
 
 ```swift
-let result = takePdfOxideRenderWarnings()
+let result = takeEngineRenderWarnings()
 ```
 
 **Returns:** `[ProcessingWarning]`

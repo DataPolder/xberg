@@ -31,22 +31,22 @@ pub fn add_converted_field(page: &mut PageBuilder, field: &ConvertedField) {
     match field {
         ConvertedField::Text(widget) => {
             page.add_text_field(widget.clone());
-        },
+        }
         ConvertedField::Checkbox(widget) => {
             page.add_checkbox(widget.clone());
-        },
+        }
         ConvertedField::RadioGroup(group) => {
             page.add_radio_group(group.clone());
-        },
+        }
         ConvertedField::ComboBox(widget) => {
             page.add_combo_box(widget.clone());
-        },
+        }
         ConvertedField::ListBox(widget) => {
             page.add_list_box(widget.clone());
-        },
+        }
         ConvertedField::Button(widget) => {
             page.add_push_button(widget.clone());
-        },
+        }
     }
 }
 
@@ -117,10 +117,7 @@ pub fn add_converted_page(page: &mut PageBuilder, converted_page: &ConvertedPage
 /// - The document doesn't contain XFA forms
 /// - XFA parsing fails
 /// - Conversion fails
-pub fn convert_xfa_document(
-    doc: &mut PdfDocument,
-    options: Option<XfaConversionOptions>,
-) -> Result<Vec<u8>> {
+pub fn convert_xfa_document(doc: &mut PdfDocument, options: Option<XfaConversionOptions>) -> Result<Vec<u8>> {
     if !XfaExtractor::has_xfa(doc)? {
         return Err(crate::error::Error::InvalidPdf(
             "Document does not contain XFA forms".to_string(),
@@ -202,11 +199,7 @@ pub fn analyze_xfa_document(doc: &mut PdfDocument) -> Result<XfaAnalysis> {
     let mut parser = XfaParser::new();
     let xfa_form = parser.parse(&xfa_data)?;
 
-    let mut field_types: Vec<String> = xfa_form
-        .fields
-        .iter()
-        .map(|f| format!("{:?}", f.field_type))
-        .collect();
+    let mut field_types: Vec<String> = xfa_form.fields.iter().map(|f| format!("{:?}", f.field_type)).collect();
     field_types.sort();
     field_types.dedup();
 

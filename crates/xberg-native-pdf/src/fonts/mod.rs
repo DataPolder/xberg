@@ -51,9 +51,7 @@ pub use encoding::UnicodeEncoder;
 pub use encoding_normalizer::EncodingNormalizer;
 pub use font_dict::{CIDSystemInfo, CIDToGIDMap, Encoding, FontInfo, VerticalMetrics};
 pub use font_subsetter::{FontSubsetter, GlyphRemapper, SubsetError, subset_font_bytes};
-pub use non_text_detection::{
-    CharacterConfidence, ConfidenceReason, NonTextDetector, NonTextStats,
-};
+pub use non_text_detection::{CharacterConfidence, ConfidenceReason, NonTextDetector, NonTextStats};
 pub use provenance::MappingProvenance;
 pub use truetype_cmap::TrueTypeCMap;
 pub use truetype_parser::{FontMetrics, TrueTypeError, TrueTypeFont, TrueTypeResult};

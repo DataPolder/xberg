@@ -37,12 +37,7 @@ impl OverprintResolver {
     /// `side` selects whether we read `/OP` (stroke) or `/op` (fill); `color`
     /// supplies the resolved channels, which become the plan's participating
     /// set.
-    pub(crate) fn resolve(
-        &self,
-        gs: &GraphicsState,
-        side: PaintSide,
-        color: &ResolvedColor,
-    ) -> OverprintPlan {
+    pub(crate) fn resolve(&self, gs: &GraphicsState, side: PaintSide, color: &ResolvedColor) -> OverprintPlan {
         let enabled = match side {
             PaintSide::Fill => gs.fill_overprint,
             PaintSide::Stroke => gs.stroke_overprint,
@@ -55,7 +50,7 @@ impl OverprintResolver {
                 // Backends that act on plates skip RGB intents entirely;
                 // backends that act on composite RGB ignore the plan. ~keep
                 SmallVec::new()
-            },
+            }
             ResolvedColor::Cmyk { c, m, y, k, .. } | ResolvedColor::IccCmyk { c, m, y, k, .. } => {
                 // `IccCmyk` carries the same four-channel decomposition
                 // as `Cmyk` for the per-plate path; the only difference
@@ -79,7 +74,7 @@ impl OverprintResolver {
                     value: *k,
                 });
                 v
-            },
+            }
             ResolvedColor::PerChannel { channels, .. } => channels
                 .iter()
                 .map(|(ink, v)| ParticipatingChannel {

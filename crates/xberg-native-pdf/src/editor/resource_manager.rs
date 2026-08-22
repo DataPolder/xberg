@@ -99,9 +99,7 @@ impl ResourceManager {
     /// Returns None if the font is not registered.
     pub fn get_font_resource(&self, font_name: &str) -> Option<String> {
         let key = format!("font:{}", font_name);
-        self.fonts
-            .get(&key)
-            .map(|obj_ref| format!("/F{}", obj_ref.id))
+        self.fonts.get(&key).map(|obj_ref| format!("/F{}", obj_ref.id))
     }
 
     /// List all registered fonts.
@@ -217,11 +215,7 @@ impl ResourceManager {
 
     /// Get a count of all registered resources.
     pub fn resource_count(&self) -> usize {
-        self.fonts.len()
-            + self.xobjects.len()
-            + self.graphics_states.len()
-            + self.patterns.len()
-            + self.shadings.len()
+        self.fonts.len() + self.xobjects.len() + self.graphics_states.len() + self.patterns.len() + self.shadings.len()
     }
 
     /// Clear all registered resources.

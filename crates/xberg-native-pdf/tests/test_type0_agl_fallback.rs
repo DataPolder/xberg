@@ -59,14 +59,15 @@ fn test_type0_agl_fallback_for_standard_ascii() {
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let result = font.char_to_unicode(0x41);
 
-    assert!(result.is_some(), "Should find mapping for GID 0x41 via Adobe Glyph List");
+    assert!(
+        result.is_some(),
+        "Should find mapping for GID 0x41 via Adobe Glyph List"
+    );
     assert_eq!(
         result.unwrap(),
         "A",
@@ -119,14 +120,20 @@ fn test_type0_lmroman_agl_fallback() {
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     assert_eq!(font.char_to_unicode(0x20), Some(" ".to_string()), "GID 0x20 (space)");
-    assert_eq!(font.char_to_unicode(0x41), Some("A".to_string()), "GID 0x41 (capital A)");
-    assert_eq!(font.char_to_unicode(0x61), Some("a".to_string()), "GID 0x61 (lowercase a)");
+    assert_eq!(
+        font.char_to_unicode(0x41),
+        Some("A".to_string()),
+        "GID 0x41 (capital A)"
+    );
+    assert_eq!(
+        font.char_to_unicode(0x61),
+        Some("a".to_string()),
+        "GID 0x61 (lowercase a)"
+    );
     assert_eq!(font.char_to_unicode(0x30), Some("0".to_string()), "GID 0x30 (digit 0)");
 }
 
@@ -174,9 +181,7 @@ fn test_type0_agl_fallback_then_replacement() {
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     // GID 0xFFFF won't be in Adobe Glyph List ~keep

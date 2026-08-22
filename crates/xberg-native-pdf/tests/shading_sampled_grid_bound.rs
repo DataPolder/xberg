@@ -69,7 +69,6 @@ fn sampled_function_size_larger_than_stream_renders() {
     ];
     let doc = PdfDocument::from_bytes(build_pdf(&objects)).expect("synthetic PDF parses");
 
-    let img = render_page(&doc, 0, &RenderOptions::default())
-        .expect("page with an oversized sampled function renders");
+    let img = render_page(&doc, 0, &RenderOptions::default()).expect("page with an oversized sampled function renders");
     assert!(!img.data.is_empty(), "renderer produced an empty buffer");
 }

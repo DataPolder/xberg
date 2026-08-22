@@ -73,11 +73,8 @@ fn test_tj_distribution_analysis() {
 
     let sum: f32 = offsets_justified.iter().sum();
     let mean = sum / offsets_justified.len() as f32;
-    let variance: f32 = offsets_justified
-        .iter()
-        .map(|x| (x - mean).powi(2))
-        .sum::<f32>()
-        / offsets_justified.len() as f32;
+    let variance: f32 =
+        offsets_justified.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / offsets_justified.len() as f32;
     let std_dev = variance.sqrt();
     let cv = std_dev.abs() / mean.abs();
 
@@ -105,11 +102,7 @@ fn test_tj_distribution_analysis() {
 
     let sum2: f32 = offsets_normal.iter().sum();
     let mean2 = sum2 / offsets_normal.len() as f32;
-    let variance2: f32 = offsets_normal
-        .iter()
-        .map(|x| (x - mean2).powi(2))
-        .sum::<f32>()
-        / offsets_normal.len() as f32;
+    let variance2: f32 = offsets_normal.iter().map(|x| (x - mean2).powi(2)).sum::<f32>() / offsets_normal.len() as f32;
     let std_dev2 = variance2.sqrt();
     let cv2 = std_dev2.abs() / mean2.abs();
 
@@ -117,7 +110,10 @@ fn test_tj_distribution_analysis() {
 
     let normal_threshold_case2 = mean2 - std_dev2;
 
-    assert!(normal_threshold_case2.is_finite(), "Normal text threshold should be finite");
+    assert!(
+        normal_threshold_case2.is_finite(),
+        "Normal text threshold should be finite"
+    );
 }
 
 /// Test consensus-based spacing requiring multiple spec-defined signals.
@@ -156,7 +152,11 @@ fn test_consensus_spacing_both_signals() {
     let tj_suggests_space2 = true;
 
     // TJ says yes, but geometric says no (gap = 0.5 is NOT > threshold 1.2) ~keep
-    assert!(!geometric_suggests_space2, "Gap {} should be <= threshold {}", gap2, threshold);
+    assert!(
+        !geometric_suggests_space2,
+        "Gap {} should be <= threshold {}",
+        gap2, threshold
+    );
     assert!(!should_insert_space_mock(
         tj_suggests_space2,
         geometric_suggests_space2,
@@ -173,7 +173,12 @@ fn test_consensus_spacing_both_signals() {
     let gap3 = next3.bbox.left() - prev3.bbox.right();
     let strong_geometric = gap3 > (2.0 * threshold);
 
-    assert!(strong_geometric, "Gap {} should be > 2× threshold {}", gap3, 2.0 * threshold);
+    assert!(
+        strong_geometric,
+        "Gap {} should be > 2× threshold {}",
+        gap3,
+        2.0 * threshold
+    );
     assert!(should_insert_space_mock(false, false, gap3, threshold));
 }
 
@@ -323,11 +328,7 @@ fn test_line_break_different_column() {
 /// - Line break + same column + no hyphen → insert space
 /// - Line break + same column + hyphen → no space (merge)
 /// - Different column → no space (column break, not line break)
-fn should_insert_space_line_break_mock(
-    line_break: bool,
-    same_column: bool,
-    prev_ends_with_hyphen: bool,
-) -> bool {
+fn should_insert_space_line_break_mock(line_break: bool, same_column: bool, prev_ends_with_hyphen: bool) -> bool {
     if !line_break || !same_column {
         return false;
     }

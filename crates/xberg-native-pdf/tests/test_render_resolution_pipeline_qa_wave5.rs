@@ -67,9 +67,7 @@ fn build_pdf(content_ops: &str, resources_dict: &str) -> Vec<u8> {
     for off in [cat_off, pages_off, page_off, stream_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -79,17 +77,8 @@ fn build_pdf(content_ops: &str, resources_dict: &str) -> Vec<u8> {
 /// page content stream; `page_resources_extra` lets the caller add a
 /// `/ColorSpace << /CS1 [/Separation /Foo /DeviceCMYK 5 0 R] >>`
 /// declaration.
-fn build_pdf_with_type4(
-    content_ops: &str,
-    type4_program: &str,
-    page_resources_extra: &str,
-) -> Vec<u8> {
-    build_pdf_with_type4_range(
-        content_ops,
-        type4_program,
-        page_resources_extra,
-        "[0 1 0 1 0 1 0 1]",
-    )
+fn build_pdf_with_type4(content_ops: &str, type4_program: &str, page_resources_extra: &str) -> Vec<u8> {
+    build_pdf_with_type4_range(content_ops, type4_program, page_resources_extra, "[0 1 0 1 0 1 0 1]")
 }
 
 fn build_pdf_with_type4_range(
@@ -129,9 +118,7 @@ fn build_pdf_with_type4_range(
     for off in [cat_off, pages_off, page_off, stream_off, func_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -507,9 +494,7 @@ fn build_pdf_shading_raw(shading_body: &str) -> Vec<u8> {
     for off in [cat_off, pages_off, page_off, stream_off, shading_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -587,7 +572,10 @@ fn qa_wave5_shading_axial_missing_function_falls_to_black_white_default() {
     let pixmap = out.unwrap();
     let (r_left, _, _, _) = pixel_at(&pixmap, 1, 50);
     let (r_right, g_right, b_right, _) = pixel_at(&pixmap, 98, 50);
-    assert!(r_left < 50, "axial-shading C0-default end should be ~black; got R={r_left}");
+    assert!(
+        r_left < 50,
+        "axial-shading C0-default end should be ~black; got R={r_left}"
+    );
     assert!(
         r_right > 200 && g_right > 200 && b_right > 200,
         "axial-shading C1-default end should be ~white; got ({r_right}, {g_right}, {b_right})"
@@ -684,19 +672,10 @@ fn qa_wave5_pipeline_resolve_components_shading_type4_separation() {
     buf.extend_from_slice(b"\nendstream\nendobj\n");
     let xref_off = buf.len();
     buf.extend_from_slice(b"xref\n0 7\n0000000000 65535 f \n");
-    for off in [
-        cat_off,
-        pages_off,
-        page_off,
-        stream_off,
-        shading_off,
-        func_off,
-    ] {
+    for off in [cat_off, pages_off, page_off, stream_off, shading_off, func_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
 
     let doc = PdfDocument::from_bytes(buf).expect("PDF parses");
     let pixmap = render(&doc);
@@ -840,19 +819,10 @@ fn qa_wave5_form_xobject_containing_axial_shading() {
     buf.extend_from_slice(shading.as_bytes());
     let xref_off = buf.len();
     buf.extend_from_slice(b"xref\n0 7\n0000000000 65535 f \n");
-    for off in [
-        cat_off,
-        pages_off,
-        page_off,
-        stream_off,
-        form_off,
-        shading_off,
-    ] {
+    for off in [cat_off, pages_off, page_off, stream_off, form_off, shading_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
 
     let doc = PdfDocument::from_bytes(buf).expect("PDF parses");
     let out = render_allow_fail(&doc);

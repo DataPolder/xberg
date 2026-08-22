@@ -98,11 +98,7 @@ impl MappingProvenance {
     /// to summarise a run of characters by its least-trustworthy member.
     #[must_use]
     pub fn weaker(self, other: Self) -> Self {
-        if self.rank() >= other.rank() {
-            self
-        } else {
-            other
-        }
+        if self.rank() >= other.rank() { self } else { other }
     }
 }
 
@@ -121,7 +117,12 @@ mod tests {
             MappingProvenance::Fallback,
         ];
         for pair in ordered.windows(2) {
-            assert!(pair[0].rank() < pair[1].rank(), "{:?} must outrank {:?}", pair[0], pair[1]);
+            assert!(
+                pair[0].rank() < pair[1].rank(),
+                "{:?} must outrank {:?}",
+                pair[0],
+                pair[1]
+            );
         }
     }
 

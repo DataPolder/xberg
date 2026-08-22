@@ -95,11 +95,7 @@ impl PdfDocument {
             };
         }
 
-        if items.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(items))
-        }
+        if items.is_empty() { Ok(None) } else { Ok(Some(items)) }
     }
 
     /// Parse a single outline item and its children recursively.
@@ -148,11 +144,7 @@ impl PdfDocument {
             }
         }
 
-        Ok(OutlineItem {
-            title,
-            dest,
-            children,
-        })
+        Ok(OutlineItem { title, dest, children })
     }
 
     /// Parse destination from an outline item.
@@ -234,7 +226,7 @@ impl PdfDocument {
                     Some(idx) => Ok(Some(Destination::PageIndex(idx))),
                     None => Ok(Some(Destination::Named(s))),
                 }
-            },
+            }
             Object::Name(name) => match self.resolve_named_destination(name)? {
                 Some(idx) => Ok(Some(Destination::PageIndex(idx))),
                 None => Ok(Some(Destination::Named(name.clone()))),
@@ -247,14 +239,14 @@ impl PdfDocument {
                     } else {
                         Ok(None)
                     }
-                },
+                }
                 _ => Ok(None),
             },
 
             Object::Reference(dest_ref) => {
                 let resolved = self.load_object(*dest_ref)?;
                 self.resolve_destination(&resolved)
-            },
+            }
 
             _ => Ok(None),
         }
@@ -276,10 +268,7 @@ impl PdfDocument {
 const NAME_TREE_MAX_DEPTH: u8 = 32;
 
 /// Follow one level of indirection. Pure given `resolve`.
-fn deref_obj(
-    o: &Object,
-    resolve: &dyn Fn(crate::object::ObjectRef) -> Option<Object>,
-) -> Option<Object> {
+fn deref_obj(o: &Object, resolve: &dyn Fn(crate::object::ObjectRef) -> Option<Object>) -> Option<Object> {
     match o {
         Object::Reference(r) => resolve(*r),
         other => Some(other.clone()),
@@ -289,10 +278,7 @@ fn deref_obj(
 /// A name-tree / `/Dests` value is either the destination **array**
 /// directly, or a dictionary with a `/D` entry holding it
 /// (ISO 32000-1 §12.3.2.3). Normalise to the array object.
-fn normalize_dest_value(
-    v: &Object,
-    resolve: &dyn Fn(crate::object::ObjectRef) -> Option<Object>,
-) -> Option<Object> {
+fn normalize_dest_value(v: &Object, resolve: &dyn Fn(crate::object::ObjectRef) -> Option<Object>) -> Option<Object> {
     let v = deref_obj(v, resolve)?;
     if let Some(d) = v.as_dict()
         && let Some(inner) = d.get("D")
@@ -387,10 +373,7 @@ fn lookup_named_dest(
         }
     }
     let names = catalog.get("Names").and_then(|n| deref_obj(n, resolve))?;
-    let root = names
-        .as_dict()?
-        .get("Dests")
-        .and_then(|d| deref_obj(d, resolve))?;
+    let root = names.as_dict()?.get("Dests").and_then(|d| deref_obj(d, resolve))?;
     walk_name_tree(&root, target, resolve, depth)
 }
 
@@ -474,23 +457,13 @@ mod tests {
     fn names_tree_flat_leaf() {
         let dests_root = Object::Dictionary(HashMap::from([(
             "Names".to_string(),
-            Object::Array(vec![
-                s("a"),
-                arr_dest(1),
-                s("b"),
-                arr_dest(4),
-                s("c"),
-                arr_dest(6),
-            ]),
+            Object::Array(vec![s("a"), arr_dest(1), s("b"), arr_dest(4), s("c"), arr_dest(6)]),
         )]));
         let names = Object::Dictionary(HashMap::from([("Dests".to_string(), dests_root)]));
         let cat = HashMap::from([("Names".to_string(), names)]);
         let r = no_resolve();
         assert_eq!(
-            lookup_named_dest(&cat, b"b", &r, 0)
-                .unwrap()
-                .as_array()
-                .unwrap()[0]
+            lookup_named_dest(&cat, b"b", &r, 0).unwrap().as_array().unwrap()[0]
                 .as_reference()
                 .unwrap()
                 .id,
@@ -534,20 +507,14 @@ mod tests {
         let names = Object::Dictionary(HashMap::from([("Dests".to_string(), root)]));
         let cat = HashMap::from([("Names".to_string(), names)]);
         assert_eq!(
-            lookup_named_dest(&cat, b"z", &resolve, 0)
-                .unwrap()
-                .as_array()
-                .unwrap()[0]
+            lookup_named_dest(&cat, b"z", &resolve, 0).unwrap().as_array().unwrap()[0]
                 .as_reference()
                 .unwrap()
                 .id,
             4
         );
         assert_eq!(
-            lookup_named_dest(&cat, b"a", &resolve, 0)
-                .unwrap()
-                .as_array()
-                .unwrap()[0]
+            lookup_named_dest(&cat, b"a", &resolve, 0).unwrap().as_array().unwrap()[0]
                 .as_reference()
                 .unwrap()
                 .id,

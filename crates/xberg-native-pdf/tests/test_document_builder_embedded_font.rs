@@ -19,8 +19,7 @@ use xberg_native_pdf::writer::{DocumentBuilder, EmbeddedFont};
 /// Type-0 path is live without shipping a CJK font in the test fixtures.
 fn load_dejavu_sans() -> EmbeddedFont {
     let font_path = Path::new("src/fonts/assets/DejaVuSans.ttf");
-    EmbeddedFont::from_file(font_path)
-        .expect("src/fonts/assets/DejaVuSans.ttf should exist and parse")
+    EmbeddedFont::from_file(font_path).expect("src/fonts/assets/DejaVuSans.ttf should exist and parse")
 }
 
 #[test]
@@ -42,8 +41,14 @@ fn document_builder_registered_embedded_font_round_trips_cyrillic() {
     let doc = PdfDocument::from_bytes(bytes).expect("parse produced pdf");
     let text = doc.extract_text(0).expect("extract_text should succeed");
 
-    assert!(text.contains("Привет, мир!"), "Cyrillic round-trip failed — got: {text:?}");
-    assert!(text.contains("Καλημέρα κόσμε"), "Greek round-trip failed — got: {text:?}");
+    assert!(
+        text.contains("Привет, мир!"),
+        "Cyrillic round-trip failed — got: {text:?}"
+    );
+    assert!(
+        text.contains("Καλημέρα κόσμε"),
+        "Greek round-trip failed — got: {text:?}"
+    );
 }
 
 #[test]

@@ -42,25 +42,14 @@ fn build_pdf(content_ops: &str, resources_dict: &str) -> Vec<u8> {
     for off in [cat_off, pages_off, page_off, stream_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
 /// Build a one-page PDF that owns an indirect Type 4 tint-transform function
 /// at object 5 plus a content stream — used by Separation probes.
-fn build_pdf_with_type4_separation(
-    content_ops: &str,
-    type4_program: &str,
-    page_resources_extra: &str,
-) -> Vec<u8> {
-    build_pdf_with_type4_separation_range(
-        content_ops,
-        type4_program,
-        page_resources_extra,
-        "[0 1 0 1 0 1 0 1]",
-    )
+fn build_pdf_with_type4_separation(content_ops: &str, type4_program: &str, page_resources_extra: &str) -> Vec<u8> {
+    build_pdf_with_type4_separation_range(content_ops, type4_program, page_resources_extra, "[0 1 0 1 0 1 0 1]")
 }
 
 fn build_pdf_with_type4_separation_range(
@@ -100,9 +89,7 @@ fn build_pdf_with_type4_separation_range(
     for off in [cat_off, pages_off, page_off, stream_off, func_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -307,7 +294,11 @@ fn qa_stroke_negative_width_renders_without_panic() {
     // negative width and either render or fail cleanly. ~keep
     let on = render_with_pipeline_allow_fail(&doc, true);
     if let Some(data) = on {
-        assert_eq!(data.len(), 100 * 100 * 4, "negative width render must produce a full pixmap");
+        assert_eq!(
+            data.len(),
+            100 * 100 * 4,
+            "negative width render must produce a full pixmap"
+        );
     }
 }
 
@@ -570,9 +561,7 @@ fn qa_iccbased_cmyk_n4_fill_paints_centre_cyan() {
     for off in [cat_off, pages_off, page_off, stream_off, icc_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     let doc = PdfDocument::from_bytes(buf).expect("PDF parses");
     let on = render_with_pipeline(&doc, true);
     let (r, g, b, _) = center_pixel(&on);
@@ -669,9 +658,7 @@ fn build_devicen_pdf(
     for off in [cat_off, pages_off, page_off, stream_off, func_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -708,7 +695,11 @@ fn qa_pattern_colour_space_degenerate_cs_does_not_crash() {
     let on = render_with_pipeline(&doc, true);
     // Bare `/Pattern cs` with no concrete pattern is degenerate; the
     // renderer must not panic. Pin the pixmap size invariant. ~keep
-    assert_eq!(on.len(), 100 * 100 * 4, "Pattern degenerate `cs` must not crash the renderer");
+    assert_eq!(
+        on.len(),
+        100 * 100 * 4,
+        "Pattern degenerate `cs` must not crash the renderer"
+    );
 }
 
 /// Probe 19 — Type 4 program that divides by zero.
@@ -866,11 +857,13 @@ fn qa_scn_too_few_components_no_panic() {
     let type4_program = "{ exch pop 0.0 exch 0.0 0.0 }";
     let resources = "/ColorSpace << /TwoSpot [/DeviceN [/SpotA /SpotB] /DeviceCMYK 5 0 R] >>";
     let content = "/TwoSpot cs\n0.5 scn\n20 20 60 60 re\nf\n";
-    let bytes =
-        build_devicen_pdf(content, type4_program, resources, "[0 1 0 1 0 1 0 1]", &[0, 1, 0, 1]);
+    let bytes = build_devicen_pdf(content, type4_program, resources, "[0 1 0 1 0 1 0 1]", &[0, 1, 0, 1]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
     let on = render_with_pipeline_allow_fail(&doc, true);
-    assert!(on.is_some(), "DeviceN with too-few components must not panic the renderer");
+    assert!(
+        on.is_some(),
+        "DeviceN with too-few components must not panic the renderer"
+    );
 }
 
 /// Probe 25 — Wall-clock smoke check: 1000 fills, all through the
@@ -976,8 +969,7 @@ fn qa_corpus_simple_pdf_renders_without_panic() {
 
 #[test]
 fn qa_corpus_hello_structure_pdf_renders_with_text_marks() {
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hello_structure.pdf");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hello_structure.pdf");
     let bytes = std::fs::read(&path).expect("hello_structure.pdf fixture present");
     let doc = PdfDocument::from_bytes(bytes).expect("hello_structure.pdf parses");
     let on = render_with_pipeline(&doc, true);

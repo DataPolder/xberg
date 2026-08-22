@@ -69,7 +69,11 @@ fn right_aligned_stacks_pdf_at(scale: f32) -> Vec<u8> {
         4,
         format!("<< /Length {} >>\nstream\n{content}endstream", content.len()),
     );
-    obj(&mut buf, 5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into());
+    obj(
+        &mut buf,
+        5,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+    );
     let xref = buf.len();
     buf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
     for id in 1..=5 {

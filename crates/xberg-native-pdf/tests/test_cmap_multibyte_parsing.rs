@@ -20,9 +20,21 @@ fn test_bfrange_array_form_basic() {
     let data = b"beginbfrange\n<0041> <0043> [<FF21> <FF22> <FF23>]\nendbfrange";
     let cmap = parse_tounicode_cmap(data).unwrap();
 
-    assert_eq!(cmap.get(&0x0041).as_deref(), Some("\u{FF21}"), "0x41 → Fullwidth A (U+FF21)");
-    assert_eq!(cmap.get(&0x0042).as_deref(), Some("\u{FF22}"), "0x42 → Fullwidth B (U+FF22)");
-    assert_eq!(cmap.get(&0x0043).as_deref(), Some("\u{FF23}"), "0x43 → Fullwidth C (U+FF23)");
+    assert_eq!(
+        cmap.get(&0x0041).as_deref(),
+        Some("\u{FF21}"),
+        "0x41 → Fullwidth A (U+FF21)"
+    );
+    assert_eq!(
+        cmap.get(&0x0042).as_deref(),
+        Some("\u{FF22}"),
+        "0x42 → Fullwidth B (U+FF22)"
+    );
+    assert_eq!(
+        cmap.get(&0x0043).as_deref(),
+        Some("\u{FF23}"),
+        "0x43 → Fullwidth C (U+FF23)"
+    );
 }
 
 #[test]
@@ -66,7 +78,11 @@ fn test_bfchar_two_byte_src_code() {
     let data = b"beginbfchar\n<4E2D> <4E2D>\nendbfchar";
     let cmap = parse_tounicode_cmap(data).unwrap();
 
-    assert_eq!(cmap.get(&0x4E2D).as_deref(), Some("\u{4E2D}"), "code 0x4E2D → U+4E2D (中)");
+    assert_eq!(
+        cmap.get(&0x4E2D).as_deref(),
+        Some("\u{4E2D}"),
+        "code 0x4E2D → U+4E2D (中)"
+    );
     assert!(
         cmap.get(&0x4E).is_none() || cmap.get(&0x4E).as_deref() != Some("\u{4E2D}"),
         "byte 0x4E must not produce 中"
@@ -78,7 +94,11 @@ fn test_bfchar_two_byte_src_hiragana() {
     let data = b"beginbfchar\n<3042> <3042>\nendbfchar";
     let cmap = parse_tounicode_cmap(data).unwrap();
 
-    assert_eq!(cmap.get(&0x3042).as_deref(), Some("\u{3042}"), "code 0x3042 → U+3042 (あ)");
+    assert_eq!(
+        cmap.get(&0x3042).as_deref(),
+        Some("\u{3042}"),
+        "code 0x3042 → U+3042 (あ)"
+    );
 }
 
 #[test]

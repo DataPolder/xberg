@@ -602,8 +602,7 @@ pub fn text_quality_gate(text: &str) -> Option<ReasonCode> {
 
     let words: Vec<&str> = text.split_whitespace().collect();
     if words.len() >= 8 {
-        let frag =
-            words.iter().filter(|w| w.chars().count() <= 2).count() as f32 / words.len() as f32;
+        let frag = words.iter().filter(|w| w.chars().count() <= 2).count() as f32 / words.len() as f32;
         // CJK/Hangul text has no inter-word spaces, so glyph-adjacency
         // clustering naturally produces short tokens — `frag` and
         // `avg_word_len` below are calibrated for space-separated Latin
@@ -624,8 +623,7 @@ pub fn text_quality_gate(text: &str) -> Option<ReasonCode> {
             }
         }
         let repeat_ratio = repeats as f32 / words.len() as f32;
-        let avg_word_len =
-            words.iter().map(|w| w.chars().count()).sum::<usize>() as f32 / words.len() as f32;
+        let avg_word_len = words.iter().map(|w| w.chars().count()).sum::<usize>() as f32 / words.len() as f32;
         if repeat_ratio > 0.30 || (frag > 0.55 && avg_word_len < 2.5 && !cjk_dominant) {
             return Some(ReasonCode::TextLayerBelowThreshold);
         }
@@ -642,10 +640,7 @@ pub fn text_quality_gate(text: &str) -> Option<ReasonCode> {
 /// Deterministic ordered guards then a coverage/density verdict (KISS:
 /// a rule cascade, not ML). Returns `(kind, confidence, reason)`.
 #[must_use]
-pub fn classify_from_signals(
-    s: &PageSignals,
-    cfg: &AutoExtractOptions,
-) -> (PageKind, f32, ReasonCode) {
+pub fn classify_from_signals(s: &PageSignals, cfg: &AutoExtractOptions) -> (PageKind, f32, ReasonCode) {
     // Calibrated defaults (research §3/§4); presets/cfg override. ~keep
     let min_text_conf = cfg.min_text_confidence.unwrap_or(0.70);
     let scan_cover_min = 0.80_f32;
@@ -656,9 +651,7 @@ pub fn classify_from_signals(
         return (PageKind::Empty, 0.99, ReasonCode::Empty);
     }
 
-    let usable_text = s.text_glyph_count >= min_glyphs
-        && s.garbled_ratio <= 0.20
-        && s.fragmented_word_ratio <= 0.80;
+    let usable_text = s.text_glyph_count >= min_glyphs && s.garbled_ratio <= 0.20 && s.fragmented_word_ratio <= 0.80;
 
     // Outlined/vectorised text (case F): paths dominate, ~no text/raster. ~keep
     if !usable_text && s.vector_path_density > 0.60 && s.image_area_ratio < 0.20 {
@@ -739,14 +732,8 @@ pub fn summarise(pages: &[PageKind]) -> DocumentSummary {
         return DocumentSummary::Empty;
     }
     let non_empty: Vec<&PageKind> = pages.iter().filter(|k| **k != PageKind::Empty).collect();
-    let text = non_empty
-        .iter()
-        .filter(|k| matches!(k, PageKind::TextLayer))
-        .count();
-    let scanned = non_empty
-        .iter()
-        .filter(|k| matches!(k, PageKind::Scanned))
-        .count();
+    let text = non_empty.iter().filter(|k| matches!(k, PageKind::TextLayer)).count();
+    let scanned = non_empty.iter().filter(|k| matches!(k, PageKind::Scanned)).count();
     let n = non_empty.len();
     if text * 100 >= n * 80 {
         DocumentSummary::MostlyText
@@ -854,10 +841,8 @@ impl AutoExtractor {
         page: usize,
         cls: &PageClassification,
     ) -> crate::Result<(String, ExtractSource, ReasonCode)> {
-        let force = matches!(self.opts.mode, ExtractMode::ForceOcr)
-            || self.opts.force_ocr_pages.contains(&page);
-        let needs_ocr =
-            force || matches!(cls.kind, PageKind::Scanned | PageKind::ImageText | PageKind::Mixed);
+        let force = matches!(self.opts.mode, ExtractMode::ForceOcr) || self.opts.force_ocr_pages.contains(&page);
+        let needs_ocr = force || matches!(cls.kind, PageKind::Scanned | PageKind::ImageText | PageKind::Mixed);
         if !needs_ocr {
             return Ok((doc.extract_text(page)?, ExtractSource::NativeText, cls.reason));
         }
@@ -925,9 +910,7 @@ impl AutoExtractor {
         let ocr_used = source == ExtractSource::Ocr;
         let bbox = doc
             .get_page_media_box(page)
-            .map(|(x0, y0, x1, y1)| {
-                Quad::from_xywh(x0.min(x1), y0.min(y1), (x1 - x0).abs(), (y1 - y0).abs())
-            })
+            .map(|(x0, y0, x1, y1)| Quad::from_xywh(x0.min(x1), y0.min(y1), (x1 - x0).abs(), (y1 - y0).abs()))
             .unwrap_or(Quad::from_xywh(0.0, 0.0, 0.0, 0.0));
         // A high-confidence native text result is COMPLETE, not partial
         // — `NativeTextHighConfidence` is a success reason, same as `Ok`
@@ -1010,11 +993,7 @@ mod tests {
         assert_eq!(AutoExtractOptions::balanced().mode, ExtractMode::Auto);
         assert!(AutoExtractOptions::balanced().reconstruct_image_tables);
         assert_eq!(AutoExtractOptions::high_fidelity().mode, ExtractMode::Auto);
-        assert!(
-            AutoExtractOptions::high_fidelity()
-                .min_text_confidence
-                .is_some()
-        );
+        assert!(AutoExtractOptions::high_fidelity().min_text_confidence.is_some());
         assert_eq!(AutoExtractOptions::default(), AutoExtractOptions::balanced());
     }
 
@@ -1041,8 +1020,7 @@ mod tests {
         let back: AutoExtractOptions = serde_json::from_str(&js).expect("deserialize");
         assert_eq!(o, back);
         // Partial JSON fills via #[serde(default)] (forward-compat). ~keep
-        let partial: AutoExtractOptions =
-            serde_json::from_str(r#"{"mode":"force_ocr"}"#).expect("partial");
+        let partial: AutoExtractOptions = serde_json::from_str(r#"{"mode":"force_ocr"}"#).expect("partial");
         assert_eq!(partial.mode, ExtractMode::ForceOcr);
         assert!(partial.reconstruct_image_tables); // from Default(=balanced) ~keep
     }
@@ -1127,7 +1105,10 @@ mod tests {
     fn cascade_empty_scanned_sparse_over_scan_hybrid_textlayer() {
         let mut s = sig();
         s.page_is_empty = true;
-        assert_eq!(classify_from_signals(&s, &AutoExtractOptions::balanced()).0, PageKind::Empty);
+        assert_eq!(
+            classify_from_signals(&s, &AutoExtractOptions::balanced()).0,
+            PageKind::Empty
+        );
 
         // Pure scan (CCITT) → high-confidence Scanned. ~keep
         let mut s = sig();
@@ -1143,7 +1124,10 @@ mod tests {
         s.image_area_ratio = 0.95;
         s.text_glyph_count = 60; // a Bates/header line ~keep
         s.text_area_ratio = 0.02;
-        assert_eq!(classify_from_signals(&s, &AutoExtractOptions::balanced()).0, PageKind::Scanned);
+        assert_eq!(
+            classify_from_signals(&s, &AutoExtractOptions::balanced()).0,
+            PageKind::Scanned
+        );
 
         // Hybrid: real text + sub-page image (cases D/S). ~keep
         let mut s = sig();
@@ -1193,7 +1177,10 @@ mod tests {
             DocumentSummary::MostlyScanned
         );
         // Heterogeneous doc (case Q) stays Mixed — not forced. ~keep
-        assert_eq!(summarise(&[TextLayer, Scanned, ImageText, Scanned]), DocumentSummary::Mixed);
+        assert_eq!(
+            summarise(&[TextLayer, Scanned, ImageText, Scanned]),
+            DocumentSummary::Mixed
+        );
     }
 
     #[test]

@@ -92,7 +92,7 @@ impl fmt::Display for Error {
                     f,
                     "{kind} algorithm '{name}' not permitted by active CryptoProvider: {reason}"
                 )
-            },
+            }
             Error::InvalidInput(s) => write!(f, "crypto: invalid input — {s}"),
             Error::Verification(s) => write!(f, "crypto: verification failed — {s}"),
             Error::Backend(s) => write!(f, "crypto: backend error — {s}"),

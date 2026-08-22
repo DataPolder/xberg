@@ -514,10 +514,7 @@ impl Operator {
     /// let operands = vec![Object::Integer(10), Object::Integer(20)];
     /// assert!(op.validate_operands(&operands).is_ok());
     /// ```
-    pub fn validate_operands_for_raw_operator(
-        operator_name: &str,
-        operands: &[Object],
-    ) -> crate::error::Result<()> {
+    pub fn validate_operands_for_raw_operator(operator_name: &str, operands: &[Object]) -> crate::error::Result<()> {
         use crate::error::Error;
 
         match operator_name {
@@ -529,7 +526,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "l" => {
                 if operands.len() != 2 {
                     return Err(Error::InvalidPdf(format!(
@@ -537,7 +534,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "c" => {
                 if operands.len() != 6 {
                     return Err(Error::InvalidPdf(format!(
@@ -545,7 +542,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "v" => {
                 if operands.len() != 4 {
                     return Err(Error::InvalidPdf(format!(
@@ -553,7 +550,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "y" => {
                 if operands.len() != 4 {
                     return Err(Error::InvalidPdf(format!(
@@ -561,7 +558,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "h" => {
                 if !operands.is_empty() {
                     return Err(Error::InvalidPdf(format!(
@@ -569,7 +566,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "re" => {
                 if operands.len() != 4 {
                     return Err(Error::InvalidPdf(format!(
@@ -577,7 +574,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
 
             // Text positioning operators - PDF Spec Section 9.4.2 ~keep
             "Td" => {
@@ -587,7 +584,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "TD" => {
                 if operands.len() != 2 {
                     return Err(Error::InvalidPdf(format!(
@@ -595,7 +592,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "Tm" => {
                 if operands.len() != 6 {
                     return Err(Error::InvalidPdf(format!(
@@ -603,7 +600,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "T*" => {
                 if !operands.is_empty() {
                     return Err(Error::InvalidPdf(format!(
@@ -611,7 +608,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
 
             // Text showing operators - PDF Spec Section 9.4.3 ~keep
             "Tj" => {
@@ -621,7 +618,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "TJ" => {
                 if operands.len() != 1 {
                     return Err(Error::InvalidPdf(format!(
@@ -629,7 +626,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "'" => {
                 if operands.len() != 1 {
                     return Err(Error::InvalidPdf(format!(
@@ -637,7 +634,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "\"" => {
                 if operands.len() != 3 {
                     return Err(Error::InvalidPdf(format!(
@@ -645,7 +642,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
 
             // Text state operators - PDF Spec Section 9.3 ~keep
             "Tc" => {
@@ -655,7 +652,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "Tw" => {
                 if operands.len() != 1 {
                     return Err(Error::InvalidPdf(format!(
@@ -663,7 +660,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "Tz" => {
                 if operands.len() != 1 {
                     return Err(Error::InvalidPdf(format!(
@@ -671,7 +668,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "TL" => {
                 if operands.len() != 1 {
                     return Err(Error::InvalidPdf(format!(
@@ -679,7 +676,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "Tf" => {
                 if operands.len() != 2 {
                     return Err(Error::InvalidPdf(format!(
@@ -687,7 +684,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "Tr" => {
                 if operands.len() != 1 {
                     return Err(Error::InvalidPdf(format!(
@@ -695,7 +692,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "Ts" => {
                 if operands.len() != 1 {
                     return Err(Error::InvalidPdf(format!(
@@ -703,7 +700,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
 
             "q" | "Q" => {
                 if !operands.is_empty() {
@@ -713,7 +710,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "cm" => {
                 if operands.len() != 6 {
                     return Err(Error::InvalidPdf(format!(
@@ -721,7 +718,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
 
             // Color operators - PDF Spec Section 8.6.8 ~keep
             "rg" => {
@@ -731,7 +728,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "RG" => {
                 if operands.len() != 3 {
                     return Err(Error::InvalidPdf(format!(
@@ -739,7 +736,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "g" => {
                 if operands.len() != 1 {
                     return Err(Error::InvalidPdf(format!(
@@ -747,7 +744,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "G" => {
                 if operands.len() != 1 {
                     return Err(Error::InvalidPdf(format!(
@@ -755,7 +752,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "k" => {
                 if operands.len() != 4 {
                     return Err(Error::InvalidPdf(format!(
@@ -763,7 +760,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
             "K" => {
                 if operands.len() != 4 {
                     return Err(Error::InvalidPdf(format!(
@@ -771,7 +768,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
 
             // Text object operators - PDF Spec Section 9.4 ~keep
             "BT" | "ET" => {
@@ -782,7 +779,7 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
 
             // XObject operator - PDF Spec Section 8.8 ~keep
             "Do" => {
@@ -792,14 +789,14 @@ impl Operator {
                         operands.len()
                     )));
                 }
-            },
+            }
 
             _ => {
                 tracing::trace!(
                     operator = operator_name,
                     "no operand validation implemented for operator"
                 );
-            },
+            }
         }
 
         Ok(())
@@ -817,7 +814,7 @@ mod tests {
             Operator::Td { tx, ty } => {
                 assert_eq!(tx, 10.0);
                 assert_eq!(ty, 20.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -840,7 +837,7 @@ mod tests {
                 assert_eq!(d, 1.0);
                 assert_eq!(e, 100.0);
                 assert_eq!(f, 200.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -853,7 +850,7 @@ mod tests {
         match op {
             Operator::Tj { text } => {
                 assert_eq!(text, b"Hello");
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -868,24 +865,20 @@ mod tests {
             Operator::Tf { font, size } => {
                 assert_eq!(font, "F1");
                 assert_eq!(size, 12.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
 
     #[test]
     fn test_operator_rgb() {
-        let op = Operator::SetFillRgb {
-            r: 1.0,
-            g: 0.0,
-            b: 0.0,
-        };
+        let op = Operator::SetFillRgb { r: 1.0, g: 0.0, b: 0.0 };
         match op {
             Operator::SetFillRgb { r, g, b } => {
                 assert_eq!(r, 1.0);
                 assert_eq!(g, 0.0);
                 assert_eq!(b, 0.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -896,7 +889,7 @@ mod tests {
         match elem {
             TextElement::String(s) => {
                 assert_eq!(s, b"Text");
-            },
+            }
             _ => panic!("Wrong element type"),
         }
     }
@@ -907,16 +900,14 @@ mod tests {
         match elem {
             TextElement::Offset(offset) => {
                 assert_eq!(offset, -100.0);
-            },
+            }
             _ => panic!("Wrong element type"),
         }
     }
 
     #[test]
     fn test_operator_clone() {
-        let op1 = Operator::Tj {
-            text: b"Test".to_vec(),
-        };
+        let op1 = Operator::Tj { text: b"Test".to_vec() };
         let op2 = op1.clone();
         assert_eq!(op1, op2);
     }
@@ -939,7 +930,7 @@ mod tests {
             Operator::Other { name, operands } => {
                 assert_eq!(name, "Do");
                 assert_eq!(operands.len(), 1);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1174,11 +1165,7 @@ mod tests {
 
     #[test]
     fn test_validate_double_quote_valid() {
-        let operands = vec![
-            Object::Real(1.0),
-            Object::Real(2.0),
-            Object::String(b"text".to_vec()),
-        ];
+        let operands = vec![Object::Real(1.0), Object::Real(2.0), Object::String(b"text".to_vec())];
         assert!(Operator::validate_operands_for_raw_operator("\"", &operands).is_ok());
     }
 
@@ -1442,7 +1429,7 @@ mod tests {
             Operator::TD { tx, ty } => {
                 assert_eq!(tx, 0.0);
                 assert_eq!(ty, -14.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1468,7 +1455,7 @@ mod tests {
                 assert!(matches!(&array[0], TextElement::String(s) if s == b"He"));
                 assert!(matches!(&array[1], TextElement::Offset(o) if *o == -120.0));
                 assert!(matches!(&array[2], TextElement::String(s) if s == b"llo"));
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1500,7 +1487,7 @@ mod tests {
                 assert_eq!(word_space, 1.0);
                 assert_eq!(char_space, 2.0);
                 assert_eq!(text, b"quoted");
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1559,24 +1546,20 @@ mod tests {
                 assert_eq!(d, 2.0);
                 assert_eq!(e, 10.0);
                 assert_eq!(f, 20.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
 
     #[test]
     fn test_operator_stroke_rgb() {
-        let op = Operator::SetStrokeRgb {
-            r: 0.0,
-            g: 0.5,
-            b: 1.0,
-        };
+        let op = Operator::SetStrokeRgb { r: 0.0, g: 0.5, b: 1.0 };
         match op {
             Operator::SetStrokeRgb { r, g, b } => {
                 assert_eq!(r, 0.0);
                 assert_eq!(g, 0.5);
                 assert_eq!(b, 1.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1607,7 +1590,7 @@ mod tests {
                 assert_eq!(m, 0.0);
                 assert_eq!(y, 0.0);
                 assert_eq!(k, 0.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1626,7 +1609,7 @@ mod tests {
                 assert_eq!(m, 1.0);
                 assert_eq!(y, 0.0);
                 assert_eq!(k, 0.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1661,20 +1644,18 @@ mod tests {
         match op {
             Operator::SetFillColor { components } => {
                 assert_eq!(components, vec![0.1, 0.2, 0.3]);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
 
     #[test]
     fn test_operator_stroke_color() {
-        let op = Operator::SetStrokeColor {
-            components: vec![0.5],
-        };
+        let op = Operator::SetStrokeColor { components: vec![0.5] };
         match op {
             Operator::SetStrokeColor { components } => {
                 assert_eq!(components, vec![0.5]);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1689,7 +1670,7 @@ mod tests {
             Operator::SetFillColorN { components, name } => {
                 assert_eq!(components, vec![0.1, 0.2, 0.3]);
                 assert_eq!(name, Some(Box::new("Pattern1".to_string())));
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1704,7 +1685,7 @@ mod tests {
             Operator::SetFillColorN { components, name } => {
                 assert_eq!(components, vec![0.5]);
                 assert!(name.is_none());
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1719,7 +1700,7 @@ mod tests {
             Operator::SetStrokeColorN { components, name } => {
                 assert!(components.is_empty());
                 assert_eq!(name, Some(Box::new("P1".to_string())));
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1748,7 +1729,7 @@ mod tests {
             Operator::MoveTo { x, y } => {
                 assert_eq!(x, 100.0);
                 assert_eq!(y, 200.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1760,7 +1741,7 @@ mod tests {
             Operator::LineTo { x, y } => {
                 assert_eq!(x, 300.0);
                 assert_eq!(y, 400.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1776,21 +1757,14 @@ mod tests {
             y3: 6.0,
         };
         match op {
-            Operator::CurveTo {
-                x1,
-                y1,
-                x2,
-                y2,
-                x3,
-                y3,
-            } => {
+            Operator::CurveTo { x1, y1, x2, y2, x3, y3 } => {
                 assert_eq!(x1, 1.0);
                 assert_eq!(y1, 2.0);
                 assert_eq!(x2, 3.0);
                 assert_eq!(y2, 4.0);
                 assert_eq!(x3, 5.0);
                 assert_eq!(y3, 6.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1809,7 +1783,7 @@ mod tests {
                 assert_eq!(y2, 20.0);
                 assert_eq!(x3, 30.0);
                 assert_eq!(y3, 40.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1828,7 +1802,7 @@ mod tests {
                 assert_eq!(y1, 20.0);
                 assert_eq!(x3, 30.0);
                 assert_eq!(y3, 40.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1847,17 +1821,12 @@ mod tests {
             height: 50.0,
         };
         match op {
-            Operator::Rectangle {
-                x,
-                y,
-                width,
-                height,
-            } => {
+            Operator::Rectangle { x, y, width, height } => {
                 assert_eq!(x, 10.0);
                 assert_eq!(y, 20.0);
                 assert_eq!(width, 100.0);
                 assert_eq!(height, 50.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1893,7 +1862,7 @@ mod tests {
             Operator::SetDash { array, phase } => {
                 assert_eq!(array, vec![3.0, 2.0]);
                 assert_eq!(phase, 0.0);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1968,7 +1937,7 @@ mod tests {
             Operator::InlineImage { dict, data } => {
                 assert_eq!(dict.len(), 2);
                 assert_eq!(data.len(), 10);
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }
@@ -1994,7 +1963,7 @@ mod tests {
             Operator::BeginMarkedContentDict { tag, properties } => {
                 assert_eq!(tag, "P");
                 assert!(matches!(*properties, Object::Name(ref n) if n == "MCID0"));
-            },
+            }
             _ => panic!("Wrong operator type"),
         }
     }

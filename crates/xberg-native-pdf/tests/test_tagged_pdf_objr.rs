@@ -22,8 +22,7 @@ mod tests {
     /// hello_structure.pdf has a /StructTreeRoot but no /MarkInfo /Marked entry.
     #[test]
     fn test_tagged_pdf_without_mark_info_loads_structure_tree() {
-        let doc = xberg_native_pdf::document::PdfDocument::from_bytes(HELLO_STRUCTURE_PDF.to_vec())
-            .unwrap();
+        let doc = xberg_native_pdf::document::PdfDocument::from_bytes(HELLO_STRUCTURE_PDF.to_vec()).unwrap();
 
         let tree = doc.structure_tree().unwrap();
         assert!(
@@ -38,12 +37,8 @@ mod tests {
     /// Without OBJR handling, obj 13 (Title, MCID 1, page 1) is silently dropped.
     #[test]
     fn test_objr_in_struct_elem_k_array_is_resolved() {
-        let doc = xberg_native_pdf::document::PdfDocument::from_bytes(HELLO_STRUCTURE_PDF.to_vec())
-            .unwrap();
-        let tree = doc
-            .structure_tree()
-            .unwrap()
-            .expect("structure tree present");
+        let doc = xberg_native_pdf::document::PdfDocument::from_bytes(HELLO_STRUCTURE_PDF.to_vec()).unwrap();
+        let tree = doc.structure_tree().unwrap().expect("structure tree present");
 
         let mut found_mcids: Vec<(u32, u32)> = Vec::new();
         collect_mcids(&tree.root_elements, &mut found_mcids);
@@ -63,12 +58,8 @@ mod tests {
     /// Without OBJR handling, obj 14 (P element with MCID 2) is silently dropped.
     #[test]
     fn test_objr_at_struct_tree_root_k_level_is_resolved() {
-        let doc = xberg_native_pdf::document::PdfDocument::from_bytes(HELLO_STRUCTURE_PDF.to_vec())
-            .unwrap();
-        let tree = doc
-            .structure_tree()
-            .unwrap()
-            .expect("structure tree present");
+        let doc = xberg_native_pdf::document::PdfDocument::from_bytes(HELLO_STRUCTURE_PDF.to_vec()).unwrap();
+        let tree = doc.structure_tree().unwrap().expect("structure tree present");
 
         let mut found_mcids: Vec<(u32, u32)> = Vec::new();
         collect_mcids(&tree.root_elements, &mut found_mcids);
@@ -87,8 +78,7 @@ mod tests {
     /// in extracted text across both pages.
     #[test]
     fn test_hello_structure_full_text_extracted() {
-        let doc = xberg_native_pdf::document::PdfDocument::from_bytes(HELLO_STRUCTURE_PDF.to_vec())
-            .unwrap();
+        let doc = xberg_native_pdf::document::PdfDocument::from_bytes(HELLO_STRUCTURE_PDF.to_vec()).unwrap();
         let page_count = doc.page_count().unwrap_or(0);
 
         let all_text: String = (0..page_count)
@@ -107,8 +97,7 @@ mod tests {
             all_text
         );
         assert!(
-            all_text.contains("I'll be back shortly!")
-                || all_text.contains("I\u{2019}ll be back shortly!"),
+            all_text.contains("I'll be back shortly!") || all_text.contains("I\u{2019}ll be back shortly!"),
             "page 1 paragraph missing from: {:?}",
             all_text
         );
@@ -123,8 +112,7 @@ mod tests {
     /// document has a structure tree (`struct_tree_opt.is_some()`).
     #[test]
     fn test_tagged_pdf_no_false_positive_table() {
-        let doc = xberg_native_pdf::document::PdfDocument::from_bytes(HELLO_STRUCTURE_PDF.to_vec())
-            .unwrap();
+        let doc = xberg_native_pdf::document::PdfDocument::from_bytes(HELLO_STRUCTURE_PDF.to_vec()).unwrap();
 
         // Page 1 contains "Goodbye Cruel World" as a heading element in the structure tree.
         // With the text-only spatial fallback guard absent, this heading was mistakenly
@@ -179,24 +167,17 @@ mod tests {
         }
     }
 
-    fn collect_mcids(
-        elems: &[xberg_native_pdf::structure::types::StructElem],
-        out: &mut Vec<(u32, u32)>,
-    ) {
+    fn collect_mcids(elems: &[xberg_native_pdf::structure::types::StructElem], out: &mut Vec<(u32, u32)>) {
         for elem in elems {
             for child in &elem.children {
                 match child {
-                    xberg_native_pdf::structure::types::StructChild::MarkedContentRef {
-                        mcid,
-                        page,
-                        ..
-                    } => {
+                    xberg_native_pdf::structure::types::StructChild::MarkedContentRef { mcid, page, .. } => {
                         out.push((*page, *mcid));
-                    },
+                    }
                     xberg_native_pdf::structure::types::StructChild::StructElem(child_elem) => {
                         collect_mcids(std::slice::from_ref(child_elem), out);
-                    },
-                    _ => {},
+                    }
+                    _ => {}
                 }
             }
         }

@@ -129,9 +129,7 @@ fn is_marginal_label(text: &str) -> bool {
         return false;
     }
     let is_arabic = t.chars().all(|c| c.is_ascii_digit());
-    let is_roman = !t.is_empty()
-        && t.chars()
-            .all(|c| matches!(c, 'i' | 'v' | 'x' | 'l' | 'c' | 'd' | 'm'));
+    let is_roman = !t.is_empty() && t.chars().all(|c| matches!(c, 'i' | 'v' | 'x' | 'l' | 'c' | 'd' | 'm'));
     is_arabic || is_roman
 }
 
@@ -192,26 +190,15 @@ fn detect_gutter_x(body: &[&TextSpan], page_width: f32) -> Option<f32> {
     }
     let all_extents: Vec<(f32, f32)> = body
         .iter()
-        .filter(|s| {
-            s.bbox.width > 0.0
-                && s.bbox.x.is_finite()
-                && s.bbox.width.is_finite()
-                && !s.text.trim().is_empty()
-        })
+        .filter(|s| s.bbox.width > 0.0 && s.bbox.x.is_finite() && s.bbox.width.is_finite() && !s.text.trim().is_empty())
         .map(|s| (s.bbox.x, s.bbox.x + s.bbox.width))
         .collect();
     if all_extents.len() < 4 {
         return None;
     }
 
-    let content_min = all_extents
-        .iter()
-        .map(|b| b.0)
-        .fold(f32::INFINITY, f32::min);
-    let content_max = all_extents
-        .iter()
-        .map(|b| b.1)
-        .fold(f32::NEG_INFINITY, f32::max);
+    let content_min = all_extents.iter().map(|b| b.0).fold(f32::INFINITY, f32::min);
+    let content_max = all_extents.iter().map(|b| b.1).fold(f32::NEG_INFINITY, f32::max);
     let content_w = content_max - content_min;
     if content_w < page_width * 0.25 {
         return None; // body too narrow to hold two columns ~keep
@@ -220,10 +207,7 @@ fn detect_gutter_x(body: &[&TextSpan], page_width: f32) -> Option<f32> {
     // Drop cross-column chrome (full-width titles/rules) so it cannot bridge the
     // gutter in projection; a real column-body line stays well under half-width. ~keep
     let bridge_w = content_w * COLUMN_BRIDGE_FRACTION;
-    let mut boxes: Vec<(f32, f32)> = all_extents
-        .into_iter()
-        .filter(|(l, r)| r - l <= bridge_w)
-        .collect();
+    let mut boxes: Vec<(f32, f32)> = all_extents.into_iter().filter(|(l, r)| r - l <= bridge_w).collect();
     if boxes.len() < 4 {
         return None;
     }
@@ -358,12 +342,7 @@ pub(crate) fn build_structured_page_full(
     // column rather than being forced to one side by its centre. ~keep
     let (content_min, content_max) = body_refs
         .iter()
-        .filter(|s| {
-            s.bbox.width > 0.0
-                && s.bbox.x.is_finite()
-                && s.bbox.width.is_finite()
-                && !s.text.trim().is_empty()
-        })
+        .filter(|s| s.bbox.width > 0.0 && s.bbox.x.is_finite() && s.bbox.width.is_finite() && !s.text.trim().is_empty())
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), s| {
             (lo.min(s.bbox.x), hi.max(s.bbox.x + s.bbox.width))
         });
@@ -418,7 +397,7 @@ pub(crate) fn build_structured_page_full(
             match regions.last() {
                 Some(r) if r.kind == kind && r.column_index == col && r.section_id == section => {
                     Some(regions.len() - 1)
-                },
+                }
                 _ => None,
             }
         };
@@ -543,7 +522,10 @@ mod tests {
             .iter()
             .find(|r| r.text.contains("Troisième Livre"))
             .expect("title region present");
-        assert_eq!(title.column_index, None, "gutter-bridging title must not be assigned a column");
+        assert_eq!(
+            title.column_index, None,
+            "gutter-bridging title must not be assigned a column"
+        );
     }
 
     #[test]
@@ -617,7 +599,7 @@ mod tests {
         // Two spans only — below the detector's `body.len() < 4` floor, so Auto
         // yields no gutter; Two must still split at the page midpoint (216). ~keep
         let spans = vec![
-            span("left body", 40.0, 700.0, 100.0), // centre 90  < 216 → col 0 ~keep
+            span("left body", 40.0, 700.0, 100.0),   // centre 90  < 216 → col 0 ~keep
             span("right body", 250.0, 700.0, 100.0), // centre 300 > 216 → col 1 ~keep
         ];
 
@@ -625,10 +607,7 @@ mod tests {
         assert!(
             auto.regions.iter().all(|r| r.column_index.is_none()),
             "Auto must not split this sparse layout: {:?}",
-            auto.regions
-                .iter()
-                .map(|r| r.column_index)
-                .collect::<Vec<_>>()
+            auto.regions.iter().map(|r| r.column_index).collect::<Vec<_>>()
         );
 
         let two = build_structured_page_with_mode(0, pw, 792.0, spans, ColumnMode::Two);
@@ -656,11 +635,7 @@ mod tests {
         assert!(
             single.regions.iter().all(|r| r.column_index.is_none()),
             "Single must suppress all columns: {:?}",
-            single
-                .regions
-                .iter()
-                .map(|r| r.column_index)
-                .collect::<Vec<_>>()
+            single.regions.iter().map(|r| r.column_index).collect::<Vec<_>>()
         );
     }
 

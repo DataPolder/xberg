@@ -50,12 +50,9 @@ mod extractor;
 mod integration;
 mod parser;
 
-pub use converter::{
-    ConvertedField, ConvertedPage, XfaConversionOptions, XfaConversionResult, XfaConverter,
-};
+pub use converter::{ConvertedField, ConvertedPage, XfaConversionOptions, XfaConversionResult, XfaConverter};
 pub use extractor::XfaExtractor;
 pub use integration::{
-    XfaAnalysis, add_converted_field, add_converted_page, analyze_xfa_document,
-    convert_xfa_document,
+    XfaAnalysis, add_converted_field, add_converted_page, analyze_xfa_document, convert_xfa_document,
 };
 pub use parser::{XfaField, XfaFieldType, XfaForm, XfaOption, XfaPage, XfaParser, is_xfa_data};

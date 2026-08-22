@@ -207,15 +207,7 @@ fn render_raw(doc: &PdfDocument, excluded: HashSet<String>) -> (Vec<u8>, u32, u3
 ///
 /// Panics on an empty region (caller bug) so out-of-frame coordinates are
 /// detected rather than silently returning black.
-fn sample_region(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
-) -> (f32, f32, f32, f32) {
+fn sample_region(data: &[u8], width: u32, height: u32, x: u32, y: u32, w: u32, h: u32) -> (f32, f32, f32, f32) {
     let mut r_sum = 0u64;
     let mut g_sum = 0u64;
     let mut b_sum = 0u64;
@@ -550,9 +542,7 @@ fn build_pdf_with_utf16le_layer_name() -> Vec<u8> {
     // OCG /Name = UTF-16LE BOM + "Layer" — hex string <FFFE 4C00 6100 7900 6500 7200>.
     // Decoded that's "Layer". (No trailing NUL.) ~keep
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        b"5 0 obj\n<< /Type /OCG /Name <FFFE4C006100790065007200> >>\nendobj\n\n",
-    );
+    pdf.extend_from_slice(b"5 0 obj\n<< /Type /OCG /Name <FFFE4C006100790065007200> >>\nendobj\n\n");
 
     write_xref_trailer(&mut pdf, &offsets);
     pdf
@@ -791,11 +781,7 @@ fn build_pdf_multi_page() -> Vec<u8> {
     pdf
 }
 
-fn render_page_raw(
-    doc: &PdfDocument,
-    page: usize,
-    excluded: HashSet<String>,
-) -> (Vec<u8>, u32, u32) {
+fn render_page_raw(doc: &PdfDocument, page: usize, excluded: HashSet<String>) -> (Vec<u8>, u32, u32) {
     let mut options = RenderOptions::with_dpi(72);
     options.format = ImageFormat::RawRgba8;
     options.excluded_layers = excluded;
@@ -860,8 +846,11 @@ fn build_pdf_with_ocmd_policy(policy: &str) -> Vec<u8> {
     pdf.extend_from_slice(b"\nendstream\nendobj\n\n");
     offsets.push(pdf.len());
     pdf.extend_from_slice(
-        format!("5 0 obj\n<< /Type /OCMD /OCGs [6 0 R 7 0 R] /P /{} >>\nendobj\n\n", policy)
-            .as_bytes(),
+        format!(
+            "5 0 obj\n<< /Type /OCMD /OCGs [6 0 R 7 0 R] /P /{} >>\nendobj\n\n",
+            policy
+        )
+        .as_bytes(),
     );
     offsets.push(pdf.len());
     pdf.extend_from_slice(b"6 0 obj\n<< /Type /OCG /Name /A >>\nendobj\n\n");
@@ -1047,9 +1036,15 @@ fn test_prepress_fixture_combinations() {
         "Artwork must be hidden: ({ar}, {ag}, {ab})"
     );
     let (dr, dg, db, _) = sample_region(&data, w, h, 270, 80, 30, 30);
-    assert!(dr < 80.0 && dg > 200.0 && db > 200.0, "Dieline must remain: ({dr}, {dg}, {db})");
+    assert!(
+        dr < 80.0 && dg > 200.0 && db > 200.0,
+        "Dieline must remain: ({dr}, {dg}, {db})"
+    );
     let (vr, vg, vb, _) = sample_region(&data, w, h, 370, 80, 30, 30);
-    assert!(vr > 200.0 && vg > 200.0 && vb < 80.0, "Varnish must remain: ({vr}, {vg}, {vb})");
+    assert!(
+        vr > 200.0 && vg > 200.0 && vb < 80.0,
+        "Varnish must remain: ({vr}, {vg}, {vb})"
+    );
 }
 
 /// Build a PDF whose OCMD uses a `/VE` visibility expression.
@@ -1150,7 +1145,10 @@ fn test_ve_and_operator() {
     // /VE = [/And 7 0 R 8 0 R]
     // Visible iff both A and B are on. ~keep
     let doc = PdfDocument::from_bytes(build_pdf_with_ve(b"[/And 7 0 R 8 0 R]")).unwrap();
-    assert!(ocmd_scope_is_visible(&doc, HashSet::new()), "And(A,B): both on -> visible");
+    assert!(
+        ocmd_scope_is_visible(&doc, HashSet::new()),
+        "And(A,B): both on -> visible"
+    );
     assert!(
         !ocmd_scope_is_visible(&doc, HashSet::from(["A".to_string()])),
         "And(A,B): A excluded -> hidden"
@@ -1166,7 +1164,10 @@ fn test_ve_or_operator() {
     // /VE = [/Or 7 0 R 8 0 R]
     // Visible iff A or B is on. ~keep
     let doc = PdfDocument::from_bytes(build_pdf_with_ve(b"[/Or 7 0 R 8 0 R]")).unwrap();
-    assert!(ocmd_scope_is_visible(&doc, HashSet::new()), "Or(A,B): both on -> visible");
+    assert!(
+        ocmd_scope_is_visible(&doc, HashSet::new()),
+        "Or(A,B): both on -> visible"
+    );
     assert!(
         ocmd_scope_is_visible(&doc, HashSet::from(["A".to_string()])),
         "Or(A,B): A excluded but B on -> visible"

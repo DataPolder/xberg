@@ -13,9 +13,7 @@ const INFO_SECRET: &str = "INFOSECRETZQXJV";
 const EF_SECRET: &str = "EMBEDDEDFILESECRETWQKP";
 
 fn contains(haystack: &[u8], needle: &str) -> bool {
-    haystack
-        .windows(needle.len())
-        .any(|w| w == needle.as_bytes())
+    haystack.windows(needle.len()).any(|w| w == needle.as_bytes())
 }
 
 /// Build a PDF whose `/Info /Title` and an embedded file both carry a
@@ -55,17 +53,17 @@ fn sanitize_document_strips_info_and_embedded_file_secrets() {
         report.annotations_removed >= 1,
         "expected >=1 sanitized construct, report = {report:?}"
     );
-    assert!(report.bytes_removed > 0, "expected non-zero bytes removed, report = {report:?}");
+    assert!(
+        report.bytes_removed > 0,
+        "expected non-zero bytes removed, report = {report:?}"
+    );
 
     let out = ed.save_to_bytes().expect("save sanitized pdf");
 
     // G5/G6: the /Info secret must not survive anywhere in the output
     // (the original /Info object is replaced by an empty dict and
     // hard-excluded so it cannot persist even as a GC-missed orphan). ~keep
-    if let Some(pos) = out
-        .windows(INFO_SECRET.len())
-        .position(|w| w == INFO_SECRET.as_bytes())
-    {
+    if let Some(pos) = out.windows(INFO_SECRET.len()).position(|w| w == INFO_SECRET.as_bytes()) {
         let lo = pos.saturating_sub(120);
         let hi = (pos + INFO_SECRET.len() + 120).min(out.len());
         panic!(
@@ -114,9 +112,5 @@ fn sanitize_document_all_toggles_off_is_noop_and_valid() {
 
     let out = ed.save_to_bytes().expect("save");
     let doc = PdfDocument::from_bytes(out).expect("reopens");
-    assert!(
-        doc.extract_text(0)
-            .unwrap_or_default()
-            .contains("PUBLIC BODY TEXT")
-    );
+    assert!(doc.extract_text(0).unwrap_or_default().contains("PUBLIC BODY TEXT"));
 }

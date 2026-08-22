@@ -128,7 +128,11 @@ fn cjk_cidfont_without_embedded_outlines_renders_glyphs() {
     let mut renderer = PageRenderer::new(opts);
     let img = renderer.render_page(&doc, 0).expect("render page");
 
-    assert_eq!(img.data.len(), (img.width * img.height * 4) as usize, "raw RGBA8 buffer");
+    assert_eq!(
+        img.data.len(),
+        (img.width * img.height * 4) as usize,
+        "raw RGBA8 buffer"
+    );
 
     // Two large CJK glyphs at 150 DPI cover thousands of pixels. A blank page
     // (the bug) would be ~0. Require a generous floor well above antialiasing

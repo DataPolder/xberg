@@ -10,8 +10,7 @@
 
 use xberg_native_pdf::document::PdfDocument;
 use xberg_native_pdf::editor::{
-    DocumentEditor, DocumentInfo, EditableDocument, EncryptionAlgorithm, EncryptionConfig,
-    Permissions, SaveOptions,
+    DocumentEditor, DocumentInfo, EditableDocument, EncryptionAlgorithm, EncryptionConfig, Permissions, SaveOptions,
 };
 
 mod common;
@@ -81,9 +80,7 @@ fn build_multi_page_pdf(page_count: usize) -> Vec<u8> {
         let content = format!("BT /F1 12 Tf 72 720 Td (Page {}) Tj ET", i + 1);
         let off = pdf.len();
         offsets.push(off);
-        pdf.extend_from_slice(
-            format!("{} 0 obj\n<< /Length {} >>\nstream\n", content_num, content.len()).as_bytes(),
-        );
+        pdf.extend_from_slice(format!("{} 0 obj\n<< /Length {} >>\nstream\n", content_num, content.len()).as_bytes());
         pdf.extend_from_slice(content.as_bytes());
         pdf.extend_from_slice(b"\nendstream\nendobj\n");
     }
@@ -511,9 +508,7 @@ fn test_editor_set_page_media_box() {
     let pdf = build_minimal_pdf();
     let (_path_dir, path) = common::write_temp_pdf(&pdf, "editor_set_mediabox.pdf");
     let mut editor = DocumentEditor::open(&path).unwrap();
-    editor
-        .set_page_media_box(0, [0.0, 0.0, 595.0, 842.0])
-        .unwrap();
+    editor.set_page_media_box(0, [0.0, 0.0, 595.0, 842.0]).unwrap();
     assert!(editor.is_modified());
     let _ = std::fs::remove_file(&path);
 }
@@ -533,9 +528,7 @@ fn test_editor_set_crop_box() {
     let pdf = build_minimal_pdf();
     let (_path_dir, path) = common::write_temp_pdf(&pdf, "editor_set_cropbox.pdf");
     let mut editor = DocumentEditor::open(&path).unwrap();
-    editor
-        .set_page_crop_box(0, [50.0, 50.0, 562.0, 742.0])
-        .unwrap();
+    editor.set_page_crop_box(0, [50.0, 50.0, 562.0, 742.0]).unwrap();
     assert!(editor.is_modified());
     let _ = std::fs::remove_file(&path);
 }
@@ -555,9 +548,7 @@ fn test_editor_erase_region() {
     let pdf = build_minimal_pdf();
     let (_path_dir, path) = common::write_temp_pdf(&pdf, "editor_erase.pdf");
     let mut editor = DocumentEditor::open(&path).unwrap();
-    editor
-        .erase_region(0, [100.0, 100.0, 200.0, 200.0])
-        .unwrap();
+    editor.erase_region(0, [100.0, 100.0, 200.0, 200.0]).unwrap();
     assert!(editor.is_modified());
     let _ = std::fs::remove_file(&path);
 }
@@ -579,9 +570,7 @@ fn test_editor_clear_erase_regions() {
     let pdf = build_minimal_pdf();
     let (_path_dir, path) = common::write_temp_pdf(&pdf, "editor_clear_erase.pdf");
     let mut editor = DocumentEditor::open(&path).unwrap();
-    editor
-        .erase_region(0, [100.0, 100.0, 200.0, 200.0])
-        .unwrap();
+    editor.erase_region(0, [100.0, 100.0, 200.0, 200.0]).unwrap();
     editor.clear_erase_regions(0);
     let _ = std::fs::remove_file(&path);
 }
@@ -645,9 +634,7 @@ fn test_editor_embed_file() {
     let pdf = build_minimal_pdf();
     let (_path_dir, path) = common::write_temp_pdf(&pdf, "editor_embed.pdf");
     let mut editor = DocumentEditor::open(&path).unwrap();
-    editor
-        .embed_file("test.txt", b"Hello embedded".to_vec())
-        .unwrap();
+    editor.embed_file("test.txt", b"Hello embedded".to_vec()).unwrap();
     assert_eq!(editor.pending_embedded_files().len(), 1);
     assert!(editor.is_modified());
     let _ = std::fs::remove_file(&path);
@@ -1610,12 +1597,8 @@ fn test_editor_combined_rotate_and_crop() {
     let mut editor = DocumentEditor::open(&path).unwrap();
 
     editor.set_page_rotation(0, 90).unwrap();
-    editor
-        .set_page_crop_box(0, [10.0, 10.0, 600.0, 780.0])
-        .unwrap();
-    editor
-        .set_page_media_box(0, [0.0, 0.0, 595.0, 842.0])
-        .unwrap();
+    editor.set_page_crop_box(0, [10.0, 10.0, 600.0, 780.0]).unwrap();
+    editor.set_page_media_box(0, [0.0, 0.0, 595.0, 842.0]).unwrap();
 
     assert!(editor.is_modified());
 
@@ -1626,8 +1609,7 @@ fn test_editor_combined_rotate_and_crop() {
 fn test_editor_combined_metadata_and_save() {
     let pdf = build_minimal_pdf();
     let (_path_dir, path) = common::write_temp_pdf(&pdf, "editor_combined_meta_save_src.pdf");
-    let (_out_path_dir, out_path) =
-        common::write_temp_pdf(&[], "editor_combined_meta_save_out.pdf");
+    let (_out_path_dir, out_path) = common::write_temp_pdf(&[], "editor_combined_meta_save_out.pdf");
     let mut editor = DocumentEditor::open(&path).unwrap();
 
     editor.set_title("Combined Test");
@@ -1734,9 +1716,7 @@ fn test_gc_produces_smaller_or_equal_output_than_no_gc() {
     let off2 = pdf.len();
     pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
     let off3 = pdf.len();
-    pdf.extend_from_slice(
-        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
     // Orphan object — not referenced from anywhere ~keep
     let off4 = pdf.len();
     let orphan = b"This is a large orphaned stream payload that should be removed by GC".repeat(20);
@@ -1792,8 +1772,9 @@ fn test_compress_produces_smaller_or_equal_output_for_raw_streams() {
     pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
     let off3 = pdf.len();
     pdf.extend_from_slice(
-        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n".to_string()
-        .as_bytes(),
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n"
+            .to_string()
+            .as_bytes(),
     );
     let off4 = pdf.len();
     pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes());

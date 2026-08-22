@@ -206,10 +206,9 @@ pub use pipeline::XYCutStrategy;
 pub mod config;
 
 pub use annotation_types::{
-    AnnotationBorderStyle, AnnotationColor, AnnotationFlags, AnnotationSubtype, BorderEffectStyle,
-    BorderStyleType, CaretSymbol, FileAttachmentIcon, FreeTextIntent, HighlightMode,
-    LineEndingStyle, QuadPoint, ReplyType, StampType, TextAlignment, TextAnnotationIcon,
-    TextMarkupType, WidgetFieldType,
+    AnnotationBorderStyle, AnnotationColor, AnnotationFlags, AnnotationSubtype, BorderEffectStyle, BorderStyleType,
+    CaretSymbol, FileAttachmentIcon, FreeTextIntent, HighlightMode, LineEndingStyle, QuadPoint, ReplyType, StampType,
+    TextAlignment, TextAnnotationIcon, TextMarkupType, WidgetFieldType,
 };
 pub use annotations::{Annotation, LinkAction, LinkDestination};
 pub use config::{DocumentType, ExtractionProfile};
@@ -219,14 +218,11 @@ pub use extractors::images::{PdfFilter, PdfImageHandle};
 pub use layout::PageText;
 pub use outline::{Destination, OutlineItem};
 pub use redaction::{
-    FontInfoMetrics, OcgPolicy, RedactionOptions, RedactionRegion, RedactionReport, RegionSet,
-    redact_content_stream,
+    FontInfoMetrics, OcgPolicy, RedactionOptions, RedactionRegion, RedactionReport, RegionSet, redact_content_stream,
 };
 pub use structured::{ColumnMode, RegionRole, StructuredPage, StructuredRegion};
 
-pub use fonts::global_cache::{
-    clear_global_font_cache, global_font_cache_stats, set_global_font_cache_capacity,
-};
+pub use fonts::global_cache::{clear_global_font_cache, global_font_cache_stats, set_global_font_cache_capacity};
 
 pub use fonts::cmap::{clear_cmap_cache, cmap_cache_size};
 
@@ -331,10 +327,7 @@ pub(crate) mod utils {
             if s.rotation_degrees == 0.0 {
                 continue;
             }
-            match groups
-                .iter_mut()
-                .find(|(k, _)| (*k - s.rotation_degrees).abs() < 0.5)
-            {
+            match groups.iter_mut().find(|(k, _)| (*k - s.rotation_degrees).abs() < 0.5) {
                 Some(g) => g.1 += 1,
                 None => groups.push((s.rotation_degrees, 1)),
             }
@@ -401,10 +394,7 @@ pub(crate) mod utils {
     /// bucket boundary, even though they're well within `tol` of each
     /// other; single-linkage clustering only looks at the gap between
     /// neighbors, so it has no such boundary effect.
-    pub fn sort_vertical_tategaki<T>(
-        items: Vec<T>,
-        get_bbox: impl Fn(&T) -> &crate::geometry::Rect,
-    ) -> Vec<T> {
+    pub fn sort_vertical_tategaki<T>(items: Vec<T>, get_bbox: impl Fn(&T) -> &crate::geometry::Rect) -> Vec<T> {
         if items.len() < 2 {
             return items;
         }
@@ -444,11 +434,7 @@ pub(crate) mod utils {
 
         // Column ascending (columns were numbered right-to-left above),
         // then top-to-bottom within a column. Both keys are total orders. ~keep
-        order.sort_by(|&a, &b| {
-            column[a]
-                .cmp(&column[b])
-                .then_with(|| safe_float_cmp(ys[b], ys[a]))
-        });
+        order.sort_by(|&a, &b| column[a].cmp(&column[b]).then_with(|| safe_float_cmp(ys[b], ys[a])));
 
         let mut slots: Vec<Option<T>> = items.into_iter().map(Some).collect();
         order
@@ -495,14 +481,8 @@ pub(crate) mod utils {
     /// ascending — `f32::total_cmp` equals `safe_float_cmp` for finite values,
     /// and both are stable on ties). Otherwise it falls back to the comparator
     /// so the NaN/±∞ policy is unchanged.
-    pub fn sort_by_row_band<T>(
-        items: &mut [T],
-        get_y: impl Fn(&T) -> f32,
-        get_x: impl Fn(&T) -> f32,
-    ) {
-        let all_finite = items
-            .iter()
-            .all(|it| get_y(it).is_finite() && get_x(it).is_finite());
+    pub fn sort_by_row_band<T>(items: &mut [T], get_y: impl Fn(&T) -> f32, get_x: impl Fn(&T) -> f32) {
+        let all_finite = items.iter().all(|it| get_y(it).is_finite() && get_x(it).is_finite());
         if !all_finite {
             items.sort_by(|a, b| row_aware_span_cmp(get_y(a), get_x(a), get_y(b), get_x(b)));
             return;
@@ -736,11 +716,7 @@ pub(crate) mod utils {
         /// top-to-bottom reading order.
         #[test]
         fn test_row_aware_span_cmp_distinct_rows_descending() {
-            let mut rows = [
-                (100.0f32, 0.0f32, "top"),
-                (50.0, 0.0, "middle"),
-                (10.0, 0.0, "bottom"),
-            ];
+            let mut rows = [(100.0f32, 0.0f32, "top"), (50.0, 0.0, "middle"), (10.0, 0.0, "bottom")];
             rows.sort_by(|a, b| row_aware_span_cmp(a.0, a.1, b.0, b.1));
             assert_eq!(rows[0].2, "top");
             assert_eq!(rows[1].2, "middle");
@@ -752,9 +728,7 @@ pub(crate) mod utils {
         /// panics.
         #[test]
         fn test_row_aware_span_cmp_is_total_order() {
-            let mut v: Vec<(f32, f32)> = (0..200)
-                .map(|i| ((i as f32) * 0.73, ((i * 17) % 500) as f32))
-                .collect();
+            let mut v: Vec<(f32, f32)> = (0..200).map(|i| ((i as f32) * 0.73, ((i * 17) % 500) as f32)).collect();
             v.sort_by(|a, b| row_aware_span_cmp(a.0, a.1, b.0, b.1));
         }
 
@@ -775,11 +749,7 @@ pub(crate) mod utils {
         /// Rows still order top-to-bottom regardless of the within-row flip.
         #[test]
         fn test_row_aware_span_cmp_rtl_rows_top_to_bottom() {
-            let mut rows = [
-                (10.0f32, 0.0f32, "bottom"),
-                (100.0, 0.0, "top"),
-                (50.0, 0.0, "middle"),
-            ];
+            let mut rows = [(10.0f32, 0.0f32, "bottom"), (100.0, 0.0, "top"), (50.0, 0.0, "middle")];
             rows.sort_by(|a, b| row_aware_span_cmp_rtl(a.0, a.1, b.0, b.1));
             assert_eq!(["top", "middle", "bottom"], [rows[0].2, rows[1].2, rows[2].2]);
         }
@@ -787,9 +757,7 @@ pub(crate) mod utils {
         /// Must be a valid total order for `sort_by` (no transitivity panic).
         #[test]
         fn test_row_aware_span_cmp_rtl_is_total_order() {
-            let mut v: Vec<(f32, f32)> = (0..200)
-                .map(|i| ((i as f32) * 0.73, ((i * 17) % 500) as f32))
-                .collect();
+            let mut v: Vec<(f32, f32)> = (0..200).map(|i| ((i as f32) * 0.73, ((i * 17) % 500) as f32)).collect();
             v.sort_by(|a, b| row_aware_span_cmp_rtl(a.0, a.1, b.0, b.1));
         }
 

@@ -14,13 +14,7 @@ use xberg_native_pdf::text::ligature_processor::{
 use xberg_native_pdf::text::{BoundaryContext, CharacterInfo};
 
 /// Helper: Create a CharacterInfo for testing
-fn create_char_info(
-    code: u32,
-    width: f32,
-    x_pos: f32,
-    tj_offset: Option<i32>,
-    is_ligature: bool,
-) -> CharacterInfo {
+fn create_char_info(code: u32, width: f32, x_pos: f32, tj_offset: Option<i32>, is_ligature: bool) -> CharacterInfo {
     CharacterInfo {
         code,
         glyph_id: Some(1),
@@ -129,7 +123,11 @@ fn test_multiple_ligatures_in_span() {
 
     let ligature_fl = create_char_info(0xFB02, 500.0, 500.0, None, true);
     let decision2 = LigatureDecisionMaker::decide(&ligature_fl, &context, Some(&char_e));
-    assert_eq!(decision2, LigatureDecision::Split, "Ligature before boundary should be split");
+    assert_eq!(
+        decision2,
+        LigatureDecision::Split,
+        "Ligature before boundary should be split"
+    );
 }
 
 #[test]
@@ -181,7 +179,11 @@ fn test_get_ligature_components() {
     assert_eq!(get_ligature_components('ﬃ'), Some("ffi"), "ffi ligature");
     assert_eq!(get_ligature_components('ﬄ'), Some("ffl"), "ffl ligature");
 
-    assert_eq!(get_ligature_components('a'), None, "Regular character should return None");
+    assert_eq!(
+        get_ligature_components('a'),
+        None,
+        "Regular character should return None"
+    );
     assert_eq!(get_ligature_components('A'), None, "Capital letter should return None");
 }
 

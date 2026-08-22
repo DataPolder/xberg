@@ -24,19 +24,16 @@ impl StreamDecoder for Ascii85Decoder {
                 b'z' => {
                     if count != 0 {
                         return Err(Error::Decode(
-                            "ASCII85Decode: 'z' must not appear in the middle of a group"
-                                .to_string(),
+                            "ASCII85Decode: 'z' must not appear in the middle of a group".to_string(),
                         ));
                     }
                     output.extend_from_slice(&[0, 0, 0, 0]);
-                },
+                }
                 b'!'..=b'u' => {
                     acc = acc
                         .checked_mul(85)
                         .and_then(|v| v.checked_add((byte - b'!') as u32))
-                        .ok_or_else(|| {
-                            Error::Decode("ASCII85Decode: overflow in decoding".to_string())
-                        })?;
+                        .ok_or_else(|| Error::Decode("ASCII85Decode: overflow in decoding".to_string()))?;
                     count += 1;
 
                     if count == 5 {
@@ -44,14 +41,14 @@ impl StreamDecoder for Ascii85Decoder {
                         acc = 0;
                         count = 0;
                     }
-                },
-                _ if byte.is_ascii_whitespace() => {},
+                }
+                _ if byte.is_ascii_whitespace() => {}
                 _ => {
                     return Err(Error::Decode(format!(
                         "ASCII85Decode: invalid character '{}'",
                         byte as char
                     )));
-                },
+                }
             }
         }
 
@@ -67,9 +64,7 @@ impl StreamDecoder for Ascii85Decoder {
                 acc = acc
                     .checked_mul(85)
                     .and_then(|v| v.checked_add(84))
-                    .ok_or_else(|| {
-                        Error::Decode("ASCII85Decode: overflow in padding".to_string())
-                    })?;
+                    .ok_or_else(|| Error::Decode("ASCII85Decode: overflow in padding".to_string()))?;
             }
 
             // Output count-1 bytes (first N-1 bytes are valid) ~keep

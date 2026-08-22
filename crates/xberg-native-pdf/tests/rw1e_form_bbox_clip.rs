@@ -34,15 +34,12 @@ fn form_bbox_pdf() -> Vec<u8> {
         off[id] = buf.len();
         buf.extend_from_slice(format!("{id} 0 obj\n{body}\nendobj\n").as_bytes());
     };
-    let raw_stream =
-        |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, dict: &str, data: &[u8]| {
-            off[id] = buf.len();
-            buf.extend_from_slice(
-                format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes(),
-            );
-            buf.extend_from_slice(data);
-            buf.extend_from_slice(b"\nendstream\nendobj\n");
-        };
+    let raw_stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, dict: &str, data: &[u8]| {
+        off[id] = buf.len();
+        buf.extend_from_slice(format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes());
+        buf.extend_from_slice(data);
+        buf.extend_from_slice(b"\nendstream\nendobj\n");
+    };
 
     buf.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
     obj(&mut buf, &mut off, 1, "<< /Type /Catalog /Pages 2 0 R >>");
@@ -89,7 +86,10 @@ fn out_of_bbox_form_text_is_clipped() {
     let doc = PdfDocument::from_bytes(form_bbox_pdf()).expect("parse");
     let text = doc.extract_text(0).expect("extract");
     assert!(text.contains("PageBodyText"), "page body missing:\n{text}");
-    assert!(text.contains("InsideBoxKeep"), "in-BBox form text wrongly dropped:\n{text}");
+    assert!(
+        text.contains("InsideBoxKeep"),
+        "in-BBox form text wrongly dropped:\n{text}"
+    );
     assert!(
         !text.contains("OutsideBoxDrop"),
         "out-of-BBox form text was NOT clipped (the duplication bug):\n{text}"

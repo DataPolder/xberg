@@ -98,12 +98,12 @@ impl FdfValue {
                 } else {
                     "/Off".to_string()
                 }
-            },
+            }
             FdfValue::Name(s) => format!("/{}", s),
             FdfValue::Array(arr) => {
                 let items: Vec<String> = arr.iter().map(|s| encode_pdf_string(s)).collect();
                 format!("[ {} ]", items.join(" "))
-            },
+            }
             FdfValue::None => "null".to_string(),
         }
     }

@@ -95,9 +95,7 @@ end";
     for off in [o1, o2, o3, o4, o5, o6, o7] {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    pdf.extend_from_slice(
-        format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes());
 
     pdf
 }
@@ -110,7 +108,10 @@ fn horizontal_identity_h_emits_x_advancing_spans() {
     let pdf = build_pdf_with_encoding("Identity-H");
     let doc = PdfDocument::from_bytes(pdf).expect("parse synthetic horizontal PDF");
     let spans = doc.extract_spans(0).expect("extract spans");
-    assert!(!spans.is_empty(), "horizontal Identity-H must produce at least one span");
+    assert!(
+        !spans.is_empty(),
+        "horizontal Identity-H must produce at least one span"
+    );
 
     let combined: String = spans.iter().map(|s| s.text.as_str()).collect();
     assert!(
@@ -211,5 +212,10 @@ fn vertical_identity_v_emits_y_advancing_spans() {
         v_y,
         h_y
     );
-    assert!(v_x <= h_x, "vertical x-extent {} should be <= horizontal x-extent {}", v_x, h_x);
+    assert!(
+        v_x <= h_x,
+        "vertical x-extent {} should be <= horizontal x-extent {}",
+        v_x,
+        h_x
+    );
 }

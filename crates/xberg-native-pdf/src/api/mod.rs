@@ -80,17 +80,16 @@ mod pdf_builder;
 pub use pdf_builder::{Pdf, PdfBuilder, PdfConfig};
 
 pub use crate::editor::{
-    AnnotationId, AnnotationWrapper, ElementId, ImageInfo, PdfElement, PdfImage, PdfPage, PdfPath,
-    PdfStructure, PdfTable, PdfText,
+    AnnotationId, AnnotationWrapper, ElementId, ImageInfo, PdfElement, PdfImage, PdfPage, PdfPath, PdfStructure,
+    PdfTable, PdfText,
 };
 
 pub use crate::editor::{EncryptionAlgorithm, EncryptionConfig, Permissions};
 
 pub use crate::writer::{
-    Annotation, CaretAnnotation, FileAttachmentAnnotation, FreeTextAnnotation, HighlightMode,
-    InkAnnotation, LineAnnotation, LinkAction, LinkAnnotation, PolygonAnnotation, PopupAnnotation,
-    RedactAnnotation, ShapeAnnotation, StampAnnotation, StampType, TextAnnotation,
-    TextMarkupAnnotation, WatermarkAnnotation,
+    Annotation, CaretAnnotation, FileAttachmentAnnotation, FreeTextAnnotation, HighlightMode, InkAnnotation,
+    LineAnnotation, LinkAction, LinkAnnotation, PolygonAnnotation, PopupAnnotation, RedactAnnotation, ShapeAnnotation,
+    StampAnnotation, StampType, TextAnnotation, TextMarkupAnnotation, WatermarkAnnotation,
 };
 
 pub use crate::document::ReadingOrder;
@@ -112,9 +111,9 @@ pub use crate::writer::{AFRelationship, EmbeddedFile, EmbeddedFilesBuilder};
 pub use crate::rendering::{ImageFormat, PageRenderer, RenderOptions, RenderedImage};
 
 pub use crate::xfa::{
-    ConvertedField, ConvertedPage, XfaAnalysis, XfaConversionOptions, XfaConversionResult,
-    XfaConverter, XfaExtractor, XfaField, XfaFieldType, XfaForm, XfaOption, XfaPage, XfaParser,
-    add_converted_field, add_converted_page, analyze_xfa_document, convert_xfa_document,
+    ConvertedField, ConvertedPage, XfaAnalysis, XfaConversionOptions, XfaConversionResult, XfaConverter, XfaExtractor,
+    XfaField, XfaFieldType, XfaForm, XfaOption, XfaPage, XfaParser, add_converted_field, add_converted_page,
+    analyze_xfa_document, convert_xfa_document,
 };
 
 /// Merge multiple PDF files into a single PDF.

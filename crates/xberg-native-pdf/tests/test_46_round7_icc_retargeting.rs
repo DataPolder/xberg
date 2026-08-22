@@ -330,8 +330,7 @@ fn build_devicen_iccbased_fixture(icc: &[u8], process_icc: &[u8]) -> Vec<u8> {
          ] >>",
         psfunc
     );
-    let process_icc_obj_hdr =
-        format!("6 0 obj\n<< /N 4 /Length {} >>\nstream\n", process_icc.len());
+    let process_icc_obj_hdr = format!("6 0 obj\n<< /N 4 /Length {} >>\nstream\n", process_icc.len());
     let mut process_icc_obj_bytes = Vec::from(process_icc_obj_hdr.as_bytes());
     process_icc_obj_bytes.extend_from_slice(process_icc);
     process_icc_obj_bytes.extend_from_slice(b"\nendstream\nendobj\n");
@@ -447,11 +446,7 @@ fn r7_backend_name_matches_active_features() {
 /// `/RI` declaration inside the content stream. `intent_decl` is the
 /// raw operator-stream snippet preceding the `scn` — pass
 /// `"/Perceptual ri\n"` for a perceptual paint, `""` for none.
-fn build_devicen_iccbased_fixture_with_intent(
-    icc: &[u8],
-    process_icc: &[u8],
-    intent_decl: &str,
-) -> Vec<u8> {
+fn build_devicen_iccbased_fixture_with_intent(icc: &[u8], process_icc: &[u8], intent_decl: &str) -> Vec<u8> {
     let psfunc = "<< /FunctionType 2 /Domain [0 1 0 1 0 1 0 1] \
                   /Range [0 1 0 1 0 1 0 1] \
                   /C0 [0 0 0 0] /C1 [1 1 1 1] /N 1 >>";
@@ -469,8 +464,7 @@ fn build_devicen_iccbased_fixture_with_intent(
          ] >>",
         psfunc
     );
-    let process_icc_obj_hdr =
-        format!("6 0 obj\n<< /N 4 /Length {} >>\nstream\n", process_icc.len());
+    let process_icc_obj_hdr = format!("6 0 obj\n<< /N 4 /Length {} >>\nstream\n", process_icc.len());
     let mut process_icc_obj_bytes = Vec::from(process_icc_obj_hdr.as_bytes());
     process_icc_obj_bytes.extend_from_slice(process_icc);
     process_icc_obj_bytes.extend_from_slice(b"\nendstream\nendobj\n");
@@ -510,8 +504,24 @@ fn r7_intent_under_qcms_only_falls_to_natural_form_byte_exact() {
     let y = centre(plate(&plates, "Yellow"));
     let k = centre(plate(&plates, "Black"));
 
-    assert_eq!(c, 115, "qcms-only + /Perceptual ri: C lane natural-form preserved. Got {}", c);
-    assert_eq!(m, 26, "qcms-only + /Perceptual ri: M lane natural-form preserved. Got {}", m);
-    assert_eq!(y, 89, "qcms-only + /Perceptual ri: Y lane natural-form preserved. Got {}", y);
-    assert_eq!(k, 13, "qcms-only + /Perceptual ri: K lane natural-form preserved. Got {}", k);
+    assert_eq!(
+        c, 115,
+        "qcms-only + /Perceptual ri: C lane natural-form preserved. Got {}",
+        c
+    );
+    assert_eq!(
+        m, 26,
+        "qcms-only + /Perceptual ri: M lane natural-form preserved. Got {}",
+        m
+    );
+    assert_eq!(
+        y, 89,
+        "qcms-only + /Perceptual ri: Y lane natural-form preserved. Got {}",
+        y
+    );
+    assert_eq!(
+        k, 13,
+        "qcms-only + /Perceptual ri: K lane natural-form preserved. Got {}",
+        k
+    );
 }

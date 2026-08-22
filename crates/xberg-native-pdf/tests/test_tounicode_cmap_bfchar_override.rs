@@ -100,7 +100,11 @@ end\n";
     let cmap = parse_tounicode_cmap(cmap_data).expect("parse CMap");
 
     // Code 0x61 ('a' area) has only a bfchar entry → must resolve to 'x' (U+0078). ~keep
-    assert_eq!(cmap.get(&0x61).as_deref(), Some("x"), "bfchar-only code 0x61 should map to 'x'");
+    assert_eq!(
+        cmap.get(&0x61).as_deref(),
+        Some("x"),
+        "bfchar-only code 0x61 should map to 'x'"
+    );
 }
 
 /// When bfchar appears *before* bfrange in the stream and both map the same

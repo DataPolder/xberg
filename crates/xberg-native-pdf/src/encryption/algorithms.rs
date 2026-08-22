@@ -292,17 +292,17 @@ fn algorithm_2b(password: &[u8], salt: &[u8], user_key: &[u8]) -> Vec<u8> {
                 let mut h = Sha256::new();
                 h.update(&e);
                 h.finalize().to_vec()
-            },
+            }
             1 => {
                 let mut h = Sha384::new();
                 h.update(&e);
                 h.finalize().to_vec()
-            },
+            }
             _ => {
                 let mut h = Sha512::new();
                 h.update(&e);
                 h.finalize().to_vec()
-            },
+            }
         };
 
         // Step e: per ISO 32000-2:2020 Algorithm 2.B step f, the round
@@ -464,11 +464,7 @@ pub fn compute_owner_password_hash(
 /// # Returns
 ///
 /// 32-byte user password hash for /U entry (48 bytes for R>=5)
-pub fn compute_user_password_hash(
-    encryption_key: &[u8],
-    file_id: &[u8],
-    revision: u32,
-) -> crate::Result<Vec<u8>> {
+pub fn compute_user_password_hash(encryption_key: &[u8], file_id: &[u8], revision: u32) -> crate::Result<Vec<u8>> {
     if revision >= 5 {
         // For R>=5, use the encryption key directly as user password indicator
         // This creates the U value with validation/key salts ~keep
@@ -550,8 +546,7 @@ pub fn compute_u_and_ue(
     // PDF 2.0 spec (ISO 32000-2 Algorithm 8) mandates a zero IV for AES-256-CBC key wrapping.
     // Security comes from the random file_key and key_salt, not the IV. ~keep
     let iv: [u8; 16] = std::array::from_fn(|_| 0);
-    let ue = super::aes::aes256_encrypt_no_padding(&intermediate_key[..32], &iv, &file_key)
-        .unwrap_or_default();
+    let ue = super::aes::aes256_encrypt_no_padding(&intermediate_key[..32], &iv, &file_key).unwrap_or_default();
 
     Ok((u, ue, file_key))
 }
@@ -602,8 +597,7 @@ pub fn compute_o_and_oe(
     // PDF 2.0 spec (ISO 32000-2 Algorithm 9) mandates a zero IV for AES-256-CBC key wrapping.
     // Security comes from the random file_key and key_salt, not the IV. ~keep
     let iv: [u8; 16] = std::array::from_fn(|_| 0);
-    let oe = super::aes::aes256_encrypt_no_padding(&intermediate_key[..32], &iv, file_key)
-        .unwrap_or_default();
+    let oe = super::aes::aes256_encrypt_no_padding(&intermediate_key[..32], &iv, file_key).unwrap_or_default();
 
     Ok((o, oe))
 }
@@ -624,15 +618,13 @@ pub fn compute_o_and_oe(
 /// [`crypto::CryptoProvider`]: crate::crypto::CryptoProvider
 fn generate_random_bytes(len: usize) -> crate::Result<Vec<u8>> {
     let mut buf = vec![0u8; len];
-    crate::crypto::active()
-        .random_bytes(&mut buf)
-        .map_err(|e| {
-            crate::Error::InvalidPdf(format!(
-                "OS RNG failure from CryptoProvider '{}': {}",
-                crate::crypto::active().name(),
-                e
-            ))
-        })?;
+    crate::crypto::active().random_bytes(&mut buf).map_err(|e| {
+        crate::Error::InvalidPdf(format!(
+            "OS RNG failure from CryptoProvider '{}': {}",
+            crate::crypto::active().name(),
+            e
+        ))
+    })?;
     Ok(buf)
 }
 
@@ -867,16 +859,8 @@ mod tests {
         let revision = 2;
         let key_length = 5;
 
-        let key = compute_encryption_key(
-            password,
-            owner_key,
-            permissions,
-            file_id,
-            revision,
-            key_length,
-            true,
-        )
-        .unwrap();
+        let key =
+            compute_encryption_key(password, owner_key, permissions, file_id, revision, key_length, true).unwrap();
 
         assert_eq!(key.len(), key_length);
     }
@@ -966,19 +950,10 @@ mod tests {
         let revision = 2;
         let key_length = 5;
 
-        let owner_hash =
-            compute_owner_password_hash(owner_pass, user_pass, revision, key_length).unwrap();
+        let owner_hash = compute_owner_password_hash(owner_pass, user_pass, revision, key_length).unwrap();
 
-        let encryption_key = compute_encryption_key(
-            user_pass,
-            &owner_hash,
-            permissions,
-            file_id,
-            revision,
-            key_length,
-            true,
-        )
-        .unwrap();
+        let encryption_key =
+            compute_encryption_key(user_pass, &owner_hash, permissions, file_id, revision, key_length, true).unwrap();
 
         let user_hash = compute_user_password_hash(&encryption_key, file_id, revision).unwrap();
 
@@ -1007,18 +982,9 @@ mod tests {
         let revision = 3;
         let key_length = 16;
 
-        let owner_hash =
-            compute_owner_password_hash(owner_pass, user_pass, revision, key_length).unwrap();
-        let encryption_key = compute_encryption_key(
-            user_pass,
-            &owner_hash,
-            permissions,
-            file_id,
-            revision,
-            key_length,
-            true,
-        )
-        .unwrap();
+        let owner_hash = compute_owner_password_hash(owner_pass, user_pass, revision, key_length).unwrap();
+        let encryption_key =
+            compute_encryption_key(user_pass, &owner_hash, permissions, file_id, revision, key_length, true).unwrap();
         let user_hash = compute_user_password_hash(&encryption_key, file_id, revision).unwrap();
 
         let auth_result = authenticate_user_password(
@@ -1042,17 +1008,7 @@ mod tests {
         // /U value shorter than 16 bytes should return None, not panic ~keep
         let short_user_key = vec![0u8; 10];
         let owner_key = vec![0u8; 32];
-        let result = authenticate_user_password(
-            b"",
-            &short_user_key,
-            &owner_key,
-            -1,
-            b"file_id",
-            2,
-            5,
-            true,
-            None,
-        );
+        let result = authenticate_user_password(b"", &short_user_key, &owner_key, -1, b"file_id", 2, 5, true, None);
         assert!(result.is_none());
     }
 
@@ -1094,28 +1050,15 @@ mod tests {
         hasher.update(password);
         hasher.update(key_salt);
         let intermediate = hasher.finalize();
-        let ue =
-            crate::encryption::aes::aes256_encrypt_no_padding(&intermediate, &[0u8; 16], &file_key)
-                .unwrap();
+        let ue = crate::encryption::aes::aes256_encrypt_no_padding(&intermediate, &[0u8; 16], &file_key).unwrap();
 
-        let result = authenticate_user_password(
-            password,
-            &user_key,
-            &[0u8; 48],
-            -1,
-            b"",
-            5,
-            32,
-            true,
-            Some(&ue),
-        );
+        let result = authenticate_user_password(password, &user_key, &[0u8; 48], -1, b"", 5, 32, true, Some(&ue));
         // The file key is the unwrapped /UE — never the intermediate hash. ~keep
         assert_eq!(result.unwrap(), file_key.to_vec());
 
         // Without /UE the file key is unobtainable; authentication must fail
         // loudly rather than hand back the intermediate hash as a "key". ~keep
-        let no_ue =
-            authenticate_user_password(password, &user_key, &[0u8; 48], -1, b"", 5, 32, true, None);
+        let no_ue = authenticate_user_password(password, &user_key, &[0u8; 48], -1, b"", 5, 32, true, None);
         assert!(no_ue.is_none());
     }
 
@@ -1134,16 +1077,14 @@ mod tests {
         user_key.extend_from_slice(&validation_salt);
         user_key.extend_from_slice(&key_salt);
 
-        let result =
-            authenticate_user_password(b"wrong", &user_key, &[0u8; 48], -1, b"", 5, 32, true, None);
+        let result = authenticate_user_password(b"wrong", &user_key, &[0u8; 48], -1, b"", 5, 32, true, None);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_authenticate_user_r5_short_u_value() {
         // U value shorter than 48 bytes should return None ~keep
-        let result =
-            authenticate_user_password(b"test", &[0u8; 40], &[0u8; 48], -1, b"", 5, 32, true, None);
+        let result = authenticate_user_password(b"test", &[0u8; 40], &[0u8; 48], -1, b"", 5, 32, true, None);
         assert!(result.is_none());
     }
 
@@ -1156,18 +1097,9 @@ mod tests {
         let revision = 2;
         let key_length = 5;
 
-        let owner_hash =
-            compute_owner_password_hash(owner_pass, user_pass, revision, key_length).unwrap();
-        let encryption_key = compute_encryption_key(
-            user_pass,
-            &owner_hash,
-            permissions,
-            file_id,
-            revision,
-            key_length,
-            true,
-        )
-        .unwrap();
+        let owner_hash = compute_owner_password_hash(owner_pass, user_pass, revision, key_length).unwrap();
+        let encryption_key =
+            compute_encryption_key(user_pass, &owner_hash, permissions, file_id, revision, key_length, true).unwrap();
         let user_hash = compute_user_password_hash(&encryption_key, file_id, revision).unwrap();
 
         let result = authenticate_owner_password(
@@ -1195,18 +1127,9 @@ mod tests {
         let revision = 3;
         let key_length = 16;
 
-        let owner_hash =
-            compute_owner_password_hash(owner_pass, user_pass, revision, key_length).unwrap();
-        let encryption_key = compute_encryption_key(
-            user_pass,
-            &owner_hash,
-            permissions,
-            file_id,
-            revision,
-            key_length,
-            true,
-        )
-        .unwrap();
+        let owner_hash = compute_owner_password_hash(owner_pass, user_pass, revision, key_length).unwrap();
+        let encryption_key =
+            compute_encryption_key(user_pass, &owner_hash, permissions, file_id, revision, key_length, true).unwrap();
         let user_hash = compute_user_password_hash(&encryption_key, file_id, revision).unwrap();
 
         let result = authenticate_owner_password(
@@ -1234,18 +1157,9 @@ mod tests {
         let revision = 3;
         let key_length = 16;
 
-        let owner_hash =
-            compute_owner_password_hash(owner_pass, user_pass, revision, key_length).unwrap();
-        let encryption_key = compute_encryption_key(
-            user_pass,
-            &owner_hash,
-            permissions,
-            file_id,
-            revision,
-            key_length,
-            true,
-        )
-        .unwrap();
+        let owner_hash = compute_owner_password_hash(owner_pass, user_pass, revision, key_length).unwrap();
+        let encryption_key =
+            compute_encryption_key(user_pass, &owner_hash, permissions, file_id, revision, key_length, true).unwrap();
         let user_hash = compute_user_password_hash(&encryption_key, file_id, revision).unwrap();
 
         let result = authenticate_owner_password(
@@ -1289,30 +1203,15 @@ mod tests {
         hasher.update(owner_key_salt);
         hasher.update(&user_key[..48]);
         let intermediate = hasher.finalize();
-        let oe =
-            crate::encryption::aes::aes256_encrypt_no_padding(&intermediate, &[0u8; 16], &file_key)
-                .unwrap();
+        let oe = crate::encryption::aes::aes256_encrypt_no_padding(&intermediate, &[0u8; 16], &file_key).unwrap();
 
-        let result = authenticate_owner_password(
-            password,
-            &user_key,
-            &owner_key,
-            -1,
-            b"",
-            5,
-            32,
-            true,
-            Some(&oe),
-        )
-        .unwrap();
+        let result =
+            authenticate_owner_password(password, &user_key, &owner_key, -1, b"", 5, 32, true, Some(&oe)).unwrap();
         // The file key is the unwrapped /OE — never the intermediate hash. ~keep
         assert_eq!(result.unwrap(), file_key.to_vec());
 
         // Without /OE the file key is unobtainable; authentication must fail. ~keep
-        let no_oe = authenticate_owner_password(
-            password, &user_key, &owner_key, -1, b"", 5, 32, true, None,
-        )
-        .unwrap();
+        let no_oe = authenticate_owner_password(password, &user_key, &owner_key, -1, b"", 5, 32, true, None).unwrap();
         assert!(no_oe.is_none());
     }
 
@@ -1333,10 +1232,7 @@ mod tests {
         owner_key.extend_from_slice(&owner_validation_salt);
         owner_key.extend_from_slice(&owner_key_salt);
 
-        let result = authenticate_owner_password(
-            b"wrong", &user_key, &owner_key, -1, b"", 5, 32, true, None,
-        )
-        .unwrap();
+        let result = authenticate_owner_password(b"wrong", &user_key, &owner_key, -1, b"", 5, 32, true, None).unwrap();
         assert!(result.is_none());
     }
 }

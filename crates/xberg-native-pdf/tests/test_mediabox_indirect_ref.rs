@@ -18,8 +18,11 @@ fn write_xref_and_trailer(pdf: &mut Vec<u8>, offsets: &[usize]) {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     pdf.extend_from_slice(
-        format!("trailer\n<</Size {} /Root 1 0 R>>\nstartxref\n{}\n%%EOF\n", count, xref_offset)
-            .as_bytes(),
+        format!(
+            "trailer\n<</Size {} /Root 1 0 R>>\nstartxref\n{}\n%%EOF\n",
+            count, xref_offset
+        )
+        .as_bytes(),
     );
 }
 
@@ -42,9 +45,7 @@ fn build_pdf_indirect_mediabox() -> Vec<u8> {
     pdf.extend_from_slice(b"2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1>>\nendobj\n");
 
     let off3 = pdf.len();
-    pdf.extend_from_slice(
-        b"3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox 4 0 R /Resources <<>>>>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox 4 0 R /Resources <<>>>>\nendobj\n");
 
     let off4 = pdf.len();
     pdf.extend_from_slice(b"4 0 obj\n[0 0 612 792]\nendobj\n");
@@ -71,9 +72,7 @@ fn build_pdf_inherited_indirect_mediabox() -> Vec<u8> {
     pdf.extend_from_slice(b"1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n");
 
     let off2 = pdf.len();
-    pdf.extend_from_slice(
-        b"2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1 /MediaBox 4 0 R>>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1 /MediaBox 4 0 R>>\nendobj\n");
 
     let off3 = pdf.len();
     pdf.extend_from_slice(b"3 0 obj\n<</Type /Page /Parent 2 0 R /Resources <<>>>>\nendobj\n");
@@ -98,9 +97,7 @@ fn build_pdf_direct_mediabox() -> Vec<u8> {
     pdf.extend_from_slice(b"2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1>>\nendobj\n");
 
     let off3 = pdf.len();
-    pdf.extend_from_slice(
-        b"3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources <<>>>>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources <<>>>>\nendobj\n");
 
     write_xref_and_trailer(&mut pdf, &[0, off1, off2, off3]);
     pdf

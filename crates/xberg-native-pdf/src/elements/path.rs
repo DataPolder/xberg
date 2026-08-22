@@ -188,11 +188,7 @@ impl PathContent {
         }
         let half = self.stroke_width * 0.5;
 
-        if let [
-            PathOperation::MoveTo(x0, y0),
-            PathOperation::LineTo(x1, y1),
-            ..,
-        ] = self.operations.as_slice()
+        if let [PathOperation::MoveTo(x0, y0), PathOperation::LineTo(x1, y1), ..] = self.operations.as_slice()
             && self.is_straight_line()
         {
             let (dx, dy) = (x1 - x0, y1 - y0);
@@ -275,9 +271,7 @@ impl PathContent {
     /// A path is a rectangle if it has exactly 1 operation: Rectangle,
     /// or if it has 5 operations: MoveTo, 3x LineTo, ClosePath that form a rectangle.
     pub fn is_rectangle(&self) -> bool {
-        if self.operations.len() == 1
-            && matches!(self.operations[0], PathOperation::Rectangle(_, _, _, _))
-        {
+        if self.operations.len() == 1 && matches!(self.operations[0], PathOperation::Rectangle(_, _, _, _)) {
             return true;
         }
 
@@ -438,14 +432,7 @@ impl PathContent {
             PathOperation::LineTo(x_right - r, y),
             PathOperation::CurveTo(x_right - r + k, y, x_right, y + r - k, x_right, y + r),
             PathOperation::LineTo(x_right, y_top - r),
-            PathOperation::CurveTo(
-                x_right,
-                y_top - r + k,
-                x_right - r + k,
-                y_top,
-                x_right - r,
-                y_top,
-            ),
+            PathOperation::CurveTo(x_right, y_top - r + k, x_right - r + k, y_top, x_right - r, y_top),
             PathOperation::LineTo(x + r, y_top),
             PathOperation::CurveTo(x + r - k, y_top, x, y_top - r + k, x, y_top - r),
             PathOperation::LineTo(x, y + r),
@@ -514,7 +501,7 @@ impl PathContent {
                     pos = (x, y);
                     start = pos;
                     current.push(pos);
-                },
+                }
                 PathOperation::LineTo(x, y) => {
                     // A segment with no open subpath (e.g. right after `re`/`h`,
                     // or a malformed leading `l`) starts at the current point. ~keep
@@ -524,7 +511,7 @@ impl PathContent {
                     }
                     pos = (x, y);
                     current.push(pos);
-                },
+                }
                 PathOperation::CurveTo(c1x, c1y, c2x, c2y, ex, ey) => {
                     if current.is_empty() {
                         start = pos;
@@ -532,7 +519,7 @@ impl PathContent {
                     }
                     flatten_cubic(pos, (c1x, c1y), (c2x, c2y), (ex, ey), tol, 0, &mut current);
                     pos = (ex, ey);
-                },
+                }
                 PathOperation::Rectangle(x, y, w, h) => {
                     flush_subpath(&mut current, &mut subpaths);
                     // `re` is a complete closed subpath equivalent to
@@ -541,7 +528,7 @@ impl PathContent {
                     subpaths.push(vec![(x, y), (x + w, y), (x + w, y + h), (x, y + h), (x, y)]);
                     pos = (x, y);
                     start = pos;
-                },
+                }
                 PathOperation::ClosePath => {
                     // `h` appends a segment back to the subpath start and
                     // terminates the subpath; a following segment begins a new
@@ -552,7 +539,7 @@ impl PathContent {
                         flush_subpath(&mut current, &mut subpaths);
                         pos = start;
                     }
-                },
+                }
             }
         }
         flush_subpath(&mut current, &mut subpaths);
@@ -573,7 +560,7 @@ impl PathContent {
                     min_y = min_y.min(*y);
                     max_x = max_x.max(*x);
                     max_y = max_y.max(*y);
-                },
+                }
                 PathOperation::CurveTo(x1, y1, x2, y2, x3, y3) => {
                     for (x, y) in [(*x1, *y1), (*x2, *y2), (*x3, *y3)] {
                         min_x = min_x.min(x);
@@ -581,14 +568,14 @@ impl PathContent {
                         max_x = max_x.max(x);
                         max_y = max_y.max(y);
                     }
-                },
+                }
                 PathOperation::Rectangle(x, y, w, h) => {
                     min_x = min_x.min(*x);
                     min_y = min_y.min(*y);
                     max_x = max_x.max(*x + *w);
                     max_y = max_y.max(*y + *h);
-                },
-                PathOperation::ClosePath => {},
+                }
+                PathOperation::ClosePath => {}
             }
         }
 
@@ -769,8 +756,7 @@ mod tests {
 
     #[test]
     fn test_path_with_fill() {
-        let path = PathContent::new(Rect::new(0.0, 0.0, 100.0, 100.0))
-            .with_fill(Color::new(1.0, 0.0, 0.0));
+        let path = PathContent::new(Rect::new(0.0, 0.0, 100.0, 100.0)).with_fill(Color::new(1.0, 0.0, 0.0));
 
         assert!(path.has_fill());
         assert!(path.has_stroke());
@@ -788,22 +774,10 @@ mod tests {
     }
 
     /// Ground-truth cubic Bézier evaluation, used to validate flattening.
-    fn cubic_at(
-        p0: (f32, f32),
-        p1: (f32, f32),
-        p2: (f32, f32),
-        p3: (f32, f32),
-        t: f32,
-    ) -> (f32, f32) {
+    fn cubic_at(p0: (f32, f32), p1: (f32, f32), p2: (f32, f32), p3: (f32, f32), t: f32) -> (f32, f32) {
         let mt = 1.0 - t;
-        let x = mt * mt * mt * p0.0
-            + 3.0 * mt * mt * t * p1.0
-            + 3.0 * mt * t * t * p2.0
-            + t * t * t * p3.0;
-        let y = mt * mt * mt * p0.1
-            + 3.0 * mt * mt * t * p1.1
-            + 3.0 * mt * t * t * p2.1
-            + t * t * t * p3.1;
+        let x = mt * mt * mt * p0.0 + 3.0 * mt * mt * t * p1.0 + 3.0 * mt * t * t * p2.0 + t * t * t * p3.0;
+        let y = mt * mt * mt * p0.1 + 3.0 * mt * mt * t * p1.1 + 3.0 * mt * t * t * p2.1 + t * t * t * p3.1;
         (x, y)
     }
 
@@ -878,8 +852,7 @@ mod tests {
 
     #[test]
     fn test_to_points_rectangle_is_closed_subpath() {
-        let path =
-            PathContent::from_operations(vec![PathOperation::Rectangle(10.0, 20.0, 30.0, 40.0)]);
+        let path = PathContent::from_operations(vec![PathOperation::Rectangle(10.0, 20.0, 30.0, 40.0)]);
         let pts = path.to_points(1.0);
         assert_eq!(
             pts,
@@ -905,13 +878,7 @@ mod tests {
         assert_eq!(pts.len(), 2);
         assert_eq!(
             pts[0],
-            vec![
-                (0.0, 0.0),
-                (10.0, 0.0),
-                (10.0, 10.0),
-                (0.0, 10.0),
-                (0.0, 0.0)
-            ]
+            vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]
         );
         assert_eq!(pts[1], vec![(0.0, 0.0), (20.0, 20.0)]);
     }
@@ -996,7 +963,10 @@ mod tests {
             let pts = path.to_points(tol);
             assert_eq!(pts.len(), 1);
             let n = pts[0].len();
-            assert!((2..100_000).contains(&n), "tol={tol} produced {n} points (expected bounded)");
+            assert!(
+                (2..100_000).contains(&n),
+                "tol={tol} produced {n} points (expected bounded)"
+            );
             assert!(pts[0].iter().all(|(x, y)| x.is_finite() && y.is_finite()));
         }
     }
@@ -1015,7 +985,11 @@ mod tests {
         assert_eq!(sub[1], (50.0, 0.0));
         // First flattened curve vertex departs from the LineTo endpoint (50,0),
         // so it must sit to its right (x > 50), never back near the origin. ~keep
-        assert!(sub[2].0 > 50.0, "curve did not start at current point; sub[2]={:?}", sub[2]);
+        assert!(
+            sub[2].0 > 50.0,
+            "curve did not start at current point; sub[2]={:?}",
+            sub[2]
+        );
         assert!((sub.last().unwrap().0 - 80.0).abs() < 1e-3);
     }
 

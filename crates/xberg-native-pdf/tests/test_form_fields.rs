@@ -7,8 +7,8 @@
 
 use xberg_native_pdf::geometry::Rect;
 use xberg_native_pdf::writer::{
-    CheckboxWidget, ChoiceOption, ComboBoxWidget, FormAction, ListBoxWidget, PdfWriter,
-    PushButtonWidget, RadioButtonGroup, TextAlignment, TextFieldWidget,
+    CheckboxWidget, ChoiceOption, ComboBoxWidget, FormAction, ListBoxWidget, PdfWriter, PushButtonWidget,
+    RadioButtonGroup, TextAlignment, TextFieldWidget,
 };
 
 #[test]
@@ -192,19 +192,19 @@ fn test_create_complete_form() {
                 .required(),
         );
 
-        page.add_text_field(
-            TextFieldWidget::new("email", Rect::new(150.0, 670.0, 200.0, 20.0)).with_value(""),
-        );
+        page.add_text_field(TextFieldWidget::new("email", Rect::new(150.0, 670.0, 200.0, 20.0)).with_value(""));
 
-        page.add_text_field(
-            TextFieldWidget::new("comments", Rect::new(150.0, 600.0, 300.0, 60.0)).multiline(),
-        );
+        page.add_text_field(TextFieldWidget::new("comments", Rect::new(150.0, 600.0, 300.0, 60.0)).multiline());
 
         page.add_checkbox(CheckboxWidget::new("newsletter", Rect::new(150.0, 560.0, 15.0, 15.0)));
 
         page.add_combo_box(
-            ComboBoxWidget::new("country", Rect::new(150.0, 530.0, 150.0, 20.0))
-                .with_options(vec!["Select...", "USA", "Canada", "UK"]),
+            ComboBoxWidget::new("country", Rect::new(150.0, 530.0, 150.0, 20.0)).with_options(vec![
+                "Select...",
+                "USA",
+                "Canada",
+                "UK",
+            ]),
         );
 
         page.add_push_button(
@@ -239,9 +239,7 @@ fn test_text_field_options() {
     {
         let mut page = writer.add_page(612.0, 792.0);
 
-        page.add_text_field(
-            TextFieldWidget::new("password", Rect::new(72.0, 700.0, 200.0, 20.0)).password(),
-        );
+        page.add_text_field(TextFieldWidget::new("password", Rect::new(72.0, 700.0, 200.0, 20.0)).password());
 
         page.add_text_field(
             TextFieldWidget::new("ssn", Rect::new(72.0, 670.0, 150.0, 20.0))
@@ -250,8 +248,7 @@ fn test_text_field_options() {
         );
 
         page.add_text_field(
-            TextFieldWidget::new("amount", Rect::new(72.0, 640.0, 100.0, 20.0))
-                .with_alignment(TextAlignment::Right),
+            TextFieldWidget::new("amount", Rect::new(72.0, 640.0, 100.0, 20.0)).with_alignment(TextAlignment::Right),
         );
 
         page.add_text_field(
@@ -278,10 +275,7 @@ fn test_multiple_pages_with_forms() {
 
     {
         let mut page = writer.add_page(612.0, 792.0);
-        page.add_text_field(TextFieldWidget::new(
-            "page1_name",
-            Rect::new(72.0, 700.0, 200.0, 20.0),
-        ));
+        page.add_text_field(TextFieldWidget::new("page1_name", Rect::new(72.0, 700.0, 200.0, 20.0)));
     }
 
     {
@@ -330,13 +324,10 @@ mod form_flattening {
             let mut page = writer.add_page(612.0, 792.0);
 
             page.add_text_field(
-                TextFieldWidget::new("name", Rect::new(72.0, 700.0, 200.0, 20.0))
-                    .with_value("Test Name"),
+                TextFieldWidget::new("name", Rect::new(72.0, 700.0, 200.0, 20.0)).with_value("Test Name"),
             );
 
-            page.add_checkbox(
-                CheckboxWidget::new("agree", Rect::new(72.0, 650.0, 15.0, 15.0)).checked(),
-            );
+            page.add_checkbox(CheckboxWidget::new("agree", Rect::new(72.0, 650.0, 15.0, 15.0)).checked());
 
             page.add_combo_box(
                 ComboBoxWidget::new("country", Rect::new(72.0, 600.0, 150.0, 20.0))
@@ -348,9 +339,7 @@ mod form_flattening {
         let bytes = writer.finish().expect("Failed to create test PDF");
 
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-        temp_file
-            .write_all(&bytes)
-            .expect("Failed to write temp file");
+        temp_file.write_all(&bytes).expect("Failed to write temp file");
         temp_file
     }
 
@@ -369,7 +358,10 @@ mod form_flattening {
         let output_bytes = std::fs::read(output_file.path()).expect("Failed to read output");
         let content = String::from_utf8_lossy(&output_bytes);
 
-        assert!(!content.contains("/AcroForm"), "AcroForm should be removed after flattening");
+        assert!(
+            !content.contains("/AcroForm"),
+            "AcroForm should be removed after flattening"
+        );
     }
 
     #[test]
@@ -377,8 +369,7 @@ mod form_flattening {
         let input_file = create_form_pdf();
 
         let mut pdf = Pdf::open(input_file.path()).expect("Failed to open PDF");
-        pdf.flatten_forms_on_page(0)
-            .expect("Failed to flatten forms on page");
+        pdf.flatten_forms_on_page(0).expect("Failed to flatten forms on page");
 
         assert!(pdf.is_page_marked_for_form_flatten(0));
 
@@ -395,10 +386,7 @@ mod form_flattening {
         {
             let mut page = writer.add_page(612.0, 792.0);
 
-            page.add_text_field(TextFieldWidget::new(
-                "test_field",
-                Rect::new(72.0, 700.0, 200.0, 20.0),
-            ));
+            page.add_text_field(TextFieldWidget::new("test_field", Rect::new(72.0, 700.0, 200.0, 20.0)));
 
             page.add_text("Test content", 72.0, 650.0, "Helvetica", 12.0);
         }
@@ -406,9 +394,7 @@ mod form_flattening {
         let bytes = writer.finish().expect("Failed to create test PDF");
 
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-        temp_file
-            .write_all(&bytes)
-            .expect("Failed to write temp file");
+        temp_file.write_all(&bytes).expect("Failed to write temp file");
 
         let mut pdf = Pdf::open(temp_file.path()).expect("Failed to open PDF");
         pdf.flatten_forms().expect("Failed to flatten forms");
@@ -432,9 +418,7 @@ mod form_flattening {
         let bytes = writer.finish().expect("Failed to create test PDF");
 
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-        temp_file
-            .write_all(&bytes)
-            .expect("Failed to write temp file");
+        temp_file.write_all(&bytes).expect("Failed to write temp file");
 
         let mut pdf = Pdf::open(temp_file.path()).expect("Failed to open PDF");
         pdf.flatten_forms().expect("Failed to flatten forms");

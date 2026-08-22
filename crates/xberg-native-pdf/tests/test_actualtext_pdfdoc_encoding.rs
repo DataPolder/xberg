@@ -14,10 +14,7 @@ use xberg_native_pdf::PdfDocument;
 /// The content stream produces a glyph using font F1 (Helvetica, /Encoding
 /// /WinAnsiEncoding), but the extraction should prefer /ActualText when present.
 fn build_pdf_with_actual_text(actual_text_bytes: &[u8]) -> Vec<u8> {
-    let hex: String = actual_text_bytes
-        .iter()
-        .map(|b| format!("{:02X}", b))
-        .collect();
+    let hex: String = actual_text_bytes.iter().map(|b| format!("{:02X}", b)).collect();
 
     let content = format!(
         "/Span << /ActualText <{hex}> >> BDC\n\

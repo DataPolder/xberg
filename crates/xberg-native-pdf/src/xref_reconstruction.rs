@@ -16,8 +16,7 @@ use std::sync::LazyLock;
 
 static RE_OBJ_PATTERN: LazyLock<regex::bytes::Regex> =
     LazyLock::new(|| regex::bytes::Regex::new(r"(\d+)\s+(\d+)\s+obj").unwrap());
-static RE_TRAILER: LazyLock<regex::bytes::Regex> =
-    LazyLock::new(|| regex::bytes::Regex::new(r"trailer\s*<<").unwrap());
+static RE_TRAILER: LazyLock<regex::bytes::Regex> = LazyLock::new(|| regex::bytes::Regex::new(r"trailer\s*<<").unwrap());
 
 /// Reconstruct the cross-reference table by scanning the entire PDF file.
 ///
@@ -60,9 +59,7 @@ static RE_TRAILER: LazyLock<regex::bytes::Regex> =
 /// # Ok(())
 /// # }
 /// ```
-pub fn reconstruct_xref<R: Read + Seek>(
-    reader: &mut R,
-) -> Result<(CrossRefTable, Object, Vec<(ObjectRef, Object)>)> {
+pub fn reconstruct_xref<R: Read + Seek>(reader: &mut R) -> Result<(CrossRefTable, Object, Vec<(ObjectRef, Object)>)> {
     tracing::warn!("xref table is corrupted or missing; reconstructing by scanning file");
 
     reader.seek(SeekFrom::Start(0))?;
@@ -88,26 +85,20 @@ pub fn reconstruct_xref<R: Read + Seek>(
             None => continue,
         };
 
-        let obj_num: u32 = match std::str::from_utf8(obj_num_bytes)
-            .ok()
-            .and_then(|s| s.parse().ok())
-        {
+        let obj_num: u32 = match std::str::from_utf8(obj_num_bytes).ok().and_then(|s| s.parse().ok()) {
             Some(n) => n,
             None => {
                 tracing::warn!(offset = full_match.start(), "failed to parse object number");
                 continue;
-            },
+            }
         };
 
-        let gen_num: u16 = match std::str::from_utf8(gen_num_bytes)
-            .ok()
-            .and_then(|s| s.parse().ok())
-        {
+        let gen_num: u16 = match std::str::from_utf8(gen_num_bytes).ok().and_then(|s| s.parse().ok()) {
             Some(n) => n,
             None => {
                 tracing::warn!(offset = full_match.start(), "failed to parse generation number");
                 continue;
-            },
+            }
         };
 
         let offset = full_match.start() as u64;
@@ -145,9 +136,8 @@ pub fn reconstruct_xref<R: Read + Seek>(
                 // - / (name)
                 // - t, f, n (true, false, null)
                 // - digit or - (number) ~keep
-                let is_valid_object_start =
-                    matches!(next_byte, b'<' | b'[' | b'(' | b'/' | b't' | b'f' | b'n' | b'-')
-                        || next_byte.is_ascii_digit();
+                let is_valid_object_start = matches!(next_byte, b'<' | b'[' | b'(' | b'/' | b't' | b'f' | b'n' | b'-')
+                    || next_byte.is_ascii_digit();
 
                 if !is_valid_object_start {
                     tracing::trace!(
@@ -166,12 +156,7 @@ pub fn reconstruct_xref<R: Read + Seek>(
                     continue;
                 }
 
-                tracing::trace!(
-                    object_id = obj_num,
-                    generation = gen_num,
-                    offset,
-                    "validated object"
-                );
+                tracing::trace!(object_id = obj_num, generation = gen_num, offset, "validated object");
             }
         }
 
@@ -183,7 +168,9 @@ pub fn reconstruct_xref<R: Read + Seek>(
     tracing::info!(count = objects_found, "reconstructed xref");
 
     if objects_found == 0 {
-        return Err(Error::InvalidPdf("No objects found during xref reconstruction".to_string()));
+        return Err(Error::InvalidPdf(
+            "No objects found during xref reconstruction".to_string(),
+        ));
     }
 
     let (trailer, synthetic) = find_trailer(&contents, reader, &xref)?;
@@ -251,14 +238,14 @@ fn find_trailer<R: Read + Seek>(
                          /Encrypt /ID /Info preserved)"
                     );
                 }
-            },
+            }
             Err(e) => {
                 tracing::warn!(
                     offset = trailer_start,
                     error = %e,
                     "failed to parse trailer dictionary"
                 );
-            },
+            }
         }
     }
     if let Some((mut trailer, best_off)) = best_trailer {
@@ -274,10 +261,10 @@ fn find_trailer<R: Read + Seek>(
         {
             for (key, (value, off)) in &salvaged {
                 match d.get(key) {
-                    Some(_) if *off <= best_off => {}, // existing is newer/equal ~keep
+                    Some(_) if *off <= best_off => {} // existing is newer/equal ~keep
                     _ => {
                         d.insert(key.clone(), value.clone());
-                    },
+                    }
                 }
             }
         }
@@ -289,11 +276,8 @@ fn find_trailer<R: Read + Seek>(
     // No /Root-bearing trailer found — synthesize one by scanning objects
     // for /Type /Catalog (handles Linearized files whose only trailer is the
     // sparse, /Root-less end-of-file trailer). ~keep
-    tracing::warn!(
-        "no /Root-bearing trailer found; reconstructing minimal trailer via Catalog scan"
-    );
-    let salvaged_values: HashMap<String, Object> =
-        salvaged.into_iter().map(|(k, (v, _))| (k, v)).collect();
+    tracing::warn!("no /Root-bearing trailer found; reconstructing minimal trailer via Catalog scan");
+    let salvaged_values: HashMap<String, Object> = salvaged.into_iter().map(|(k, (v, _))| (k, v)).collect();
     reconstruct_minimal_trailer(reader, xref, &salvaged_values)
 }
 
@@ -337,15 +321,11 @@ fn reconstruct_minimal_trailer<R: Read + Seek>(
             match load_object_at_offset(reader, entry.offset) {
                 Ok(obj) => {
                     if is_catalog(&obj) {
-                        tracing::info!(
-                            object_id = obj_num,
-                            generation = entry.generation,
-                            "found catalog"
-                        );
+                        tracing::info!(object_id = obj_num, generation = entry.generation, "found catalog");
                         catalog_ref = Some((obj_num, entry.generation));
                         break;
                     }
-                },
+                }
                 Err(e) => {
                     tracing::trace!(
                         object_id = obj_num,
@@ -354,7 +334,7 @@ fn reconstruct_minimal_trailer<R: Read + Seek>(
                         "failed to load object"
                     );
                     continue;
-                },
+                }
             }
         }
     }
@@ -435,9 +415,9 @@ fn synthesize_catalog_from_pages<R: Read + Seek>(
                 if dict.get("Parent").is_none() {
                     pages_root.get_or_insert(obj_num);
                 }
-            },
+            }
             Some("Page") => page_objs.push(obj_num),
-            _ => {},
+            _ => {}
         }
     }
 
@@ -470,7 +450,10 @@ fn synthesize_catalog_from_pages<R: Read + Seek>(
         ));
     }
     page_objs.sort_unstable();
-    tracing::warn!(count = page_objs.len(), "recovery: synthesizing flat /Pages over orphan pages");
+    tracing::warn!(
+        count = page_objs.len(),
+        "recovery: synthesizing flat /Pages over orphan pages"
+    );
     let pages_num = max_obj + 2;
     let kids: Vec<Object> = page_objs
         .iter()
@@ -555,22 +538,18 @@ fn recover_from_objstms<R: Read + Seek>(
         let mut contained: Vec<(u32, Object)> = contained.into_iter().collect();
         contained.sort_by_key(|(num, _)| *num);
         for (num, obj) in contained {
-            match obj
-                .as_dict()
-                .and_then(|d| d.get("Type"))
-                .and_then(|t| t.as_name())
-            {
+            match obj.as_dict().and_then(|d| d.get("Type")).and_then(|t| t.as_name()) {
                 Some("Catalog") => {
                     catalog.get_or_insert(num);
-                },
+                }
                 Some("Pages") => {
                     pages_any.get_or_insert(num);
                     if obj.as_dict().and_then(|d| d.get("Parent")).is_none() {
                         pages_root.get_or_insert(num);
                     }
-                },
+                }
                 Some("Page") => page_objs.push(num),
-                _ => {},
+                _ => {}
             }
             injected.push((ObjectRef::new(num, 0), obj));
         }
@@ -623,7 +602,10 @@ fn recover_from_objstms<R: Read + Seek>(
         ]),
     );
     injected.push((ObjectRef::new(pages_num, 0), Object::Dictionary(pages)));
-    injected.push((ObjectRef::new(synth_catalog, 0), catalog_dict(ObjectRef::new(pages_num, 0))));
+    injected.push((
+        ObjectRef::new(synth_catalog, 0),
+        catalog_dict(ObjectRef::new(pages_num, 0)),
+    ));
     Some((ObjectRef::new(synth_catalog, 0), injected))
 }
 
@@ -657,7 +639,7 @@ fn load_object_at_offset<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<
                 if content.windows(6).any(|w| w == b"endobj") {
                     break;
                 }
-            },
+            }
             Err(e) => return Err(Error::Io(e)),
         }
     }
@@ -706,11 +688,7 @@ fn is_catalog(obj: &Object) -> bool {
 ///
 /// When the reconstructed xref has slightly incorrect offsets, this function
 /// searches within a ±1KB window to find the actual object.
-pub fn search_nearby_for_object<R: Read + Seek>(
-    reader: &mut R,
-    obj_id: u32,
-    approx_offset: u64,
-) -> Result<Object> {
+pub fn search_nearby_for_object<R: Read + Seek>(reader: &mut R, obj_id: u32, approx_offset: u64) -> Result<Object> {
     tracing::warn!(
         object_id = obj_id,
         approx_offset,

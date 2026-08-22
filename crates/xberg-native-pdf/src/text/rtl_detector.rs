@@ -192,7 +192,7 @@ pub fn normalize_arabic_contextual_form(code: u32) -> u32 {
             // Generic approximation: many presentation forms follow patterns
             // In production, use a complete lookup table ~keep
             code
-        },
+        }
 
         _ => code,
     }
@@ -320,10 +320,8 @@ pub fn should_split_at_rtl_boundary(
         return Some(true);
     }
 
-    if (is_arabic_letter(prev_code)
-        || is_arabic_letter(normalize_arabic_contextual_form(prev_code)))
-        && (is_arabic_letter(curr_code)
-            || is_arabic_letter(normalize_arabic_contextual_form(curr_code)))
+    if (is_arabic_letter(prev_code) || is_arabic_letter(normalize_arabic_contextual_form(prev_code)))
+        && (is_arabic_letter(curr_code) || is_arabic_letter(normalize_arabic_contextual_form(curr_code)))
     {
         return Some(false);
     }

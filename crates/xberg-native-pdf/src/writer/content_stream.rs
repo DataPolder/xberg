@@ -4,8 +4,8 @@
 //! according to PDF specification ISO 32000-1:2008 Section 8-9.
 
 use crate::elements::{
-    ContentElement, ImageContent, PathContent, PathOperation, StructureElement, TableCellAlign,
-    TableContent, TextContent,
+    ContentElement, ImageContent, PathContent, PathOperation, StructureElement, TableCellAlign, TableContent,
+    TextContent,
 };
 use crate::error::Result;
 use crate::fonts::GlyphRemapper;
@@ -458,13 +458,7 @@ impl ContentStreamBuilder {
     /// with the same resource name in
     /// [`ContentStreamBuilder::build_with_remappers`] maps them to the
     /// subset-local IDs actually emitted as hex.
-    pub fn embedded_text(
-        &mut self,
-        font_name: &str,
-        glyph_ids: Vec<u16>,
-        x: f32,
-        y: f32,
-    ) -> &mut Self {
+    pub fn embedded_text(&mut self, font_name: &str, glyph_ids: Vec<u16>, x: f32, y: f32) -> &mut Self {
         self.begin_text();
         self.op(ContentStreamOp::SetTextMatrix(1.0, 0.0, 0.0, 1.0, x, y));
         self.op(ContentStreamOp::ShowEmbeddedText {
@@ -487,14 +481,7 @@ impl ContentStreamBuilder {
     /// * `y` - Y position (bottom edge)
     /// * `width` - Display width
     /// * `height` - Display height
-    pub fn draw_image(
-        &mut self,
-        resource_id: &str,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-    ) -> &mut Self {
+    pub fn draw_image(&mut self, resource_id: &str, x: f32, y: f32, width: f32, height: f32) -> &mut Self {
         self.end_text();
 
         self.op(ContentStreamOp::SaveState);
@@ -505,11 +492,7 @@ impl ContentStreamBuilder {
     }
 
     /// Draw an image using an ImagePlacement specification.
-    pub fn draw_image_at(
-        &mut self,
-        resource_id: &str,
-        placement: &super::image_handler::ImagePlacement,
-    ) -> &mut Self {
+    pub fn draw_image_at(&mut self, resource_id: &str, placement: &super::image_handler::ImagePlacement) -> &mut Self {
         self.draw_image(resource_id, placement.x, placement.y, placement.width, placement.height)
     }
 
@@ -742,14 +725,7 @@ impl ContentStreamBuilder {
     ///
     /// This is a convenience method that clips to the rectangle and paints the shading.
     /// The shading resource must be defined separately.
-    pub fn draw_gradient_rect(
-        &mut self,
-        shading_name: &str,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-    ) -> &mut Self {
+    pub fn draw_gradient_rect(&mut self, shading_name: &str, x: f32, y: f32, width: f32, height: f32) -> &mut Self {
         self.save_state()
             .rect(x, y, width, height)
             .clip()
@@ -803,14 +779,7 @@ impl ContentStreamBuilder {
     }
 
     /// Draw a rounded rectangle.
-    pub fn rounded_rect(
-        &mut self,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-        radius: f32,
-    ) -> &mut Self {
+    pub fn rounded_rect(&mut self, x: f32, y: f32, width: f32, height: f32, radius: f32) -> &mut Self {
         let r = radius.min(width / 2.0).min(height / 2.0);
         let k = r * 0.552_284_8;
 
@@ -845,7 +814,7 @@ impl ContentStreamBuilder {
                 let record = self.add_structure_element_impl(s);
                 self.struct_records.push(record);
                 self
-            },
+            }
             ContentElement::Table(table) => self.add_table_content(table),
         }
     }
@@ -870,16 +839,13 @@ impl ContentStreamBuilder {
                         PaginationSubtype::Other => None,
                     };
                     ("Pagination".to_string(), sub_str)
-                },
+                }
                 Some(ArtifactType::Layout) => ("Layout".to_string(), None),
                 Some(ArtifactType::Page) => ("Page".to_string(), None),
                 Some(ArtifactType::Background) => ("Background".to_string(), None),
                 None => unreachable!(),
             };
-            self.op(ContentStreamOp::BeginArtifact {
-                artifact_type,
-                subtype,
-            });
+            self.op(ContentStreamOp::BeginArtifact { artifact_type, subtype });
         }
 
         self.begin_text();
@@ -894,7 +860,14 @@ impl ContentStreamBuilder {
         let font_name = self.map_font_name(&text.font.name, text.style.weight.is_bold());
         self.set_font(&font_name, text.font.size);
 
-        self.op(ContentStreamOp::SetTextMatrix(1.0, 0.0, 0.0, 1.0, text.bbox.x, text.bbox.y));
+        self.op(ContentStreamOp::SetTextMatrix(
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+            text.bbox.x,
+            text.bbox.y,
+        ));
         self.op(ContentStreamOp::ShowText(text.text.clone()));
 
         if is_artifact {
@@ -928,16 +901,13 @@ impl ContentStreamBuilder {
                         PaginationSubtype::Other => None,
                     };
                     ("Pagination".to_string(), sub_str)
-                },
+                }
                 Some(ArtifactType::Layout) => ("Layout".to_string(), None),
                 Some(ArtifactType::Page) => ("Page".to_string(), None),
                 Some(ArtifactType::Background) => ("Background".to_string(), None),
                 None => unreachable!(),
             };
-            self.op(ContentStreamOp::BeginArtifact {
-                artifact_type,
-                subtype,
-            });
+            self.op(ContentStreamOp::BeginArtifact { artifact_type, subtype });
         }
 
         // If the path carries a 2D affine transform, bracket it in
@@ -975,19 +945,19 @@ impl ContentStreamBuilder {
             match op {
                 PathOperation::MoveTo(x, y) => {
                     self.op(ContentStreamOp::MoveTo(*x, *y));
-                },
+                }
                 PathOperation::LineTo(x, y) => {
                     self.op(ContentStreamOp::LineTo(*x, *y));
-                },
+                }
                 PathOperation::CurveTo(x1, y1, x2, y2, x3, y3) => {
                     self.op(ContentStreamOp::CurveTo(*x1, *y1, *x2, *y2, *x3, *y3));
-                },
+                }
                 PathOperation::Rectangle(x, y, w, h) => {
                     self.op(ContentStreamOp::Rectangle(*x, *y, *w, *h));
-                },
+                }
                 PathOperation::ClosePath => {
                     self.op(ContentStreamOp::ClosePath);
-                },
+                }
             }
         }
 
@@ -1090,19 +1060,13 @@ impl ContentStreamBuilder {
 
                 if let Some((r, g, b)) = cell.background {
                     self.op(ContentStreamOp::SetFillColorRGB(r, g, b));
-                    self.op(ContentStreamOp::Rectangle(
-                        current_x, current_y, cell_width, row_height,
-                    ));
+                    self.op(ContentStreamOp::Rectangle(current_x, current_y, cell_width, row_height));
                     self.op(ContentStreamOp::Fill);
                 }
 
                 if !cell.text.is_empty() {
                     let font_size = cell.font_size.unwrap_or(10.0);
-                    let font_name = if cell.bold {
-                        "Helvetica-Bold"
-                    } else {
-                        "Helvetica"
-                    };
+                    let font_name = if cell.bold { "Helvetica-Bold" } else { "Helvetica" };
 
                     let text_x = match cell.align {
                         TableCellAlign::Left => current_x + padding,
@@ -1320,10 +1284,10 @@ impl ContentStreamBuilder {
                 ContentElement::Structure(nested_elem) => {
                     let child_record = self.add_structure_element_impl(nested_elem);
                     child_records.push(child_record);
-                },
+                }
                 _ => {
                     self.add_element(child);
-                },
+                }
             }
         }
 
@@ -1365,10 +1329,7 @@ impl ContentStreamBuilder {
     /// Missing remappers fall back to emitting the original GID unchanged
     /// — a defensive path; in practice `PdfWriter::finish` always
     /// supplies a remapper for every embedded font it has registered.
-    pub fn build_with_remappers(
-        &self,
-        remappers: &HashMap<String, GlyphRemapper>,
-    ) -> Result<Vec<u8>> {
+    pub fn build_with_remappers(&self, remappers: &HashMap<String, GlyphRemapper>) -> Result<Vec<u8>> {
         let mut buf = Vec::new();
 
         for op in &self.operations {
@@ -1391,27 +1352,24 @@ impl ContentStreamBuilder {
             ContentStreamOp::RestoreState => write!(w, "Q"),
             ContentStreamOp::Transform(a, b, c, d, e, f) => {
                 write!(w, "{} {} {} {} {} {} cm", a, b, c, d, e, f)
-            },
+            }
             ContentStreamOp::BeginText => write!(w, "BT"),
             ContentStreamOp::EndText => write!(w, "ET"),
             ContentStreamOp::SetFont(name, size) => write!(w, "/{} {} Tf", name, size),
             ContentStreamOp::MoveText(tx, ty) => write!(w, "{} {} Td", tx, ty),
             ContentStreamOp::SetTextMatrix(a, b, c, d, e, f) => {
                 write!(w, "{} {} {} {} {} {} Tm", a, b, c, d, e, f)
-            },
+            }
             ContentStreamOp::ShowText(text) => {
                 write!(w, "(")?;
                 self.write_escaped_string(w, text)?;
                 write!(w, ") Tj")
-            },
+            }
             ContentStreamOp::ShowHexText(hex) => {
                 // Hex string already formatted as <XXXX...> ~keep
                 write!(w, "{} Tj", hex)
-            },
-            ContentStreamOp::ShowEmbeddedText {
-                font_name,
-                glyph_ids,
-            } => {
+            }
+            ContentStreamOp::ShowEmbeddedText { font_name, glyph_ids } => {
                 // Resolve original GIDs through the font's subset remapper.
                 // Missing remapper is a defensive fallback — production
                 // writer always supplies one. ~keep
@@ -1422,7 +1380,7 @@ impl ContentStreamBuilder {
                     write!(w, "{:04X}", emitted)?;
                 }
                 write!(w, "> Tj")
-            },
+            }
             ContentStreamOp::ShowTextArray(items) => {
                 write!(w, "[")?;
                 for item in items {
@@ -1431,19 +1389,19 @@ impl ContentStreamBuilder {
                             write!(w, "(")?;
                             self.write_escaped_string(w, t)?;
                             write!(w, ")")?;
-                        },
+                        }
                         TextArrayItem::HexText(hex) => {
                             // Hex string already formatted as <XXXX...> ~keep
                             write!(w, "{}", hex)?;
-                        },
+                        }
                         TextArrayItem::Adjustment(adj) => {
                             write!(w, "{}", adj)?;
-                        },
+                        }
                     }
                     write!(w, " ")?;
                 }
                 write!(w, "] TJ")
-            },
+            }
             ContentStreamOp::SetCharacterSpacing(spacing) => write!(w, "{} Tc", spacing),
             ContentStreamOp::SetWordSpacing(spacing) => write!(w, "{} Tw", spacing),
             ContentStreamOp::SetTextLeading(leading) => write!(w, "{} TL", leading),
@@ -1457,10 +1415,10 @@ impl ContentStreamBuilder {
             ContentStreamOp::LineTo(x, y) => write!(w, "{} {} l", x, y),
             ContentStreamOp::CurveTo(x1, y1, x2, y2, x3, y3) => {
                 write!(w, "{} {} {} {} {} {} c", x1, y1, x2, y2, x3, y3)
-            },
+            }
             ContentStreamOp::Rectangle(x, y, w_val, h) => {
                 write!(w, "{} {} {} {} re", x, y, w_val, h)
-            },
+            }
             ContentStreamOp::ClosePath => write!(w, "h"),
             ContentStreamOp::Stroke => write!(w, "S"),
             ContentStreamOp::Fill => write!(w, "f"),
@@ -1471,20 +1429,17 @@ impl ContentStreamBuilder {
 
             ContentStreamOp::BeginMarkedContentDict { tag, mcid } => {
                 write!(w, "/{} <</MCID {}>> BDC", tag, mcid)
-            },
+            }
             ContentStreamOp::EndMarkedContent => write!(w, "EMC"),
 
-            ContentStreamOp::BeginArtifact {
-                artifact_type,
-                subtype,
-            } => {
+            ContentStreamOp::BeginArtifact { artifact_type, subtype } => {
                 write!(w, "/Artifact <<")?;
                 write!(w, "/Type /{}", artifact_type)?;
                 if let Some(sub) = subtype {
                     write!(w, " /Subtype /{}", sub)?;
                 }
                 write!(w, ">> BDC")
-            },
+            }
             ContentStreamOp::EndArtifact => write!(w, "EMC"),
 
             ContentStreamOp::Clip => write!(w, "W"),
@@ -1499,34 +1454,34 @@ impl ContentStreamBuilder {
                     write!(w, "{} ", c)?;
                 }
                 write!(w, "scn")
-            },
+            }
             ContentStreamOp::SetStrokeColorN(components) => {
                 for c in components {
                     write!(w, "{} ", c)?;
                 }
                 write!(w, "SCN")
-            },
+            }
             ContentStreamOp::SetFillPattern(name, components) => {
                 for c in components {
                     write!(w, "{} ", c)?;
                 }
                 write!(w, "/{} scn", name)
-            },
+            }
             ContentStreamOp::SetStrokePattern(name, components) => {
                 for c in components {
                     write!(w, "{} ", c)?;
                 }
                 write!(w, "/{} SCN", name)
-            },
+            }
 
             ContentStreamOp::PaintShading(name) => write!(w, "/{} sh", name),
 
             ContentStreamOp::CurveToV(x2, y2, x3, y3) => {
                 write!(w, "{} {} {} {} v", x2, y2, x3, y3)
-            },
+            }
             ContentStreamOp::CurveToY(x1, y1, x3, y3) => {
                 write!(w, "{} {} {} {} y", x1, y1, x3, y3)
-            },
+            }
             ContentStreamOp::FillEvenOdd => write!(w, "f*"),
             ContentStreamOp::FillStrokeEvenOdd => write!(w, "B*"),
             ContentStreamOp::CloseFillStroke => write!(w, "b"),
@@ -1544,14 +1499,14 @@ impl ContentStreamBuilder {
                     write!(w, "{}", p)?;
                 }
                 write!(w, "] {} d", phase)
-            },
+            }
 
             ContentStreamOp::SetFillColorCMYK(c, m, y, k) => {
                 write!(w, "{} {} {} {} k", c, m, y, k)
-            },
+            }
             ContentStreamOp::SetStrokeColorCMYK(c, m, y, k) => {
                 write!(w, "{} {} {} {} K", c, m, y, k)
-            },
+            }
 
             ContentStreamOp::Raw(raw) => write!(w, "{}", raw),
         }
@@ -1582,7 +1537,7 @@ impl ContentStreamBuilder {
                 None => {
                     w.write_all(b"?")?;
                     continue;
-                },
+                }
             };
             match b {
                 b'(' => write!(w, "\\(")?,
@@ -1865,8 +1820,7 @@ mod tests {
         ]);
         table.add_row(header);
 
-        let row =
-            TableRowContent::new(vec![TableCellContent::new("Item"), TableCellContent::new("100")]);
+        let row = TableRowContent::new(vec![TableCellContent::new("Item"), TableCellContent::new("100")]);
         table.add_row(row);
 
         let mut builder = ContentStreamBuilder::new();
@@ -1931,8 +1885,7 @@ mod tests {
     #[test]
     fn test_mixed_content_elements() {
         use crate::elements::{
-            ColorSpace, ImageContent, ImageFormat, TableCellContent, TableContent,
-            TableContentStyle, TableRowContent,
+            ColorSpace, ImageContent, ImageFormat, TableCellContent, TableContent, TableContentStyle, TableRowContent,
         };
 
         let mut builder = ContentStreamBuilder::new();
@@ -2079,11 +2032,7 @@ mod tests {
     #[test]
     fn test_fill_color() {
         let mut builder = ContentStreamBuilder::new();
-        builder.fill_color(Color {
-            r: 1.0,
-            g: 0.0,
-            b: 0.0,
-        });
+        builder.fill_color(Color { r: 1.0, g: 0.0, b: 0.0 });
 
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
@@ -2093,11 +2042,7 @@ mod tests {
     #[test]
     fn test_stroke_color() {
         let mut builder = ContentStreamBuilder::new();
-        builder.stroke_color(Color {
-            r: 0.0,
-            g: 1.0,
-            b: 0.0,
-        });
+        builder.stroke_color(Color { r: 0.0, g: 1.0, b: 0.0 });
 
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
@@ -2203,10 +2148,7 @@ mod tests {
     #[test]
     fn test_close_fill_stroke() {
         let mut builder = ContentStreamBuilder::new();
-        builder
-            .move_to(0.0, 0.0)
-            .line_to(100.0, 0.0)
-            .close_fill_stroke();
+        builder.move_to(0.0, 0.0).line_to(100.0, 0.0).close_fill_stroke();
 
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
@@ -2227,10 +2169,7 @@ mod tests {
     #[test]
     fn test_clip_even_odd() {
         let mut builder = ContentStreamBuilder::new();
-        builder
-            .rect(10.0, 10.0, 200.0, 200.0)
-            .clip_even_odd()
-            .end_path();
+        builder.rect(10.0, 10.0, 200.0, 200.0).clip_even_odd().end_path();
 
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
@@ -2272,9 +2211,7 @@ mod tests {
     #[test]
     fn test_curve_to() {
         let mut builder = ContentStreamBuilder::new();
-        builder
-            .move_to(0.0, 0.0)
-            .curve_to(10.0, 20.0, 30.0, 40.0, 50.0, 60.0);
+        builder.move_to(0.0, 0.0).curve_to(10.0, 20.0, 30.0, 40.0, 50.0, 60.0);
 
         let bytes = builder.build().unwrap();
         let content = String::from_utf8_lossy(&bytes);
@@ -2899,11 +2836,7 @@ mod tests {
                 PathOperation::ClosePath,
             ],
             stroke_color: Some(Color::black()),
-            fill_color: Some(Color {
-                r: 1.0,
-                g: 0.0,
-                b: 0.0,
-            }),
+            fill_color: Some(Color { r: 1.0, g: 0.0, b: 0.0 }),
             stroke_width: 2.0,
             bbox: Rect::new(0.0, 0.0, 100.0, 100.0),
             line_cap: Default::default(),
@@ -2928,10 +2861,7 @@ mod tests {
         use crate::elements::PathContent;
 
         let path = PathContent {
-            operations: vec![
-                PathOperation::MoveTo(0.0, 0.0),
-                PathOperation::LineTo(100.0, 100.0),
-            ],
+            operations: vec![PathOperation::MoveTo(0.0, 0.0), PathOperation::LineTo(100.0, 100.0)],
             stroke_color: Some(Color::black()),
             fill_color: None,
             stroke_width: 1.0,
@@ -2960,11 +2890,7 @@ mod tests {
         let path = PathContent {
             operations: vec![PathOperation::Rectangle(0.0, 0.0, 100.0, 100.0)],
             stroke_color: None,
-            fill_color: Some(Color {
-                r: 0.0,
-                g: 0.0,
-                b: 1.0,
-            }),
+            fill_color: Some(Color { r: 0.0, g: 0.0, b: 1.0 }),
             stroke_width: 0.0,
             bbox: Rect::new(0.0, 0.0, 100.0, 100.0),
             line_cap: Default::default(),

@@ -220,7 +220,10 @@ mod diacritical_tests {
         assert_eq!(should_split_at_rtl_boundary(&base, &mark1, Some(&context)), Some(false));
 
         let mark2 = make_char(0x0651, 100.0, None);
-        assert_eq!(should_split_at_rtl_boundary(&mark1, &mark2, Some(&context)), Some(false));
+        assert_eq!(
+            should_split_at_rtl_boundary(&mark1, &mark2, Some(&context)),
+            Some(false)
+        );
     }
 
     #[test]
@@ -231,8 +234,14 @@ mod diacritical_tests {
         let vowel = make_char(0x05B0, 100.0, None);
         let dagesh = make_char(0x05BC, 100.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&letter, &vowel, Some(&context)), Some(false));
-        assert_eq!(should_split_at_rtl_boundary(&vowel, &dagesh, Some(&context)), Some(false));
+        assert_eq!(
+            should_split_at_rtl_boundary(&letter, &vowel, Some(&context)),
+            Some(false)
+        );
+        assert_eq!(
+            should_split_at_rtl_boundary(&vowel, &dagesh, Some(&context)),
+            Some(false)
+        );
     }
 
     #[test]
@@ -412,13 +421,22 @@ mod number_handling_tests {
         let digit2 = make_char(0x0032, 105.0, None);
         let digit3 = make_char(0x0033, 110.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&digit1, &digit2, Some(&context)), Some(false));
-        assert_eq!(should_split_at_rtl_boundary(&digit2, &digit3, Some(&context)), Some(false));
+        assert_eq!(
+            should_split_at_rtl_boundary(&digit1, &digit2, Some(&context)),
+            Some(false)
+        );
+        assert_eq!(
+            should_split_at_rtl_boundary(&digit2, &digit3, Some(&context)),
+            Some(false)
+        );
 
         let e_digit1 = make_char(0x06F1, 100.0, None);
         let e_digit2 = make_char(0x06F2, 105.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&e_digit1, &e_digit2, Some(&context)), Some(false));
+        assert_eq!(
+            should_split_at_rtl_boundary(&e_digit1, &e_digit2, Some(&context)),
+            Some(false)
+        );
     }
 
     #[test]
@@ -428,7 +446,10 @@ mod number_handling_tests {
         let western = make_char(0x0031, 100.0, None);
         let eastern = make_char(0x06F2, 105.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&western, &eastern, Some(&context)), Some(false));
+        assert_eq!(
+            should_split_at_rtl_boundary(&western, &eastern, Some(&context)),
+            Some(false)
+        );
     }
 }
 
@@ -444,8 +465,14 @@ mod boundary_rules_tests {
         let space = make_char(0x0020, 105.0, None);
         let next_letter = make_char(0x062A, 110.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&letter, &space, Some(&context)), Some(true));
-        assert_eq!(should_split_at_rtl_boundary(&space, &next_letter, Some(&context)), Some(true));
+        assert_eq!(
+            should_split_at_rtl_boundary(&letter, &space, Some(&context)),
+            Some(true)
+        );
+        assert_eq!(
+            should_split_at_rtl_boundary(&space, &next_letter, Some(&context)),
+            Some(true)
+        );
     }
 
     #[test]
@@ -456,8 +483,14 @@ mod boundary_rules_tests {
         let tatweel = make_char(0x0640, 105.0, None);
         let letter2 = make_char(0x062A, 110.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&letter1, &tatweel, Some(&context)), Some(false));
-        assert_eq!(should_split_at_rtl_boundary(&tatweel, &letter2, Some(&context)), Some(false));
+        assert_eq!(
+            should_split_at_rtl_boundary(&letter1, &tatweel, Some(&context)),
+            Some(false)
+        );
+        assert_eq!(
+            should_split_at_rtl_boundary(&tatweel, &letter2, Some(&context)),
+            Some(false)
+        );
     }
 
     #[test]
@@ -468,7 +501,10 @@ mod boundary_rules_tests {
         let letter2 = make_char(0x062A, 95.0, None);
 
         // Large negative TJ offset (< -50) creates boundary in RTL ~keep
-        assert_eq!(should_split_at_rtl_boundary(&letter1, &letter2, Some(&context)), Some(true));
+        assert_eq!(
+            should_split_at_rtl_boundary(&letter1, &letter2, Some(&context)),
+            Some(true)
+        );
     }
 
     #[test]
@@ -479,7 +515,10 @@ mod boundary_rules_tests {
         let letter2 = make_char(0x062A, 97.0, None);
 
         // Small negative TJ offset does not create boundary ~keep
-        assert_eq!(should_split_at_rtl_boundary(&letter1, &letter2, Some(&context)), Some(false));
+        assert_eq!(
+            should_split_at_rtl_boundary(&letter1, &letter2, Some(&context)),
+            Some(false)
+        );
     }
 
     #[test]
@@ -489,7 +528,10 @@ mod boundary_rules_tests {
         let arabic = make_char(0x0628, 100.0, None);
         let latin = make_char(0x0041, 105.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&arabic, &latin, Some(&context)), Some(true));
+        assert_eq!(
+            should_split_at_rtl_boundary(&arabic, &latin, Some(&context)),
+            Some(true)
+        );
     }
 
     #[test]
@@ -499,7 +541,10 @@ mod boundary_rules_tests {
         let latin = make_char(0x0041, 100.0, None);
         let arabic = make_char(0x0628, 105.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&latin, &arabic, Some(&context)), Some(true));
+        assert_eq!(
+            should_split_at_rtl_boundary(&latin, &arabic, Some(&context)),
+            Some(true)
+        );
     }
 
     #[test]
@@ -511,9 +556,18 @@ mod boundary_rules_tests {
         let semicolon = make_char(0x061B, 110.0, None);
         let question = make_char(0x061F, 115.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&letter, &comma, Some(&context)), Some(true));
-        assert_eq!(should_split_at_rtl_boundary(&letter, &semicolon, Some(&context)), Some(true));
-        assert_eq!(should_split_at_rtl_boundary(&letter, &question, Some(&context)), Some(true));
+        assert_eq!(
+            should_split_at_rtl_boundary(&letter, &comma, Some(&context)),
+            Some(true)
+        );
+        assert_eq!(
+            should_split_at_rtl_boundary(&letter, &semicolon, Some(&context)),
+            Some(true)
+        );
+        assert_eq!(
+            should_split_at_rtl_boundary(&letter, &question, Some(&context)),
+            Some(true)
+        );
     }
 
     #[test]
@@ -524,8 +578,14 @@ mod boundary_rules_tests {
         let geresh = make_char(0x05F3, 105.0, None);
         let gershayim = make_char(0x05F4, 110.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&letter, &geresh, Some(&context)), Some(true));
-        assert_eq!(should_split_at_rtl_boundary(&letter, &gershayim, Some(&context)), Some(true));
+        assert_eq!(
+            should_split_at_rtl_boundary(&letter, &geresh, Some(&context)),
+            Some(true)
+        );
+        assert_eq!(
+            should_split_at_rtl_boundary(&letter, &gershayim, Some(&context)),
+            Some(true)
+        );
     }
 
     #[test]
@@ -615,7 +675,10 @@ mod ligature_tests {
         let ligature = make_char(0xFEFC, 100.0, None);
         let letter = make_char(0x062A, 105.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&ligature, &letter, Some(&context)), Some(false));
+        assert_eq!(
+            should_split_at_rtl_boundary(&ligature, &letter, Some(&context)),
+            Some(false)
+        );
     }
 }
 
@@ -651,8 +714,14 @@ mod integration_tests {
         let space = make_char(0x0020, 135.0, None);
         let word2_first = make_char(0x0628, 140.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&word1_last, &space, Some(&context)), Some(true));
-        assert_eq!(should_split_at_rtl_boundary(&space, &word2_first, Some(&context)), Some(true));
+        assert_eq!(
+            should_split_at_rtl_boundary(&word1_last, &space, Some(&context)),
+            Some(true)
+        );
+        assert_eq!(
+            should_split_at_rtl_boundary(&space, &word2_first, Some(&context)),
+            Some(true)
+        );
     }
 
     #[test]
@@ -687,7 +756,10 @@ mod integration_tests {
             Some(true)
         );
 
-        assert_eq!(should_split_at_rtl_boundary(&space, &latin_letter, Some(&context)), Some(true));
+        assert_eq!(
+            should_split_at_rtl_boundary(&space, &latin_letter, Some(&context)),
+            Some(true)
+        );
     }
 
     #[test]
@@ -701,12 +773,27 @@ mod integration_tests {
         let digit3 = make_char(0x06F2, 120.0, None);
         let digit4 = make_char(0x06F5, 125.0, None);
 
-        assert_eq!(should_split_at_rtl_boundary(&word_end, &space, Some(&context)), Some(true));
-        assert_eq!(should_split_at_rtl_boundary(&space, &digit1, Some(&context)), Some(true));
+        assert_eq!(
+            should_split_at_rtl_boundary(&word_end, &space, Some(&context)),
+            Some(true)
+        );
+        assert_eq!(
+            should_split_at_rtl_boundary(&space, &digit1, Some(&context)),
+            Some(true)
+        );
 
-        assert_eq!(should_split_at_rtl_boundary(&digit1, &digit2, Some(&context)), Some(false));
-        assert_eq!(should_split_at_rtl_boundary(&digit2, &digit3, Some(&context)), Some(false));
-        assert_eq!(should_split_at_rtl_boundary(&digit3, &digit4, Some(&context)), Some(false));
+        assert_eq!(
+            should_split_at_rtl_boundary(&digit1, &digit2, Some(&context)),
+            Some(false)
+        );
+        assert_eq!(
+            should_split_at_rtl_boundary(&digit2, &digit3, Some(&context)),
+            Some(false)
+        );
+        assert_eq!(
+            should_split_at_rtl_boundary(&digit3, &digit4, Some(&context)),
+            Some(false)
+        );
     }
 
     #[test]

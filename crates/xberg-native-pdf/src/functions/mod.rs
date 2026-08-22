@@ -139,7 +139,7 @@ impl Value {
                 } else {
                     0.0
                 }
-            },
+            }
         }
     }
 }
@@ -323,22 +323,18 @@ fn resolve_conditionals(instructions: &mut Vec<Instruction>) -> Result<()> {
             Instruction::If(body) if body.is_empty() => {
                 // `if`: one preceding procedure body ~keep
                 if i == 0 {
-                    return Err(Error::InvalidPdf(
-                        "Type 4 `if` without preceding procedure body".into(),
-                    ));
+                    return Err(Error::InvalidPdf("Type 4 `if` without preceding procedure body".into()));
                 }
                 match instructions.remove(i - 1) {
                     Instruction::ProcedureBody(body) => {
                         instructions[i - 1] = Instruction::If(body);
                         // Don't increment i; we removed an element before ~keep
-                    },
+                    }
                     _ => {
-                        return Err(Error::InvalidPdf(
-                            "Type 4 `if` requires a procedure body".into(),
-                        ));
-                    },
+                        return Err(Error::InvalidPdf("Type 4 `if` requires a procedure body".into()));
+                    }
                 }
-            },
+            }
             Instruction::IfElse(true_b, false_b) if true_b.is_empty() && false_b.is_empty() => {
                 // `ifelse`: two preceding procedure bodies ~keep
                 if i < 2 {
@@ -352,7 +348,7 @@ fn resolve_conditionals(instructions: &mut Vec<Instruction>) -> Result<()> {
                         return Err(Error::InvalidPdf(
                             "Type 4 `ifelse` requires two procedure bodies".into(),
                         ));
-                    },
+                    }
                 };
                 let true_branch = match instructions.remove(i - 2) {
                     Instruction::ProcedureBody(body) => body,
@@ -360,14 +356,14 @@ fn resolve_conditionals(instructions: &mut Vec<Instruction>) -> Result<()> {
                         return Err(Error::InvalidPdf(
                             "Type 4 `ifelse` requires two procedure bodies".into(),
                         ));
-                    },
+                    }
                 };
                 instructions[i - 2] = Instruction::IfElse(true_branch, false_branch);
                 i = i.saturating_sub(1);
-            },
+            }
             _ => {
                 i += 1;
-            },
+            }
         }
     }
     // Any procedure body that survives the resolve pass is an orphan — a
@@ -447,11 +443,7 @@ impl Program {
         let mut stack: Vec<Value> = inputs
             .iter()
             .map(|&v| {
-                if v.is_finite()
-                    && v.fract() == 0.0
-                    && v >= i64::MIN as f64
-                    && v < I64_MAX_PLUS_ONE_AS_F64
-                {
+                if v.is_finite() && v.fract() == 0.0 && v >= i64::MIN as f64 && v < I64_MAX_PLUS_ONE_AS_F64 {
                     Value::Int(v as i64)
                 } else {
                     Value::Real(v)
@@ -471,12 +463,7 @@ impl Program {
     /// range after execution. Malformed bounds (`min > max`) are swapped;
     /// NaN bounds are treated as no-op, since `f64::clamp` would otherwise
     /// panic.
-    pub fn evaluate_clamped(
-        &self,
-        inputs: &[f64],
-        domain: &[[f64; 2]],
-        range: &[[f64; 2]],
-    ) -> Result<Vec<f64>> {
+    pub fn evaluate_clamped(&self, inputs: &[f64], domain: &[[f64; 2]], range: &[[f64; 2]]) -> Result<Vec<f64>> {
         let clamped_inputs: Vec<f64> = inputs
             .iter()
             .enumerate()
@@ -590,7 +577,7 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                     .checked_div(b)
                     .ok_or_else(|| Error::Type4Runtime("Type 4 idiv integer overflow".into()))?;
                 stack.push(Value::Int(q));
-            },
+            }
             Instruction::Mod => {
                 let b = pop(stack)?.as_int()?;
                 let a = pop(stack)?.as_int()?;
@@ -601,7 +588,7 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                     .checked_rem(b)
                     .ok_or_else(|| Error::Type4Runtime("Type 4 mod integer overflow".into()))?;
                 stack.push(Value::Int(r));
-            },
+            }
             // PLRM §8.2: `neg` on `i64::MIN` overflows. Use `checked_neg` so
             // the program fails cleanly instead of wrapping silently — matches
             // the explicit overflow path already in use for `idiv`/`mod`. ~keep
@@ -609,29 +596,29 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                 let v = pop(stack)?;
                 match v {
                     Value::Int(i) => {
-                        let n = i.checked_neg().ok_or_else(|| {
-                            Error::Type4Runtime("Type 4 integer overflow in neg".into())
-                        })?;
+                        let n = i
+                            .checked_neg()
+                            .ok_or_else(|| Error::Type4Runtime("Type 4 integer overflow in neg".into()))?;
                         stack.push(Value::Int(n));
-                    },
+                    }
                     Value::Real(r) => stack.push(Value::Real(-r)),
                     Value::Bool(_) => return Err(typecheck("neg expects a number")),
                 }
-            },
+            }
             // PLRM §8.2: `abs` on `i64::MIN` overflows. Same treatment as `neg`. ~keep
             Instruction::Abs => {
                 let v = pop(stack)?;
                 match v {
                     Value::Int(i) => {
-                        let n = i.checked_abs().ok_or_else(|| {
-                            Error::Type4Runtime("Type 4 integer overflow in abs".into())
-                        })?;
+                        let n = i
+                            .checked_abs()
+                            .ok_or_else(|| Error::Type4Runtime("Type 4 integer overflow in abs".into()))?;
                         stack.push(Value::Int(n));
-                    },
+                    }
                     Value::Real(r) => stack.push(Value::Real(r.abs())),
                     Value::Bool(_) => return Err(typecheck("abs expects a number")),
                 }
-            },
+            }
             Instruction::Ceiling => real_unary_preserve(stack, |a| Ok(a.ceil()))?,
             Instruction::Floor => real_unary_preserve(stack, |a| Ok(a.floor()))?,
             // PLRM §8.2: round goes to the greater of the two surrounding
@@ -684,17 +671,17 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                     deg -= 360.0;
                 }
                 stack.push(Value::Real(deg));
-            },
+            }
             Instruction::Eq => {
                 let b = pop(stack)?;
                 let a = pop(stack)?;
                 stack.push(Value::Bool(values_equal(a, b)));
-            },
+            }
             Instruction::Ne => {
                 let b = pop(stack)?;
                 let a = pop(stack)?;
                 stack.push(Value::Bool(!values_equal(a, b)));
-            },
+            }
             Instruction::Gt => comparison(stack, |o| o == std::cmp::Ordering::Greater)?,
             Instruction::Ge => comparison(stack, |o| o != std::cmp::Ordering::Less)?,
             Instruction::Lt => comparison(stack, |o| o == std::cmp::Ordering::Less)?,
@@ -709,9 +696,9 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                     Value::Int(i) => stack.push(Value::Int(!i)),
                     Value::Real(_) => {
                         return Err(typecheck("not expects boolean or integer"));
-                    },
+                    }
                 }
-            },
+            }
             // PLRM §8.2: bitshift takes two integers. Magnitudes >= 64 would
             // panic with Rust's `<<`/`>>`; PLRM specifies "bits shifted out
             // are discarded; zeros are supplied for vacated bits", which for
@@ -731,7 +718,7 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                     ((val as u64) >> (-shift) as u32) as i64
                 };
                 stack.push(Value::Int(result));
-            },
+            }
             // PLRM §8.2: `cvi` pops a number, truncates toward zero, and
             // pushes the result as a typed integer. Reals outside the i64
             // range overflow as a runtime error rather than wrapping. ~keep
@@ -741,9 +728,7 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                     Value::Int(i) => stack.push(Value::Int(i)),
                     Value::Real(r) => {
                         if !r.is_finite() {
-                            return Err(Error::Type4Runtime(
-                                "Type 4 cvi: input is not finite".into(),
-                            ));
+                            return Err(Error::Type4Runtime("Type 4 cvi: input is not finite".into()));
                         }
                         let t = r.trunc();
                         // i64::MAX (2^63 - 1) is NOT exactly representable in
@@ -757,10 +742,10 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                             return Err(Error::Type4Runtime("Type 4 cvi: integer overflow".into()));
                         }
                         stack.push(Value::Int(t as i64));
-                    },
+                    }
                     Value::Bool(_) => return Err(typecheck("cvi expects a number")),
                 }
-            },
+            }
             // PLRM §8.2: `cvr` pops a number and pushes it as a typed real.
             // An integer becomes a typed real (no longer satisfies `as_int`). ~keep
             Instruction::Cvr => {
@@ -770,21 +755,21 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                     Value::Real(r) => stack.push(Value::Real(r)),
                     Value::Bool(_) => return Err(typecheck("cvr expects a number")),
                 }
-            },
+            }
             Instruction::Dup => {
                 let a = *stack.last().ok_or_else(underflow)?;
                 push_checked(stack, a)?;
-            },
+            }
             Instruction::Exch => {
                 let b = pop(stack)?;
                 let a = pop(stack)?;
                 // Net-neutral: two pops, two pushes back. ~keep
                 stack.push(b);
                 stack.push(a);
-            },
+            }
             Instruction::Pop => {
                 pop(stack)?;
-            },
+            }
             Instruction::Copy => {
                 // Note: operand pops happen before the bounds check below.
                 // The mutation is visible only inside this scope; on error
@@ -802,7 +787,7 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                 let start = stack.len() - n;
                 let copied: Vec<Value> = stack[start..].to_vec();
                 stack.extend_from_slice(&copied);
-            },
+            }
             Instruction::Index => {
                 // Note: operand pops happen before the bounds check below.
                 // The mutation is visible only inside this scope; on error
@@ -814,7 +799,7 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                 }
                 let val = stack[stack.len() - 1 - n];
                 stack.push(val);
-            },
+            }
             Instruction::Roll => {
                 // Note: operand pops happen before the bounds check below.
                 // The mutation is visible only inside this scope; on error
@@ -832,13 +817,13 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                     let shift = j.rem_euclid(len) as usize;
                     slice.rotate_right(shift);
                 }
-            },
+            }
             Instruction::If(body) => {
                 let cond = pop(stack)?.as_bool()?;
                 if cond {
                     execute(body, stack, budget)?;
                 }
-            },
+            }
             Instruction::IfElse(true_branch, false_branch) => {
                 let cond = pop(stack)?.as_bool()?;
                 if cond {
@@ -846,7 +831,7 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                 } else {
                     execute(false_branch, stack, budget)?;
                 }
-            },
+            }
             Instruction::ProcedureBody(_) => {
                 // Unreachable: `resolve_conditionals` rejects orphan procedure
                 // bodies at parse time. If one reaches `execute` we treat it
@@ -854,7 +839,7 @@ fn execute(instructions: &[Instruction], stack: &mut Vec<Value>, budget: &mut us
                 return Err(Error::Type4Runtime(
                     "Type 4 internal error: ProcedureBody reached execute".into(),
                 ));
-            },
+            }
         }
     }
     Ok(())
@@ -1098,15 +1083,24 @@ mod tests {
         assert_eq!(evaluate_type4(b"{ dup }", &[5.0]).unwrap(), vec![5.0, 5.0]);
         assert_eq!(evaluate_type4(b"{ exch }", &[1.0, 2.0]).unwrap(), vec![2.0, 1.0]);
         assert_eq!(evaluate_type4(b"{ pop }", &[1.0, 2.0]).unwrap(), vec![1.0]);
-        assert_eq!(evaluate_type4(b"{ 2 copy }", &[1.0, 2.0]).unwrap(), vec![1.0, 2.0, 1.0, 2.0]);
-        assert_eq!(evaluate_type4(b"{ 1 index }", &[1.0, 2.0]).unwrap(), vec![1.0, 2.0, 1.0]);
+        assert_eq!(
+            evaluate_type4(b"{ 2 copy }", &[1.0, 2.0]).unwrap(),
+            vec![1.0, 2.0, 1.0, 2.0]
+        );
+        assert_eq!(
+            evaluate_type4(b"{ 1 index }", &[1.0, 2.0]).unwrap(),
+            vec![1.0, 2.0, 1.0]
+        );
     }
 
     #[test]
     fn roll_operator() {
         // roll(n=3, j=1): rotate top 3 elements by 1
         // [1, 2, 3] -> [3, 1, 2] ~keep
-        assert_eq!(evaluate_type4(b"{ 3 1 roll }", &[1.0, 2.0, 3.0]).unwrap(), vec![3.0, 1.0, 2.0]);
+        assert_eq!(
+            evaluate_type4(b"{ 3 1 roll }", &[1.0, 2.0, 3.0]).unwrap(),
+            vec![3.0, 1.0, 2.0]
+        );
         // roll(n=3, j=-1): rotate top 3 elements by -1
         // [1, 2, 3] -> [2, 3, 1] ~keep
         assert_eq!(
@@ -1163,8 +1157,7 @@ mod tests {
 
     #[test]
     fn nested_conditionals() {
-        let prog =
-            b"{ dup 0.5 gt { dup 0.8 gt { pop 1.0 } { pop 0.75 } ifelse } { pop 0.0 } ifelse }";
+        let prog = b"{ dup 0.5 gt { dup 0.8 gt { pop 1.0 } { pop 0.75 } ifelse } { pop 0.0 } ifelse }";
         assert_eq!(evaluate_type4(prog, &[0.9]).unwrap(), vec![1.0]);
         assert_eq!(evaluate_type4(prog, &[0.6]).unwrap(), vec![0.75]);
         assert_eq!(evaluate_type4(prog, &[0.3]).unwrap(), vec![0.0]);
@@ -1203,7 +1196,10 @@ mod tests {
         ];
         for (prog, inp, want, desc) in cases {
             let got = evaluate_type4(prog, inp).unwrap_or_else(|e| panic!("{desc}: {e}"));
-            assert!(approx_eq(&got, want, 1e-9), "case: {desc}\n  got:  {got:?}\n  want: {want:?}");
+            assert!(
+                approx_eq(&got, want, 1e-9),
+                "case: {desc}\n  got:  {got:?}\n  want: {want:?}"
+            );
         }
     }
 
@@ -1266,8 +1262,7 @@ mod tests {
         assert_eq!(r, vec![0.5]);
 
         // NaN bounds must not panic — treat as no clamp. ~keep
-        let r =
-            evaluate_type4_clamped(b"{ }", &[0.5], &[[f64::NAN, 1.0]], &[[0.0, f64::NAN]]).unwrap();
+        let r = evaluate_type4_clamped(b"{ }", &[0.5], &[[f64::NAN, 1.0]], &[[0.0, f64::NAN]]).unwrap();
         assert_eq!(r, vec![0.5]);
 
         // bitshift by >= 64 must not shift-overflow. ~keep
@@ -1363,8 +1358,7 @@ mod tests {
         let direct = program
             .evaluate_clamped(&[1.5], &[[0.0, 1.0]], &[[0.0, 1.0]])
             .expect("direct");
-        let via_fn = evaluate_type4_clamped(b"{ 2.0 mul }", &[1.5], &[[0.0, 1.0]], &[[0.0, 1.0]])
-            .expect("via_fn");
+        let via_fn = evaluate_type4_clamped(b"{ 2.0 mul }", &[1.5], &[[0.0, 1.0]], &[[0.0, 1.0]]).expect("via_fn");
         assert_eq!(direct, via_fn);
     }
 
@@ -1454,7 +1448,10 @@ mod tests {
             (-100.0, 0.0, 270.0),
         ] {
             let got = evaluate_type4(b"{ atan }", &[num, den]).unwrap();
-            assert!((got[0] - want).abs() < 1e-9, "atan({num}, {den}) = {got:?}, want {want}");
+            assert!(
+                (got[0] - want).abs() < 1e-9,
+                "atan({num}, {den}) = {got:?}, want {want}"
+            );
             assert!(got[0] >= 0.0 && got[0] < 360.0, "atan out of [0, 360): {got:?}");
         }
     }
@@ -1468,10 +1465,10 @@ mod tests {
         bytes.extend(std::iter::repeat_n(b'{', 50));
         bytes.extend(std::iter::repeat_n(b'}', 50));
         match evaluate_type4(&bytes, &[]) {
-            Err(Error::InvalidPdf(_)) => {},
+            Err(Error::InvalidPdf(_)) => {}
             Err(Error::Type4Runtime(s)) => {
                 panic!("parse depth should error as InvalidPdf, not Type4Runtime: {s}")
-            },
+            }
             Err(other) => panic!("unexpected error: {other}"),
             Ok(out) => panic!("should have errored, got {out:?}"),
         }
@@ -1487,7 +1484,7 @@ mod tests {
         assert_eq!(pow_63, i64::MAX as f64, "test setup: 2^63 == i64::MAX as f64");
         let result = evaluate_type4(b"{ cvi }", &[pow_63]);
         match result {
-            Err(Error::Type4Runtime(s)) if s.contains("cvi") => {},
+            Err(Error::Type4Runtime(s)) if s.contains("cvi") => {}
             Err(other) => panic!("expected Type4Runtime(cvi overflow), got: {other}"),
             Ok(v) => panic!(
                 "2^63 cvi should overflow; got {v:?} (likely saturated to i64::MAX = {})",

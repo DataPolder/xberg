@@ -47,9 +47,7 @@ fn build_pdf_with_spot_in_nested_form() -> Vec<u8> {
     offsets.push(buf.len());
     buf.extend_from_slice(b"6 0 obj\n[/Separation /SpotRed /DeviceCMYK 7 0 R]\nendobj\n");
     offsets.push(buf.len());
-    buf.extend_from_slice(
-        b"7 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0 0 0 0] /C1 [0 1 0 0] >>\nendobj\n",
-    );
+    buf.extend_from_slice(b"7 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0 0 0 0] /C1 [0 1 0 0] >>\nendobj\n");
 
     finalize_pdf(buf, offsets)
 }
@@ -154,9 +152,7 @@ fn build_pdf_with_spot_two_levels_deep() -> Vec<u8> {
     offsets.push(buf.len());
     buf.extend_from_slice(b"7 0 obj\n[/Separation /DeepSpot /DeviceCMYK 8 0 R]\nendobj\n");
     offsets.push(buf.len());
-    buf.extend_from_slice(
-        b"8 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0 0 0 0] /C1 [1 0 0 0] >>\nendobj\n",
-    );
+    buf.extend_from_slice(b"8 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0 0 0 0] /C1 [1 0 0 0] >>\nendobj\n");
     finalize_pdf(buf, offsets)
 }
 
@@ -220,9 +216,7 @@ fn build_pdf_with_cyclic_forms() -> Vec<u8> {
     offsets.push(buf.len());
     buf.extend_from_slice(b"7 0 obj\n[/Separation /CycleSpot /DeviceCMYK 8 0 R]\nendobj\n");
     offsets.push(buf.len());
-    buf.extend_from_slice(
-        b"8 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0 0 0 0] /C1 [1 0 0 0] >>\nendobj\n",
-    );
+    buf.extend_from_slice(b"8 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0 0 0 0] /C1 [1 0 0 0] >>\nendobj\n");
     finalize_pdf(buf, offsets)
 }
 
@@ -231,7 +225,11 @@ fn deep_terminates_on_form_cycle() {
     let doc = PdfDocument::from_bytes(build_pdf_with_cyclic_forms()).expect("parse");
     let deep = doc.get_page_inks_deep(0).expect("deep");
     let count = deep.iter().filter(|s| s.as_str() == "CycleSpot").count();
-    assert_eq!(count, 1, "CycleSpot must appear exactly once after dedupe; got {:?}", deep);
+    assert_eq!(
+        count, 1,
+        "CycleSpot must appear exactly once after dedupe; got {:?}",
+        deep
+    );
 }
 
 /// Two sibling forms whose /Resources/ColorSpace each point at the SAME
@@ -282,9 +280,7 @@ fn build_pdf_with_shared_spot_in_two_forms() -> Vec<u8> {
     offsets.push(buf.len());
     buf.extend_from_slice(b"7 0 obj\n[/Separation /SharedSpot /DeviceCMYK 8 0 R]\nendobj\n");
     offsets.push(buf.len());
-    buf.extend_from_slice(
-        b"8 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0 0 0 0] /C1 [1 0 0 0] >>\nendobj\n",
-    );
+    buf.extend_from_slice(b"8 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0 0 0 0] /C1 [1 0 0 0] >>\nendobj\n");
     finalize_pdf(buf, offsets)
 }
 

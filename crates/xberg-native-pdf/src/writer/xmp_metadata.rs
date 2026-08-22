@@ -203,11 +203,17 @@ impl XmpWriter {
         }
 
         if let Some(date) = &self.metadata.xmp_create_date {
-            xml.push_str(&format!("      <xmp:CreateDate>{}</xmp:CreateDate>\n", escape_xml(date)));
+            xml.push_str(&format!(
+                "      <xmp:CreateDate>{}</xmp:CreateDate>\n",
+                escape_xml(date)
+            ));
         }
 
         if let Some(date) = &self.metadata.xmp_modify_date {
-            xml.push_str(&format!("      <xmp:ModifyDate>{}</xmp:ModifyDate>\n", escape_xml(date)));
+            xml.push_str(&format!(
+                "      <xmp:ModifyDate>{}</xmp:ModifyDate>\n",
+                escape_xml(date)
+            ));
         }
 
         if let Some(date) = &self.metadata.xmp_metadata_date {
@@ -218,11 +224,17 @@ impl XmpWriter {
         }
 
         if let Some(producer) = &self.metadata.pdf_producer {
-            xml.push_str(&format!("      <pdf:Producer>{}</pdf:Producer>\n", escape_xml(producer)));
+            xml.push_str(&format!(
+                "      <pdf:Producer>{}</pdf:Producer>\n",
+                escape_xml(producer)
+            ));
         }
 
         if let Some(keywords) = &self.metadata.pdf_keywords {
-            xml.push_str(&format!("      <pdf:Keywords>{}</pdf:Keywords>\n", escape_xml(keywords)));
+            xml.push_str(&format!(
+                "      <pdf:Keywords>{}</pdf:Keywords>\n",
+                escape_xml(keywords)
+            ));
         }
 
         if let Some(version) = &self.metadata.pdf_version {
@@ -400,22 +412,19 @@ mod tests {
     #[test]
     fn test_xmp_writer_custom_properties_sorted() {
         let mut metadata = XmpMetadata::new();
-        metadata
-            .custom
-            .insert("zz:Last".to_string(), "z".to_string());
-        metadata
-            .custom
-            .insert("aa:First".to_string(), "a".to_string());
-        metadata
-            .custom
-            .insert("mm:Middle".to_string(), "m".to_string());
+        metadata.custom.insert("zz:Last".to_string(), "z".to_string());
+        metadata.custom.insert("aa:First".to_string(), "a".to_string());
+        metadata.custom.insert("mm:Middle".to_string(), "m".to_string());
 
         let xml = XmpWriter::new(metadata).build();
 
         let first = xml.find("<aa:First>").expect("aa:First missing");
         let middle = xml.find("<mm:Middle>").expect("mm:Middle missing");
         let last = xml.find("<zz:Last>").expect("zz:Last missing");
-        assert!(first < middle && middle < last, "custom properties must emit in key order");
+        assert!(
+            first < middle && middle < last,
+            "custom properties must emit in key order"
+        );
     }
 
     #[test]

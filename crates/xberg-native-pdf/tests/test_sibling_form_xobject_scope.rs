@@ -47,7 +47,11 @@ fn build_sibling_form_collision_pdf() -> Vec<u8> {
         pdf.extend_from_slice(body);
     };
 
-    push(&mut pdf, &mut off, b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    push(
+        &mut pdf,
+        &mut off,
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    );
     push(
         &mut pdf,
         &mut off,
@@ -85,8 +89,7 @@ fn build_sibling_form_collision_pdf() -> Vec<u8> {
 
         let mut form_content = Vec::new();
         for k in 0..N_OPS_PER_FORM {
-            form_content
-                .extend_from_slice(format!("{} {} m {} {} l S\n", k, k, k + 1, k + 1).as_bytes());
+            form_content.extend_from_slice(format!("{} {} m {} {} l S\n", k, k, k + 1, k + 1).as_bytes());
         }
         for j in 0..N_SIBLINGS {
             form_content.extend_from_slice(format!("/Im{} Do\n", j + 1).as_bytes());
@@ -130,8 +133,11 @@ fn build_sibling_form_collision_pdf() -> Vec<u8> {
     }
 
     pdf.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", count, xref_pos)
-            .as_bytes(),
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            count, xref_pos
+        )
+        .as_bytes(),
     );
 
     pdf

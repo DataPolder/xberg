@@ -8,9 +8,7 @@ use xberg_native_pdf::api::Pdf;
 use xberg_native_pdf::editor::{DocumentEditor, EditableDocument};
 use xberg_native_pdf::fdf::{FdfField, FdfValue, FdfWriter, XfdfWriter};
 use xberg_native_pdf::geometry::Rect;
-use xberg_native_pdf::writer::form_fields::{
-    CheckboxWidget, ChoiceOption, ComboBoxWidget, TextFieldWidget,
-};
+use xberg_native_pdf::writer::form_fields::{CheckboxWidget, ChoiceOption, ComboBoxWidget, TextFieldWidget};
 
 #[test]
 fn test_fdf_writer_basic() {
@@ -198,8 +196,7 @@ fn test_export_fdf_from_editor() {
     editor
         .add_form_field(
             0,
-            TextFieldWidget::new("username", Rect::new(100.0, 700.0, 200.0, 20.0))
-                .with_value("test_user"),
+            TextFieldWidget::new("username", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("test_user"),
         )
         .unwrap();
     editor
@@ -228,8 +225,7 @@ fn test_export_xfdf_from_editor() {
     editor
         .add_form_field(
             0,
-            TextFieldWidget::new("email", Rect::new(100.0, 700.0, 200.0, 20.0))
-                .with_value("test@example.com"),
+            TextFieldWidget::new("email", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("test@example.com"),
         )
         .unwrap();
     editor.save(&pdf_path).unwrap();
@@ -276,8 +272,7 @@ fn test_pdf_api_export_fdf() {
     editor
         .add_form_field(
             0,
-            TextFieldWidget::new("name", Rect::new(100.0, 700.0, 200.0, 20.0))
-                .with_value("Test Name"),
+            TextFieldWidget::new("name", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("Test Name"),
         )
         .unwrap();
     editor.save(&pdf_path).unwrap();
@@ -326,8 +321,7 @@ fn test_fdf_round_trip_consistency() {
     editor
         .add_form_field(
             0,
-            TextFieldWidget::new("text_field", Rect::new(100.0, 700.0, 200.0, 20.0))
-                .with_value("Hello World"),
+            TextFieldWidget::new("text_field", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("Hello World"),
         )
         .unwrap();
     editor
@@ -360,15 +354,13 @@ fn test_xfdf_round_trip_consistency() {
     editor
         .add_form_field(
             0,
-            TextFieldWidget::new("field1", Rect::new(100.0, 700.0, 200.0, 20.0))
-                .with_value("Value1"),
+            TextFieldWidget::new("field1", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("Value1"),
         )
         .unwrap();
     editor
         .add_form_field(
             0,
-            TextFieldWidget::new("field2", Rect::new(100.0, 660.0, 200.0, 20.0))
-                .with_value("Value2"),
+            TextFieldWidget::new("field2", Rect::new(100.0, 660.0, 200.0, 20.0)).with_value("Value2"),
         )
         .unwrap();
     editor.save(&pdf_path).unwrap();

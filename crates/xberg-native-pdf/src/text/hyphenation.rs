@@ -89,10 +89,7 @@ impl HyphenationHandler {
 
         if trimmed.ends_with('\u{00AD}') {
             let before_hyphen = &trimmed[..trimmed.len() - '\u{00AD}'.len_utf8()];
-            return before_hyphen
-                .chars()
-                .last()
-                .is_some_and(|c| c.is_alphabetic());
+            return before_hyphen.chars().last().is_some_and(|c| c.is_alphabetic());
         }
 
         if !trimmed.ends_with('-') {
@@ -102,10 +99,7 @@ impl HyphenationHandler {
         // Check that there's at least one letter before the hyphen
         // (avoids matching bullet points like "- item") ~keep
         let before_hyphen = &trimmed[..trimmed.len() - 1];
-        before_hyphen
-            .chars()
-            .last()
-            .is_some_and(|c| c.is_alphabetic())
+        before_hyphen.chars().last().is_some_and(|c| c.is_alphabetic())
     }
 
     /// Check if a word appears to be a compound word that should keep its hyphen.
@@ -126,9 +120,9 @@ impl HyphenationHandler {
         let first_lower = first_part.to_lowercase();
 
         let compound_prefixes = [
-            "self", "non", "anti", "pre", "post", "re", "co", "ex", "multi", "semi", "sub",
-            "super", "ultra", "under", "over", "cross", "inter", "intra", "counter", "mid", "well",
-            "ill", "all", "half", "high", "low", "full", "part", "short", "long", "hard", "soft",
+            "self", "non", "anti", "pre", "post", "re", "co", "ex", "multi", "semi", "sub", "super", "ultra", "under",
+            "over", "cross", "inter", "intra", "counter", "mid", "well", "ill", "all", "half", "high", "low", "full",
+            "part", "short", "long", "hard", "soft",
         ];
 
         if compound_prefixes.contains(&first_lower.as_str()) {
@@ -205,26 +199,16 @@ impl HyphenationHandler {
         } else {
             &trimmed_current[..trimmed_current.len() - 1]
         };
-        let last_word = without_hyphen
-            .split_whitespace()
-            .next_back()
-            .unwrap_or(without_hyphen);
+        let last_word = without_hyphen.split_whitespace().next_back().unwrap_or(without_hyphen);
 
         // Check if this is a compound word that should keep hyphen
         // Note: Soft hyphens are NEVER compound word markers, only hard hyphens ~keep
         let is_soft_hyphen = trimmed_current.ends_with('\u{00AD}');
-        if !is_soft_hyphen
-            && self.preserve_compounds
-            && Self::is_compound_word(last_word, next_word)
-        {
+        if !is_soft_hyphen && self.preserve_compounds && Self::is_compound_word(last_word, next_word) {
             return (current_line.to_string(), false);
         }
 
-        let hyphen_len = if is_soft_hyphen {
-            '\u{00AD}'.len_utf8()
-        } else {
-            1
-        };
+        let hyphen_len = if is_soft_hyphen { '\u{00AD}'.len_utf8() } else { 1 };
         let prefix = &trimmed_current[..trimmed_current.len() - last_word.len() - hyphen_len];
         let joined_word = format!("{}{}", last_word, next_word);
 

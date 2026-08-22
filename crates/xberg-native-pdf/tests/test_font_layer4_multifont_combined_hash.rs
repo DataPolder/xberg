@@ -184,8 +184,7 @@ fn layer4_combined_hash_catches_f2_mismatch_when_f1_matches() {
 /// Symmetric case: F3 is the same but F1 and F2 differ.
 #[test]
 fn layer4_combined_hash_catches_f1_f2_mismatch_when_f3_matches() {
-    let pdf =
-        build_three_font_two_page_pdf("L4Combined-F1F2Mismatch", 'A', 'B', 'C', 'D', 'E', 'C');
+    let pdf = build_three_font_two_page_pdf("L4Combined-F1F2Mismatch", 'A', 'B', 'C', 'D', 'E', 'C');
 
     let baseline_p1 = {
         let doc = PdfDocument::from_bytes(pdf.clone()).unwrap();

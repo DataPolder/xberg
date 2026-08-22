@@ -132,9 +132,7 @@ fn build_type0_pdf(cid_base: u16, cid_to_gid: Option<&[u8]>) -> Vec<u8> {
     for off in &offsets {
         out.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
     }
-    out.extend_from_slice(
-        format!("trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF").as_bytes(),
-    );
+    out.extend_from_slice(format!("trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF").as_bytes());
     out
 }
 
@@ -220,15 +218,12 @@ fn stream_cid_to_gid_map_distinguishes_otherwise_identical_fonts() {
     // Same cid_base ⇒ identical /ToUnicode and content; the ONLY difference is
     // the /CIDToGIDMap stream. Sized to cover every CID used (2 bytes/CID), GIDs
     // kept < 0x80 so it is well-formed map data. ~keep
-    let distinct = LINES
-        .iter()
-        .flat_map(|l| l.chars())
-        .fold(Vec::new(), |mut v, c| {
-            if !v.contains(&c) {
-                v.push(c);
-            }
-            v
-        });
+    let distinct = LINES.iter().flat_map(|l| l.chars()).fold(Vec::new(), |mut v, c| {
+        if !v.contains(&c) {
+            v.push(c);
+        }
+        v
+    });
     let len = 2 * (0x21 + distinct.len());
     let map_a: Vec<u8> = (0..len).map(|i| (i % 0x40) as u8).collect();
     let mut map_b = map_a.clone();

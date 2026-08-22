@@ -172,8 +172,8 @@ public func verifyExcerpt<GenericIntoRustString: IntoRustString>(_ excerpt: Gene
 public func installPdfRenderDiagnostics() -> Bool {
     __swift_bridge__$install_pdf_render_diagnostics()
 }
-public func takePdfOxideRenderWarnings() -> RustVec<ProcessingWarning> {
-    RustVec(ptr: __swift_bridge__$take_pdf_oxide_render_warnings())
+public func takeEngineRenderWarnings() -> RustVec<ProcessingWarning> {
+    RustVec(ptr: __swift_bridge__$take_engine_render_warnings())
 }
 public func buildDecoderPromptTokens(_ start_of_transcript: UInt32, _ lang_id: UInt32, _ transcribe: UInt32, _ no_timestamps: UInt32, _ timestamps: Bool) -> RustVec<Int64> {
     RustVec(ptr: __swift_bridge__$build_decoder_prompt_tokens(start_of_transcript, lang_id, transcribe, no_timestamps, timestamps))

@@ -13,18 +13,12 @@ fn sample(plate: &SeparationPlate, x: u32, y: u32) -> u8 {
 }
 
 fn plate<'a>(plates: &'a [SeparationPlate], name: &str) -> &'a SeparationPlate {
-    plates
-        .iter()
-        .find(|p| p.ink_name == name)
-        .unwrap_or_else(|| {
-            panic!(
-                "missing plate {name:?}; have {:?}",
-                plates
-                    .iter()
-                    .map(|p| p.ink_name.as_str())
-                    .collect::<Vec<_>>()
-            )
-        })
+    plates.iter().find(|p| p.ink_name == name).unwrap_or_else(|| {
+        panic!(
+            "missing plate {name:?}; have {:?}",
+            plates.iter().map(|p| p.ink_name.as_str()).collect::<Vec<_>>()
+        )
+    })
 }
 
 fn finalize_pdf(mut buf: Vec<u8>, offsets: Vec<usize>) -> Vec<u8> {
@@ -288,8 +282,7 @@ fn sixteen_bpc_cmyk_image_routes_with_channels_intact() {
         samples.extend_from_slice(&[0x00u8, 0x00u8]);
         samples.extend_from_slice(&[0x00u8, 0x00u8]);
     }
-    let doc =
-        PdfDocument::from_bytes(build_pdf_with_16bpc_cmyk_image(&samples, 2, 2)).expect("parse");
+    let doc = PdfDocument::from_bytes(build_pdf_with_16bpc_cmyk_image(&samples, 2, 2)).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
 
     let cyan = plate(&plates, "Cyan");
@@ -316,12 +309,7 @@ fn sixteen_bpc_cmyk_image_routes_with_channels_intact() {
 /// Build a single-page PDF with a Separation image carrying a `/Decode`
 /// array. `decode` is two floats representing the [dmin, dmax] mapping
 /// applied per channel.
-fn build_pdf_with_separation_image_decode(
-    samples: &[u8],
-    width: u32,
-    height: u32,
-    decode: [f32; 2],
-) -> Vec<u8> {
+fn build_pdf_with_separation_image_decode(samples: &[u8], width: u32, height: u32, decode: [f32; 2]) -> Vec<u8> {
     let content = b"q\n50 0 0 50 25 25 cm\n/Im1 Do\nQ\n";
     let mut buf = Vec::new();
     let mut offsets = Vec::new();
@@ -373,8 +361,7 @@ fn build_pdf_with_separation_image_decode(
 fn separation_image_decode_array_inverts_routing() {
     let samples = vec![0u8]; // 1×1 raw sample of 0; under /Decode [1 0] → full tint ~keep
     let doc =
-        PdfDocument::from_bytes(build_pdf_with_separation_image_decode(&samples, 1, 1, [1.0, 0.0]))
-            .expect("parse");
+        PdfDocument::from_bytes(build_pdf_with_separation_image_decode(&samples, 1, 1, [1.0, 0.0])).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
     let pantone = plate(&plates, "Pantone-185");
     assert!(
@@ -388,11 +375,7 @@ fn separation_image_decode_array_inverts_routing() {
 /// space's component count. The extractor's parser is exact (`len == ncomp*2`)
 /// and rejects it, so nothing is folded into the samples; this path's parser is
 /// lenient (`len >= ncomp*2`) and still owes the image the inversion.
-fn build_pdf_with_16bpc_separation_overlong_decode(
-    samples: &[u8],
-    width: u32,
-    height: u32,
-) -> Vec<u8> {
+fn build_pdf_with_16bpc_separation_overlong_decode(samples: &[u8], width: u32, height: u32) -> Vec<u8> {
     let content = b"q\n50 0 0 50 25 25 cm\n/Im1 Do\nQ\n";
     let mut buf = Vec::new();
     let mut offsets = Vec::new();
@@ -443,9 +426,7 @@ fn build_pdf_with_16bpc_separation_overlong_decode(
 #[test]
 fn plate_routing_applies_decode_the_extractor_rejected() {
     let samples: Vec<u8> = vec![0xFF, 0xFF, 0x00, 0x00];
-    let doc =
-        PdfDocument::from_bytes(build_pdf_with_16bpc_separation_overlong_decode(&samples, 2, 1))
-            .expect("parse");
+    let doc = PdfDocument::from_bytes(build_pdf_with_16bpc_separation_overlong_decode(&samples, 2, 1)).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
     let pantone = plate(&plates, "Pantone-185");
     assert!(

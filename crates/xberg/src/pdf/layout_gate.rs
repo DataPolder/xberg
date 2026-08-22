@@ -386,7 +386,11 @@ fn page_signals(doc: &PdfDocument, page_index: usize) -> Option<PageGateSignals>
 
 /// Fraction of the page under raster images plus stroked or filled vector
 /// paths, without decoding pixels. Summed, not unioned: an upper bound.
-fn graphics_coverage(doc: &PdfDocument, page_index: usize, paths: &[xberg_native_pdf::elements::PathContent]) -> Option<f32> {
+fn graphics_coverage(
+    doc: &PdfDocument,
+    page_index: usize,
+    paths: &[xberg_native_pdf::elements::PathContent],
+) -> Option<f32> {
     let (x0, y0, x1, y1) = doc.get_page_media_box(page_index).ok()?;
     let page_area = ((x1 - x0) * (y1 - y0)).abs();
     if page_area <= f32::EPSILON {

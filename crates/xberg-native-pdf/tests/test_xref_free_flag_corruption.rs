@@ -147,9 +147,7 @@ fn genuinely_free_object_still_treated_as_null() {
     offs.push(pdf.len());
     pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
     offs.push(pdf.len());
-    pdf.extend_from_slice(
-        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
 
     // Slot 4: truly free — no body, xref offset is the conventional 0. ~keep
     let mut entries: Vec<(usize, bool)> = offs.iter().map(|&o| (o, true)).collect();

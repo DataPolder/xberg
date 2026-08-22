@@ -32,9 +32,7 @@ fn finish(mut buf: Vec<u8>, offsets: &[usize]) -> Vec<u8> {
     for &off in &offsets[1..] {
         buf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     buf
 }
 

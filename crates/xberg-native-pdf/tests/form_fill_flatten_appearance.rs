@@ -67,7 +67,12 @@ fn form_with_empty_ap(field_name: &str) -> Vec<u8> {
              /Rect [72 700 400 720] /DA (/Helv 0 Tf 0 g) /AP << /N 6 0 R >> >>"
         ),
     );
-    obj(&mut buf, &mut off, 5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    obj(
+        &mut buf,
+        &mut off,
+        5,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
     stream_obj(
         &mut buf,
         &mut off,
@@ -223,7 +228,10 @@ fn flatten_renders_cjk_value() {
     let out = fill_and_flatten("city", "とうきょう");
 
     let has_text_op = contains_ascii(&out, b"Tj") || contains_ascii(&out, b"TJ");
-    assert!(has_text_op, "flattened CJK appearance must contain a text-show operator");
+    assert!(
+        has_text_op,
+        "flattened CJK appearance must contain a text-show operator"
+    );
     assert!(
         !contains_ascii(&out, b"BMC\nEMC"),
         "the empty BMC..EMC placeholder must not be the baked appearance"
@@ -312,7 +320,10 @@ fn fixture_flatten_embeds_cjk_and_emoji_fonts() {
         "must embed a TrueType fallback font program (FontFile2)"
     );
     assert!(contains_ascii(&out, b"Type0"), "must use a Type0 composite font");
-    assert!(contains_ascii(&out, b"CIDFontType2"), "must use a CIDFontType2 descendant");
+    assert!(
+        contains_ascii(&out, b"CIDFontType2"),
+        "must use a CIDFontType2 descendant"
+    );
     assert!(
         out.windows(4).any(|w| w == b"> Tj"),
         "must emit CID-keyed hex text for the embedded font"

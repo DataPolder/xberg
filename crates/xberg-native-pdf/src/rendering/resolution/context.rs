@@ -29,9 +29,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::color::{
-    CmykRetargetTransform, IccProfile, RenderingIntent, SrgbToCmykTransform, Transform,
-};
+use crate::color::{CmykRetargetTransform, IccProfile, RenderingIntent, SrgbToCmykTransform, Transform};
 use crate::document::PdfDocument;
 use crate::object::Object;
 
@@ -99,8 +97,7 @@ pub(crate) struct IccTransformCache {
     /// §11.3.4 is the per-pixel computation that runs inside it).
     /// Built on miss (lcms2 builds only — qcms returns `None`); cached
     /// for the page lifetime.
-    srgb_to_cmyk_entries:
-        RefCell<HashMap<(u64, RenderingIntent), Option<Arc<SrgbToCmykTransform>>>>,
+    srgb_to_cmyk_entries: RefCell<HashMap<(u64, RenderingIntent), Option<Arc<SrgbToCmykTransform>>>>,
     /// CMYK → CMYK retarget transforms keyed by `(src_fingerprint,
     /// dst_fingerprint, intent)` where each fingerprint is
     /// `(n_components, byte_len, content_hash)`. The wider key (vs the
@@ -114,12 +111,8 @@ pub(crate) struct IccTransformCache {
     /// per paint by `try_retarget_cmyk_via_embedded_profile`); without
     /// the cache, each paint re-parses the OutputIntent + embedded
     /// profile and rebuilds the lcms2 CLUT.
-    cmyk_retarget_entries: RefCell<
-        HashMap<
-            ((u8, usize, u64), (u8, usize, u64), RenderingIntent),
-            Option<Arc<CmykRetargetTransform>>,
-        >,
-    >,
+    cmyk_retarget_entries:
+        RefCell<HashMap<((u8, usize, u64), (u8, usize, u64), RenderingIntent), Option<Arc<CmykRetargetTransform>>>>,
     /// Test-support counter: every cache miss (i.e. every call that
     /// actually constructs a fresh `Transform`) increments this
     /// instance-local counter. Distinct from the global
@@ -161,11 +154,7 @@ impl IccTransformCache {
     /// `Arc<Transform>`. The borrow on `entries` is released between
     /// the `get` probe and the `insert` so the closure can re-enter
     /// the cache safely (it won't — but defensive locking shape).
-    pub(crate) fn get_or_build(
-        &self,
-        profile: &Arc<IccProfile>,
-        intent: RenderingIntent,
-    ) -> Arc<Transform> {
+    pub(crate) fn get_or_build(&self, profile: &Arc<IccProfile>, intent: RenderingIntent) -> Arc<Transform> {
         self.lookup_count.set(self.lookup_count.get() + 1);
         let key = (profile.content_hash(), intent);
         if let Some(t) = self.entries.borrow().get(&key).cloned() {
@@ -191,9 +180,7 @@ impl IccTransformCache {
             return slot.clone();
         }
         let built = SrgbToCmykTransform::new(Arc::clone(dst_profile), intent).map(Arc::new);
-        self.srgb_to_cmyk_entries
-            .borrow_mut()
-            .insert(key, built.clone());
+        self.srgb_to_cmyk_entries.borrow_mut().insert(key, built.clone());
         built
     }
 
@@ -224,12 +211,8 @@ impl IccTransformCache {
         if let Some(slot) = self.cmyk_retarget_entries.borrow().get(&key) {
             return slot.clone();
         }
-        let built =
-            CmykRetargetTransform::new(Arc::clone(src_profile), Arc::clone(dst_profile), intent)
-                .map(Arc::new);
-        self.cmyk_retarget_entries
-            .borrow_mut()
-            .insert(key, built.clone());
+        let built = CmykRetargetTransform::new(Arc::clone(src_profile), Arc::clone(dst_profile), intent).map(Arc::new);
+        self.cmyk_retarget_entries.borrow_mut().insert(key, built.clone());
         self.cmyk_retarget_build_count
             .set(self.cmyk_retarget_build_count.get() + 1);
         built
@@ -435,8 +418,8 @@ mod tests {
     fn with_rendering_intent_overrides_default() {
         let doc = fixture_doc();
         let color_spaces = HashMap::new();
-        let ctx = ResolutionContext::new(&doc, &color_spaces)
-            .with_rendering_intent(RenderingIntent::AbsoluteColorimetric);
+        let ctx =
+            ResolutionContext::new(&doc, &color_spaces).with_rendering_intent(RenderingIntent::AbsoluteColorimetric);
         assert_eq!(ctx.rendering_intent, RenderingIntent::AbsoluteColorimetric);
     }
 
@@ -446,11 +429,7 @@ mod tests {
         let color_spaces = HashMap::new();
         let gray = Object::Name("DeviceGray".to_string());
         let cmyk = Object::Name("DeviceCMYK".to_string());
-        let ctx = ResolutionContext::new(&doc, &color_spaces).with_defaults(
-            Some(&gray),
-            None,
-            Some(&cmyk),
-        );
+        let ctx = ResolutionContext::new(&doc, &color_spaces).with_defaults(Some(&gray), None, Some(&cmyk));
         assert!(ctx.default_gray.is_some());
         assert!(ctx.default_rgb.is_none());
         assert!(ctx.default_cmyk.is_some());

@@ -57,45 +57,45 @@ pub fn decode_literal_string_escapes(raw: &[u8]) -> Vec<u8> {
                 b'n' => {
                     result.push(b'\n');
                     i += 2;
-                },
+                }
                 b'r' => {
                     result.push(b'\r');
                     i += 2;
-                },
+                }
                 b't' => {
                     result.push(b'\t');
                     i += 2;
-                },
+                }
                 b'b' => {
                     result.push(8);
                     i += 2;
-                },
+                }
                 b'f' => {
                     result.push(12);
                     i += 2;
-                },
+                }
                 b'(' => {
                     result.push(b'(');
                     i += 2;
-                },
+                }
                 b')' => {
                     result.push(b')');
                     i += 2;
-                },
+                }
                 b'\\' => {
                     result.push(b'\\');
                     i += 2;
-                },
+                }
                 // Line continuation: \<newline> is ignored ~keep
                 b'\n' => {
                     i += 2;
-                },
+                }
                 b'\r' => {
                     i += 2;
                     if i < raw.len() && raw[i] == b'\n' {
                         i += 1;
                     }
-                },
+                }
                 // Octal escape: \ddd (1-3 octal digits) ~keep
                 c if c.is_ascii_digit() && c < b'8' => {
                     let start = i + 1;
@@ -124,12 +124,12 @@ pub fn decode_literal_string_escapes(raw: &[u8]) -> Vec<u8> {
                         result.push(b'\\');
                         i += 1;
                     }
-                },
+                }
                 // Unknown escape: keep backslash literal (PDF spec allows this) ~keep
                 _ => {
                     result.push(b'\\');
                     i += 1;
-                },
+                }
             }
         } else {
             result.push(raw[i]);
@@ -180,14 +180,11 @@ pub fn parse_object(input: &[u8]) -> IResult<&[u8], Object> {
             if let Ok((input2, Token::Integer(generation))) = token(input)
                 && let Ok((input3, Token::R)) = token(input2)
             {
-                return Ok((
-                    input3,
-                    Object::Reference(ObjectRef::new(i as u32, generation as u16)),
-                ));
+                return Ok((input3, Object::Reference(ObjectRef::new(i as u32, generation as u16))));
             }
 
             Ok((input, Object::Integer(i)))
-        },
+        }
 
         Token::Real(r) => Ok((input, Object::Real(r))),
 
@@ -195,13 +192,14 @@ pub fn parse_object(input: &[u8]) -> IResult<&[u8], Object> {
             // Decode escape sequences per ISO 32000-1:2008, Section 7.3.4.2 ~keep
             let decoded = decode_literal_string_escapes(bytes);
             Ok((input, Object::String(decoded)))
-        },
+        }
 
         Token::HexString(hex_bytes) => match decode_hex(hex_bytes) {
             Ok(decoded) => Ok((input, Object::String(decoded))),
-            Err(_) => {
-                Err(nom::Err::Failure(nom::error::Error::new(input, nom::error::ErrorKind::Fail)))
-            },
+            Err(_) => Err(nom::Err::Failure(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Fail,
+            ))),
         },
 
         Token::Name(name) => Ok((input, Object::Name(name))),
@@ -221,7 +219,7 @@ pub fn parse_object(input: &[u8]) -> IResult<&[u8], Object> {
                             input,
                             nom::error::ErrorKind::Tag,
                         )));
-                    },
+                    }
                 };
 
                 let (final_input, stream_data) = parse_stream_data(stream_input, &dict)?;
@@ -236,9 +234,12 @@ pub fn parse_object(input: &[u8]) -> IResult<&[u8], Object> {
             }
 
             Ok((remaining, dict_obj))
-        },
+        }
 
-        _ => Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag))),
+        _ => Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Tag,
+        ))),
     }
 }
 
@@ -249,10 +250,7 @@ pub fn parse_object(input: &[u8]) -> IResult<&[u8], Object> {
 ///
 /// PDF Spec: ISO 32000-1:2008, Section 7.3.8.1 - Stream Objects
 /// The keyword stream must be followed by either a CRLF or LF sequence, but not CR alone.
-fn parse_stream_data<'a>(
-    input: &'a [u8],
-    dict: &HashMap<String, Object>,
-) -> IResult<&'a [u8], Vec<u8>> {
+fn parse_stream_data<'a>(input: &'a [u8], dict: &HashMap<String, Object>) -> IResult<&'a [u8], Vec<u8>> {
     // SPEC COMPLIANCE: PDF Spec ISO 32000-1:2008, Section 7.3.8.1 states that
     // the 'stream' keyword must be followed by either CRLF or LF, but NOT CR alone.
     //
@@ -362,15 +360,16 @@ fn parse_stream_data<'a>(
         return Ok((remaining, stream_data));
     }
 
-    Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Eof)))
+    Err(nom::Err::Error(nom::error::Error::new(
+        input,
+        nom::error::ErrorKind::Eof,
+    )))
 }
 
 /// Find the position of 'endstream' keyword in input.
 fn find_endstream(input: &[u8]) -> Option<usize> {
     let keyword = b"endstream";
-    input
-        .windows(keyword.len())
-        .position(|window| window == keyword)
+    input.windows(keyword.len()).position(|window| window == keyword)
 }
 
 /// Parse a PDF array: `[ obj1 obj2 ... objN ]`
@@ -414,20 +413,20 @@ fn parse_array(input: &[u8]) -> IResult<&[u8], Object> {
                     Ok((inp, obj)) => {
                         objects.push(obj);
                         remaining = inp;
-                    },
+                    }
                     Err(e) => {
                         if remaining.is_empty() {
                             // Unclosed array, but return what we have ~keep
                             return Ok((remaining, Object::Array(objects)));
                         }
                         return Err(e);
-                    },
+                    }
                 }
-            },
+            }
             Err(nom::Err::Incomplete(_)) | Err(nom::Err::Error(_)) if remaining.is_empty() => {
                 // Hit EOF before closing array - return what we have ~keep
                 return Ok((remaining, Object::Array(objects)));
-            },
+            }
             Err(e) => return Err(e),
         }
     }
@@ -478,10 +477,7 @@ fn parse_dictionary(input: &[u8]) -> IResult<&[u8], Object> {
                                 if let Token::Name(name) = tok {
                                     Ok((inp2, Object::Name(name)))
                                 } else {
-                                    Err(nom::Err::Error(nom::error::Error::new(
-                                        inp,
-                                        nom::error::ErrorKind::Alt,
-                                    )))
+                                    Err(nom::Err::Error(nom::error::Error::new(inp, nom::error::ErrorKind::Alt)))
                                 }
                             })
                         });
@@ -489,16 +485,16 @@ fn parse_dictionary(input: &[u8]) -> IResult<&[u8], Object> {
                             Ok((inp, value)) => {
                                 dict.insert(key, value);
                                 remaining = inp;
-                            },
+                            }
                             Err(e) => {
                                 if inp.is_empty() {
                                     // Incomplete dictionary, return what we have ~keep
                                     return Ok((inp, Object::Dictionary(dict)));
                                 }
                                 return Err(e);
-                            },
+                            }
                         }
-                    },
+                    }
                     _ => {
                         // Invalid dictionary - key must be a name
                         // But if we hit EOF, return what we have ~keep
@@ -509,13 +505,13 @@ fn parse_dictionary(input: &[u8]) -> IResult<&[u8], Object> {
                             remaining,
                             nom::error::ErrorKind::Tag,
                         )));
-                    },
+                    }
                 }
-            },
+            }
             Err(nom::Err::Incomplete(_)) | Err(nom::Err::Error(_)) if remaining.is_empty() => {
                 // Hit EOF before closing dictionary - return what we have ~keep
                 return Ok((remaining, Object::Dictionary(dict)));
-            },
+            }
             Err(e) => return Err(e),
         }
     }
@@ -571,19 +567,19 @@ pub fn decode_hex(hex_bytes: &[u8]) -> Result<Vec<u8>> {
             2 => {
                 let byte = (hex_val(chunk[0]) << 4) | hex_val(chunk[1]);
                 result.push(byte);
-            },
+            }
             1 => {
                 // Odd number of hex digits - pad last digit with 0 ~keep
                 let byte = hex_val(chunk[0]) << 4;
                 result.push(byte);
-            },
+            }
             _ => {
                 // chunks(2) guarantees max 2 elements, this should never execute ~keep
                 return Err(Error::ParseError {
                     offset: 0,
                     reason: "Invalid hex string chunk size".to_string(),
                 });
-            },
+            }
         }
     }
 

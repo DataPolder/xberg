@@ -69,9 +69,7 @@ fn build_pdf_text(content_ops: &str, resources_extra: &str) -> Vec<u8> {
     for off in [cat_off, pages_off, page_off, stream_off, font_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -112,25 +110,17 @@ fn build_pdf_two_fonts(content_ops: &str) -> Vec<u8> {
 
     let xref_off = buf.len();
     buf.extend_from_slice(b"xref\n0 7\n0000000000 65535 f \n");
-    for off in [
-        cat_off, pages_off, page_off, stream_off, font1_off, font2_off,
-    ] {
+    for off in [cat_off, pages_off, page_off, stream_off, font1_off, font2_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
 /// Build a one-page text-fixture PDF with a Helvetica `/F1` Type 1 font
 /// AND an indirect Type 4 tint-transform function at object 6. Used by
 /// Separation / DeviceN spot-colour probes.
-fn build_pdf_text_with_type4_separation(
-    content_ops: &str,
-    type4_program: &str,
-    resources_extra: &str,
-) -> Vec<u8> {
+fn build_pdf_text_with_type4_separation(content_ops: &str, type4_program: &str, resources_extra: &str) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(b"%PDF-1.4\n");
 
@@ -174,9 +164,7 @@ fn build_pdf_text_with_type4_separation(
     for off in [cat_off, pages_off, page_off, stream_off, font_off, func_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -237,9 +225,7 @@ fn build_pdf_text_with_devicen_type4(
     for off in [cat_off, pages_off, page_off, stream_off, font_off, func_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -645,8 +631,7 @@ fn qa_text_tj_devicen_multi_colorant_type4_capability() {
     let content = "/TwoSpot cs 0 1 scn \
                    BT /F1 60 Tf 10 30 Td (M) Tj ET\n";
     let range = "[0 1 0 1 0 1 0 1]";
-    let bytes =
-        build_pdf_text_with_devicen_type4(content, type4_program, resources, range, &[0, 1, 0, 1]);
+    let bytes = build_pdf_text_with_devicen_type4(content, type4_program, resources, range, &[0, 1, 0, 1]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
 
     let on = render_with_pipeline(&doc, true);
@@ -838,7 +823,10 @@ fn qa_text_tm_before_tj_preserved() {
     let right_doc = PdfDocument::from_bytes(build_pdf_text(right, "")).unwrap();
     let left_on = render_with_pipeline(&left_doc, true);
     let right_on = render_with_pipeline(&right_doc, true);
-    assert_ne!(left_on, right_on, "Tm at different translations must produce different renders");
+    assert_ne!(
+        left_on, right_on,
+        "Tm at different translations must produce different renders"
+    );
 }
 
 /// Probe 16 — Td / TD (move text position) before Tj. Td translates by
@@ -852,7 +840,10 @@ fn qa_text_td_translation_preserved() {
     let b_doc = PdfDocument::from_bytes(build_pdf_text(pos_b, "")).unwrap();
     let a_on = render_with_pipeline(&a_doc, true);
     let b_on = render_with_pipeline(&b_doc, true);
-    assert_ne!(a_on, b_on, "Td at different translations must produce different renders");
+    assert_ne!(
+        a_on, b_on,
+        "Td at different translations must produce different renders"
+    );
 }
 
 /// Probe 13b — Tz interaction with TJ numeric-kerning offsets. Pre-existing
@@ -870,8 +861,7 @@ fn qa_text_td_translation_preserved() {
 #[ignore = "pre-existing inline bug: Tz not applied to TJ numeric kerning advance"]
 fn qa_text_tz_applied_to_tj_kerning_advance_narrows_rightmost() {
     let normal = "BT 1 0 0 rg /F1 14 Tf 5 50 Td [(H) -50 (e) -50 (l) -50 (l) -50 (o)] TJ ET\n";
-    let narrow =
-        "BT 1 0 0 rg /F1 14 Tf 50 Tz 5 50 Td [(H) -50 (e) -50 (l) -50 (l) -50 (o)] TJ ET\n";
+    let narrow = "BT 1 0 0 rg /F1 14 Tf 50 Tz 5 50 Td [(H) -50 (e) -50 (l) -50 (l) -50 (o)] TJ ET\n";
     let normal_doc = PdfDocument::from_bytes(build_pdf_text(normal, "")).unwrap();
     let narrow_doc = PdfDocument::from_bytes(build_pdf_text(narrow, "")).unwrap();
     let normal_on = render_with_pipeline(&normal_doc, true);
@@ -938,9 +928,7 @@ fn build_pdf_cid_type0(content_ops: &str) -> Vec<u8> {
     );
 
     let csi_off = buf.len();
-    buf.extend_from_slice(
-        b"7 0 obj\n<< /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>\nendobj\n",
-    );
+    buf.extend_from_slice(b"7 0 obj\n<< /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>\nendobj\n");
 
     let fd_off = buf.len();
     buf.extend_from_slice(
@@ -963,9 +951,7 @@ fn build_pdf_cid_type0(content_ops: &str) -> Vec<u8> {
     ] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 9 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 9 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -1078,9 +1064,7 @@ endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
     for off in [cat_off, pages_off, page_off, stream_off, font_off, cmap_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -1224,7 +1208,11 @@ fn qa_text_empty_tj_paints_zero_pixels() {
     let bytes = build_pdf_text(content, "");
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
     let on = render_with_pipeline(&doc, true);
-    assert_eq!(count_ink_pixels(&on, 0, 0, 100, 100), 0, "empty Tj must paint zero pixels");
+    assert_eq!(
+        count_ink_pixels(&on, 0, 0, 100, 100),
+        0,
+        "empty Tj must paint zero pixels"
+    );
 }
 
 /// Probe 27 — Whitespace-only Tj string. Tw word-spacing affects only

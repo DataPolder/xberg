@@ -271,11 +271,7 @@ impl TextSpan {
         // (negative determinant) carries its across-axis on the clockwise
         // side of the baseline: v is reflected, not rotated. ~keep
         let (ux, uy) = (cos, sin);
-        let (vx, vy) = if self.mirrored {
-            (sin, -cos)
-        } else {
-            (-sin, cos)
-        };
+        let (vx, vy) = if self.mirrored { (sin, -cos) } else { (-sin, cos) };
         let b = self.bbox;
         // Image of the run origin under the applied page rotation — the
         // anchor the run frame pivots about in `bbox`'s current frame. ~keep
@@ -297,15 +293,9 @@ impl TextSpan {
         });
 
         let min_x = corners.iter().map(|c| c.0).fold(f32::INFINITY, f32::min);
-        let max_x = corners
-            .iter()
-            .map(|c| c.0)
-            .fold(f32::NEG_INFINITY, f32::max);
+        let max_x = corners.iter().map(|c| c.0).fold(f32::NEG_INFINITY, f32::max);
         let min_y = corners.iter().map(|c| c.1).fold(f32::INFINITY, f32::min);
-        let max_y = corners
-            .iter()
-            .map(|c| c.1)
-            .fold(f32::NEG_INFINITY, f32::max);
+        let max_y = corners.iter().map(|c| c.1).fold(f32::NEG_INFINITY, f32::max);
         Rect::new(min_x, min_y, max_x - min_x, max_y - min_y)
     }
 
@@ -815,10 +805,7 @@ impl TextBlock {
 
         let text: String = chars.iter().map(|c| c.char).collect();
 
-        let bbox = chars
-            .iter()
-            .map(|c| c.bbox)
-            .fold(chars[0].bbox, |acc, r| acc.union(&r));
+        let bbox = chars.iter().map(|c| c.bbox).fold(chars[0].bbox, |acc, r| acc.union(&r));
 
         let avg_font_size = chars.iter().map(|c| c.font_size).sum::<f32>() / chars.len() as f32;
 
@@ -833,9 +820,7 @@ impl TextBlock {
         // Ties resolve to the lexicographically smaller font name. ~keep
         let dominant_font = font_counts
             .iter()
-            .max_by(|(a_font, a_count), (b_font, b_count)| {
-                a_count.cmp(b_count).then_with(|| b_font.cmp(a_font))
-            })
+            .max_by(|(a_font, a_count), (b_font, b_count)| a_count.cmp(b_count).then_with(|| b_font.cmp(a_font)))
             .map(|(font, _)| font.clone())
             .unwrap_or_default();
 
@@ -894,8 +879,7 @@ impl TextBlock {
         // the font size with NaN, which then propagates into every downstream
         // gap threshold. ~keep
         if self_n + other_n > 0.0 {
-            self.avg_font_size =
-                (self.avg_font_size * self_n + other.avg_font_size * other_n) / (self_n + other_n);
+            self.avg_font_size = (self.avg_font_size * self_n + other.avg_font_size * other_n) / (self_n + other_n);
         }
         if other_n > self_n {
             self.dominant_font = other.dominant_font;
@@ -948,16 +932,9 @@ impl TextLine {
     pub fn new(words: Vec<Word>) -> Self {
         assert!(!words.is_empty(), "Cannot create TextLine from empty words");
 
-        let bbox = words
-            .iter()
-            .map(|w| w.bbox)
-            .fold(words[0].bbox, |acc, r| acc.union(&r));
+        let bbox = words.iter().map(|w| w.bbox).fold(words[0].bbox, |acc, r| acc.union(&r));
 
-        let text = words
-            .iter()
-            .map(|w| w.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let text = words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
 
         Self { words, bbox, text }
     }
@@ -986,7 +963,10 @@ mod tests {
             ..TextSpan::default()
         };
         let json = serde_json::to_string(&plain).unwrap();
-        assert!(!json.contains("provenance"), "absent provenance must be omitted: {json}");
+        assert!(
+            !json.contains("provenance"),
+            "absent provenance must be omitted: {json}"
+        );
     }
 
     fn mock_char(c: char, x: f32, y: f32) -> TextChar {
@@ -1271,6 +1251,9 @@ mod tests {
             ..TextSpan::default()
         };
         let json = serde_json::to_string(&raised).unwrap();
-        assert!(json.contains("text_rise"), "non-zero text_rise must be serialized: {json}");
+        assert!(
+            json.contains("text_rise"),
+            "non-zero text_rise must be serialized: {json}"
+        );
     }
 }

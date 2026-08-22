@@ -121,12 +121,7 @@ fn test_multi_column_layout_structure_tree_priority() {
     // Structure tree order (MCID): 1, 2, 3, 4
     // Physical/columnar order would be: 1, 3 (left column) then 2, 4 (right column)
     // Structure tree should win ~keep
-    let expected_order = vec![
-        "Column1 para1",
-        "Column2 para1",
-        "Column1 para2",
-        "Column2 para2",
-    ];
+    let expected_order = vec!["Column1 para1", "Column2 para1", "Column1 para2", "Column2 para2"];
     let block_texts: Vec<&str> = blocks.iter().map(|b| b.text.as_str()).collect();
 
     assert_eq!(block_texts, expected_order);
@@ -242,15 +237,9 @@ fn test_structure_tree_completely_overrides_physical_order() {
 
 #[test]
 fn test_nested_structure_elements_ordering() {
-    let section1_paragraphs = [
-        (1, "Section 1 - Paragraph 1"),
-        (2, "Section 1 - Paragraph 2"),
-    ];
+    let section1_paragraphs = [(1, "Section 1 - Paragraph 1"), (2, "Section 1 - Paragraph 2")];
 
-    let section2_paragraphs = [
-        (3, "Section 2 - Paragraph 1"),
-        (4, "Section 2 - Paragraph 2"),
-    ];
+    let section2_paragraphs = [(3, "Section 2 - Paragraph 1"), (4, "Section 2 - Paragraph 2")];
 
     // Structure order (depth-first): 1, 2, 3, 4
     // All of section 1's content before section 2 ~keep
@@ -317,7 +306,10 @@ fn test_specification_reference_iso_14_7_8() {
     ];
 
     assert_eq!(spec_priority[0], "1. Structure tree (tagged PDF)");
-    assert_eq!(spec_priority[1], "2. Physical page order (top-to-bottom, left-to-right)");
+    assert_eq!(
+        spec_priority[1],
+        "2. Physical page order (top-to-bottom, left-to-right)"
+    );
     assert_eq!(spec_priority[2], "3. Content stream order");
 }
 

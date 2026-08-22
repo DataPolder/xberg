@@ -267,11 +267,7 @@ impl StructuredExtractor {
     /// This method extracts text blocks from the PDF and converts them to paragraphs
     /// with formatting information (bold, italic, font size). Header detection, list
     /// detection, and alignment detection have been removed for PDF-spec compliance.
-    pub fn extract_page(
-        &mut self,
-        document: &mut PdfDocument,
-        page_num: u32,
-    ) -> Result<StructuredDocument> {
+    pub fn extract_page(&mut self, document: &mut PdfDocument, page_num: u32) -> Result<StructuredDocument> {
         let spans = document.extract_spans(page_num as usize)?;
 
         if spans.is_empty() {
@@ -363,8 +359,7 @@ impl StructuredExtractor {
     fn block_to_text_style(block: &TextBlock) -> TextStyle {
         let bold = block.is_bold || block.dominant_font.contains("Bold");
 
-        let italic =
-            block.dominant_font.contains("Italic") || block.dominant_font.contains("Oblique");
+        let italic = block.dominant_font.contains("Italic") || block.dominant_font.contains("Oblique");
 
         let color = block
             .chars
@@ -432,25 +427,25 @@ impl StructuredDocument {
                     }
                     text.push_str(t);
                     text.push('\n');
-                },
+                }
                 DocumentElement::Paragraph { text: t, .. } => {
                     if !text.is_empty() {
                         text.push('\n');
                     }
                     text.push_str(t);
-                },
+                }
                 DocumentElement::List { items, .. } => {
                     for item in items {
                         text.push('\n');
                         text.push_str(&item.text);
                     }
-                },
+                }
                 DocumentElement::Table { cells, .. } => {
                     for row in cells {
                         text.push('\n');
                         text.push_str(&row.join("\t"));
                     }
-                },
+                }
             }
         }
 

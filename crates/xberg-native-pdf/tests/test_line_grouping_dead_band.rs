@@ -52,7 +52,11 @@ fn header_plus_small_instruction_splits() {
         put(&mut page, "(see instructions)", 240.0, 696.5, "Helvetica", 9.0);
     });
 
-    assert!(newline_between(&out, "Section 3", "(see instructions)"), "got {:?}", out);
+    assert!(
+        newline_between(&out, "Section 3", "(see instructions)"),
+        "got {:?}",
+        out
+    );
 }
 
 // C. Body (11pt) + small annotation (8pt) in dead-band, y_diff=3.5pt. ~keep
@@ -64,7 +68,11 @@ fn body_plus_small_annotation_splits() {
         put(&mut page, "[updated 2024]", 220.0, 696.5, "Helvetica", 8.0);
     });
 
-    assert!(newline_between(&out, "See reference 12", "[updated 2024]"), "got {:?}", out);
+    assert!(
+        newline_between(&out, "See reference 12", "[updated 2024]"),
+        "got {:?}",
+        out
+    );
 }
 
 // D. Two-row small-gutter dead-band layout. K=1.5 accepts narrow intra-row
@@ -175,14 +183,7 @@ fn aligned_two_column_extracts_unchanged() {
         put(&mut page, "FootRight", 300.0, 671.2, "Helvetica", 12.0);
     });
 
-    for cell in [
-        "HdrLeft",
-        "HdrRight",
-        "BodyLeft",
-        "BodyRight",
-        "FootLeft",
-        "FootRight",
-    ] {
+    for cell in ["HdrLeft", "HdrRight", "BodyLeft", "BodyRight", "FootLeft", "FootRight"] {
         assert!(out.contains(cell), "missing {:?}: {:?}", cell, out);
     }
     assert!(newline_between(&out, "HdrRight", "BodyLeft"), "got {:?}", out);

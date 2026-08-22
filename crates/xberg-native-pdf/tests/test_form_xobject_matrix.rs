@@ -57,9 +57,7 @@ fn build_form_xobject_with_matrix_pdf() -> Vec<u8> {
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
 
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
 
     let xref_offset = pdf.len();
     let total_objects = offsets.len() + 1;
@@ -126,9 +124,7 @@ fn build_form_xobject_with_translation_pdf() -> Vec<u8> {
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
 
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
 
     let xref_offset = pdf.len();
     let total_objects = offsets.len() + 1;
@@ -191,9 +187,7 @@ fn build_form_xobject_without_matrix_pdf() -> Vec<u8> {
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
 
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
 
     let xref_offset = pdf.len();
     let total_objects = offsets.len() + 1;
@@ -355,9 +349,7 @@ fn test_form_xobject_matrix_does_not_leak_to_parent() {
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
 
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
 
     let xref_offset = pdf.len();
     let total_objects = offsets.len() + 1;
@@ -463,9 +455,7 @@ fn test_form_xobject_nested_matrix_composition() {
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
 
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        b"7 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"7 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
 
     let xref_offset = pdf.len();
     let total_objects = offsets.len() + 1;
@@ -546,9 +536,7 @@ fn test_rotated_text_does_not_produce_extreme_coordinates() {
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
 
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
 
     let xref_offset = pdf.len();
     let total_objects = offsets.len() + 1;

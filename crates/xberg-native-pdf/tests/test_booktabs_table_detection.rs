@@ -96,9 +96,7 @@ fn booktabs_table_survives_unrelated_decorative_speck() {
         ..Default::default()
     };
     let doc = PdfDocument::from_bytes(booktabs_fixture_pdf_with_decorations(true)).expect("parse");
-    let tables = doc
-        .extract_tables_with_config(0, config)
-        .expect("extract tables");
+    let tables = doc.extract_tables_with_config(0, config).expect("extract tables");
     assert!(
         !tables.is_empty(),
         "booktabs table must still be detected with a decorative speck on the page"
@@ -117,9 +115,7 @@ fn booktabs_table_detected_by_line_pipelines_alone() {
         ..Default::default()
     };
     let doc = PdfDocument::from_bytes(booktabs_fixture_pdf()).expect("parse");
-    let tables = doc
-        .extract_tables_with_config(0, config)
-        .expect("extract tables");
+    let tables = doc.extract_tables_with_config(0, config).expect("extract tables");
     assert!(!tables.is_empty(), "three-line table must be detected from its rules");
 }
 
@@ -169,12 +165,10 @@ fn scattered_fraction_bars_pdf() -> Vec<u8> {
     ];
     for (y, i) in text_lines {
         if i <= 8 {
+            content
+                .extend_from_slice(format!("1 0 0 1 100 {} Tm (EqMarker{} alpha plus beta) Tj\n", y + 4, i).as_bytes());
             content.extend_from_slice(
-                format!("1 0 0 1 100 {} Tm (EqMarker{} alpha plus beta) Tj\n", y + 4, i).as_bytes(),
-            );
-            content.extend_from_slice(
-                format!("1 0 0 1 100 {} Tm (gamma minus delta over epsilon) Tj\n", y - 11)
-                    .as_bytes(),
+                format!("1 0 0 1 100 {} Tm (gamma minus delta over epsilon) Tj\n", y - 11).as_bytes(),
             );
         } else {
             content.extend_from_slice(
@@ -199,9 +193,7 @@ fn scattered_fraction_bars_do_not_form_a_table() {
         ..Default::default()
     };
     let doc = PdfDocument::from_bytes(scattered_fraction_bars_pdf()).expect("parse");
-    let tables = doc
-        .extract_tables_with_config(0, config)
-        .expect("extract tables");
+    let tables = doc.extract_tables_with_config(0, config).expect("extract tables");
     assert!(
         tables.is_empty(),
         "scattered fraction bars must not be grouped into a table, got {} table(s): {:?}",
@@ -241,15 +233,9 @@ fn scattered_fraction_bars_preserve_reading_order() {
 /// 0.96x0.96, all 1.0pt stroke).
 fn push_dashed_border_line(content: &mut Vec<u8>, y: f32) {
     content.extend_from_slice(b"1 w\n");
-    let segs: [(f32, f32); 4] = [
-        (-24.52, 198.0),
-        (173.48, 0.96),
-        (174.44, 76.92),
-        (251.36, 0.96),
-    ];
+    let segs: [(f32, f32); 4] = [(-24.52, 198.0), (173.48, 0.96), (174.44, 76.92), (251.36, 0.96)];
     for (x, w) in segs {
-        content
-            .extend_from_slice(format!("{x} {y} m {} {y1} l S\n", x + w, y1 = y + 0.96).as_bytes());
+        content.extend_from_slice(format!("{x} {y} m {} {y1} l S\n", x + w, y1 = y + 0.96).as_bytes());
     }
 }
 
@@ -263,9 +249,7 @@ fn push_dashed_border_verticals(content: &mut Vec<u8>, y_bottom: f32, y_top: f32
     for x in [-24.52_f32, 251.36] {
         let mut y = y_bottom + 1.5;
         while y + 10.0 < y_top {
-            content.extend_from_slice(
-                format!("{x} {y} m {x1} {y1} l S\n", x1 = x + 0.96, y1 = y + 10.0).as_bytes(),
-            );
+            content.extend_from_slice(format!("{x} {y} m {x1} {y1} l S\n", x1 = x + 0.96, y1 = y + 10.0).as_bytes());
             y += 14.0;
         }
     }
@@ -287,8 +271,7 @@ fn push_booktabs_table(content: &mut Vec<u8>, y_top: i32, y_sub: i32, y_bot: i32
     for r in 0..n_rows {
         let ry = y_sub - 12 - r * 14;
         for (c, x) in xs.iter().enumerate() {
-            content
-                .extend_from_slice(format!("1 0 0 1 {x} {ry} Tm ({tag}R{r}C{c}) Tj\n").as_bytes());
+            content.extend_from_slice(format!("1 0 0 1 {x} {ry} Tm ({tag}R{r}C{c}) Tj\n").as_bytes());
         }
     }
     content.extend_from_slice(b"ET\n");
@@ -300,9 +283,7 @@ fn push_booktabs_table(content: &mut Vec<u8>, y_top: i32, y_sub: i32, y_bot: i32
 fn pmc_dash_border_page_one_table() -> Vec<u8> {
     let mut content = Vec::new();
     content.extend_from_slice(b"0 J 0 j\n");
-    for y in [
-        795.92, 781.94, 699.98, 253.70, 239.72, 225.68, 211.70, 170.24,
-    ] {
+    for y in [795.92, 781.94, 699.98, 253.70, 239.72, 225.68, 211.70, 170.24] {
         push_dashed_border_line(&mut content, y);
     }
     push_dashed_border_verticals(&mut content, 781.94, 795.92);
@@ -338,9 +319,7 @@ fn booktabs_table_survives_dash_bordered_box_on_page() {
         ..Default::default()
     };
     let doc = PdfDocument::from_bytes(pmc_dash_border_page_one_table()).expect("parse");
-    let tables = doc
-        .extract_tables_with_config(0, config)
-        .expect("extract tables");
+    let tables = doc.extract_tables_with_config(0, config).expect("extract tables");
     assert!(
         !tables.is_empty(),
         "the booktabs table must be detected despite dash-bordered boxes elsewhere on the page"
@@ -365,9 +344,7 @@ fn stacked_booktabs_tables_survive_dash_bordered_box_on_page() {
         ..Default::default()
     };
     let doc = PdfDocument::from_bytes(pmc_dash_border_page_two_tables()).expect("parse");
-    let tables = doc
-        .extract_tables_with_config(0, config)
-        .expect("extract tables");
+    let tables = doc.extract_tables_with_config(0, config).expect("extract tables");
     let all_cells: Vec<String> = tables
         .iter()
         .flat_map(|t| t.rows.iter())
@@ -408,18 +385,10 @@ fn aligned_derivation_bars_pdf() -> Vec<u8> {
     // structure a real derivation has. ~keep
     content.extend_from_slice(b"BT /F1 10 Tf\n");
     for (i, (x, _w, y)) in bars.iter().enumerate() {
-        content.extend_from_slice(
-            format!("1 0 0 1 150 {} Tm (DerivStep{} equals) Tj\n", y - 2, i + 1).as_bytes(),
-        );
-        content.extend_from_slice(
-            format!("1 0 0 1 {} {} Tm (alpha sub k plus one) Tj\n", x, y + 5).as_bytes(),
-        );
-        content.extend_from_slice(
-            format!("1 0 0 1 {} {} Tm (beta sub k minus one) Tj\n", x, y - 12).as_bytes(),
-        );
-        content.extend_from_slice(
-            format!("1 0 0 1 500 {} Tm (open {} close) Tj\n", y - 2, i + 1).as_bytes(),
-        );
+        content.extend_from_slice(format!("1 0 0 1 150 {} Tm (DerivStep{} equals) Tj\n", y - 2, i + 1).as_bytes());
+        content.extend_from_slice(format!("1 0 0 1 {} {} Tm (alpha sub k plus one) Tj\n", x, y + 5).as_bytes());
+        content.extend_from_slice(format!("1 0 0 1 {} {} Tm (beta sub k minus one) Tj\n", x, y - 12).as_bytes());
+        content.extend_from_slice(format!("1 0 0 1 500 {} Tm (open {} close) Tj\n", y - 2, i + 1).as_bytes());
     }
     content.extend_from_slice(b"ET");
     build_minimal_pdf_raw(&content, b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]")
@@ -432,9 +401,7 @@ fn aligned_derivation_bars_do_not_form_a_table() {
         ..Default::default()
     };
     let doc = PdfDocument::from_bytes(aligned_derivation_bars_pdf()).expect("parse");
-    let tables = doc
-        .extract_tables_with_config(0, config)
-        .expect("extract tables");
+    let tables = doc.extract_tables_with_config(0, config).expect("extract tables");
     assert!(
         tables.is_empty(),
         "x-aligned derivation vinculums must not be grouped into a table, got {} table(s): {:?}",
@@ -508,9 +475,7 @@ fn framed_code_listing_is_not_a_table() {
         ..Default::default()
     };
     let doc = PdfDocument::from_bytes(framed_code_listing_pdf()).expect("parse");
-    let tables = doc
-        .extract_tables_with_config(0, config)
-        .expect("extract tables");
+    let tables = doc.extract_tables_with_config(0, config).expect("extract tables");
     assert!(
         tables.is_empty(),
         "letter-spaced code between rules must not become a table, got {} table(s): {:?}",

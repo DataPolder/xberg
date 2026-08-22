@@ -131,12 +131,20 @@ fn quad_to_bounding_box(quad: &[f64; 8]) -> BoundingBox {
 ///
 /// Returns `None` when no box yields any text (e.g. the region only covers
 /// whitespace, or `xberg_native_pdf` fails to extract text for every box).
-fn extract_marked_text(doc: &xberg_native_pdf::PdfDocument, page_index: usize, boxes: &[BoundingBox]) -> Option<String> {
+fn extract_marked_text(
+    doc: &xberg_native_pdf::PdfDocument,
+    page_index: usize,
+    boxes: &[BoundingBox],
+) -> Option<String> {
     let mut pieces = Vec::with_capacity(boxes.len());
 
     for bbox in boxes {
-        let region =
-            xberg_native_pdf::geometry::Rect::from_points(bbox.x0 as f32, bbox.y0 as f32, bbox.x1 as f32, bbox.y1 as f32);
+        let region = xberg_native_pdf::geometry::Rect::from_points(
+            bbox.x0 as f32,
+            bbox.y0 as f32,
+            bbox.x1 as f32,
+            bbox.y1 as f32,
+        );
 
         match doc.extract_text_in_rect(page_index, region, xberg_native_pdf::layout::RectFilterMode::Intersects) {
             Ok(text) => {
@@ -207,7 +215,9 @@ fn page_annotations_failure_warning(page_number: u32, error: &xberg_native_pdf::
 /// Map a xberg_native_pdf annotation subtype to Xberg's `PdfAnnotationType`.
 fn map_annotation_subtype(subtype: xberg_native_pdf::AnnotationSubtype) -> PdfAnnotationType {
     match subtype {
-        xberg_native_pdf::AnnotationSubtype::Text | xberg_native_pdf::AnnotationSubtype::FreeText => PdfAnnotationType::Text,
+        xberg_native_pdf::AnnotationSubtype::Text | xberg_native_pdf::AnnotationSubtype::FreeText => {
+            PdfAnnotationType::Text
+        }
         xberg_native_pdf::AnnotationSubtype::Highlight => PdfAnnotationType::Highlight,
         xberg_native_pdf::AnnotationSubtype::Link => PdfAnnotationType::Link,
         xberg_native_pdf::AnnotationSubtype::Stamp => PdfAnnotationType::Stamp,

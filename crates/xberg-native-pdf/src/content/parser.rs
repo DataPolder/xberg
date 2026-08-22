@@ -37,8 +37,7 @@ const MAX_OPERATORS: usize = 1_000_000;
 /// means "use [`MAX_OPERATORS`] default"; any other value is the
 /// effective cap. Atomic so it's safe to set from one thread while
 /// extraction runs on another (e.g. parallel-page extraction).
-static MAX_OPERATORS_OVERRIDE: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+static MAX_OPERATORS_OVERRIDE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Set the global content-stream operator cap. `None` keeps the
 /// default of `MAX_OPERATORS` (1,000,000). `Some(n)` overrides to `n`
@@ -63,11 +62,7 @@ pub fn set_max_ops_per_stream(limit: Option<usize>) -> Option<usize> {
 #[inline]
 fn effective_max_operators() -> usize {
     let override_val = MAX_OPERATORS_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed);
-    if override_val == 0 {
-        MAX_OPERATORS
-    } else {
-        override_val
-    }
+    if override_val == 0 { MAX_OPERATORS } else { override_val }
 }
 
 /// Maximum consecutive parse errors (byte skips) before bailing out.
@@ -125,7 +120,7 @@ pub fn parse_content_stream(data: &[u8]) -> Result<Vec<Operator>> {
                     push_operator_cap_warning();
                     break;
                 }
-            },
+            }
             Err(_) => {
                 consecutive_errors += 1;
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
@@ -143,7 +138,7 @@ pub fn parse_content_stream(data: &[u8]) -> Result<Vec<Operator>> {
                 } else {
                     break;
                 }
-            },
+            }
         }
     }
 
@@ -188,8 +183,7 @@ pub fn parse_content_stream_paths_only(data: &[u8]) -> Result<Vec<Operator>> {
         match BYTE_CLASS[data[i] as usize] {
             SCAN_ALPHA => {
                 let first_byte = data[i];
-                let second_is_non_alpha =
-                    i + 1 >= len || BYTE_CLASS[data[i + 1] as usize] != SCAN_ALPHA;
+                let second_is_non_alpha = i + 1 >= len || BYTE_CLASS[data[i + 1] as usize] != SCAN_ALPHA;
 
                 if second_is_non_alpha {
                     let operands = &data[operand_start..i];
@@ -199,10 +193,8 @@ pub fn parse_content_stream_paths_only(data: &[u8]) -> Result<Vec<Operator>> {
                         b'h' => Some(Operator::ClosePath),
                         b'q' => Some(Operator::SaveState),
                         b'Q' => Some(Operator::RestoreState),
-                        b'm' => parse_floats::<2>(operands)
-                            .map(|f| Operator::MoveTo { x: f[0], y: f[1] }),
-                        b'l' => parse_floats::<2>(operands)
-                            .map(|f| Operator::LineTo { x: f[0], y: f[1] }),
+                        b'm' => parse_floats::<2>(operands).map(|f| Operator::MoveTo { x: f[0], y: f[1] }),
+                        b'l' => parse_floats::<2>(operands).map(|f| Operator::LineTo { x: f[0], y: f[1] }),
                         b'c' => parse_floats::<6>(operands).map(|f| Operator::CurveTo {
                             x1: f[0],
                             y1: f[1],
@@ -223,20 +215,12 @@ pub fn parse_content_stream_paths_only(data: &[u8]) -> Result<Vec<Operator>> {
                             x3: f[2],
                             y3: f[3],
                         }),
-                        b'w' => parse_floats::<1>(operands)
-                            .map(|f| Operator::SetLineWidth { width: f[0] }),
-                        b'J' => parse_floats::<1>(operands).map(|f| Operator::SetLineCap {
-                            cap_style: f[0] as u8,
-                        }),
-                        b'j' => parse_floats::<1>(operands).map(|f| Operator::SetLineJoin {
-                            join_style: f[0] as u8,
-                        }),
-                        b'M' => parse_floats::<1>(operands)
-                            .map(|f| Operator::SetMiterLimit { limit: f[0] }),
-                        b'g' => parse_floats::<1>(operands)
-                            .map(|f| Operator::SetFillGray { gray: f[0] }),
-                        b'G' => parse_floats::<1>(operands)
-                            .map(|f| Operator::SetStrokeGray { gray: f[0] }),
+                        b'w' => parse_floats::<1>(operands).map(|f| Operator::SetLineWidth { width: f[0] }),
+                        b'J' => parse_floats::<1>(operands).map(|f| Operator::SetLineCap { cap_style: f[0] as u8 }),
+                        b'j' => parse_floats::<1>(operands).map(|f| Operator::SetLineJoin { join_style: f[0] as u8 }),
+                        b'M' => parse_floats::<1>(operands).map(|f| Operator::SetMiterLimit { limit: f[0] }),
+                        b'g' => parse_floats::<1>(operands).map(|f| Operator::SetFillGray { gray: f[0] }),
+                        b'G' => parse_floats::<1>(operands).map(|f| Operator::SetStrokeGray { gray: f[0] }),
                         b'f' | b'F' => Some(Operator::Fill),
                         b'B' => Some(Operator::FillStroke),
                         b'b' => Some(Operator::CloseFillStroke),
@@ -245,14 +229,14 @@ pub fn parse_content_stream_paths_only(data: &[u8]) -> Result<Vec<Operator>> {
                         b's' => {
                             operators.push(Operator::ClosePath);
                             Some(Operator::Stroke)
-                        },
+                        }
                         b'W' => Some(Operator::ClipNonZero),
                         b'i' => {
                             operand_start = i + 1;
                             i += 1;
                             consecutive_errors = 0;
                             continue;
-                        },
+                        }
                         _ => None,
                     };
                     if let Some(op) = op {
@@ -266,10 +250,7 @@ pub fn parse_content_stream_paths_only(data: &[u8]) -> Result<Vec<Operator>> {
 
                 let op_start = i;
                 while i < len
-                    && (data[i].is_ascii_alphanumeric()
-                        || data[i] == b'\''
-                        || data[i] == b'"'
-                        || data[i] == b'*')
+                    && (data[i].is_ascii_alphanumeric() || data[i] == b'\'' || data[i] == b'"' || data[i] == b'*')
                 {
                     i += 1;
                 }
@@ -288,57 +269,54 @@ pub fn parse_content_stream_paths_only(data: &[u8]) -> Result<Vec<Operator>> {
                         Some(rest) => {
                             i = len - rest.len();
                             operand_start = i;
-                        },
+                        }
                         None => break,
                     }
                     continue;
                 }
 
-                let fast_op =
-                    match op {
-                        b"cm" => parse_six_floats(operands)
-                            .map(|(a, b, c, d, e, f)| Operator::Cm { a, b, c, d, e, f }),
-                        b"re" => parse_floats::<4>(operands).map(|f| Operator::Rectangle {
-                            x: f[0],
-                            y: f[1],
-                            width: f[2],
-                            height: f[3],
-                        }),
-                        b"rg" => parse_floats::<3>(operands).map(|f| Operator::SetFillRgb {
-                            r: f[0],
-                            g: f[1],
-                            b: f[2],
-                        }),
-                        b"RG" => parse_floats::<3>(operands).map(|f| Operator::SetStrokeRgb {
-                            r: f[0],
-                            g: f[1],
-                            b: f[2],
-                        }),
-                        b"k" => parse_floats::<4>(operands).map(|f| Operator::SetFillCmyk {
-                            c: f[0],
-                            m: f[1],
-                            y: f[2],
-                            k: f[3],
-                        }),
-                        b"K" => parse_floats::<4>(operands).map(|f| Operator::SetStrokeCmyk {
-                            c: f[0],
-                            m: f[1],
-                            y: f[2],
-                            k: f[3],
-                        }),
-                        b"f*" => Some(Operator::FillEvenOdd),
-                        b"B*" => Some(Operator::FillStrokeEvenOdd),
-                        b"b*" => Some(Operator::CloseFillStrokeEvenOdd),
-                        b"W*" => Some(Operator::ClipEvenOdd),
-                        // Skip text/color-space/shading operators that don't affect paths ~keep
-                        b"ET" | b"Tc" | b"Tw" | b"Tz" | b"TL" | b"Tf" | b"Tr" | b"Ts" | b"Td"
-                        | b"TD" | b"Tm" | b"Tj" | b"TJ" | b"T*" | b"cs" | b"CS" | b"sc" | b"SC"
-                        | b"scn" | b"SCN" | b"ri" | b"sh" | b"EI" => {
-                            operand_start = i;
-                            continue;
-                        },
-                        _ => None,
-                    };
+                let fast_op = match op {
+                    b"cm" => parse_six_floats(operands).map(|(a, b, c, d, e, f)| Operator::Cm { a, b, c, d, e, f }),
+                    b"re" => parse_floats::<4>(operands).map(|f| Operator::Rectangle {
+                        x: f[0],
+                        y: f[1],
+                        width: f[2],
+                        height: f[3],
+                    }),
+                    b"rg" => parse_floats::<3>(operands).map(|f| Operator::SetFillRgb {
+                        r: f[0],
+                        g: f[1],
+                        b: f[2],
+                    }),
+                    b"RG" => parse_floats::<3>(operands).map(|f| Operator::SetStrokeRgb {
+                        r: f[0],
+                        g: f[1],
+                        b: f[2],
+                    }),
+                    b"k" => parse_floats::<4>(operands).map(|f| Operator::SetFillCmyk {
+                        c: f[0],
+                        m: f[1],
+                        y: f[2],
+                        k: f[3],
+                    }),
+                    b"K" => parse_floats::<4>(operands).map(|f| Operator::SetStrokeCmyk {
+                        c: f[0],
+                        m: f[1],
+                        y: f[2],
+                        k: f[3],
+                    }),
+                    b"f*" => Some(Operator::FillEvenOdd),
+                    b"B*" => Some(Operator::FillStrokeEvenOdd),
+                    b"b*" => Some(Operator::CloseFillStrokeEvenOdd),
+                    b"W*" => Some(Operator::ClipEvenOdd),
+                    // Skip text/color-space/shading operators that don't affect paths ~keep
+                    b"ET" | b"Tc" | b"Tw" | b"Tz" | b"TL" | b"Tf" | b"Tr" | b"Ts" | b"Td" | b"TD" | b"Tm" | b"Tj"
+                    | b"TJ" | b"T*" | b"cs" | b"CS" | b"sc" | b"SC" | b"scn" | b"SCN" | b"ri" | b"sh" | b"EI" => {
+                        operand_start = i;
+                        continue;
+                    }
+                    _ => None,
+                };
 
                 if let Some(op) = fast_op {
                     operators.push(op);
@@ -351,22 +329,22 @@ pub fn parse_content_stream_paths_only(data: &[u8]) -> Result<Vec<Operator>> {
                         operators.push(op);
                         i = len - rest.len();
                         operand_start = i;
-                    },
+                    }
                     Err(_) => {
                         operand_start = i;
-                    },
+                    }
                 }
-            },
+            }
 
             SCAN_PAREN => match skip_literal_string_raw(data, i) {
                 Some(end) => {
                     i = end;
                     consecutive_errors = 0;
-                },
+                }
                 None => {
                     i += 1;
                     consecutive_errors += 1;
-                },
+                }
             },
             SCAN_ANGLE => {
                 if i + 1 < len && data[i + 1] == b'<' {
@@ -377,14 +355,14 @@ pub fn parse_content_stream_paths_only(data: &[u8]) -> Result<Vec<Operator>> {
                         Some(end) => {
                             i = end;
                             consecutive_errors = 0;
-                        },
+                        }
                         None => {
                             i += 1;
                             consecutive_errors += 1;
-                        },
+                        }
                     }
                 }
-            },
+            }
             SCAN_BRACKET => {
                 i += 1;
                 let mut depth = 1u32;
@@ -397,20 +375,20 @@ pub fn parse_content_stream_paths_only(data: &[u8]) -> Result<Vec<Operator>> {
                                 i = end;
                                 continue;
                             }
-                        },
-                        _ => {},
+                        }
+                        _ => {}
                     }
                     i += 1;
                 }
-            },
+            }
             SCAN_SLASH => {
                 i = skip_name_raw(data, i);
-            },
+            }
             SCAN_PERCENT => {
                 while i < len && data[i] != b'\n' && data[i] != b'\r' {
                     i += 1;
                 }
-            },
+            }
             _ => {
                 i += 1;
                 consecutive_errors += 1;
@@ -422,7 +400,7 @@ pub fn parse_content_stream_paths_only(data: &[u8]) -> Result<Vec<Operator>> {
                     );
                     break;
                 }
-            },
+            }
         }
     }
 
@@ -482,7 +460,7 @@ pub fn parse_content_stream_text_only(data: &[u8]) -> Result<Vec<Operator>> {
                     operators.push(op);
                     input = rest;
                     consecutive_errors = 0;
-                },
+                }
                 Err(_) => {
                     consecutive_errors += 1;
                     if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
@@ -498,7 +476,7 @@ pub fn parse_content_stream_text_only(data: &[u8]) -> Result<Vec<Operator>> {
                     } else {
                         break;
                     }
-                },
+                }
             }
         } else {
             // Outside BT/ET: byte-level scan — skip operands and graphics
@@ -509,7 +487,7 @@ pub fn parse_content_stream_text_only(data: &[u8]) -> Result<Vec<Operator>> {
                     operators.push(Operator::BeginText);
                     input = rest;
                     inside_text = true;
-                },
+                }
                 ScanResult::InlineImage { rest } => match parse_inline_image(rest) {
                     Ok((rest2, _)) => input = rest2,
                     Err(_) => input = rest,
@@ -521,7 +499,7 @@ pub fn parse_content_stream_text_only(data: &[u8]) -> Result<Vec<Operator>> {
                     Ok((rest2, op)) => {
                         operators.push(op);
                         input = rest2;
-                    },
+                    }
                     Err(_) => input = after_op,
                 },
                 ScanResult::DeferredThenText {
@@ -538,23 +516,23 @@ pub fn parse_content_stream_text_only(data: &[u8]) -> Result<Vec<Operator>> {
                             Ok((rest2, op)) => {
                                 operators.push(op);
                                 remaining = rest2;
-                            },
+                            }
                             Err(_) => {
                                 if remaining.len() > 1 {
                                     remaining = &remaining[1..];
                                 } else {
                                     break;
                                 }
-                            },
+                            }
                         }
                     }
                     input = trigger_start;
                     consecutive_errors = 0;
-                },
+                }
                 ScanResult::SimpleOp { op, rest } => {
                     operators.push(op);
                     input = rest;
-                },
+                }
                 ScanResult::TooManyErrors { remaining } => {
                     tracing::warn!(
                         count = MAX_CONSECUTIVE_ERRORS,
@@ -562,7 +540,7 @@ pub fn parse_content_stream_text_only(data: &[u8]) -> Result<Vec<Operator>> {
                         "content stream had too many consecutive parse errors; bailing out"
                     );
                     break;
-                },
+                }
             }
         }
     }
@@ -677,8 +655,7 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
 
     let mut last_name: Option<String> = None;
 
-    let mut sorted_positions: Vec<(usize, usize)> =
-        text_positions.iter().copied().enumerate().collect();
+    let mut sorted_positions: Vec<(usize, usize)> = text_positions.iter().copied().enumerate().collect();
     sorted_positions.sort_by_key(|&(_, pos)| pos);
     let mut next_tp_idx = 0;
 
@@ -719,20 +696,13 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
             continue;
         }
 
-        if b.is_ascii_digit()
-            || b == b'-'
-            || b == b'+'
-            || (b == b'.' && i + 1 < len && data[i + 1].is_ascii_digit())
-        {
+        if b.is_ascii_digit() || b == b'-' || b == b'+' || (b == b'.' && i + 1 < len && data[i + 1].is_ascii_digit()) {
             let start = i;
             i += 1;
             while i < len && (data[i].is_ascii_digit() || data[i] == b'.') {
                 i += 1;
             }
-            if let Ok(val) = std::str::from_utf8(&data[start..i])
-                .unwrap_or("")
-                .parse::<f32>()
-            {
+            if let Ok(val) = std::str::from_utf8(&data[start..i]).unwrap_or("").parse::<f32>() {
                 if num_count < 6 {
                     num_buf[num_count] = val;
                     num_count += 1;
@@ -747,12 +717,7 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
         if b.is_ascii_alphabetic() {
             let op_start = i;
             i += 1;
-            while i < len
-                && (data[i].is_ascii_alphabetic()
-                    || data[i] == b'*'
-                    || data[i] == b'\''
-                    || data[i] == b'"')
-            {
+            while i < len && (data[i].is_ascii_alphabetic() || data[i] == b'*' || data[i] == b'\'' || data[i] == b'"') {
                 i += 1;
             }
             let op = &data[op_start..i];
@@ -785,21 +750,13 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
                     }
                     i = j;
                     continue;
-                },
+                }
                 b"q" => {
-                    ctm_stack.push((
-                        ctm,
-                        current_font_idx,
-                        text_state,
-                        fill_space.clone(),
-                        fill_op.clone(),
-                    ));
+                    ctm_stack.push((ctm, current_font_idx, text_state, fill_space.clone(), fill_op.clone()));
                     num_count = 0;
-                },
+                }
                 b"Q" => {
-                    if let Some((saved_ctm, saved_font_idx, saved_text, saved_space, saved_fill)) =
-                        ctm_stack.pop()
-                    {
+                    if let Some((saved_ctm, saved_font_idx, saved_text, saved_space, saved_fill)) = ctm_stack.pop() {
                         ctm = saved_ctm;
                         current_font_idx = saved_font_idx;
                         text_state = saved_text;
@@ -807,7 +764,7 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
                         fill_op = saved_fill;
                     }
                     num_count = 0;
-                },
+                }
                 b"cm" => {
                     if num_count >= 6 {
                         let base = num_count - 6;
@@ -822,7 +779,7 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
                         ctm = new_ctm.multiply(&ctm);
                     }
                     num_count = 0;
-                },
+                }
                 b"Tf" => {
                     if num_count >= 1 {
                         let size = num_buf[num_count - 1];
@@ -833,50 +790,50 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
                         }
                     }
                     num_count = 0;
-                },
+                }
                 b"Tc" => {
                     if num_count >= 1 {
                         text_state.char_spacing = num_buf[num_count - 1];
                     }
                     num_count = 0;
-                },
+                }
                 b"Tw" => {
                     if num_count >= 1 {
                         text_state.word_spacing = num_buf[num_count - 1];
                     }
                     num_count = 0;
-                },
+                }
                 b"Tz" => {
                     if num_count >= 1 {
                         text_state.horiz_scaling = num_buf[num_count - 1];
                     }
                     num_count = 0;
-                },
+                }
                 b"TL" => {
                     if num_count >= 1 {
                         text_state.leading = num_buf[num_count - 1];
                     }
                     num_count = 0;
-                },
+                }
                 b"Ts" => {
                     if num_count >= 1 {
                         text_state.rise = num_buf[num_count - 1];
                     }
                     num_count = 0;
-                },
+                }
                 b"Tr" => {
                     if num_count >= 1 {
                         text_state.render_mode = num_buf[num_count - 1] as u8;
                     }
                     num_count = 0;
-                },
+                }
                 b"TD" => {
                     // `tx ty TD` also sets the leading to -ty (§9.4.2). ~keep
                     if num_count >= 2 {
                         text_state.leading = -num_buf[num_count - 1];
                     }
                     num_count = 0;
-                },
+                }
                 b"rg" => {
                     if num_count >= 3 {
                         fill_op = Some(Operator::SetFillRgb {
@@ -887,7 +844,7 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
                     }
                     fill_space = None;
                     num_count = 0;
-                },
+                }
                 b"g" => {
                     if num_count >= 1 {
                         fill_op = Some(Operator::SetFillGray {
@@ -896,7 +853,7 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
                     }
                     fill_space = None;
                     num_count = 0;
-                },
+                }
                 b"k" => {
                     if num_count >= 4 {
                         fill_op = Some(Operator::SetFillCmyk {
@@ -908,7 +865,7 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
                     }
                     fill_space = None;
                     num_count = 0;
-                },
+                }
                 b"cs" => {
                     // `cs` resets the fill color to the space's initial value,
                     // so any earlier color operator no longer applies. ~keep
@@ -917,7 +874,7 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
                         fill_op = None;
                     }
                     num_count = 0;
-                },
+                }
                 b"sc" => {
                     // Operands are the TAIL of the rolling buffer, like every
                     // other arm. The buffer holds 6, so at 7+ operands the
@@ -931,7 +888,7 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
                         });
                     }
                     num_count = 0;
-                },
+                }
                 b"scn" => {
                     if (1..=4).contains(&num_count) || (num_count == 0 && last_name.is_some()) {
                         fill_op = Some(Operator::SetFillColorN {
@@ -940,10 +897,10 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
                         });
                     }
                     num_count = 0;
-                },
+                }
                 _ => {
                     num_count = 0;
-                },
+                }
             }
             // A name operand belongs to the operator that follows it; once any
             // operator has executed, a surviving `last_name` is stale. Without
@@ -978,7 +935,7 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
                     b'\\' => i += 1,
                     b'(' => depth += 1,
                     b')' => depth -= 1,
-                    _ => {},
+                    _ => {}
                 }
                 i += 1;
             }
@@ -1024,9 +981,7 @@ fn forward_scan_ctm(data: &[u8], text_positions: &[usize]) -> Option<Vec<Prescan
             {
                 i += 1;
             }
-            last_name = std::str::from_utf8(&data[name_start..i])
-                .ok()
-                .map(|s| s.to_string());
+            last_name = std::str::from_utf8(&data[name_start..i]).ok().map(|s| s.to_string());
             num_count = 0;
             continue;
         }
@@ -1104,8 +1059,7 @@ impl PrescanResult {
 /// to full stream parsing.
 fn prescan_text_regions(data: &[u8]) -> Option<PrescanResult> {
     fn is_boundary(b: u8) -> bool {
-        b.is_ascii_whitespace()
-            || matches!(b, b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%')
+        b.is_ascii_whitespace() || matches!(b, b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%')
     }
 
     let len = data.len();
@@ -1133,7 +1087,7 @@ fn prescan_text_regions(data: &[u8]) -> Option<PrescanResult> {
                         text_positions.push(pos);
                     }
                 }
-            },
+            }
         }
     }
 
@@ -1205,8 +1159,7 @@ fn prescan_text_regions(data: &[u8]) -> Option<PrescanResult> {
             ctm_regions.push((region_start, region_end.min(len)));
         }
 
-        let mut indexed: Vec<((usize, usize), PrescanState)> =
-            ctm_regions.into_iter().zip(states).collect();
+        let mut indexed: Vec<((usize, usize), PrescanState)> = ctm_regions.into_iter().zip(states).collect();
         indexed.sort_by_key(|&(r, _)| r.0);
 
         let mut merged: Vec<(usize, usize)> = Vec::new();
@@ -1344,11 +1297,7 @@ fn find_preceding_marked_content(data: &[u8], pos: usize) -> usize {
     let mut i = pos;
     while i > scan_start {
         i -= 1;
-        if data[i] == b'C'
-            && i >= 2
-            && data[i - 2] == b'B'
-            && (data[i - 1] == b'D' || data[i - 1] == b'M')
-        {
+        if data[i] == b'C' && i >= 2 && data[i - 2] == b'B' && (data[i - 1] == b'D' || data[i - 1] == b'M') {
             let op_start = i - 2;
             let before_ok = op_start == 0 || !data[op_start - 1].is_ascii_alphanumeric();
             let after_ok = i + 1 >= data.len() || !data[i + 1].is_ascii_alphanumeric();
@@ -1357,10 +1306,7 @@ fn find_preceding_marked_content(data: &[u8], pos: usize) -> usize {
                 // e.g., "/Span << /MCID 0 >> BDC"
                 // Find the start of the line/command ~keep
                 let mut line_start = op_start;
-                while line_start > scan_start
-                    && data[line_start - 1] != b'\n'
-                    && data[line_start - 1] != b'\r'
-                {
+                while line_start > scan_start && data[line_start - 1] != b'\n' && data[line_start - 1] != b'\r' {
                     line_start -= 1;
                 }
                 return line_start;
@@ -1440,11 +1386,8 @@ where
                     parse_region_text_only(&data[*start..*end], &mut handler)?;
                 }
                 return Ok(());
-            },
-            PrescanResult::RegionsWithCtm {
-                regions,
-                region_states,
-            } => {
+            }
+            PrescanResult::RegionsWithCtm { regions, region_states } => {
                 // Inject the correct graphics state before each BT region.
                 // Each region is wrapped in SaveState/RestoreState so state
                 // from one region doesn't leak into the next. ~keep
@@ -1495,23 +1438,19 @@ where
                         })?;
                     }
                     if ts.leading != 0.0 {
-                        handler(Operator::TL {
-                            leading: ts.leading,
-                        })?;
+                        handler(Operator::TL { leading: ts.leading })?;
                     }
                     if ts.rise != 0.0 {
                         handler(Operator::Ts { rise: ts.rise })?;
                     }
                     if ts.render_mode != 0 {
-                        handler(Operator::Tr {
-                            render: ts.render_mode,
-                        })?;
+                        handler(Operator::Tr { render: ts.render_mode })?;
                     }
                     parse_region_text_only(&data[*start..*end], &mut handler)?;
                     handler(Operator::RestoreState)?;
                 }
                 return Ok(());
-            },
+            }
         }
     }
 
@@ -1547,7 +1486,7 @@ where
                     op_count += 1;
                     input = rest;
                     consecutive_errors = 0;
-                },
+                }
                 _ => match parse_operator_with_operands(input) {
                     Ok((rest, op)) => {
                         if matches!(op, Operator::EndText) {
@@ -1557,7 +1496,7 @@ where
                         op_count += 1;
                         input = rest;
                         consecutive_errors = 0;
-                    },
+                    }
                     Err(_) => {
                         consecutive_errors += 1;
                         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
@@ -1573,7 +1512,7 @@ where
                         } else {
                             break;
                         }
-                    },
+                    }
                 },
             }
         } else {
@@ -1584,7 +1523,7 @@ where
                     op_count += 1;
                     input = rest;
                     inside_text = true;
-                },
+                }
                 ScanResult::InlineImage { rest } => match parse_inline_image(rest) {
                     Ok((rest2, _)) => input = rest2,
                     Err(_) => input = rest,
@@ -1597,7 +1536,7 @@ where
                         handler(op)?;
                         op_count += 1;
                         input = rest2;
-                    },
+                    }
                     Err(_) => input = after_op,
                 },
                 ScanResult::DeferredThenText {
@@ -1611,24 +1550,24 @@ where
                                 handler(op)?;
                                 op_count += 1;
                                 remaining = rest2;
-                            },
+                            }
                             Err(_) => {
                                 if remaining.len() > 1 {
                                     remaining = &remaining[1..];
                                 } else {
                                     break;
                                 }
-                            },
+                            }
                         }
                     }
                     input = trigger_start;
                     consecutive_errors = 0;
-                },
+                }
                 ScanResult::SimpleOp { op, rest } => {
                     handler(op)?;
                     op_count += 1;
                     input = rest;
-                },
+                }
                 ScanResult::TooManyErrors { remaining } => {
                     tracing::warn!(
                         count = MAX_CONSECUTIVE_ERRORS,
@@ -1636,7 +1575,7 @@ where
                         "content stream had too many consecutive parse errors; bailing out"
                     );
                     break;
-                },
+                }
             }
         }
     }
@@ -1673,11 +1612,11 @@ where
         match &op {
             Operator::BeginMarkedContent { .. } | Operator::BeginMarkedContentDict { .. } => {
                 mc_depth += 1;
-            },
+            }
             Operator::EndMarkedContent => {
                 mc_depth = mc_depth.saturating_sub(1);
-            },
-            _ => {},
+            }
+            _ => {}
         }
         handler(op)
     };
@@ -1704,7 +1643,7 @@ where
                     op_count += 1;
                     input = rest;
                     consecutive_errors = 0;
-                },
+                }
                 _ => match parse_operator_with_operands(input) {
                     Ok((rest, op)) => {
                         if matches!(op, Operator::EndText) {
@@ -1714,7 +1653,7 @@ where
                         op_count += 1;
                         input = rest;
                         consecutive_errors = 0;
-                    },
+                    }
                     Err(_) => {
                         consecutive_errors += 1;
                         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
@@ -1725,7 +1664,7 @@ where
                         } else {
                             break;
                         }
-                    },
+                    }
                 },
             }
         } else {
@@ -1736,7 +1675,7 @@ where
                     op_count += 1;
                     input = rest;
                     inside_text = true;
-                },
+                }
                 ScanResult::InlineImage { rest } => match parse_inline_image(rest) {
                     Ok((rest2, _)) => input = rest2,
                     Err(_) => input = rest,
@@ -1749,7 +1688,7 @@ where
                         call(op, handler)?;
                         op_count += 1;
                         input = rest2;
-                    },
+                    }
                     Err(_) => input = after_op,
                 },
                 ScanResult::DeferredThenText {
@@ -1763,24 +1702,24 @@ where
                                 call(op, handler)?;
                                 op_count += 1;
                                 remaining = rest2;
-                            },
+                            }
                             Err(_) => {
                                 if remaining.len() > 1 {
                                     remaining = &remaining[1..];
                                 } else {
                                     break;
                                 }
-                            },
+                            }
                         }
                     }
                     input = trigger_start;
                     consecutive_errors = 0;
-                },
+                }
                 ScanResult::SimpleOp { op, rest } => {
                     call(op, handler)?;
                     op_count += 1;
                     input = rest;
-                },
+                }
                 ScanResult::TooManyErrors { .. } => break,
             }
         }
@@ -1827,7 +1766,7 @@ pub fn parse_content_stream_images_only(data: &[u8]) -> Result<Vec<Operator>> {
                     input = rest;
                     inside_text = false;
                     consecutive_errors = 0;
-                },
+                }
                 None => break,
             }
         } else {
@@ -1836,12 +1775,12 @@ pub fn parse_content_stream_images_only(data: &[u8]) -> Result<Vec<Operator>> {
                 ScanResult::FoundBT { rest } => {
                     input = rest;
                     inside_text = true;
-                },
+                }
                 ScanResult::InlineImage { rest } => match parse_inline_image(rest) {
                     Ok((rest2, op)) => {
                         operators.push(op);
                         input = rest2;
-                    },
+                    }
                     Err(_) => input = rest,
                 },
                 ScanResult::NeedFullParse {
@@ -1851,7 +1790,7 @@ pub fn parse_content_stream_images_only(data: &[u8]) -> Result<Vec<Operator>> {
                     Ok((rest2, op)) => {
                         operators.push(op);
                         input = rest2;
-                    },
+                    }
                     Err(_) => input = after_op,
                 },
                 ScanResult::DeferredThenText {
@@ -1864,23 +1803,23 @@ pub fn parse_content_stream_images_only(data: &[u8]) -> Result<Vec<Operator>> {
                             Ok((rest2, op)) => {
                                 operators.push(op);
                                 remaining = rest2;
-                            },
+                            }
                             Err(_) => {
                                 if remaining.len() > 1 {
                                     remaining = &remaining[1..];
                                 } else {
                                     break;
                                 }
-                            },
+                            }
                         }
                     }
                     input = trigger_start;
                     consecutive_errors = 0;
-                },
+                }
                 ScanResult::SimpleOp { op, rest } => {
                     operators.push(op);
                     input = rest;
-                },
+                }
                 ScanResult::TooManyErrors { .. } => break,
             }
         }
@@ -1895,12 +1834,8 @@ fn scan_to_et(data: &[u8]) -> Option<&[u8]> {
     let mut i = 0;
     while i + 1 < data.len() {
         if data[i] == b'E' && data[i + 1] == b'T' {
-            let before_ok = i == 0
-                || data[i - 1].is_ascii_whitespace()
-                || data[i - 1] == b')'
-                || data[i - 1] == b'>';
-            let after_ok =
-                i + 2 >= data.len() || data[i + 2].is_ascii_whitespace() || data[i + 2] == b'%';
+            let before_ok = i == 0 || data[i - 1].is_ascii_whitespace() || data[i - 1] == b')' || data[i - 1] == b'>';
+            let after_ok = i + 2 >= data.len() || data[i + 2].is_ascii_whitespace() || data[i + 2] == b'%';
             if before_ok && after_ok {
                 return Some(&data[i + 2..]);
             }
@@ -1913,7 +1848,7 @@ fn scan_to_et(data: &[u8]) -> Option<&[u8]> {
                     b'(' => depth += 1,
                     b')' => depth -= 1,
                     b'\\' => i += 1,
-                    _ => {},
+                    _ => {}
                 }
                 i += 1;
             }
@@ -1989,8 +1924,7 @@ fn is_operator_start(byte: u8) -> bool {
 /// - Star (*) for T* operator
 fn parse_operator_name(input: &[u8]) -> IResult<&[u8], &str> {
     let (input, name_bytes) =
-        take_while1(|c: u8| c.is_ascii_alphanumeric() || c == b'\'' || c == b'"' || c == b'*')
-            .parse(input)?;
+        take_while1(|c: u8| c.is_ascii_alphanumeric() || c == b'\'' || c == b'"' || c == b'*').parse(input)?;
 
     let name = std::str::from_utf8(name_bytes)
         .map_err(|_| nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Char)))?;
@@ -2012,12 +1946,12 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
             let tx = get_number(&operands, 0).unwrap_or(0.0);
             let ty = get_number(&operands, 1).unwrap_or(0.0);
             Operator::Td { tx, ty }
-        },
+        }
         "TD" => {
             let tx = get_number(&operands, 0).unwrap_or(0.0);
             let ty = get_number(&operands, 1).unwrap_or(0.0);
             Operator::TD { tx, ty }
-        },
+        }
         "Tm" => {
             let a = get_number(&operands, 0).unwrap_or(1.0);
             let b = get_number(&operands, 1).unwrap_or(0.0);
@@ -2026,13 +1960,13 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
             let e = get_number(&operands, 4).unwrap_or(0.0);
             let f = get_number(&operands, 5).unwrap_or(0.0);
             Operator::Tm { a, b, c, d, e, f }
-        },
+        }
         "T*" => Operator::TStar,
 
         "Tj" => {
             let text = get_string(&operands, 0).unwrap_or_default();
             Operator::Tj { text }
-        },
+        }
         "TJ" => {
             let elements = if let Some(array) = get_array(&operands, 0) {
                 array
@@ -2048,11 +1982,11 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
                 Vec::new()
             };
             Operator::TJ { array: elements }
-        },
+        }
         "'" => {
             let text = get_string(&operands, 0).unwrap_or_default();
             Operator::Quote { text }
-        },
+        }
         "\"" => {
             let word_space = get_number(&operands, 0).unwrap_or(0.0);
             let char_space = get_number(&operands, 1).unwrap_or(0.0);
@@ -2062,37 +1996,37 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
                 char_space,
                 text,
             }
-        },
+        }
 
         "Tc" => {
             let char_space = get_number(&operands, 0).unwrap_or(0.0);
             Operator::Tc { char_space }
-        },
+        }
         "Tw" => {
             let word_space = get_number(&operands, 0).unwrap_or(0.0);
             Operator::Tw { word_space }
-        },
+        }
         "Tz" => {
             let scale = get_number(&operands, 0).unwrap_or(100.0);
             Operator::Tz { scale }
-        },
+        }
         "TL" => {
             let leading = get_number(&operands, 0).unwrap_or(0.0);
             Operator::TL { leading }
-        },
+        }
         "Tf" => {
             let font = get_name(&operands, 0).unwrap_or("").to_string();
             let size = get_number(&operands, 1).unwrap_or(12.0);
             Operator::Tf { font, size }
-        },
+        }
         "Tr" => {
             let render = get_integer(&operands, 0).unwrap_or(0) as u8;
             Operator::Tr { render }
-        },
+        }
         "Ts" => {
             let rise = get_number(&operands, 0).unwrap_or(0.0);
             Operator::Ts { rise }
-        },
+        }
 
         "q" => Operator::SaveState,
         "Q" => Operator::RestoreState,
@@ -2104,51 +2038,51 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
             let e = get_number(&operands, 4).unwrap_or(0.0);
             let f = get_number(&operands, 5).unwrap_or(0.0);
             Operator::Cm { a, b, c, d, e, f }
-        },
+        }
 
         "rg" => {
             let r = get_number(&operands, 0).unwrap_or(0.0);
             let g = get_number(&operands, 1).unwrap_or(0.0);
             let b = get_number(&operands, 2).unwrap_or(0.0);
             Operator::SetFillRgb { r, g, b }
-        },
+        }
         "RG" => {
             let r = get_number(&operands, 0).unwrap_or(0.0);
             let g = get_number(&operands, 1).unwrap_or(0.0);
             let b = get_number(&operands, 2).unwrap_or(0.0);
             Operator::SetStrokeRgb { r, g, b }
-        },
+        }
         "g" => {
             let gray = get_number(&operands, 0).unwrap_or(0.0);
             Operator::SetFillGray { gray }
-        },
+        }
         "G" => {
             let gray = get_number(&operands, 0).unwrap_or(0.0);
             Operator::SetStrokeGray { gray }
-        },
+        }
         "k" => {
             let c = get_number(&operands, 0).unwrap_or(0.0);
             let m = get_number(&operands, 1).unwrap_or(0.0);
             let y = get_number(&operands, 2).unwrap_or(0.0);
             let k = get_number(&operands, 3).unwrap_or(0.0);
             Operator::SetFillCmyk { c, m, y, k }
-        },
+        }
         "K" => {
             let c = get_number(&operands, 0).unwrap_or(0.0);
             let m = get_number(&operands, 1).unwrap_or(0.0);
             let y = get_number(&operands, 2).unwrap_or(0.0);
             let k = get_number(&operands, 3).unwrap_or(0.0);
             Operator::SetStrokeCmyk { c, m, y, k }
-        },
+        }
 
         "cs" => {
             let name = get_name(&operands, 0).unwrap_or("DeviceGray").to_string();
             Operator::SetFillColorSpace { name }
-        },
+        }
         "CS" => {
             let name = get_name(&operands, 0).unwrap_or("DeviceGray").to_string();
             Operator::SetStrokeColorSpace { name }
-        },
+        }
         "sc" => {
             // Set fill color: c1 c2 ... cn sc
             // Number of components depends on current color space ~keep
@@ -2161,7 +2095,7 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
                 })
                 .collect();
             Operator::SetFillColor { components }
-        },
+        }
         "SC" => {
             let components: Vec<f32> = operands
                 .iter()
@@ -2172,7 +2106,7 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
                 })
                 .collect();
             Operator::SetStrokeColor { components }
-        },
+        }
         "scn" => {
             // Set fill color with pattern support: c1 c2 ... cn [name] scn
             // Last operand may be a name for pattern color spaces ~keep
@@ -2194,7 +2128,7 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
                 components,
                 name: name.map(Box::new),
             }
-        },
+        }
         "SCN" => {
             // Set stroke color with pattern support: c1 c2 ... cn [name] SCN ~keep
             let name = if let Some(Object::Name(n)) = operands.last() {
@@ -2215,7 +2149,7 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
                 components,
                 name: name.map(Box::new),
             }
-        },
+        }
 
         "BT" => Operator::BeginText,
         "ET" => Operator::EndText,
@@ -2231,18 +2165,18 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
                 .unwrap_or("")
                 .to_string();
             Operator::Do { name }
-        },
+        }
 
         "m" => {
             let x = get_number(&operands, 0).unwrap_or(0.0);
             let y = get_number(&operands, 1).unwrap_or(0.0);
             Operator::MoveTo { x, y }
-        },
+        }
         "l" => {
             let x = get_number(&operands, 0).unwrap_or(0.0);
             let y = get_number(&operands, 1).unwrap_or(0.0);
             Operator::LineTo { x, y }
-        },
+        }
         "c" => {
             let x1 = get_number(&operands, 0).unwrap_or(0.0);
             let y1 = get_number(&operands, 1).unwrap_or(0.0);
@@ -2250,15 +2184,8 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
             let y2 = get_number(&operands, 3).unwrap_or(0.0);
             let x3 = get_number(&operands, 4).unwrap_or(0.0);
             let y3 = get_number(&operands, 5).unwrap_or(0.0);
-            Operator::CurveTo {
-                x1,
-                y1,
-                x2,
-                y2,
-                x3,
-                y3,
-            }
-        },
+            Operator::CurveTo { x1, y1, x2, y2, x3, y3 }
+        }
         "v" => {
             // Bézier curve (first control point = current point) ~keep
             let x2 = get_number(&operands, 0).unwrap_or(0.0);
@@ -2266,7 +2193,7 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
             let x3 = get_number(&operands, 2).unwrap_or(0.0);
             let y3 = get_number(&operands, 3).unwrap_or(0.0);
             Operator::CurveToV { x2, y2, x3, y3 }
-        },
+        }
         "y" => {
             // Bézier curve (second control point = end point) ~keep
             let x1 = get_number(&operands, 0).unwrap_or(0.0);
@@ -2274,20 +2201,15 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
             let x3 = get_number(&operands, 2).unwrap_or(0.0);
             let y3 = get_number(&operands, 3).unwrap_or(0.0);
             Operator::CurveToY { x1, y1, x3, y3 }
-        },
+        }
         "h" => Operator::ClosePath,
         "re" => {
             let x = get_number(&operands, 0).unwrap_or(0.0);
             let y = get_number(&operands, 1).unwrap_or(0.0);
             let width = get_number(&operands, 2).unwrap_or(0.0);
             let height = get_number(&operands, 3).unwrap_or(0.0);
-            Operator::Rectangle {
-                x,
-                y,
-                width,
-                height,
-            }
-        },
+            Operator::Rectangle { x, y, width, height }
+        }
         "S" => Operator::Stroke,
         "f" | "F" => Operator::Fill,
         // ~keep
@@ -2303,7 +2225,7 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
         "w" => {
             let width = get_number(&operands, 0).unwrap_or(1.0);
             Operator::SetLineWidth { width }
-        },
+        }
         "d" => {
             // d operator: array phase
             // Example: [3 2] 0 d means 3 on, 2 off, starting at phase 0 ~keep
@@ -2320,62 +2242,60 @@ fn build_operator(name: &str, operands: SmallVec<[Object; 6]>) -> Operator {
             };
             let phase = get_number(&operands, 1).unwrap_or(0.0);
             Operator::SetDash { array, phase }
-        },
+        }
         "J" => {
             // J operator: integer J
             // 0=butt cap, 1=round cap, 2=projecting square cap ~keep
             let cap_style = get_integer(&operands, 0).unwrap_or(0) as u8;
             Operator::SetLineCap { cap_style }
-        },
+        }
         "j" => {
             // j operator: integer j
             // 0=miter join, 1=round join, 2=bevel join ~keep
             let join_style = get_integer(&operands, 0).unwrap_or(0) as u8;
             Operator::SetLineJoin { join_style }
-        },
+        }
         "M" => {
             // M operator: number M
             // Miter limit (ratio of miter length to line width) ~keep
             let limit = get_number(&operands, 0).unwrap_or(10.0);
             Operator::SetMiterLimit { limit }
-        },
+        }
         "ri" => {
             // ri operator: name ri
             // Rendering intent: /AbsoluteColorimetric, /RelativeColorimetric, /Saturation, or /Perceptual
             // ~keep
-            let intent = get_name(&operands, 0)
-                .unwrap_or("RelativeColorimetric")
-                .to_string();
+            let intent = get_name(&operands, 0).unwrap_or("RelativeColorimetric").to_string();
             Operator::SetRenderingIntent { intent }
-        },
+        }
         "i" => {
             // i operator: number i
             // Flatness tolerance (0-100) ~keep
             let tolerance = get_number(&operands, 0).unwrap_or(1.0);
             Operator::SetFlatness { tolerance }
-        },
+        }
         "gs" => {
             let dict_name = get_name(&operands, 0).unwrap_or("").to_string();
             Operator::SetExtGState { dict_name }
-        },
+        }
         "sh" => {
             let name = get_name(&operands, 0).unwrap_or("").to_string();
             Operator::PaintShading { name }
-        },
+        }
 
         // Marked content operators (for tagged PDF structure)
         // PDF Spec: ISO 32000-1:2008, Section 14.6 ~keep
         "BMC" => {
             let tag = get_name(&operands, 0).unwrap_or("").to_string();
             Operator::BeginMarkedContent { tag }
-        },
+        }
         "BDC" => {
             // Begin marked content with properties: tag properties BDC
             // properties can be a dictionary or a name (reference to /Properties resource) ~keep
             let tag = get_name(&operands, 0).unwrap_or("").to_string();
             let properties = Box::new(operands.get(1).cloned().unwrap_or(Object::Null));
             Operator::BeginMarkedContentDict { tag, properties }
-        },
+        }
         "EMC" => Operator::EndMarkedContent,
 
         // Unknown operator — convert SmallVec to Vec for the boxed storage.
@@ -2401,9 +2321,7 @@ fn get_integer(operands: &[Object], index: usize) -> Option<i64> {
 }
 
 fn get_string(operands: &[Object], index: usize) -> Option<Vec<u8>> {
-    operands
-        .get(index)
-        .and_then(|obj| obj.as_string().map(|s| s.to_vec()))
+    operands.get(index).and_then(|obj| obj.as_string().map(|s| s.to_vec()))
 }
 
 fn get_name(operands: &[Object], index: usize) -> Option<&str> {
@@ -2503,7 +2421,10 @@ fn find_ei_operator(input: &[u8]) -> IResult<&[u8], usize> {
         }
     }
 
-    Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)))
+    Err(nom::Err::Error(nom::error::Error::new(
+        input,
+        nom::error::ErrorKind::Tag,
+    )))
 }
 
 /// Extract image data up to (but not including) the whitespace before EI.
@@ -2520,7 +2441,10 @@ fn is_whitespace(byte: u8) -> bool {
 /// Check if a byte is whitespace or a PDF delimiter.
 fn is_whitespace_or_delimiter(byte: u8) -> bool {
     is_whitespace(byte)
-        || matches!(byte, b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%')
+        || matches!(
+            byte,
+            b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
+        )
 }
 
 // ── Nom-based operand skippers (test-only, superseded by raw variants) ───── ~keep
@@ -2528,7 +2452,10 @@ fn is_whitespace_or_delimiter(byte: u8) -> bool {
 #[cfg(test)]
 fn skip_operand_token(input: &[u8]) -> IResult<&[u8], ()> {
     if input.is_empty() {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Eof)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Eof,
+        )));
     }
 
     match input[0] {
@@ -2538,7 +2465,10 @@ fn skip_operand_token(input: &[u8]) -> IResult<&[u8], ()> {
         b'<' => skip_hex_string(input),
         b'/' => skip_name(input),
         b'[' => skip_array(input),
-        _ => Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Char))),
+        _ => Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Char,
+        ))),
     }
 }
 
@@ -2561,7 +2491,10 @@ fn skip_number(input: &[u8]) -> IResult<&[u8], ()> {
         }
     }
     if i == start {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Digit)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Digit,
+        )));
     }
     Ok((&input[i..], ()))
 }
@@ -2576,16 +2509,19 @@ fn skip_literal_string(input: &[u8]) -> IResult<&[u8], ()> {
             b'(' => {
                 depth += 1;
                 i += 1;
-            },
+            }
             b')' => {
                 depth -= 1;
                 i += 1;
-            },
+            }
             _ => i += 1,
         }
     }
     if depth != 0 {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Char)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Char,
+        )));
     }
     Ok((&input[i..], ()))
 }
@@ -2599,7 +2535,10 @@ fn skip_hex_string(input: &[u8]) -> IResult<&[u8], ()> {
         }
         i += 1;
     }
-    Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Char)))
+    Err(nom::Err::Error(nom::error::Error::new(
+        input,
+        nom::error::ErrorKind::Char,
+    )))
 }
 
 #[cfg(test)]
@@ -2620,11 +2559,11 @@ fn skip_array(input: &[u8]) -> IResult<&[u8], ()> {
             b'[' => {
                 depth += 1;
                 i += 1;
-            },
+            }
             b']' => {
                 depth -= 1;
                 i += 1;
-            },
+            }
             b'(' => {
                 i += 1;
                 let mut str_depth: u32 = 1;
@@ -2634,15 +2573,15 @@ fn skip_array(input: &[u8]) -> IResult<&[u8], ()> {
                         b'(' => {
                             str_depth += 1;
                             i += 1;
-                        },
+                        }
                         b')' => {
                             str_depth -= 1;
                             i += 1;
-                        },
+                        }
                         _ => i += 1,
                     }
                 }
-            },
+            }
             b'<' if i + 1 < input.len() && input[i + 1] == b'<' => {
                 i += 2;
                 let mut dict_depth: u32 = 1;
@@ -2657,7 +2596,7 @@ fn skip_array(input: &[u8]) -> IResult<&[u8], ()> {
                         i += 1;
                     }
                 }
-            },
+            }
             b'<' => {
                 i += 1;
                 while i < input.len() && input[i] != b'>' {
@@ -2666,12 +2605,15 @@ fn skip_array(input: &[u8]) -> IResult<&[u8], ()> {
                 if i < input.len() {
                     i += 1;
                 }
-            },
+            }
             _ => i += 1,
         }
     }
     if depth != 0 {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Char)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Char,
+        )));
     }
     Ok((&input[i..], ()))
 }
@@ -2696,11 +2638,11 @@ fn skip_dict(input: &[u8]) -> IResult<&[u8], ()> {
                     b'(' => {
                         str_depth += 1;
                         i += 1;
-                    },
+                    }
                     b')' => {
                         str_depth -= 1;
                         i += 1;
-                    },
+                    }
                     _ => i += 1,
                 }
             }
@@ -2717,7 +2659,10 @@ fn skip_dict(input: &[u8]) -> IResult<&[u8], ()> {
         }
     }
     if depth != 0 {
-        return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Char)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Char,
+        )));
     }
     Ok((&input[i..], ()))
 }
@@ -2872,11 +2817,11 @@ fn skip_literal_string_raw(data: &[u8], mut i: usize) -> Option<usize> {
             b'(' => {
                 depth += 1;
                 i += 1;
-            },
+            }
             b')' => {
                 depth -= 1;
                 i += 1;
-            },
+            }
             _ => i += 1,
         }
     }
@@ -2911,11 +2856,11 @@ fn skip_array_raw(data: &[u8], i: usize) -> Option<usize> {
             b'[' => {
                 depth += 1;
                 pos += 1;
-            },
+            }
             b']' => {
                 depth -= 1;
                 pos += 1;
-            },
+            }
             b'(' => {
                 pos += 1;
                 let mut str_depth: u32 = 1;
@@ -2925,15 +2870,15 @@ fn skip_array_raw(data: &[u8], i: usize) -> Option<usize> {
                         b'(' => {
                             str_depth += 1;
                             pos += 1;
-                        },
+                        }
                         b')' => {
                             str_depth -= 1;
                             pos += 1;
-                        },
+                        }
                         _ => pos += 1,
                     }
                 }
-            },
+            }
             b'<' if pos + 1 < data.len() && data[pos + 1] == b'<' => {
                 pos += 2;
                 let mut dict_depth: u32 = 1;
@@ -2948,7 +2893,7 @@ fn skip_array_raw(data: &[u8], i: usize) -> Option<usize> {
                         pos += 1;
                     }
                 }
-            },
+            }
             b'<' => {
                 pos += 1;
                 while pos < data.len() && data[pos] != b'>' {
@@ -2957,7 +2902,7 @@ fn skip_array_raw(data: &[u8], i: usize) -> Option<usize> {
                 if pos < data.len() {
                     pos += 1;
                 }
-            },
+            }
             _ => pos += 1,
         }
     }
@@ -2983,11 +2928,11 @@ fn skip_dict_raw(data: &[u8], i: usize) -> Option<usize> {
                     b'(' => {
                         str_depth += 1;
                         pos += 1;
-                    },
+                    }
                     b')' => {
                         str_depth -= 1;
                         pos += 1;
-                    },
+                    }
                     _ => pos += 1,
                 }
             }
@@ -3077,7 +3022,7 @@ fn parse_literal_string_fast(data: &[u8], start: usize) -> Option<(Vec<u8>, usiz
         match data[i] {
             b')' => {
                 return Some((data[scan_start..i].to_vec(), i + 1));
-            },
+            }
             b'\\' | b'(' => break,
             _ => i += 1,
         }
@@ -3091,35 +3036,35 @@ fn parse_literal_string_fast(data: &[u8], start: usize) -> Option<(Vec<u8>, usiz
                 b'n' => {
                     result.push(b'\n');
                     i += 2;
-                },
+                }
                 b'r' => {
                     result.push(b'\r');
                     i += 2;
-                },
+                }
                 b't' => {
                     result.push(b'\t');
                     i += 2;
-                },
+                }
                 b'b' => {
                     result.push(0x08);
                     i += 2;
-                },
+                }
                 b'f' => {
                     result.push(0x0C);
                     i += 2;
-                },
+                }
                 b'(' => {
                     result.push(b'(');
                     i += 2;
-                },
+                }
                 b')' => {
                     result.push(b')');
                     i += 2;
-                },
+                }
                 b'\\' => {
                     result.push(b'\\');
                     i += 2;
-                },
+                }
                 b'0'..=b'7' => {
                     let mut octal: u32 = (data[i + 1] - b'0') as u32;
                     let mut j = i + 2;
@@ -3133,37 +3078,37 @@ fn parse_literal_string_fast(data: &[u8], start: usize) -> Option<(Vec<u8>, usiz
                     }
                     result.push((octal & 0xFF) as u8);
                     i = j;
-                },
+                }
                 b'\r' => {
                     i += 2;
                     if i < data.len() && data[i] == b'\n' {
                         i += 1;
                     }
-                },
+                }
                 b'\n' => {
                     i += 2;
-                },
+                }
                 _ => {
                     result.push(data[i + 1]);
                     i += 2;
-                },
+                }
             },
             b'(' => {
                 depth += 1;
                 result.push(b'(');
                 i += 1;
-            },
+            }
             b')' => {
                 depth -= 1;
                 if depth > 0 {
                     result.push(b')');
                 }
                 i += 1;
-            },
+            }
             _ => {
                 result.push(data[i]);
                 i += 1;
-            },
+            }
         }
     }
     if depth == 0 { Some((result, i)) } else { None }
@@ -3190,7 +3135,7 @@ fn parse_hex_string_fast(data: &[u8], start: usize) -> Option<(Vec<u8>, usize)> 
                 Some(h) => {
                     result.push((h << 4) | nibble);
                     high_nibble = None;
-                },
+                }
             }
         }
         i += 1;
@@ -3229,7 +3174,7 @@ fn parse_tj_array_fast(data: &[u8], start: usize) -> Option<(Vec<TextElement>, u
                 } else {
                     return None;
                 }
-            },
+            }
             b'<' => {
                 if let Some((bytes, end)) = parse_hex_string_fast(data, i) {
                     elements.push(TextElement::String(bytes));
@@ -3237,7 +3182,7 @@ fn parse_tj_array_fast(data: &[u8], start: usize) -> Option<(Vec<TextElement>, u
                 } else {
                     return None;
                 }
-            },
+            }
             b'0'..=b'9' | b'.' | b'+' | b'-' => {
                 if let Some((num, consumed)) = parse_float_fast(&data[i..]) {
                     elements.push(TextElement::Offset(num));
@@ -3245,10 +3190,10 @@ fn parse_tj_array_fast(data: &[u8], start: usize) -> Option<(Vec<TextElement>, u
                 } else {
                     return None;
                 }
-            },
+            }
             _ => {
                 i += 1;
-            },
+            }
         }
     }
 }
@@ -3288,8 +3233,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
             b'0'..=b'9' | b'.' | b'+' | b'-' => {
                 // Quick check: a lone '-' or '+' followed by non-digit is not a number ~keep
                 if (b == b'-' || b == b'+')
-                    && (pos + 1 >= input.len()
-                        || (!input[pos + 1].is_ascii_digit() && input[pos + 1] != b'.'))
+                    && (pos + 1 >= input.len() || (!input[pos + 1].is_ascii_digit() && input[pos + 1] != b'.'))
                 {
                     return None;
                 }
@@ -3302,7 +3246,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                 } else {
                     return None;
                 }
-            },
+            }
             b'(' => {
                 if let Some((bytes, end)) = parse_literal_string_fast(input, pos) {
                     if op_count < 8 {
@@ -3313,7 +3257,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                 } else {
                     return None;
                 }
-            },
+            }
             b'<' => {
                 if pos + 1 < input.len() && input[pos + 1] == b'<' {
                     return None;
@@ -3327,7 +3271,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                 } else {
                     return None;
                 }
-            },
+            }
             b'/' => {
                 let (name, end) = parse_name_fast(input, pos);
                 if op_count < 8 {
@@ -3335,7 +3279,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                     op_count += 1;
                 }
                 pos = end;
-            },
+            }
             b'[' => {
                 if let Some((elements, end)) = parse_tj_array_fast(input, pos) {
                     if op_count < 8 {
@@ -3346,7 +3290,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                 } else {
                     return None;
                 }
-            },
+            }
             c if c.is_ascii_alphabetic() || c == b'\'' || c == b'"' || c == b'*' => {
                 let op_start = pos;
                 while pos < input.len()
@@ -3377,7 +3321,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             _ => 12.0,
                         };
                         Operator::Tf { font, size }
-                    },
+                    }
                     b"Td" => {
                         let tx = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
@@ -3388,7 +3332,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             _ => 0.0,
                         };
                         Operator::Td { tx, ty }
-                    },
+                    }
                     b"TD" => {
                         let tx = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
@@ -3399,7 +3343,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             _ => 0.0,
                         };
                         Operator::TD { tx, ty }
-                    },
+                    }
                     b"Tm" => {
                         let get_n = |i: usize, def: f32| match &operands[i] {
                             Some(FastOperand::Number(n)) => *n,
@@ -3413,7 +3357,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             e: get_n(4, 0.0),
                             f: get_n(5, 0.0),
                         }
-                    },
+                    }
                     b"T*" => Operator::TStar,
                     b"Tj" => {
                         let text = match operands[0].take() {
@@ -3421,21 +3365,21 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             _ => Vec::new(),
                         };
                         Operator::Tj { text }
-                    },
+                    }
                     b"TJ" => {
                         let array = match operands[0].take() {
                             Some(FastOperand::TextArray(a)) => a,
                             _ => Vec::new(),
                         };
                         Operator::TJ { array }
-                    },
+                    }
                     b"'" => {
                         let text = match operands[0].take() {
                             Some(FastOperand::StringBytes(b)) => b,
                             _ => Vec::new(),
                         };
                         Operator::Quote { text }
-                    },
+                    }
                     b"\"" => {
                         let word_space = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
@@ -3454,49 +3398,49 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             char_space,
                             text,
                         }
-                    },
+                    }
                     b"Tc" => {
                         let char_space = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
                             _ => 0.0,
                         };
                         Operator::Tc { char_space }
-                    },
+                    }
                     b"Tw" => {
                         let word_space = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
                             _ => 0.0,
                         };
                         Operator::Tw { word_space }
-                    },
+                    }
                     b"Tz" => {
                         let scale = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
                             _ => 100.0,
                         };
                         Operator::Tz { scale }
-                    },
+                    }
                     b"TL" => {
                         let leading = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
                             _ => 0.0,
                         };
                         Operator::TL { leading }
-                    },
+                    }
                     b"Tr" => {
                         let render = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n as u8,
                             _ => 0,
                         };
                         Operator::Tr { render }
-                    },
+                    }
                     b"Ts" => {
                         let rise = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
                             _ => 0.0,
                         };
                         Operator::Ts { rise }
-                    },
+                    }
                     b"q" => Operator::SaveState,
                     b"Q" => Operator::RestoreState,
                     b"cm" => {
@@ -3512,7 +3456,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             e: get_n(4, 0.0),
                             f: get_n(5, 0.0),
                         }
-                    },
+                    }
                     b"rg" => {
                         let get_n = |i: usize| match &operands[i] {
                             Some(FastOperand::Number(n)) => *n,
@@ -3523,7 +3467,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             g: get_n(1),
                             b: get_n(2),
                         }
-                    },
+                    }
                     b"RG" => {
                         let get_n = |i: usize| match &operands[i] {
                             Some(FastOperand::Number(n)) => *n,
@@ -3534,21 +3478,21 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             g: get_n(1),
                             b: get_n(2),
                         }
-                    },
+                    }
                     b"g" => {
                         let gray = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
                             _ => 0.0,
                         };
                         Operator::SetFillGray { gray }
-                    },
+                    }
                     b"G" => {
                         let gray = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
                             _ => 0.0,
                         };
                         Operator::SetStrokeGray { gray }
-                    },
+                    }
                     b"k" => {
                         let get_n = |i: usize| match &operands[i] {
                             Some(FastOperand::Number(n)) => *n,
@@ -3560,7 +3504,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             y: get_n(2),
                             k: get_n(3),
                         }
-                    },
+                    }
                     b"K" => {
                         let get_n = |i: usize| match &operands[i] {
                             Some(FastOperand::Number(n)) => *n,
@@ -3572,21 +3516,21 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             y: get_n(2),
                             k: get_n(3),
                         }
-                    },
+                    }
                     b"cs" => {
                         let name = match &operands[0] {
                             Some(FastOperand::Name(n)) => n.clone(),
                             _ => "DeviceGray".to_string(),
                         };
                         Operator::SetFillColorSpace { name }
-                    },
+                    }
                     b"CS" => {
                         let name = match &operands[0] {
                             Some(FastOperand::Name(n)) => n.clone(),
                             _ => "DeviceGray".to_string(),
                         };
                         Operator::SetStrokeColorSpace { name }
-                    },
+                    }
                     b"sc" => {
                         let components: Vec<f32> = operands[..op_count]
                             .iter()
@@ -3596,7 +3540,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             })
                             .collect();
                         Operator::SetFillColor { components }
-                    },
+                    }
                     b"SC" => {
                         let components: Vec<f32> = operands[..op_count]
                             .iter()
@@ -3606,7 +3550,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             })
                             .collect();
                         Operator::SetStrokeColor { components }
-                    },
+                    }
                     b"scn" => {
                         let name = match &operands[op_count.saturating_sub(1)] {
                             Some(FastOperand::Name(n)) => Some(n.clone()),
@@ -3623,7 +3567,7 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             components,
                             name: name.map(Box::new),
                         }
-                    },
+                    }
                     b"SCN" => {
                         let name = match &operands[op_count.saturating_sub(1)] {
                             Some(FastOperand::Name(n)) => Some(n.clone()),
@@ -3640,14 +3584,14 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             components,
                             name: name.map(Box::new),
                         }
-                    },
+                    }
                     b"gs" => {
                         let dict_name = match &operands[0] {
                             Some(FastOperand::Name(n)) => n.clone(),
                             _ => String::new(),
                         };
                         Operator::SetExtGState { dict_name }
-                    },
+                    }
                     b"Do" => {
                         // See the nom-parser "Do" arm in `build_operator` for why
                         // this reads the last operand, not operands[0]. ~keep
@@ -3656,45 +3600,45 @@ fn parse_text_operator_fast(input: &[u8]) -> Option<(&[u8], Operator)> {
                             _ => String::new(),
                         };
                         Operator::Do { name }
-                    },
+                    }
                     b"w" => {
                         let width = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
                             _ => 1.0,
                         };
                         Operator::SetLineWidth { width }
-                    },
+                    }
                     b"J" => {
                         let cap_style = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n as u8,
                             _ => 0,
                         };
                         Operator::SetLineCap { cap_style }
-                    },
+                    }
                     b"j" => {
                         let join_style = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n as u8,
                             _ => 0,
                         };
                         Operator::SetLineJoin { join_style }
-                    },
+                    }
                     b"i" => {
                         let tolerance = match &operands[0] {
                             Some(FastOperand::Number(n)) => *n,
                             _ => 0.0,
                         };
                         Operator::SetFlatness { tolerance }
-                    },
+                    }
                     _ => {
                         return None;
-                    },
+                    }
                 };
 
                 return Some((rest, operator));
-            },
+            }
             _ => {
                 return None;
-            },
+            }
         }
     }
 }
@@ -3779,8 +3723,7 @@ fn scan_graphics_region<'a>(data: &'a [u8], consecutive_errors: &mut usize) -> S
         match BYTE_CLASS[data[i] as usize] {
             SCAN_ALPHA => {
                 let first_byte = data[i];
-                let second_is_non_alpha =
-                    i + 1 >= len || BYTE_CLASS[data[i + 1] as usize] != SCAN_ALPHA;
+                let second_is_non_alpha = i + 1 >= len || BYTE_CLASS[data[i + 1] as usize] != SCAN_ALPHA;
 
                 // Fast path for common single-char skippable operators.
                 // Avoids reading the full operator name and is_skippable check.
@@ -3824,10 +3767,7 @@ fn scan_graphics_region<'a>(data: &'a [u8], consecutive_errors: &mut usize) -> S
 
                 let op_start = i;
                 while i < len
-                    && (data[i].is_ascii_alphanumeric()
-                        || data[i] == b'\''
-                        || data[i] == b'"'
-                        || data[i] == b'*')
+                    && (data[i].is_ascii_alphanumeric() || data[i] == b'\'' || data[i] == b'"' || data[i] == b'*')
                 {
                     i += 1;
                 }
@@ -3877,9 +3817,7 @@ fn scan_graphics_region<'a>(data: &'a [u8], consecutive_errors: &mut usize) -> S
                     // ConcatMatrix: parse 6 floats inline to avoid nom overhead
                     // (171K triggers/PDF for Murphy). Falls back to NeedFullParse
                     // on malformed operands. ~keep
-                    if let Some((a, b, c, d, e, f)) =
-                        parse_six_floats(&data[operand_start..op_start])
-                    {
+                    if let Some((a, b, c, d, e, f)) = parse_six_floats(&data[operand_start..op_start]) {
                         return ScanResult::SimpleOp {
                             op: Operator::Cm { a, b, c, d, e, f },
                             rest: &data[i..],
@@ -3907,17 +3845,17 @@ fn scan_graphics_region<'a>(data: &'a [u8], consecutive_errors: &mut usize) -> S
                         after_op: &data[i..],
                     };
                 }
-            },
+            }
 
             SCAN_PAREN => match skip_literal_string_raw(data, i) {
                 Some(end) => {
                     i = end;
                     *consecutive_errors = 0;
-                },
+                }
                 None => {
                     i += 1;
                     *consecutive_errors += 1;
-                },
+                }
             },
 
             SCAN_ANGLE => {
@@ -3926,59 +3864,57 @@ fn scan_graphics_region<'a>(data: &'a [u8], consecutive_errors: &mut usize) -> S
                         Some(end) => {
                             i = end;
                             *consecutive_errors = 0;
-                        },
+                        }
                         None => {
                             i += 1;
                             *consecutive_errors += 1;
-                        },
+                        }
                     }
                 } else {
                     match skip_hex_string_raw(data, i) {
                         Some(end) => {
                             i = end;
                             *consecutive_errors = 0;
-                        },
+                        }
                         None => {
                             i += 1;
                             *consecutive_errors += 1;
-                        },
+                        }
                     }
                 }
-            },
+            }
 
             SCAN_BRACKET => match skip_array_raw(data, i) {
                 Some(end) => {
                     i = end;
                     *consecutive_errors = 0;
-                },
+                }
                 None => {
                     i += 1;
                     *consecutive_errors += 1;
-                },
+                }
             },
 
             SCAN_SLASH => {
                 i = skip_name_raw(data, i);
                 *consecutive_errors = 0;
-            },
+            }
 
             SCAN_PERCENT => {
                 while i < len && data[i] != b'\n' && data[i] != b'\r' {
                     i += 1;
                 }
                 *consecutive_errors = 0;
-            },
+            }
 
             _ => {
                 i += 1;
                 *consecutive_errors += 1;
-            },
+            }
         }
 
         if *consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-            return ScanResult::TooManyErrors {
-                remaining: &data[i..],
-            };
+            return ScanResult::TooManyErrors { remaining: &data[i..] };
         }
     }
 }
@@ -4016,7 +3952,7 @@ mod tests {
                 assert_eq!(*d, 1.0);
                 assert_eq!(*e, 100.0);
                 assert_eq!(*f, 200.0);
-            },
+            }
             _ => panic!("Expected Tm operator"),
         }
     }
@@ -4033,7 +3969,7 @@ mod tests {
                 assert!(matches!(array[0], TextElement::String(_)));
                 assert!(matches!(array[1], TextElement::Offset(-100.0)));
                 assert!(matches!(array[2], TextElement::String(_)));
-            },
+            }
             _ => panic!("Expected TJ operator"),
         }
     }
@@ -4049,7 +3985,7 @@ mod tests {
                 assert_eq!(*r, 1.0);
                 assert_eq!(*g, 0.0);
                 assert_eq!(*b, 0.0);
-            },
+            }
             _ => panic!("Expected rg operator"),
         }
 
@@ -4058,7 +3994,7 @@ mod tests {
                 assert_eq!(*r, 0.0);
                 assert_eq!(*g, 1.0);
                 assert_eq!(*b, 0.0);
-            },
+            }
             _ => panic!("Expected RG operator"),
         }
     }
@@ -4125,7 +4061,7 @@ mod tests {
         match &ops[0] {
             Operator::Do { name } => {
                 assert_eq!(name, "Im1");
-            },
+            }
             _ => panic!("Expected Do operator"),
         }
     }
@@ -4154,7 +4090,7 @@ mod tests {
             Operator::Td { tx, ty } => {
                 assert_eq!(*tx, 1.5);
                 assert_eq!(*ty, 2.7);
-            },
+            }
             _ => panic!("Expected Td operator"),
         }
     }
@@ -4232,9 +4168,7 @@ mod tests {
         let stream = b"1 0 0 rg 0.5 g /CS1 cs";
         let ops = parse_content_stream_text_only(stream).unwrap();
         assert_eq!(ops.len(), 3);
-        assert!(
-            matches!(ops[0], Operator::SetFillRgb { r, g, b } if r == 1.0 && g == 0.0 && b == 0.0)
-        );
+        assert!(matches!(ops[0], Operator::SetFillRgb { r, g, b } if r == 1.0 && g == 0.0 && b == 0.0));
         assert!(matches!(ops[1], Operator::SetFillGray { gray } if gray == 0.5));
         assert!(matches!(ops[2], Operator::SetFillColorSpace { ref name } if name == "CS1"));
     }
@@ -4408,10 +4342,7 @@ mod tests {
     fn test_parse_inline_image_basic() {
         let stream = b"BI /W 4 /H 4 /BPC 8 /CS /DeviceGray ID ABCD EI";
         let ops = parse_content_stream(stream).unwrap();
-        assert!(
-            ops.iter()
-                .any(|op| matches!(op, Operator::InlineImage { .. }))
-        );
+        assert!(ops.iter().any(|op| matches!(op, Operator::InlineImage { .. })));
         for op in &ops {
             if let Operator::InlineImage { dict, data } = op {
                 assert_eq!(dict.get("W").and_then(|o| o.as_integer()), Some(4));
@@ -4426,10 +4357,7 @@ mod tests {
     fn test_parse_inline_image_empty_data() {
         let stream = b"BI /W 1 /H 1 ID X EI";
         let ops = parse_content_stream(stream).unwrap();
-        assert!(
-            ops.iter()
-                .any(|op| matches!(op, Operator::InlineImage { .. }))
-        );
+        assert!(ops.iter().any(|op| matches!(op, Operator::InlineImage { .. })));
     }
 
     #[test]
@@ -4439,10 +4367,7 @@ mod tests {
         assert!(ops.len() >= 3);
         assert!(matches!(ops[0], Operator::SaveState));
         assert!(matches!(ops[1], Operator::Cm { .. }));
-        assert!(
-            ops.iter()
-                .any(|op| matches!(op, Operator::InlineImage { .. }))
-        );
+        assert!(ops.iter().any(|op| matches!(op, Operator::InlineImage { .. })));
         assert!(ops.iter().any(|op| matches!(op, Operator::RestoreState)));
     }
 
@@ -4452,10 +4377,7 @@ mod tests {
         let mut stream = b"q BI /W 2 /H 2 ID AB".to_vec();
         stream.extend_from_slice(b"\x00EI Q BT (Hi) Tj ET");
         let ops = parse_content_stream(&stream).unwrap();
-        assert!(
-            ops.iter()
-                .any(|op| matches!(op, Operator::InlineImage { .. }))
-        );
+        assert!(ops.iter().any(|op| matches!(op, Operator::InlineImage { .. })));
         assert!(ops.iter().any(|op| matches!(op, Operator::RestoreState)));
         assert!(ops.iter().any(|op| matches!(op, Operator::Tj { .. })));
     }
@@ -4469,7 +4391,7 @@ mod tests {
             Operator::Td { tx, ty } => {
                 assert_eq!(*tx, -100.0);
                 assert_eq!(*ty, -200.0);
-            },
+            }
             _ => panic!("Expected Td"),
         }
     }
@@ -4483,7 +4405,7 @@ mod tests {
             Operator::Td { tx, ty } => {
                 assert!((tx - 0.001).abs() < 0.0001);
                 assert!((ty - 99.999).abs() < 0.01);
-            },
+            }
             _ => panic!("Expected Td"),
         }
     }
@@ -4497,7 +4419,7 @@ mod tests {
             Operator::Td { tx, ty } => {
                 assert!((tx - 0.5).abs() < 0.001);
                 assert!((ty - 0.25).abs() < 0.001);
-            },
+            }
             _ => panic!("Expected Td"),
         }
     }
@@ -4511,7 +4433,7 @@ mod tests {
             Operator::Td { tx, ty } => {
                 assert_eq!(*tx, 99999.0);
                 assert_eq!(*ty, 88888.0);
-            },
+            }
             _ => panic!("Expected Td"),
         }
     }
@@ -4525,7 +4447,7 @@ mod tests {
             Operator::Td { tx, ty } => {
                 assert_eq!(*tx, 0.0);
                 assert_eq!(*ty, 0.0);
-            },
+            }
             _ => panic!("Expected Td"),
         }
     }
@@ -4538,7 +4460,7 @@ mod tests {
         match &ops[0] {
             Operator::Tj { text } => {
                 assert_eq!(text, b"Hello (World)");
-            },
+            }
             _ => panic!("Expected Tj"),
         }
     }
@@ -4551,7 +4473,7 @@ mod tests {
         match &ops[0] {
             Operator::Tj { text } => {
                 assert!(!text.is_empty());
-            },
+            }
             _ => panic!("Expected Tj"),
         }
     }
@@ -4564,7 +4486,7 @@ mod tests {
         match &ops[0] {
             Operator::Tj { text } => {
                 assert!(text.is_empty());
-            },
+            }
             _ => panic!("Expected Tj"),
         }
     }
@@ -4577,7 +4499,7 @@ mod tests {
         match &ops[0] {
             Operator::Tj { text } => {
                 assert_eq!(text, b"Hello");
-            },
+            }
             _ => panic!("Expected Tj"),
         }
     }
@@ -4593,7 +4515,7 @@ mod tests {
                 assert_eq!(text.len(), 2);
                 assert_eq!(text[0], 0xAB);
                 assert_eq!(text[1], 0xC0);
-            },
+            }
             _ => panic!("Expected Tj"),
         }
     }
@@ -4606,7 +4528,7 @@ mod tests {
         match &ops[0] {
             Operator::Tj { text } => {
                 assert!(text.is_empty());
-            },
+            }
             _ => panic!("Expected Tj"),
         }
     }
@@ -4652,7 +4574,7 @@ mod tests {
             Operator::SetDash { array, phase } => {
                 assert_eq!(array, &[3.0, 2.0]);
                 assert_eq!(*phase, 0.0);
-            },
+            }
             _ => panic!("Expected SetDash"),
         }
     }
@@ -4665,7 +4587,7 @@ mod tests {
         match &ops[0] {
             Operator::SetRenderingIntent { intent } => {
                 assert_eq!(intent, "AbsoluteColorimetric");
-            },
+            }
             _ => panic!("Expected SetRenderingIntent"),
         }
     }
@@ -4686,7 +4608,7 @@ mod tests {
         match &ops[0] {
             Operator::SetExtGState { dict_name } => {
                 assert_eq!(dict_name, "GS0");
-            },
+            }
             _ => panic!("Expected SetExtGState"),
         }
     }
@@ -4699,7 +4621,7 @@ mod tests {
         match &ops[0] {
             Operator::PaintShading { name } => {
                 assert_eq!(name, "Sh0");
-            },
+            }
             _ => panic!("Expected PaintShading"),
         }
     }
@@ -4724,7 +4646,7 @@ mod tests {
                 assert!((m - 0.2).abs() < 0.01);
                 assert!((y - 0.3).abs() < 0.01);
                 assert!((k - 0.4).abs() < 0.01);
-            },
+            }
             _ => panic!("Expected SetFillCmyk"),
         }
         match &ops[1] {
@@ -4733,7 +4655,7 @@ mod tests {
                 assert!((m - 0.6).abs() < 0.01);
                 assert!((y - 0.7).abs() < 0.01);
                 assert!((k - 0.8).abs() < 0.01);
-            },
+            }
             _ => panic!("Expected SetStrokeCmyk"),
         }
     }
@@ -4764,7 +4686,7 @@ mod tests {
                 assert!((components[0] - 0.1).abs() < 0.01);
                 assert!((components[1] - 0.2).abs() < 0.01);
                 assert!((components[2] - 0.3).abs() < 0.01);
-            },
+            }
             _ => panic!("Expected SetFillColor"),
         }
     }
@@ -4777,7 +4699,7 @@ mod tests {
         match &ops[0] {
             Operator::SetStrokeColor { components } => {
                 assert_eq!(components.len(), 2);
-            },
+            }
             _ => panic!("Expected SetStrokeColor"),
         }
     }
@@ -4792,7 +4714,7 @@ mod tests {
                 assert_eq!(components.len(), 1);
                 assert!(name.is_some());
                 assert_eq!(**name.as_ref().unwrap(), "Pattern1");
-            },
+            }
             _ => panic!("Expected SetFillColorN"),
         }
     }
@@ -4806,7 +4728,7 @@ mod tests {
             Operator::SetFillColorN { components, name } => {
                 assert_eq!(components.len(), 3);
                 assert!(name.is_none());
-            },
+            }
             _ => panic!("Expected SetFillColorN"),
         }
     }
@@ -4820,7 +4742,7 @@ mod tests {
             Operator::SetStrokeColorN { components, name } => {
                 assert_eq!(components.len(), 1);
                 assert!(name.is_some());
-            },
+            }
             _ => panic!("Expected SetStrokeColorN"),
         }
     }
@@ -4845,7 +4767,7 @@ mod tests {
             Operator::BeginMarkedContentDict { tag, properties } => {
                 assert_eq!(tag, "Span");
                 assert!(!matches!(**properties, Object::Null));
-            },
+            }
             _ => panic!("Expected BeginMarkedContentDict"),
         }
     }
@@ -4859,7 +4781,7 @@ mod tests {
             Operator::BeginMarkedContentDict { tag, properties } => {
                 assert_eq!(tag, "Span");
                 assert_eq!(properties.as_name(), Some("MC0"));
-            },
+            }
             _ => panic!("Expected BeginMarkedContentDict"),
         }
     }
@@ -4892,21 +4814,14 @@ mod tests {
         let ops = parse_content_stream(stream).unwrap();
         assert_eq!(ops.len(), 1);
         match &ops[0] {
-            Operator::CurveTo {
-                x1,
-                y1,
-                x2,
-                y2,
-                x3,
-                y3,
-            } => {
+            Operator::CurveTo { x1, y1, x2, y2, x3, y3 } => {
                 assert_eq!(*x1, 10.0);
                 assert_eq!(*y1, 20.0);
                 assert_eq!(*x2, 30.0);
                 assert_eq!(*y2, 40.0);
                 assert_eq!(*x3, 50.0);
                 assert_eq!(*y3, 60.0);
-            },
+            }
             _ => panic!("Expected CurveTo"),
         }
     }
@@ -4922,7 +4837,7 @@ mod tests {
                 assert_eq!(*y2, 20.0);
                 assert_eq!(*x3, 30.0);
                 assert_eq!(*y3, 40.0);
-            },
+            }
             _ => panic!("Expected CurveToV"),
         }
     }
@@ -4938,7 +4853,7 @@ mod tests {
                 assert_eq!(*y1, 20.0);
                 assert_eq!(*x3, 30.0);
                 assert_eq!(*y3, 40.0);
-            },
+            }
             _ => panic!("Expected CurveToY"),
         }
     }
@@ -4984,17 +4899,12 @@ mod tests {
         let ops = parse_content_stream(stream).unwrap();
         assert_eq!(ops.len(), 1);
         match &ops[0] {
-            Operator::Rectangle {
-                x,
-                y,
-                width,
-                height,
-            } => {
+            Operator::Rectangle { x, y, width, height } => {
                 assert_eq!(*x, 10.0);
                 assert_eq!(*y, 20.0);
                 assert_eq!(*width, 100.0);
                 assert_eq!(*height, 50.0);
-            },
+            }
             _ => panic!("Expected Rectangle"),
         }
     }
@@ -5029,7 +4939,7 @@ mod tests {
                 assert!((word_space - 1.5).abs() < 0.001);
                 assert!((char_space - 0.5).abs() < 0.001);
                 assert_eq!(text, b"Hello");
-            },
+            }
             _ => panic!("Expected DoubleQuote"),
         }
     }
@@ -5042,7 +4952,7 @@ mod tests {
         match &ops[0] {
             Operator::Quote { text } => {
                 assert_eq!(text, b"NextLine");
-            },
+            }
             _ => panic!("Expected Quote"),
         }
     }
@@ -5056,7 +4966,7 @@ mod tests {
             Operator::Other { name, operands } => {
                 assert_eq!(name, "XYZ");
                 assert_eq!(operands.len(), 1);
-            },
+            }
             _ => panic!("Expected Other operator"),
         }
     }
@@ -5070,7 +4980,7 @@ mod tests {
             Operator::Other { name, operands } => {
                 assert_eq!(name, "BX");
                 assert_eq!(operands.len(), 0);
-            },
+            }
             _ => panic!("Expected Other for BX"),
         }
     }
@@ -5136,10 +5046,7 @@ mod tests {
     fn test_images_only_inline_image() {
         let stream = b"q 1 0 0 1 0 0 cm BI /W 2 /H 2 ID AB EI Q";
         let ops = parse_content_stream_images_only(stream).unwrap();
-        assert!(
-            ops.iter()
-                .any(|op| matches!(op, Operator::InlineImage { .. }))
-        );
+        assert!(ops.iter().any(|op| matches!(op, Operator::InlineImage { .. })));
     }
 
     #[test]
@@ -5169,10 +5076,7 @@ mod tests {
     fn test_text_only_inline_image_outside_bt_skipped() {
         let stream = b"BI /W 2 /H 2 ID XY EI BT (Hi) Tj ET";
         let ops = parse_content_stream_text_only(stream).unwrap();
-        assert!(
-            !ops.iter()
-                .any(|op| matches!(op, Operator::InlineImage { .. }))
-        );
+        assert!(!ops.iter().any(|op| matches!(op, Operator::InlineImage { .. })));
         assert!(ops.iter().any(|op| matches!(op, Operator::Tj { .. })));
     }
 
@@ -5271,15 +5175,12 @@ mod tests {
         // The injected Cm should reflect the accumulated CTM at the BT position:
         // outer scaling (0.1) × inner translation (3000, 4000).
         // Net: a=0.1, d=0.1, e=0.1*3000+50=350, f=0.1*4000+50=450 ~keep
-        let cm_ops: Vec<_> = ops
-            .iter()
-            .filter(|op| matches!(op, Operator::Cm { .. }))
-            .collect();
+        let cm_ops: Vec<_> = ops.iter().filter(|op| matches!(op, Operator::Cm { .. })).collect();
         assert!(!cm_ops.is_empty(), "expected at least 1 Cm operator (injected CTM)");
 
-        let has_scaled_cm = cm_ops.iter().any(|op| {
-            matches!(op, Operator::Cm { a, d, .. } if (*a - 0.1).abs() < 0.01 && (*d - 0.1).abs() < 0.02)
-        });
+        let has_scaled_cm = cm_ops
+            .iter()
+            .any(|op| matches!(op, Operator::Cm { a, d, .. } if (*a - 0.1).abs() < 0.01 && (*d - 0.1).abs() < 0.02));
         assert!(
             has_scaled_cm,
             "injected Cm should include outer 0.1x scaling, got: {:?}",
@@ -5334,10 +5235,7 @@ mod tests {
         })
         .unwrap();
 
-        let cm_ops: Vec<_> = ops
-            .iter()
-            .filter(|op| matches!(op, Operator::Cm { .. }))
-            .collect();
+        let cm_ops: Vec<_> = ops.iter().filter(|op| matches!(op, Operator::Cm { .. })).collect();
         let has_scaled_cm = cm_ops.iter().any(|op| {
             matches!(
                 op,
@@ -5395,10 +5293,7 @@ mod tests {
         })
         .unwrap();
 
-        let tf_ops: Vec<_> = ops
-            .iter()
-            .filter(|op| matches!(op, Operator::Tf { .. }))
-            .collect();
+        let tf_ops: Vec<_> = ops.iter().filter(|op| matches!(op, Operator::Tf { .. })).collect();
         assert!(
             tf_ops.len() >= 2,
             "expected Tf for both BT blocks (explicit + inherited), got {}",
@@ -5512,16 +5407,16 @@ mod tests {
 
         let injected = last_region_injected(&ops);
         assert!(
-            injected.iter().any(
-                |op| matches!(op, Operator::Tc { char_space } if (*char_space - 0.5).abs() < 1e-6)
-            ),
+            injected
+                .iter()
+                .any(|op| matches!(op, Operator::Tc { char_space } if (*char_space - 0.5).abs() < 1e-6)),
             "inherited Tc not injected: {:?}",
             injected
         );
         assert!(
-            injected.iter().any(
-                |op| matches!(op, Operator::Tw { word_space } if (*word_space - 0.25).abs() < 1e-6)
-            ),
+            injected
+                .iter()
+                .any(|op| matches!(op, Operator::Tw { word_space } if (*word_space - 0.25).abs() < 1e-6)),
             "inherited Tw not injected: {:?}",
             injected
         );
@@ -5549,16 +5444,16 @@ mod tests {
 
         let injected = last_region_injected(&ops);
         assert!(
-            injected.iter().any(
-                |op| matches!(op, Operator::Tw { word_space } if (*word_space - 1.5).abs() < 1e-6)
-            ),
+            injected
+                .iter()
+                .any(|op| matches!(op, Operator::Tw { word_space } if (*word_space - 1.5).abs() < 1e-6)),
             "Tw persisted by \" not injected: {:?}",
             injected
         );
         assert!(
-            injected.iter().any(
-                |op| matches!(op, Operator::Tc { char_space } if (*char_space - 0.3).abs() < 1e-6)
-            ),
+            injected
+                .iter()
+                .any(|op| matches!(op, Operator::Tc { char_space } if (*char_space - 0.3).abs() < 1e-6)),
             "Tc persisted by \" not injected: {:?}",
             injected
         );
@@ -5578,16 +5473,16 @@ mod tests {
 
         let injected = last_region_injected(&ops);
         assert!(
-            injected.iter().any(
-                |op| matches!(op, Operator::Tw { word_space } if (*word_space - 2.0).abs() < 1e-6)
-            ),
+            injected
+                .iter()
+                .any(|op| matches!(op, Operator::Tw { word_space } if (*word_space - 2.0).abs() < 1e-6)),
             "Tw persisted by \" with hex string not injected: {:?}",
             injected
         );
         assert!(
-            injected.iter().any(
-                |op| matches!(op, Operator::Tc { char_space } if (*char_space - 0.5).abs() < 1e-6)
-            ),
+            injected
+                .iter()
+                .any(|op| matches!(op, Operator::Tc { char_space } if (*char_space - 0.5).abs() < 1e-6)),
             "Tc persisted by \" with hex string not injected: {:?}",
             injected
         );
@@ -5672,8 +5567,7 @@ mod tests {
     fn test_prescan_scn_with_too_many_operands_injects_nothing() {
         // A 6-component scn (DeviceN) exceeds what the rolling buffer can
         // faithfully replay; a truncated color would be plausible and wrong. ~keep
-        let cs =
-            two_region_prescan_stream(b"/F1 10 Tf (A) Tj ET 0.1 0.2 0.3 0.4 0.5 0.6 scn BT (X) Tj");
+        let cs = two_region_prescan_stream(b"/F1 10 Tf (A) Tj ET 0.1 0.2 0.3 0.4 0.5 0.6 scn BT (X) Tj");
         let mut ops = Vec::new();
         parse_and_execute_text_only(&cs, |op| {
             ops.push(op);
@@ -5682,10 +5576,9 @@ mod tests {
         .unwrap();
         let injected = last_region_injected(&ops);
         assert!(
-            !injected.iter().any(|op| matches!(
-                op,
-                Operator::SetFillColor { .. } | Operator::SetFillColorN { .. }
-            )),
+            !injected
+                .iter()
+                .any(|op| matches!(op, Operator::SetFillColor { .. } | Operator::SetFillColorN { .. })),
             "truncated color injected: {:?}",
             injected
         );
@@ -5876,7 +5769,7 @@ mod tests {
             Operator::Td { tx, ty } => {
                 assert_eq!(*tx, 0.0);
                 assert_eq!(*ty, 0.0);
-            },
+            }
             _ => panic!("Expected Td with default values"),
         }
     }
@@ -5914,10 +5807,7 @@ mod tests {
         assert!(ops.iter().any(|op| matches!(op, Operator::TStar)));
         assert!(ops.iter().any(|op| matches!(op, Operator::EndText)));
         assert!(ops.iter().any(|op| matches!(op, Operator::RestoreState)));
-        assert!(
-            ops.iter()
-                .any(|op| matches!(op, Operator::Rectangle { .. }))
-        );
+        assert!(ops.iter().any(|op| matches!(op, Operator::Rectangle { .. })));
         assert!(ops.iter().any(|op| matches!(op, Operator::Stroke)));
     }
 
@@ -5954,7 +5844,7 @@ mod tests {
                     TextElement::String(s) => assert_eq!(s, b"World"),
                     _ => panic!("Expected string"),
                 }
-            },
+            }
             _ => panic!("Expected TJ"),
         }
     }
@@ -5968,7 +5858,7 @@ mod tests {
             Operator::Td { tx, ty } => {
                 assert_eq!(*tx, 100.0);
                 assert_eq!(*ty, 200.0);
-            },
+            }
             _ => panic!("Expected Td"),
         }
     }
@@ -5978,14 +5868,8 @@ mod tests {
         let stream = b"BT (A) Tj ET BT (B) Tj ET BT (C) Tj ET";
         let ops = parse_content_stream(stream).unwrap();
         assert_eq!(ops.len(), 9);
-        let bt_count = ops
-            .iter()
-            .filter(|op| matches!(op, Operator::BeginText))
-            .count();
-        let et_count = ops
-            .iter()
-            .filter(|op| matches!(op, Operator::EndText))
-            .count();
+        let bt_count = ops.iter().filter(|op| matches!(op, Operator::BeginText)).count();
+        let et_count = ops.iter().filter(|op| matches!(op, Operator::EndText)).count();
         assert_eq!(bt_count, 3);
         assert_eq!(et_count, 3);
     }
@@ -5999,7 +5883,7 @@ mod tests {
             Operator::Tf { font, size } => {
                 assert_eq!(font, "Helvetica");
                 assert!((size - 14.5).abs() < 0.01);
-            },
+            }
             _ => panic!("Expected Tf from fast parser"),
         }
     }
@@ -6024,11 +5908,8 @@ mod tests {
     fn test_fast_parser_tm_operator() {
         let stream = b"BT 1 0 0 1 72 700 Tm ET";
         let ops = parse_content_stream_text_only(stream).unwrap();
-        assert!(
-            ops.iter()
-                .any(|op| matches!(op, Operator::Tm { a, b, c, d, e, f }
-            if *a == 1.0 && *b == 0.0 && *c == 0.0 && *d == 1.0 && *e == 72.0 && *f == 700.0))
-        );
+        assert!(ops.iter().any(|op| matches!(op, Operator::Tm { a, b, c, d, e, f }
+            if *a == 1.0 && *b == 0.0 && *c == 0.0 && *d == 1.0 && *e == 72.0 && *f == 700.0)));
     }
 
     #[test]
@@ -6072,24 +5953,15 @@ mod tests {
     fn test_fast_parser_double_quote_operator() {
         let stream = b"BT 1 2 (text) \" ET";
         let ops = parse_content_stream_text_only(stream).unwrap();
-        assert!(
-            ops.iter()
-                .any(|op| matches!(op, Operator::DoubleQuote { .. }))
-        );
+        assert!(ops.iter().any(|op| matches!(op, Operator::DoubleQuote { .. })));
     }
 
     #[test]
     fn test_fast_parser_color_ops_inside_bt() {
         let stream = b"BT 1 0 0 rg 0 g ET";
         let ops = parse_content_stream_text_only(stream).unwrap();
-        assert!(
-            ops.iter()
-                .any(|op| matches!(op, Operator::SetFillRgb { .. }))
-        );
-        assert!(
-            ops.iter()
-                .any(|op| matches!(op, Operator::SetFillGray { .. }))
-        );
+        assert!(ops.iter().any(|op| matches!(op, Operator::SetFillRgb { .. })));
+        assert!(ops.iter().any(|op| matches!(op, Operator::SetFillGray { .. })));
     }
 
     #[test]
@@ -6506,7 +6378,7 @@ mod tests {
                 assert_eq!(d, 1.0);
                 assert_eq!(e, 72.0);
                 assert_eq!(f, 700.0);
-            },
+            }
             _ => panic!(
                 "Expected SimpleOp with Cm, got {:?}",
                 match result {
@@ -6986,9 +6858,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let has_emc = ops
-            .iter()
-            .any(|op| matches!(op, Operator::EndMarkedContent));
+        let has_emc = ops.iter().any(|op| matches!(op, Operator::EndMarkedContent));
         assert!(has_emc, "EndMarkedContent (EMC) must be preserved in tagged PDF output");
     }
 }

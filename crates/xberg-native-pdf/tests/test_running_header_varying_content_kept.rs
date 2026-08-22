@@ -37,10 +37,7 @@ fn stream(buf: &mut Vec<u8>, off: &mut [usize], id: usize, data: &[u8]) {
 
 /// Minimal single-page-content PDF builder: N pages, each with a body
 /// paragraph plus arbitrary extra content-stream text supplied per page.
-fn build_pdf_with_page_extras(
-    page_count: usize,
-    extra_per_page: impl Fn(usize) -> String,
-) -> Vec<u8> {
+fn build_pdf_with_page_extras(page_count: usize, extra_per_page: impl Fn(usize) -> String) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
     let mut off = vec![0usize; 4 + page_count * 2];
 

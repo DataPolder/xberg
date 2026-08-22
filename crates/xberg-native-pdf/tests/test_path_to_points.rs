@@ -18,9 +18,7 @@ const MAX_POINTS_PER_PATH: usize = 200_000;
 
 fn check_fixture(path: &str, tolerance: f32) {
     let doc = PdfDocument::open(path).unwrap_or_else(|e| panic!("open {path}: {e}"));
-    let pages = doc
-        .page_count()
-        .unwrap_or_else(|e| panic!("page_count {path}: {e}"));
+    let pages = doc.page_count().unwrap_or_else(|e| panic!("page_count {path}: {e}"));
 
     let mut paths_seen = 0usize;
     let mut curves_seen = 0usize;

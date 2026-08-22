@@ -124,8 +124,7 @@ impl DocumentProperties {
 
         let median_char_width = Self::compute_median_char_width(chars);
 
-        let (median_line_spacing, avg_chars_per_line, line_y_variance) =
-            Self::estimate_line_properties(chars);
+        let (median_line_spacing, avg_chars_per_line, line_y_variance) = Self::estimate_line_properties(chars);
 
         let column_count = Self::detect_column_count(chars, page_bbox.width);
 
@@ -213,8 +212,7 @@ impl DocumentProperties {
         };
 
         let mean_y = line_ys.iter().sum::<f32>() / line_ys.len().max(1) as f32;
-        let variance = line_ys.iter().map(|&y| (y - mean_y).powi(2)).sum::<f32>()
-            / line_ys.len().max(1) as f32;
+        let variance = line_ys.iter().map(|&y| (y - mean_y).powi(2)).sum::<f32>() / line_ys.len().max(1) as f32;
 
         (median_line_spacing, avg_chars_per_line, variance)
     }
@@ -405,8 +403,8 @@ impl AdaptiveLayoutParams {
     pub fn default_for_letter_pdf() -> Self {
         Self {
             xy_cut_min_gap_ratio: 0.05,
-            word_gap_threshold: 3.0, // ~0.5 character width for 12pt text ~keep
-            line_gap_threshold: 15.0, // ~1.3× line spacing for 12pt text ~keep
+            word_gap_threshold: 3.0,    // ~0.5 character width for 12pt text ~keep
+            line_gap_threshold: 15.0,   // ~1.3× line spacing for 12pt text ~keep
             column_gap_threshold: 24.0, // ~2× font size for 12pt text ~keep
             xy_cut_max_depth: 10,
             xy_cut_min_region_size: 50.0,

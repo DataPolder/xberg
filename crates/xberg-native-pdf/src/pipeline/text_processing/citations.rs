@@ -209,9 +209,7 @@ fn get_numeric_bracket_regex() -> Option<&'static Regex> {
 }
 
 fn get_numeric_paren_regex() -> Option<&'static Regex> {
-    NUMERIC_PAREN_REGEX
-        .get_or_init(|| Regex::new(r"\(\d+\)").ok())
-        .as_ref()
+    NUMERIC_PAREN_REGEX.get_or_init(|| Regex::new(r"\(\d+\)").ok()).as_ref()
 }
 
 fn get_superscript_regex() -> Option<&'static Regex> {
@@ -223,8 +221,10 @@ fn get_superscript_regex() -> Option<&'static Regex> {
 fn get_author_year_regex() -> Option<&'static Regex> {
     AUTHOR_YEAR_REGEX
         .get_or_init(|| {
-            Regex::new(r"\([A-Z][a-z]+(?:,?\s+and\s+[A-Z][a-z]+)?,?\s*\d{4}\)|[A-Z][a-z]+\s*\(\d{4}\)|[A-Z][a-z]+,\s*\d{4}")
-                .ok()
+            Regex::new(
+                r"\([A-Z][a-z]+(?:,?\s+and\s+[A-Z][a-z]+)?,?\s*\d{4}\)|[A-Z][a-z]+\s*\(\d{4}\)|[A-Z][a-z]+,\s*\d{4}",
+            )
+            .ok()
         })
         .as_ref()
 }

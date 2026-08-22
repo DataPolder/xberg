@@ -150,17 +150,11 @@ fn parse_one_thread(
     Some(ArticleThread { title, beads })
 }
 
-fn parse_bead(
-    bead_dict: &HashMap<String, Object>,
-    page_index: &HashMap<ObjectRef, usize>,
-) -> Option<Bead> {
+fn parse_bead(bead_dict: &HashMap<String, Object>, page_index: &HashMap<ObjectRef, usize>) -> Option<Bead> {
     let page_ref = bead_dict.get("P")?.as_reference()?;
     let idx = *page_index.get(&page_ref)?;
     let rect = parse_rect(bead_dict.get("R")?.as_array()?)?;
-    Some(Bead {
-        page_index: idx,
-        rect,
-    })
+    Some(Bead { page_index: idx, rect })
 }
 
 /// Decode a PDF text string object into a Rust `String` (best-effort).

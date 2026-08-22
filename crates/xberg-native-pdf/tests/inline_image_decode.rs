@@ -56,9 +56,7 @@ fn pdf_with_inline_image(dict: &str, samples: &[u8]) -> Vec<u8> {
 }
 
 /// The four pixels of the 2x2 test image: red, green, blue, white.
-const RGB_2X2: [u8; 12] = [
-    0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF,
-];
+const RGB_2X2: [u8; 12] = [0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF];
 
 #[test]
 fn inline_image_with_abbreviated_colour_space_decodes_to_exact_pixels() {
@@ -66,7 +64,11 @@ fn inline_image_with_abbreviated_colour_space_decodes_to_exact_pixels() {
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
 
     let images = doc.extract_images(0).expect("extract");
-    assert_eq!(images.len(), 1, "the inline image must be extracted, not silently dropped");
+    assert_eq!(
+        images.len(),
+        1,
+        "the inline image must be extracted, not silently dropped"
+    );
 
     let img = &images[0];
     assert_eq!((img.width(), img.height()), (2, 2));
@@ -78,7 +80,7 @@ fn inline_image_with_abbreviated_colour_space_decodes_to_exact_pixels() {
                 &RGB_2X2,
                 "decoded samples must be the exact bytes the stream carried"
             );
-        },
+        }
         other => panic!("expected raw RGB pixels, got {other:?}"),
     }
 }

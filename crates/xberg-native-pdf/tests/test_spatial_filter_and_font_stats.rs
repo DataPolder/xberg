@@ -66,8 +66,7 @@ fn one_page_pdf(content: &[u8]) -> Vec<u8> {
 /// After excluding the figure region, only body text should remain.
 #[test]
 fn extract_text_excluding_rects_removes_figure_text() {
-    let content =
-        b"BT /F1 12 Tf 50 700 Td (Body text) Tj ET\nBT /F1 10 Tf 50 400 Td (Figure caption) Tj ET";
+    let content = b"BT /F1 12 Tf 50 700 Td (Body text) Tj ET\nBT /F1 10 Tf 50 400 Td (Figure caption) Tj ET";
     let pdf = one_page_pdf(content);
     let doc = PdfDocument::from_bytes(pdf).expect("open PDF");
 
@@ -96,8 +95,7 @@ fn extract_text_excluding_rects_removes_figure_text() {
 /// extract_spans_excluding_rects keeps spans outside the excluded region.
 #[test]
 fn extract_spans_excluding_rects_filters_correctly() {
-    let content =
-        b"BT /F1 12 Tf 50 700 Td (Keep this) Tj ET\nBT /F1 12 Tf 50 200 Td (Drop this) Tj ET";
+    let content = b"BT /F1 12 Tf 50 700 Td (Keep this) Tj ET\nBT /F1 12 Tf 50 200 Td (Drop this) Tj ET";
     let pdf = one_page_pdf(content);
     let doc = PdfDocument::from_bytes(pdf).expect("open PDF");
 
@@ -145,8 +143,7 @@ fn extract_text_excluding_rects_empty_exclusion_is_noop() {
 /// extract_words_excluding_rects keeps words outside the excluded region.
 #[test]
 fn extract_words_excluding_rects_filters_correctly() {
-    let content =
-        b"BT /F1 12 Tf 50 700 Td (KeepWord) Tj ET\nBT /F1 12 Tf 50 200 Td (DropWord) Tj ET";
+    let content = b"BT /F1 12 Tf 50 700 Td (KeepWord) Tj ET\nBT /F1 12 Tf 50 200 Td (DropWord) Tj ET";
     let pdf = one_page_pdf(content);
     let doc = PdfDocument::from_bytes(pdf).expect("open PDF");
 
@@ -182,9 +179,7 @@ fn page_font_stats_dominant_em_matches_body_size() {
     let pdf = one_page_pdf(content);
     let doc = PdfDocument::from_bytes(pdf).expect("open PDF");
 
-    let stats = doc
-        .page_font_stats(0)
-        .expect("page_font_stats must not error");
+    let stats = doc.page_font_stats(0).expect("page_font_stats must not error");
 
     assert!(
         (stats.dominant_em - 12.0).abs() < 1.5,
@@ -214,10 +209,7 @@ fn heading_detection_via_page_font_stats_ratio() {
         "at least one span should meet H1 ratio (font_size/dominant_em >= 1.8); \
          dominant_em={:.1}, spans: {:?}",
         stats.dominant_em,
-        spans
-            .iter()
-            .map(|s| (&s.text, s.font_size))
-            .collect::<Vec<_>>()
+        spans.iter().map(|s| (&s.text, s.font_size)).collect::<Vec<_>>()
     );
     assert!(
         heading_spans.iter().any(|s| s.text.contains("Big Heading")),
@@ -233,9 +225,7 @@ fn page_font_stats_empty_page_returns_default() {
     let pdf = one_page_pdf(content);
     let doc = PdfDocument::from_bytes(pdf).expect("open PDF");
 
-    let stats = doc
-        .page_font_stats(0)
-        .expect("page_font_stats on empty page");
+    let stats = doc.page_font_stats(0).expect("page_font_stats on empty page");
     assert_eq!(
         stats.dominant_em,
         PageFontStats::default().dominant_em,

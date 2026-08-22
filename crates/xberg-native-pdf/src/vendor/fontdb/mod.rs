@@ -134,11 +134,7 @@ impl Database {
                 .faces
                 .iter()
                 .enumerate()
-                .filter(|(_, face)| {
-                    face.families
-                        .iter()
-                        .any(|(family_name, _)| family_name == name)
-                })
+                .filter(|(_, face)| face.families.iter().any(|(family_name, _)| family_name == name))
                 .map(|(index, info)| (ID(index), info))
                 .collect();
 
@@ -175,46 +171,31 @@ impl Database {
     /// Sets the family used by `Family::Serif`. Only called from
     /// `system_fonts::load_fontconfig`, hence the matching `cfg`: on other
     /// targets these would otherwise be dead code. ~keep
-    #[cfg(all(
-        unix,
-        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
-    ))]
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
     fn set_serif_family<S: Into<String>>(&mut self, family: S) {
         self.family_serif = family.into();
     }
 
     /// Sets the family used by `Family::SansSerif`.
-    #[cfg(all(
-        unix,
-        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
-    ))]
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
     fn set_sans_serif_family<S: Into<String>>(&mut self, family: S) {
         self.family_sans_serif = family.into();
     }
 
     /// Sets the family used by `Family::Cursive`.
-    #[cfg(all(
-        unix,
-        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
-    ))]
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
     fn set_cursive_family<S: Into<String>>(&mut self, family: S) {
         self.family_cursive = family.into();
     }
 
     /// Sets the family used by `Family::Fantasy`.
-    #[cfg(all(
-        unix,
-        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
-    ))]
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
     fn set_fantasy_family<S: Into<String>>(&mut self, family: S) {
         self.family_fantasy = family.into();
     }
 
     /// Sets the family used by `Family::Monospace`.
-    #[cfg(all(
-        unix,
-        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
-    ))]
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
     fn set_monospace_family<S: Into<String>>(&mut self, family: S) {
         self.family_monospace = family.into();
     }

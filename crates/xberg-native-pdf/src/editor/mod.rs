@@ -1,11 +1,5 @@
 //! PDF editing module for modifying existing PDF documents.
-#![allow(
-    dead_code,
-    unused_variables,
-    unused_mut,
-    missing_docs,
-    clippy::write_with_newline
-)]
+#![allow(dead_code, unused_variables, unused_mut, missing_docs, clippy::write_with_newline)]
 //!
 //! This module provides a high-level API for editing PDF documents:
 //! - Metadata editing (title, author, subject, keywords)
@@ -91,15 +85,13 @@ pub mod form_fields;
 pub mod resource_manager;
 
 pub use document_editor::{
-    DocumentEditor, DocumentInfo, EditableDocument, EncryptionAlgorithm, EncryptionConfig,
-    ImageInfo, PageInfo, Permissions, SaveOptions,
+    DocumentEditor, DocumentInfo, EditableDocument, EncryptionAlgorithm, EncryptionConfig, ImageInfo, PageInfo,
+    Permissions, SaveOptions,
 };
 pub use dom::{
-    AnnotationId, AnnotationWrapper, ElementId, ImageElementCollectionEditor, PageEditor,
-    PathElementCollectionEditor, PdfElement, PdfImage, PdfPage, PdfPath, PdfStructure, PdfTable,
-    PdfText, TableElementCollectionEditor, TextElementCollectionEditor,
+    AnnotationId, AnnotationWrapper, ElementId, ImageElementCollectionEditor, PageEditor, PathElementCollectionEditor,
+    PdfElement, PdfImage, PdfPage, PdfPath, PdfStructure, PdfTable, PdfText, TableElementCollectionEditor,
+    TextElementCollectionEditor,
 };
-pub use form_fields::{
-    FormFieldType, FormFieldValue, FormFieldWrapper, ParentFieldConfig, WidgetConfig,
-};
+pub use form_fields::{FormFieldType, FormFieldValue, FormFieldWrapper, ParentFieldConfig, WidgetConfig};
 pub use resource_manager::ResourceManager;

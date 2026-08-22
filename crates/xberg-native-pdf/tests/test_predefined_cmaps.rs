@@ -64,9 +64,7 @@ fn test_identity_h_cmap_simple_cid_to_unicode() {
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let result = font.char_to_unicode(0x4E00);
@@ -126,9 +124,7 @@ fn test_unigb_ucs2_h_cmap_simplified_chinese() {
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let result = font.char_to_unicode(0x2EE5);
@@ -191,16 +187,17 @@ fn test_unijis_ucs2_h_cmap_japanese() {
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let result = font.char_to_unicode(0x3042);
 
     assert!(result.is_some(), "UniJIS-UCS2-H should map CID 0x3042");
     let mapped = result.unwrap();
-    assert_eq!(mapped, "あ", "CID 0x3042 should map to Japanese character 'あ' (U+3042)");
+    assert_eq!(
+        mapped, "あ",
+        "CID 0x3042 should map to Japanese character 'あ' (U+3042)"
+    );
 }
 
 #[test]
@@ -253,9 +250,7 @@ fn test_unicns_ucs2_h_cmap_traditional_chinese() {
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let result = font.char_to_unicode(0x4E00);
@@ -315,9 +310,7 @@ fn test_uniks_ucs2_h_cmap_korean() {
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let result = font.char_to_unicode(0xAC00);

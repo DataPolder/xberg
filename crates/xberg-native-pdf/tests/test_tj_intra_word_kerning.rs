@@ -68,7 +68,11 @@ BT /F0 12 Tf 1 0 0 1 100 760 Tm [(equivalen) -150 (t)] TJ ET\n";
         &mut offsets,
         &format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len() + 1),
     );
-    push(&mut out, &mut offsets, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
 
     let xref_offset = out.len();
     out.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
@@ -103,8 +107,16 @@ fn tj_kerning_within_word_does_not_insert_space() {
         (("equivalen", "t"), "equivalent"),
     ] {
         // Both halves must be present (otherwise the test is broken)... ~keep
-        assert!(text.contains(halves.0), "missing left half '{}'. Text: {text:?}", halves.0);
-        assert!(text.contains(halves.1), "missing right half '{}'. Text: {text:?}", halves.1);
+        assert!(
+            text.contains(halves.0),
+            "missing left half '{}'. Text: {text:?}",
+            halves.0
+        );
+        assert!(
+            text.contains(halves.1),
+            "missing right half '{}'. Text: {text:?}",
+            halves.1
+        );
 
         // ...and they must be joined, not split by a spurious space. ~keep
         let split = format!("{} {}", halves.0, halves.1);
@@ -112,6 +124,9 @@ fn tj_kerning_within_word_does_not_insert_space() {
             !text.contains(&split),
             "TJ intra-word kerning produced spurious space: '{split}' should be '{joined}'. Text: {text:?}"
         );
-        assert!(text.contains(joined), "expected '{joined}' in extracted text. Text: {text:?}");
+        assert!(
+            text.contains(joined),
+            "expected '{joined}' in extracted text. Text: {text:?}"
+        );
     }
 }

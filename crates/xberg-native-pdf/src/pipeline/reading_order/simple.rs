@@ -15,11 +15,7 @@ use super::{ReadingOrderContext, ReadingOrderStrategy};
 pub struct SimpleStrategy;
 
 impl ReadingOrderStrategy for SimpleStrategy {
-    fn apply(
-        &self,
-        spans: Vec<TextSpan>,
-        _context: &ReadingOrderContext,
-    ) -> Result<Vec<OrderedTextSpan>> {
+    fn apply(&self, spans: Vec<TextSpan>, _context: &ReadingOrderContext) -> Result<Vec<OrderedTextSpan>> {
         let mut spans_with_index: Vec<_> = spans.into_iter().enumerate().collect();
 
         spans_with_index.sort_by(|(_, a), (_, b)| {
@@ -33,9 +29,7 @@ impl ReadingOrderStrategy for SimpleStrategy {
         Ok(spans_with_index
             .into_iter()
             .enumerate()
-            .map(|(order, (_, span))| {
-                OrderedTextSpan::with_info(span, order, ReadingOrderInfo::simple())
-            })
+            .map(|(order, (_, span))| OrderedTextSpan::with_info(span, order, ReadingOrderInfo::simple()))
             .collect())
     }
 

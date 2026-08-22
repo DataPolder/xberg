@@ -24,9 +24,7 @@ fn test_outline_present() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to get outline")
         .expect("Outline should have been found");
 
-    let [embedded, indirect] = outline
-        .try_into()
-        .expect("Outline should have had exactly two items");
+    let [embedded, indirect] = outline.try_into().expect("Outline should have had exactly two items");
 
     match embedded {
         OutlineItem {
@@ -36,7 +34,7 @@ fn test_outline_present() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             assert_eq!(title, "Outline with Embedded Action");
             assert_eq!(children.len(), 0, "Outline items should have no children");
-        },
+        }
         _ => return Err("Expected destination to be first page".into()),
     }
 
@@ -48,7 +46,7 @@ fn test_outline_present() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             assert_eq!(title, "Outline with Indirectly Referenced Action");
             assert_eq!(children.len(), 0, "Outline items should have no children");
-        },
+        }
         _ => return Err("Expected destination to be first page".into()),
     }
 

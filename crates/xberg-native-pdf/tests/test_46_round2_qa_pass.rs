@@ -433,9 +433,7 @@ fn qa2_smask_alpha_uniform_half_modulates_spot_lane() {
     let post_u8 = tint_to_u8(compose_normal(0.0, 0.6, 1.0));
     assert_eq!(post_u8, 153);
     let m = 0.5_f32;
-    let expected = (m * post_u8 as f32 + (1.0 - m) * 0.0)
-        .clamp(0.0, 255.0)
-        .round() as u8;
+    let expected = (m * post_u8 as f32 + (1.0 - m) * 0.0).clamp(0.0, 255.0).round() as u8;
     assert_eq!(expected, 77);
     assert_eq!(
         plane[centre], expected,
@@ -1056,9 +1054,7 @@ fn qa10_round4_cmyk_plane_byte_identity_preserved_through_round2() {
         plane_inka.iter().position(|&b| b != 0)
     );
 
-    let cmyk = renderer
-        .cmyk_sidecar_cmyk_bytes()
-        .expect("sidecar CMYK plane");
+    let cmyk = renderer.cmyk_sidecar_cmyk_bytes().expect("sidecar CMYK plane");
     let dims = renderer.cmyk_sidecar_dims().unwrap();
     let centre = ((dims.1 / 2) * dims.0 + dims.0 / 2) as usize;
     let c_at_centre = cmyk[centre * 4];
@@ -1090,8 +1086,7 @@ fn qa11_separation_paint_without_trigger_keeps_sidecar_none() {
     let psfunc = "<< /FunctionType 2 /Domain [0 1] /Range [0 1 0 1 0 1 0 1] \
                   /C0 [0.0 0.0 0.0 0.0] /C1 [0.0 1.0 0.0 0.0] /N 1 >>";
     let content = "/CS_PMS cs\n0.7 scn\n0 0 100 100 re\nf\n";
-    let resources =
-        format!("/ColorSpace << /CS_PMS [/Separation /InkA /DeviceCMYK {} ] >>", psfunc);
+    let resources = format!("/ColorSpace << /CS_PMS [/Separation /InkA /DeviceCMYK {} ] >>", psfunc);
     let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[]);
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
     let mut renderer = PageRenderer::new(RenderOptions::with_dpi(72).as_raw());

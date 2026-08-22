@@ -32,38 +32,34 @@ pub(super) fn find_best_match(candidates: &[(ID, &FaceInfo)], query: &Query) -> 
         let stretch = matching_set
             .iter()
             .filter(|&&index| candidates[index].1.stretch < query.stretch)
-            .min_by_key(|&&index| {
-                query.stretch.to_number() - candidates[index].1.stretch.to_number()
-            });
+            .min_by_key(|&&index| query.stretch.to_number() - candidates[index].1.stretch.to_number());
 
         match stretch {
             Some(&matching_index) => candidates[matching_index].1.stretch,
             None => {
-                let matching_index = *matching_set.iter().min_by_key(|&&index| {
-                    candidates[index].1.stretch.to_number() - query.stretch.to_number()
-                })?;
+                let matching_index = *matching_set
+                    .iter()
+                    .min_by_key(|&&index| candidates[index].1.stretch.to_number() - query.stretch.to_number())?;
 
                 candidates[matching_index].1.stretch
-            },
+            }
         }
     } else {
         // Closest stretch, first checking wider values and then narrower values. ~keep
         let stretch = matching_set
             .iter()
             .filter(|&&index| candidates[index].1.stretch > query.stretch)
-            .min_by_key(|&&index| {
-                candidates[index].1.stretch.to_number() - query.stretch.to_number()
-            });
+            .min_by_key(|&&index| candidates[index].1.stretch.to_number() - query.stretch.to_number());
 
         match stretch {
             Some(&matching_index) => candidates[matching_index].1.stretch,
             None => {
-                let matching_index = *matching_set.iter().min_by_key(|&&index| {
-                    query.stretch.to_number() - candidates[index].1.stretch.to_number()
-                })?;
+                let matching_index = *matching_set
+                    .iter()
+                    .min_by_key(|&&index| query.stretch.to_number() - candidates[index].1.stretch.to_number())?;
 
                 candidates[matching_index].1.stretch
-            },
+            }
         }
     };
     matching_set.retain(|&index| candidates[index].1.stretch == matching_stretch);
@@ -88,23 +84,12 @@ pub(super) fn find_best_match(candidates: &[(ID, &FaceInfo)], query: &Query) -> 
     // just use 450 as the cutoff. ~keep
     let weight = query.weight.0;
 
-    let matching_weight = if matching_set
-        .iter()
-        .any(|&index| candidates[index].1.weight.0 == weight)
-    {
+    let matching_weight = if matching_set.iter().any(|&index| candidates[index].1.weight.0 == weight) {
         Weight(weight)
-    } else if (400..450).contains(&weight)
-        && matching_set
-            .iter()
-            .any(|&index| candidates[index].1.weight.0 == 500)
-    {
+    } else if (400..450).contains(&weight) && matching_set.iter().any(|&index| candidates[index].1.weight.0 == 500) {
         // Check 500 first. ~keep
         Weight::MEDIUM
-    } else if (450..=500).contains(&weight)
-        && matching_set
-            .iter()
-            .any(|&index| candidates[index].1.weight.0 == 400)
-    {
+    } else if (450..=500).contains(&weight) && matching_set.iter().any(|&index| candidates[index].1.weight.0 == 400) {
         // Check 400 first. ~keep
         Weight::NORMAL
     } else if weight <= 500 {
@@ -121,7 +106,7 @@ pub(super) fn find_best_match(candidates: &[(ID, &FaceInfo)], query: &Query) -> 
                     .iter()
                     .min_by_key(|&&index| candidates[index].1.weight.0 - weight)?;
                 candidates[matching_index].1.weight
-            },
+            }
         }
     } else {
         // Closest weight, first checking fatter values and then thinner ones. ~keep
@@ -137,7 +122,7 @@ pub(super) fn find_best_match(candidates: &[(ID, &FaceInfo)], query: &Query) -> 
                     .iter()
                     .min_by_key(|&&index| weight - candidates[index].1.weight.0)?;
                 candidates[matching_index].1.weight
-            },
+            }
         }
     };
     matching_set.retain(|&index| candidates[index].1.weight == matching_weight);
@@ -145,8 +130,5 @@ pub(super) fn find_best_match(candidates: &[(ID, &FaceInfo)], query: &Query) -> 
     // Ignore step 4d (`font-size`). ~keep
 
     // Return the result. ~keep
-    matching_set
-        .into_iter()
-        .next()
-        .map(|index| candidates[index].0)
+    matching_set.into_iter().next().map(|index| candidates[index].0)
 }

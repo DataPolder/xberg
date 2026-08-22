@@ -396,18 +396,9 @@ mod tests {
 
     #[test]
     fn test_boundary_score_ordering() {
-        assert!(
-            get_cjk_punctuation_boundary_score(0x3002, None)
-                > get_cjk_punctuation_boundary_score(0x3001, None)
-        );
-        assert!(
-            get_cjk_punctuation_boundary_score(0x3001, None)
-                > get_cjk_punctuation_boundary_score(0xFF08, None)
-        );
-        assert!(
-            get_cjk_punctuation_boundary_score(0xFF08, None)
-                > get_cjk_punctuation_boundary_score(0x30FB, None)
-        );
+        assert!(get_cjk_punctuation_boundary_score(0x3002, None) > get_cjk_punctuation_boundary_score(0x3001, None));
+        assert!(get_cjk_punctuation_boundary_score(0x3001, None) > get_cjk_punctuation_boundary_score(0xFF08, None));
+        assert!(get_cjk_punctuation_boundary_score(0xFF08, None) > get_cjk_punctuation_boundary_score(0x30FB, None));
     }
 
     #[test]

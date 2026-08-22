@@ -27,10 +27,7 @@ impl PdfBuilder {
     fn new() -> Self {
         let mut buf = Vec::new();
         buf.extend_from_slice(b"%PDF-1.5\n%\xE2\xE3\xCF\xD3\n");
-        PdfBuilder {
-            buf,
-            offsets: vec![0],
-        }
+        PdfBuilder { buf, offsets: vec![0] }
     }
 
     fn obj(&mut self, n: usize, body: &str) {
@@ -38,8 +35,7 @@ impl PdfBuilder {
             self.offsets.push(0);
         }
         self.offsets[n] = self.buf.len();
-        self.buf
-            .extend_from_slice(format!("{} 0 obj\n", n).as_bytes());
+        self.buf.extend_from_slice(format!("{} 0 obj\n", n).as_bytes());
         self.buf.extend_from_slice(body.as_bytes());
         self.buf.extend_from_slice(b"\nendobj\n");
     }
@@ -52,8 +48,7 @@ impl PdfBuilder {
     fn finish(mut self, root: usize) -> Vec<u8> {
         let xref_offset = self.buf.len();
         let count = self.offsets.len();
-        self.buf
-            .extend_from_slice(format!("xref\n0 {}\n", count).as_bytes());
+        self.buf.extend_from_slice(format!("xref\n0 {}\n", count).as_bytes());
         self.buf.extend_from_slice(b"0000000000 65535 f \r\n");
         for &off in &self.offsets[1..] {
             self.buf

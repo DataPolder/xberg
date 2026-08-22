@@ -50,12 +50,7 @@ impl ColorResolver {
     /// `alpha` is the pre-computed straight alpha from the graphics state
     /// (i.e. `gs.fill_alpha` for fill intents, `gs.stroke_alpha` for stroke
     /// intents). Folding it in here keeps backends simple.
-    pub(crate) fn resolve(
-        &self,
-        color: &LogicalColor,
-        ctx: &ResolutionContext,
-        alpha: f32,
-    ) -> Result<ResolvedColor> {
+    pub(crate) fn resolve(&self, color: &LogicalColor, ctx: &ResolutionContext, alpha: f32) -> Result<ResolvedColor> {
         match color {
             LogicalColor::Device(dev) => {
                 // ISO 32000-1:2008 §8.6.5.6: when the page declares a
@@ -72,10 +67,8 @@ impl ColorResolver {
                     return Ok(resolved);
                 }
                 Ok(device_to_rgba(*dev, alpha))
-            },
-            LogicalColor::Spaced { space, components } => {
-                self.resolve_spaced(space, components, ctx, alpha)
-            },
+            }
+            LogicalColor::Spaced { space, components } => self.resolve_spaced(space, components, ctx, alpha),
         }
     }
 
@@ -103,8 +96,7 @@ impl ColorResolver {
         ctx: &ResolutionContext,
         alpha: f32,
     ) -> Result<Option<ResolvedColor>> {
-        let (override_obj, components): (Option<&Object>, smallvec::SmallVec<[f32; 4]>) = match dev
-        {
+        let (override_obj, components): (Option<&Object>, smallvec::SmallVec<[f32; 4]>) = match dev {
             DeviceColor::Gray(g) => (ctx.default_gray, smallvec::smallvec![g]),
             DeviceColor::Rgb(r, g, b) => (ctx.default_rgb, smallvec::smallvec![r, g, b]),
             DeviceColor::Cmyk(c, m, y, k) => (ctx.default_cmyk, smallvec::smallvec![c, m, y, k]),
@@ -174,9 +166,7 @@ impl ColorResolver {
             "DeviceRGB" | "RGB" | "CalRGB" => Ok(three_as_rgb(components, alpha)),
             "DeviceCMYK" | "CMYK" => Ok(four_as_cmyk_native(components, alpha)),
             "ICCBased" => self.resolve_iccbased(arr, components, ctx, alpha),
-            "Separation" | "DeviceN" => {
-                self.resolve_separation_or_devicen(arr, components, ctx, alpha)
-            },
+            "Separation" | "DeviceN" => self.resolve_separation_or_devicen(arr, components, ctx, alpha),
             "Indexed" => self.resolve_indexed(arr, components, ctx, alpha),
             _ => Ok(first_as_gray(components, alpha)),
         }
@@ -238,15 +228,14 @@ impl ColorResolver {
             // hashes identically. Unit tests skip the cache
             // (ctx.icc_transform_cache is None) and pay the
             // per-call build cost. ~keep
-            let transform: std::sync::Arc<crate::color::Transform> =
-                if let Some(cache) = ctx.icc_transform_cache {
-                    cache.get_or_build(&profile, ctx.rendering_intent)
-                } else {
-                    std::sync::Arc::new(crate::color::Transform::new_srgb_target(
-                        std::sync::Arc::clone(&profile),
-                        ctx.rendering_intent,
-                    ))
-                };
+            let transform: std::sync::Arc<crate::color::Transform> = if let Some(cache) = ctx.icc_transform_cache {
+                cache.get_or_build(&profile, ctx.rendering_intent)
+            } else {
+                std::sync::Arc::new(crate::color::Transform::new_srgb_target(
+                    std::sync::Arc::clone(&profile),
+                    ctx.rendering_intent,
+                ))
+            };
             if transform.has_cmm() {
                 let c = components[0].clamp(0.0, 1.0);
                 let m = components[1].clamp(0.0, 1.0);
@@ -292,15 +281,14 @@ impl ColorResolver {
             && let Some(profile) = crate::color::IccProfile::parse(bytes, 3)
         {
             let profile = std::sync::Arc::new(profile);
-            let transform: std::sync::Arc<crate::color::Transform> =
-                if let Some(cache) = ctx.icc_transform_cache {
-                    cache.get_or_build(&profile, ctx.rendering_intent)
-                } else {
-                    std::sync::Arc::new(crate::color::Transform::new_srgb_target(
-                        std::sync::Arc::clone(&profile),
-                        ctx.rendering_intent,
-                    ))
-                };
+            let transform: std::sync::Arc<crate::color::Transform> = if let Some(cache) = ctx.icc_transform_cache {
+                cache.get_or_build(&profile, ctx.rendering_intent)
+            } else {
+                std::sync::Arc::new(crate::color::Transform::new_srgb_target(
+                    std::sync::Arc::clone(&profile),
+                    ctx.rendering_intent,
+                ))
+            };
             if transform.has_cmm() {
                 let r = components[0].clamp(0.0, 1.0);
                 let g = components[1].clamp(0.0, 1.0);
@@ -344,15 +332,14 @@ impl ColorResolver {
             && let Some(profile) = crate::color::IccProfile::parse(bytes, 1)
         {
             let profile = std::sync::Arc::new(profile);
-            let transform: std::sync::Arc<crate::color::Transform> =
-                if let Some(cache) = ctx.icc_transform_cache {
-                    cache.get_or_build(&profile, ctx.rendering_intent)
-                } else {
-                    std::sync::Arc::new(crate::color::Transform::new_srgb_target(
-                        std::sync::Arc::clone(&profile),
-                        ctx.rendering_intent,
-                    ))
-                };
+            let transform: std::sync::Arc<crate::color::Transform> = if let Some(cache) = ctx.icc_transform_cache {
+                cache.get_or_build(&profile, ctx.rendering_intent)
+            } else {
+                std::sync::Arc::new(crate::color::Transform::new_srgb_target(
+                    std::sync::Arc::clone(&profile),
+                    ctx.rendering_intent,
+                ))
+            };
             if transform.has_cmm() {
                 let g = components[0].clamp(0.0, 1.0);
                 let g_u8 = (g * 255.0).round() as u8;
@@ -421,9 +408,7 @@ impl ColorResolver {
         // sees `InkSelector::None` via the OverprintPlan and skips
         // every plate regardless of this colour value. ~keep
         let type_name = arr.first().and_then(|o| o.as_name());
-        if matches!(type_name, Some("Separation"))
-            && arr.get(1).and_then(|o| o.as_name()) == Some("None")
-        {
+        if matches!(type_name, Some("Separation")) && arr.get(1).and_then(|o| o.as_name()) == Some("None") {
             return Ok(ResolvedColor::Rgba {
                 r: 0.0,
                 g: 0.0,
@@ -484,10 +469,7 @@ impl ColorResolver {
         let Some(func_dict) = func_resolved.as_dict() else {
             return Ok(invert_tint_fallback(components, alpha));
         };
-        let func_type = func_dict
-            .get("FunctionType")
-            .and_then(|o| o.as_integer())
-            .unwrap_or(-1);
+        let func_type = func_dict.get("FunctionType").and_then(|o| o.as_integer()).unwrap_or(-1);
 
         let alt_cs_name = alt_cs_resolved.as_name();
 
@@ -525,13 +507,9 @@ impl ColorResolver {
         match alt_cs_name {
             Some("DeviceCMYK") | Some("CMYK") if altspace_values.len() >= 4 => {
                 Ok(four_as_cmyk(&altspace_values, alpha, ctx))
-            },
-            Some("DeviceRGB") | Some("RGB") if altspace_values.len() >= 3 => {
-                Ok(three_as_rgb(&altspace_values, alpha))
-            },
-            Some("DeviceGray") | Some("G") if !altspace_values.is_empty() => {
-                Ok(first_as_gray(&altspace_values, alpha))
-            },
+            }
+            Some("DeviceRGB") | Some("RGB") if altspace_values.len() >= 3 => Ok(three_as_rgb(&altspace_values, alpha)),
+            Some("DeviceGray") | Some("G") if !altspace_values.is_empty() => Ok(first_as_gray(&altspace_values, alpha)),
             _ => {
                 // Compound alternate space (e.g. ICCBased). We synthesise a
                 // logical Spaced colour and recurse — this lets a
@@ -542,7 +520,7 @@ impl ColorResolver {
                 } else {
                     Ok(first_as_gray(&altspace_values, alpha))
                 }
-            },
+            }
         }
     }
 
@@ -605,9 +583,7 @@ fn device_to_rgba(dev: DeviceColor, alpha: f32) -> ResolvedColor {
 
 fn resolve_device_alias(name: &str, components: &[f32], alpha: f32) -> ResolvedColor {
     match name {
-        "DeviceGray" | "G" | "CalGray" if !components.is_empty() => {
-            first_as_gray(components, alpha)
-        },
+        "DeviceGray" | "G" | "CalGray" if !components.is_empty() => first_as_gray(components, alpha),
         "DeviceRGB" | "RGB" | "CalRGB" if components.len() >= 3 => three_as_rgb(components, alpha),
         "DeviceCMYK" | "CMYK" if components.len() >= 4 => four_as_cmyk_native(components, alpha),
         _ => first_as_gray(components, alpha),
@@ -641,8 +617,7 @@ fn three_as_rgb(components: &[f32], alpha: f32) -> ResolvedColor {
 /// not the alternate's CMYK decomposition, so the alt is composite-
 /// only.
 fn four_as_cmyk(components: &[f32], alpha: f32, ctx: &ResolutionContext) -> ResolvedColor {
-    let (r, g, b) =
-        cmyk_to_rgb_via_intent(components[0], components[1], components[2], components[3], ctx);
+    let (r, g, b) = cmyk_to_rgb_via_intent(components[0], components[1], components[2], components[3], ctx);
     ResolvedColor::Rgba { r, g, b, a: alpha }
 }
 
@@ -714,13 +689,7 @@ fn cmyk_to_rgb(c: f32, m: f32, y: f32, k: f32) -> (f32, f32, f32) {
 /// in `tests/test_render_output_intent.rs` pins this — a CMM upgrade
 /// will turn the probe RED at the new per-intent expected references.
 ///
-pub(crate) fn cmyk_to_rgb_via_intent(
-    c: f32,
-    m: f32,
-    y: f32,
-    k: f32,
-    ctx: &ResolutionContext<'_>,
-) -> (f32, f32, f32) {
+pub(crate) fn cmyk_to_rgb_via_intent(c: f32, m: f32, y: f32, k: f32, ctx: &ResolutionContext<'_>) -> (f32, f32, f32) {
     if let Some(profile) = ctx.output_intent_cmyk {
         let c_u8 = (c.clamp(0.0, 1.0) * 255.0).round() as u8;
         let m_u8 = (m.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -739,10 +708,8 @@ pub(crate) fn cmyk_to_rgb_via_intent(
             let transform = cache.get_or_build(profile, ctx.rendering_intent);
             transform.convert_cmyk_pixel(c_u8, m_u8, y_u8, k_u8)
         } else {
-            let transform = crate::color::Transform::new_srgb_target(
-                std::sync::Arc::clone(profile),
-                ctx.rendering_intent,
-            );
+            let transform =
+                crate::color::Transform::new_srgb_target(std::sync::Arc::clone(profile), ctx.rendering_intent);
             transform.convert_cmyk_pixel(c_u8, m_u8, y_u8, k_u8)
         };
         return (rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0);
@@ -863,10 +830,7 @@ fn evaluate_type0_sampled(func_obj: &Object, inputs: &[f32]) -> Option<Vec<f32>>
     if sizes.contains(&0) {
         return None;
     }
-    let bps = dict
-        .get("BitsPerSample")
-        .and_then(|o| o.as_integer())
-        .unwrap_or(8);
+    let bps = dict.get("BitsPerSample").and_then(|o| o.as_integer()).unwrap_or(8);
     if !(bps == 8 || bps == 16) {
         return None;
     }
@@ -905,9 +869,7 @@ fn evaluate_type0_sampled(func_obj: &Object, inputs: &[f32]) -> Option<Vec<f32>>
 
     let raw = func_obj.decode_stream_data().ok()?;
     let bytes_per = if bps == 8 { 1usize } else { 2 };
-    let total_samples = sizes
-        .iter()
-        .try_fold(1usize, |acc, &s| acc.checked_mul(s))?;
+    let total_samples = sizes.iter().try_fold(1usize, |acc, &s| acc.checked_mul(s))?;
     let needed = total_samples.checked_mul(n_out)?.checked_mul(bytes_per)?;
     if raw.len() < needed {
         return None;
@@ -1047,9 +1009,7 @@ fn object_to_f32(o: &Object) -> f32 {
 }
 
 fn object_to_f64(o: &Object) -> f64 {
-    o.as_real()
-        .or_else(|| o.as_integer().map(|i| i as f64))
-        .unwrap_or(0.0)
+    o.as_real().or_else(|| o.as_integer().map(|i| i as f64)).unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -1058,10 +1018,7 @@ mod tests {
     use crate::rendering::resolution::test_support::fixture_doc;
     use std::collections::HashMap;
 
-    fn ctx<'a>(
-        doc: &'a crate::document::PdfDocument,
-        spaces: &'a HashMap<String, Object>,
-    ) -> ResolutionContext<'a> {
+    fn ctx<'a>(doc: &'a crate::document::PdfDocument, spaces: &'a HashMap<String, Object>) -> ResolutionContext<'a> {
         ResolutionContext::new(doc, spaces)
     }
 
@@ -1080,7 +1037,7 @@ mod tests {
             ResolvedColor::Cmyk { c, m, y, k, a } => {
                 let (rr, gg, bb) = super::cmyk_to_rgb(c, m, y, k);
                 (rr, gg, bb, a)
-            },
+            }
             other => panic!("expected Rgba or Cmyk; got {other:?}"),
         };
         assert!((rr - r).abs() < 1e-3, "r: got {rr}, want {r}");
@@ -1231,8 +1188,10 @@ mod tests {
 
         let mut func_dict: HashMap<String, Object> = HashMap::new();
         func_dict.insert("FunctionType".into(), Object::Integer(4));
-        func_dict
-            .insert("Domain".into(), Object::Array(vec![Object::Integer(0), Object::Integer(1)]));
+        func_dict.insert(
+            "Domain".into(),
+            Object::Array(vec![Object::Integer(0), Object::Integer(1)]),
+        );
         func_dict.insert(
             "Range".into(),
             Object::Array(vec![
@@ -1313,7 +1272,7 @@ mod tests {
                 let gg = (1.0 - (m + k).min(1.0)).clamp(0.0, 1.0);
                 let bb = (1.0 - (y + k).min(1.0)).clamp(0.0, 1.0);
                 (rr, gg, bb)
-            },
+            }
             other => panic!("expected Rgba or Cmyk; got {other:?}"),
         };
         // The old inline path would have produced gray = 1.0 - 1.0 = 0.0
@@ -1332,10 +1291,14 @@ mod tests {
         // 0 (0/255) and sample 1 (128/255). ~keep
         let mut func_dict: HashMap<String, Object> = HashMap::new();
         func_dict.insert("FunctionType".into(), Object::Integer(0));
-        func_dict
-            .insert("Domain".into(), Object::Array(vec![Object::Integer(0), Object::Integer(1)]));
-        func_dict
-            .insert("Range".into(), Object::Array(vec![Object::Integer(0), Object::Integer(1)]));
+        func_dict.insert(
+            "Domain".into(),
+            Object::Array(vec![Object::Integer(0), Object::Integer(1)]),
+        );
+        func_dict.insert(
+            "Range".into(),
+            Object::Array(vec![Object::Integer(0), Object::Integer(1)]),
+        );
         func_dict.insert("Size".into(), Object::Array(vec![Object::Integer(3)]));
         func_dict.insert("BitsPerSample".into(), Object::Integer(8));
         let func_obj = Object::Stream {
@@ -1368,18 +1331,21 @@ mod tests {
                 Object::Integer(1),
             ]),
         );
-        func_dict
-            .insert("Range".into(), Object::Array(vec![Object::Integer(0), Object::Integer(1)]));
-        func_dict
-            .insert("Size".into(), Object::Array(vec![Object::Integer(2), Object::Integer(2)]));
+        func_dict.insert(
+            "Range".into(),
+            Object::Array(vec![Object::Integer(0), Object::Integer(1)]),
+        );
+        func_dict.insert(
+            "Size".into(),
+            Object::Array(vec![Object::Integer(2), Object::Integer(2)]),
+        );
         func_dict.insert("BitsPerSample".into(), Object::Integer(8));
         // Sample order per SS 7.10.2 (dim 0 fastest): (0,0) (1,0) (0,1) (1,1). ~keep
         let func_obj = Object::Stream {
             dict: func_dict,
             data: vec![0u8, 0, 0, 255].into(),
         };
-        let out =
-            super::evaluate_type0_sampled(&func_obj, &[0.25, 0.75]).expect("in supported envelope");
+        let out = super::evaluate_type0_sampled(&func_obj, &[0.25, 0.75]).expect("in supported envelope");
         assert_eq!(out.len(), 1);
         assert!((out[0] - 0.1875).abs() < 1e-4, "got {}, want 0.1875", out[0]);
 
@@ -1420,19 +1386,15 @@ mod tests {
                 Object::Integer(1),
             ]),
         );
-        func_dict
-            .insert("Size".into(), Object::Array(vec![Object::Integer(2), Object::Integer(2)]));
+        func_dict.insert(
+            "Size".into(),
+            Object::Array(vec![Object::Integer(2), Object::Integer(2)]),
+        );
         func_dict.insert("BitsPerSample".into(), Object::Integer(8));
         // 3 output channels (R, G, B on the DeviceRGB alternate), 4 grid
         // corners. Only the (1,1) corner (both inputs at their max) is
         // pure red; every other corner is black. ~keep
-        #[rustfmt::skip]
-        let samples: Vec<u8> = vec![
-            0, 0, 0,       
-            0, 0, 0,       
-            0, 0, 0,       
-            255, 0, 0,     
-        ];
+        let samples: Vec<u8> = vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 0, 0];
         let func_obj = Object::Stream {
             dict: func_dict,
             data: samples.into(),
@@ -1483,7 +1445,7 @@ mod tests {
         match c {
             ResolvedColor::Rgba { a, .. } => {
                 assert!((a - 0.0).abs() < 1e-6, "/None composite alpha must be 0");
-            },
+            }
             other => panic!("expected Rgba; got {other:?}"),
         }
     }
@@ -1589,9 +1551,7 @@ mod tests {
         header_only[16..20].copy_from_slice(b"CMYK");
         header_only[20..24].copy_from_slice(b"Lab ");
         header_only[36..40].copy_from_slice(b"acsp");
-        let profile = std::sync::Arc::new(
-            crate::color::IccProfile::parse(header_only, 4).expect("stub parses"),
-        );
+        let profile = std::sync::Arc::new(crate::color::IccProfile::parse(header_only, 4).expect("stub parses"));
         let ctx = ResolutionContext::new(&doc, &spaces).with_output_intent(Some(&profile));
         let (r, g, b) = super::cmyk_to_rgb_via_intent(0.25, 0.0, 0.0, 0.0, &ctx);
         // The no-CMM fallback of `convert_cmyk_pixel` routes through

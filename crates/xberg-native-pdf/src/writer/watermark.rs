@@ -113,30 +113,22 @@ impl WatermarkAnnotation {
 
     /// Create a "CONFIDENTIAL" watermark with default styling.
     pub fn confidential() -> Self {
-        Self::new("CONFIDENTIAL")
-            .with_color(0.8, 0.0, 0.0)
-            .with_rotation(45.0)
+        Self::new("CONFIDENTIAL").with_color(0.8, 0.0, 0.0).with_rotation(45.0)
     }
 
     /// Create a "DRAFT" watermark with default styling.
     pub fn draft() -> Self {
-        Self::new("DRAFT")
-            .with_color(0.5, 0.5, 0.5)
-            .with_rotation(45.0)
+        Self::new("DRAFT").with_color(0.5, 0.5, 0.5).with_rotation(45.0)
     }
 
     /// Create a "SAMPLE" watermark with default styling.
     pub fn sample() -> Self {
-        Self::new("SAMPLE")
-            .with_color(0.0, 0.5, 0.0)
-            .with_rotation(45.0)
+        Self::new("SAMPLE").with_color(0.0, 0.5, 0.0).with_rotation(45.0)
     }
 
     /// Create a "DO NOT COPY" watermark with default styling.
     pub fn do_not_copy() -> Self {
-        Self::new("DO NOT COPY")
-            .with_color(0.8, 0.0, 0.0)
-            .with_rotation(45.0)
+        Self::new("DO NOT COPY").with_color(0.8, 0.0, 0.0).with_rotation(45.0)
     }
 
     /// Set the bounding rectangle for the watermark.
@@ -245,8 +237,10 @@ impl WatermarkAnnotation {
 
         stream.push_str(&format!("/F1 {} Tf\n", self.font_size));
 
-        stream
-            .push_str(&format!("{:.3} {:.3} {:.3} rg\n", self.color.0, self.color.1, self.color.2));
+        stream.push_str(&format!(
+            "{:.3} {:.3} {:.3} rg\n",
+            self.color.0, self.color.1, self.color.2
+        ));
 
         // Calculate text position (centered in rect)
         // Approximate text width based on font size and character count ~keep

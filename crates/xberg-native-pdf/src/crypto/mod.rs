@@ -23,22 +23,19 @@ mod rust_provider;
 mod types;
 
 pub use active::{
-    SetPolicyError, SetProviderError, active, active_policy, inventory, is_policy_set, is_set,
-    record_algorithm_use, set_policy, set_provider,
+    SetPolicyError, SetProviderError, active, active_policy, inventory, is_policy_set, is_set, record_algorithm_use,
+    set_policy, set_provider,
 };
 pub use cbom::cbom_json;
 pub use error::{AlgorithmKind, Error, Result, not_permitted};
 pub use policy::{
-    AlgorithmId, AlgorithmUse, AuditEvent, AuditSink, Decision, LogAuditSink, NoopAuditSink,
-    PolicyMode, PolicyParseError, SecurityPolicy, SecurityPolicyBuilder,
+    AlgorithmId, AlgorithmUse, AuditEvent, AuditSink, Decision, LogAuditSink, NoopAuditSink, PolicyMode,
+    PolicyParseError, SecurityPolicy, SecurityPolicyBuilder,
 };
-pub use provider::{
-    CryptoProvider, Hasher, SignatureVerifier, Signer, SigningKeyMaterial, SymmetricCipher,
-};
+pub use provider::{CryptoProvider, Hasher, SignatureVerifier, Signer, SigningKeyMaterial, SymmetricCipher};
 pub use rust_provider::RustCryptoProvider;
 pub use types::{
-    AesKeySize, AsymmetricAlgorithm, EcCurve, HashAlgorithm, Padding, RsaPublicKey, RsaScheme,
-    SigningAlgorithm,
+    AesKeySize, AsymmetricAlgorithm, EcCurve, HashAlgorithm, Padding, RsaPublicKey, RsaScheme, SigningAlgorithm,
 };
 
 #[cfg(test)]

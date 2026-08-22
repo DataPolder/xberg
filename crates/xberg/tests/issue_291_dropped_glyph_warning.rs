@@ -6,7 +6,9 @@
 #![cfg(feature = "pdf")]
 
 use xberg::ProcessingWarning;
-use xberg::pdf::render::{install_pdf_render_diagnostics, render_pdf_page_to_png, take_xberg_native_pdf_render_warnings};
+use xberg::pdf::render::{
+    install_pdf_render_diagnostics, render_pdf_page_to_png, take_xberg_native_pdf_render_warnings,
+};
 
 /// Build a minimal one-page PDF whose `/Resources /Font /F1` entry points at
 /// object 5, which is a PDF string (`(NotAFontDict)`) rather than a font

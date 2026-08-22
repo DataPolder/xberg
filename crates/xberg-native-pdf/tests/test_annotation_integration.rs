@@ -104,13 +104,10 @@ fn test_add_sticky_note_annotation() {
     let mut editor = DocumentEditor::open(&temp_path).expect("Failed to open PDF");
     let mut page = editor.get_page(0).expect("Failed to get page");
 
-    let note =
-        TextAnnotation::new(Rect::new(100.0, 700.0, 24.0, 24.0), "Please review this section");
+    let note = TextAnnotation::new(Rect::new(100.0, 700.0, 24.0, 24.0), "Please review this section");
     let annot_id = page.add_annotation(note);
 
-    let annot = page
-        .find_annotation(annot_id)
-        .expect("Should find annotation");
+    let annot = page.find_annotation(annot_id).expect("Should find annotation");
     assert_eq!(annot.subtype(), AnnotationSubtype::Text);
 
     editor.save_page(page).expect("Failed to save page");

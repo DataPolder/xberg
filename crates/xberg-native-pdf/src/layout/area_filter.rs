@@ -59,7 +59,7 @@ pub trait LayoutObjectSpatial {
                     // Zero-area objects (like lines) use a binary 1.0 or 0.0 ~keep
                     1.0
                 }
-            },
+            }
             None => 0.0,
         }
     }

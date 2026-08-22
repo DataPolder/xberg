@@ -76,9 +76,7 @@ pub(crate) fn render_mesh_shading(
     // each vertex/patch corner (or, for Type 1, the 2-D domain point) into
     // the shading colour space's components. When absent the stream carries
     // the colour-space components directly. ~keep
-    let function = shading
-        .get("Function")
-        .and_then(|f| doc.resolve_object(f).ok());
+    let function = shading.get("Function").and_then(|f| doc.resolve_object(f).ok());
 
     // Resolve a set of stream/function colour components to RGBA, routing
     // through `/Function` first when present.
@@ -97,8 +95,7 @@ pub(crate) fn render_mesh_shading(
 
     let to_rgba = |comps: &[f32]| -> (f32, f32, f32, f32) {
         let cs_comps: Vec<f32> = match &function {
-            Some(f) => eval_pdf_function(f, doc, comps, sampled_bytes.as_deref())
-                .unwrap_or_else(|| comps.to_vec()),
+            Some(f) => eval_pdf_function(f, doc, comps, sampled_bytes.as_deref()).unwrap_or_else(|| comps.to_vec()),
             None => comps.to_vec(),
         };
         resolve_color(&cs_comps).unwrap_or((0.0, 0.0, 0.0, 1.0))
@@ -112,39 +109,37 @@ pub(crate) fn render_mesh_shading(
                 Err(e) => {
                     tracing::warn!("Mesh shading type {shading_type}: stream decode failed: {e}");
                     return Ok(());
-                },
+                }
             };
             let params = match MeshParams::parse(shading) {
                 Some(p) => p,
                 None => {
-                    tracing::warn!(
-                        "Mesh shading type {shading_type}: missing/invalid stream params"
-                    );
+                    tracing::warn!("Mesh shading type {shading_type}: missing/invalid stream params");
                     return Ok(());
-                },
+                }
             };
             match shading_type {
                 4 => {
                     let tris = decode_type4_stream(&data, &params, MAX_TRIANGLES);
                     rasterize_raw_triangles(pixmap, &tris, transform, clip_mask, &to_rgba);
-                },
+                }
                 5 => {
                     let tris = decode_type5_stream(&data, &params, MAX_TRIANGLES);
                     rasterize_raw_triangles(pixmap, &tris, transform, clip_mask, &to_rgba);
-                },
+                }
                 6 | 7 => {
                     let is_tensor = shading_type == 7;
                     let patches = decode_patches(&data, is_tensor, &params, MAX_PATCHES);
                     render_patches(pixmap, &patches, is_tensor, transform, clip_mask, &to_rgba);
-                },
+                }
                 _ => unreachable!(),
             }
             Ok(())
-        },
+        }
         other => {
             tracing::warn!("Unsupported shading type {other} in mesh renderer");
             Ok(())
-        },
+        }
     }
 }
 
@@ -190,11 +185,7 @@ impl<'a> BitReader<'a> {
 /// Map a raw `nbits`-wide unsigned integer onto `[lo, hi]` per a `/Decode`
 /// pair (§8.7.4.5.5). `2^nbits - 1` is the maximum representable value.
 fn decode_value(raw: u64, nbits: u32, lo: f32, hi: f32) -> f32 {
-    let max = if nbits >= 64 {
-        u64::MAX
-    } else {
-        (1u64 << nbits) - 1
-    };
+    let max = if nbits >= 64 { u64::MAX } else { (1u64 << nbits) - 1 };
     if max == 0 {
         return lo;
     }
@@ -218,10 +209,7 @@ impl MeshParams {
         let bits_per_coord = shading.get("BitsPerCoordinate")?.as_integer()? as u32;
         let bits_per_comp = shading.get("BitsPerComponent")?.as_integer()? as u32;
         // BitsPerFlag is absent on Type 5 lattices; default to a byte. ~keep
-        let bits_per_flag = shading
-            .get("BitsPerFlag")
-            .and_then(|o| o.as_integer())
-            .unwrap_or(8) as u32;
+        let bits_per_flag = shading.get("BitsPerFlag").and_then(|o| o.as_integer()).unwrap_or(8) as u32;
         if bits_per_coord == 0 || bits_per_coord > 32 || bits_per_comp == 0 || bits_per_comp > 32 {
             return None;
         }
@@ -453,7 +441,7 @@ fn decode_patches(data: &[u8], is_tensor: bool, p: &MeshParams, max_patches: usi
                 None => {
                     ok = false;
                     break;
-                },
+                }
             }
         }
         // Tensor patches carry four extra interior points after the
@@ -465,7 +453,7 @@ fn decode_patches(data: &[u8], is_tensor: bool, p: &MeshParams, max_patches: usi
                     None => {
                         ok = false;
                         break;
-                    },
+                    }
                 }
             }
         }
@@ -476,7 +464,7 @@ fn decode_patches(data: &[u8], is_tensor: bool, p: &MeshParams, max_patches: usi
                     None => {
                         ok = false;
                         break;
-                    },
+                    }
                 }
             }
         }
@@ -602,11 +590,7 @@ fn render_patches(
             }
         }
         // Skip patches wholly outside the canvas (cheap corner test). ~keep
-        if dev
-            .iter()
-            .all(|p| p.0 < 0.0 || p.0 > w || p.1 < 0.0 || p.1 > h)
-            && !bbox_intersects_canvas(&dev, w, h)
-        {
+        if dev.iter().all(|p| p.0 < 0.0 || p.0 > w || p.1 < 0.0 || p.1 > h) && !bbox_intersects_canvas(&dev, w, h) {
             continue;
         }
         let n = ((extent / 16.0).ceil() as usize).clamp(1, MAX_SUBDIV);
@@ -685,16 +669,7 @@ fn render_function_based(
         .get("Matrix")
         .and_then(|o| o.as_array())
         .filter(|a| a.len() >= 6)
-        .map(|a| {
-            [
-                num(&a[0]),
-                num(&a[1]),
-                num(&a[2]),
-                num(&a[3]),
-                num(&a[4]),
-                num(&a[5]),
-            ]
-        })
+        .map(|a| [num(&a[0]), num(&a[1]), num(&a[2]), num(&a[3]), num(&a[4]), num(&a[5])])
         .unwrap_or([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
 
     // Map a domain point → device point (Matrix then shading→device CTM). ~keep
@@ -714,8 +689,7 @@ fn render_function_based(
     let mut extent = 0.0f32;
     for i in 0..corners.len() {
         for j in i + 1..corners.len() {
-            let d = ((corners[i].0 - corners[j].0).powi(2) + (corners[i].1 - corners[j].1).powi(2))
-                .sqrt();
+            let d = ((corners[i].0 - corners[j].0).powi(2) + (corners[i].1 - corners[j].1).powi(2)).sqrt();
             extent = extent.max(d);
         }
     }
@@ -948,11 +922,7 @@ fn eval_type2(dict: &HashMap<String, Object>, inputs: &[f32]) -> Option<Vec<f32>
 
 /// Type 3 stitching: select the sub-function whose sub-domain contains the
 /// input, remap the input through `/Encode`, and evaluate it.
-fn eval_type3(
-    dict: &HashMap<String, Object>,
-    doc: &PdfDocument,
-    inputs: &[f32],
-) -> Option<Vec<f32>> {
+fn eval_type3(dict: &HashMap<String, Object>, doc: &PdfDocument, inputs: &[f32]) -> Option<Vec<f32>> {
     let x = *inputs.first()?;
     let funcs = dict.get("Functions").and_then(|o| o.as_array())?;
     if funcs.is_empty() {
@@ -1055,37 +1025,22 @@ fn eval_type0(bytes: &[u8], dict: &HashMap<String, Object>, inputs: &[f32]) -> O
         .map(|a| a.iter().map(num).collect())
         .unwrap_or_else(|| {
             // Default Encode: [0 (Size_i - 1)] per input dimension. ~keep
-            size.iter()
-                .flat_map(|&s| [0.0, (s.saturating_sub(1)) as f32])
-                .collect()
+            size.iter().flat_map(|&s| [0.0, (s.saturating_sub(1)) as f32]).collect()
         });
     let decode: Vec<(f32, f32)> = dict
         .get("Decode")
         .and_then(|o| o.as_array())
-        .map(|a| {
-            a.as_chunks::<2>()
-                .0
-                .iter()
-                .map(|c| (num(&c[0]), num(&c[1])))
-                .collect()
-        })
+        .map(|a| a.as_chunks::<2>().0.iter().map(|c| (num(&c[0]), num(&c[1]))).collect())
         .unwrap_or_else(|| range.iter().map(|r| (r[0] as f32, r[1] as f32)).collect());
 
     // Encode each input to a continuous grid coordinate in [0, Size_i - 1]. ~keep
     let mut e = [0.0f32; 2];
     for i in 0..m {
         let (d0, d1) = (domain[i][0] as f32, domain[i][1] as f32);
-        let x = inputs
-            .get(i)
-            .copied()
-            .unwrap_or(0.0)
-            .clamp(d0.min(d1), d0.max(d1));
+        let x = inputs.get(i).copied().unwrap_or(0.0).clamp(d0.min(d1), d0.max(d1));
         let (en0, en1) = (
             encode.get(2 * i).copied().unwrap_or(0.0),
-            encode
-                .get(2 * i + 1)
-                .copied()
-                .unwrap_or((size[i] - 1) as f32),
+            encode.get(2 * i + 1).copied().unwrap_or((size[i] - 1) as f32),
         );
         let ec = if (d1 - d0).abs() < f32::EPSILON {
             en0
@@ -1377,8 +1332,7 @@ mod tests {
         buf.extend_from_slice(format!("{:010} 00000 n \n", cat_off).as_bytes());
         buf.extend_from_slice(format!("{:010} 00000 n \n", pages_off).as_bytes());
         buf.extend_from_slice(
-            format!("trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off)
-                .as_bytes(),
+            format!("trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
         );
         PdfDocument::from_bytes(buf).expect("fixture PDF parses")
     }
@@ -1440,10 +1394,8 @@ mod tests {
             ([0.25, 0.75], [0.375, 0.25, 0.5625]),
         ];
         for (inputs, expected) in cases {
-            let fast = eval_pdf_function(&func, &doc, inputs, Some(&prepared))
-                .expect("fast path evaluates");
-            let slow =
-                eval_pdf_function(&func, &doc, inputs, None).expect("fallback path evaluates");
+            let fast = eval_pdf_function(&func, &doc, inputs, Some(&prepared)).expect("fast path evaluates");
+            let slow = eval_pdf_function(&func, &doc, inputs, None).expect("fallback path evaluates");
             assert_eq!(fast, slow, "paths diverge at {inputs:?}");
             assert_eq!(fast.len(), 3);
             for (o, (&got, &want)) in fast.iter().zip(expected).enumerate() {
@@ -1512,8 +1464,7 @@ mod tests {
         let data = pixmap.data();
         for &(px, py) in &[(4usize, 4usize), (12, 4), (4, 12), (12, 12), (8, 8)] {
             let (u, v) = ((px as f32 + 0.5) / 16.0, (py as f32 + 0.5) / 16.0);
-            let want =
-                eval_pdf_function(&func, &doc, &[u, v], None).expect("fallback path evaluates");
+            let want = eval_pdf_function(&func, &doc, &[u, v], None).expect("fallback path evaluates");
             let o = (py * 16 + px) * 4;
             assert_eq!(data[o + 3], 255, "pixel ({px},{py}) must be opaque");
             for (ch, &w) in want.iter().enumerate().take(3) {

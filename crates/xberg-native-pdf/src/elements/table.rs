@@ -428,10 +428,7 @@ mod tests {
         ]);
         table.add_row(header);
 
-        let row = TableRowContent::new(vec![
-            TableCellContent::new("Item 1"),
-            TableCellContent::new("100"),
-        ]);
+        let row = TableRowContent::new(vec![TableCellContent::new("Item 1"), TableCellContent::new("100")]);
         table.add_row(row);
 
         assert_eq!(table.row_count(), 2);

@@ -37,11 +37,7 @@ impl StructureTreeStrategy {
     /// helper supplied bead rectangles for the page; otherwise uses the
     /// geometric XY-cut fallback. With no bead rects this is exactly the prior
     /// behaviour (fails closed).
-    fn fallback_order(
-        &self,
-        spans: Vec<TextSpan>,
-        context: &ReadingOrderContext,
-    ) -> Result<Vec<OrderedTextSpan>> {
+    fn fallback_order(&self, spans: Vec<TextSpan>, context: &ReadingOrderContext) -> Result<Vec<OrderedTextSpan>> {
         if context.bead_rects.as_ref().is_some_and(|b| !b.is_empty()) {
             return ArticleThreadStrategy::new().apply(spans, context);
         }
@@ -122,11 +118,7 @@ impl Default for StructureTreeStrategy {
 }
 
 impl ReadingOrderStrategy for StructureTreeStrategy {
-    fn apply(
-        &self,
-        spans: Vec<TextSpan>,
-        context: &ReadingOrderContext,
-    ) -> Result<Vec<OrderedTextSpan>> {
+    fn apply(&self, spans: Vec<TextSpan>, context: &ReadingOrderContext) -> Result<Vec<OrderedTextSpan>> {
         // If structure tree has suspect content, fall back to geometric ordering
         // Per ISO 32000-1:2008 Section 14.7.1, suspects=true means the structure
         // tree may contain errors or unreliable content. ~keep
@@ -278,10 +270,7 @@ mod tests {
 
     #[test]
     fn test_no_structure_tree_fallback() {
-        let spans = vec![
-            make_span("Bottom", 0.0, 50.0, None),
-            make_span("Top", 0.0, 100.0, None),
-        ];
+        let spans = vec![make_span("Bottom", 0.0, 50.0, None), make_span("Top", 0.0, 100.0, None)];
 
         let strategy = StructureTreeStrategy::new();
         let context = ReadingOrderContext::new();
@@ -333,9 +322,7 @@ mod tests {
             .collect();
 
         assert!(
-            left_indices
-                .iter()
-                .all(|&l| right_indices.iter().all(|&r| l < r)),
+            left_indices.iter().all(|&l| right_indices.iter().all(|&r| l < r)),
             "Left column should be processed before right column"
         );
     }

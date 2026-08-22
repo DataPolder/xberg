@@ -111,7 +111,7 @@ fn indexed_lab_mid_gray_yields_srgb_mid_gray() {
         ImageData::Raw { pixels, .. } => pixels.clone(),
         ImageData::Jpeg(_) => {
             panic!("expected raw-pixel image, got JPEG; test setup is wrong");
-        },
+        }
     };
 
     assert!(pixels.len() >= 3, "need at least one RGB pixel");

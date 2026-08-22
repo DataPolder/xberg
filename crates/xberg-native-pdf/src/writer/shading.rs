@@ -155,9 +155,7 @@ impl LinearGradientBuilder {
 
     /// Build a simple two-color gradient.
     pub fn two_color(start_color: Color, end_color: Color) -> Self {
-        Self::new()
-            .add_stop(0.0, start_color)
-            .add_stop(1.0, end_color)
+        Self::new().add_stop(0.0, start_color).add_stop(1.0, end_color)
     }
 
     /// Build the shading dictionary as a PDF Object.
@@ -347,9 +345,7 @@ impl RadialGradientBuilder {
 
     /// Create a centered radial gradient.
     pub fn centered(cx: f32, cy: f32, radius: f32) -> Self {
-        Self::new()
-            .inner_circle(cx, cy, 0.0)
-            .outer_circle(cx, cy, radius)
+        Self::new().inner_circle(cx, cy, 0.0).outer_circle(cx, cy, radius)
     }
 
     /// Add a color stop.
@@ -435,51 +431,16 @@ impl GradientPresets {
     /// Sunset gradient (orange to purple).
     pub fn sunset() -> LinearGradientBuilder {
         LinearGradientBuilder::new()
-            .add_stop(
-                0.0,
-                Color {
-                    r: 1.0,
-                    g: 0.6,
-                    b: 0.0,
-                },
-            )
-            .add_stop(
-                0.5,
-                Color {
-                    r: 1.0,
-                    g: 0.3,
-                    b: 0.3,
-                },
-            )
-            .add_stop(
-                1.0,
-                Color {
-                    r: 0.5,
-                    g: 0.0,
-                    b: 0.5,
-                },
-            )
+            .add_stop(0.0, Color { r: 1.0, g: 0.6, b: 0.0 })
+            .add_stop(0.5, Color { r: 1.0, g: 0.3, b: 0.3 })
+            .add_stop(1.0, Color { r: 0.5, g: 0.0, b: 0.5 })
     }
 
     /// Ocean gradient (light blue to dark blue).
     pub fn ocean() -> LinearGradientBuilder {
         LinearGradientBuilder::new()
-            .add_stop(
-                0.0,
-                Color {
-                    r: 0.5,
-                    g: 0.8,
-                    b: 1.0,
-                },
-            )
-            .add_stop(
-                1.0,
-                Color {
-                    r: 0.0,
-                    g: 0.2,
-                    b: 0.5,
-                },
-            )
+            .add_stop(0.0, Color { r: 0.5, g: 0.8, b: 1.0 })
+            .add_stop(1.0, Color { r: 0.0, g: 0.2, b: 0.5 })
     }
 }
 

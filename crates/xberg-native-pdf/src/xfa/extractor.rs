@@ -125,7 +125,7 @@ impl XfaExtractor {
             Object::Stream { dict, data } => {
                 let decoded = Self::decode_stream_data(dict, data)?;
                 Ok(vec![("xdp".to_string(), decoded)])
-            },
+            }
             Object::Array(arr) => Self::extract_xfa_packets_from_array(doc, arr),
             _ => Err(Error::InvalidPdf("XFA entry is neither stream nor array".to_string())),
         }
@@ -141,10 +141,7 @@ impl XfaExtractor {
     }
 
     /// Decode a stream's data using its filter chain.
-    fn decode_stream_data(
-        dict: &std::collections::HashMap<String, Object>,
-        data: &[u8],
-    ) -> Result<Vec<u8>> {
+    fn decode_stream_data(dict: &std::collections::HashMap<String, Object>, data: &[u8]) -> Result<Vec<u8>> {
         let filters = Self::get_filters(dict);
         if filters.is_empty() {
             Ok(data.to_vec())
@@ -160,13 +157,7 @@ impl XfaExtractor {
             Some(Object::Name(n)) => vec![n.clone()],
             Some(Object::Array(arr)) => arr
                 .iter()
-                .filter_map(|o| {
-                    if let Object::Name(n) = o {
-                        Some(n.clone())
-                    } else {
-                        None
-                    }
-                })
+                .filter_map(|o| if let Object::Name(n) = o { Some(n.clone()) } else { None })
                 .collect(),
             _ => Vec::new(),
         }
@@ -192,10 +183,7 @@ impl XfaExtractor {
     }
 
     /// Extract packets from XFA array with names preserved.
-    fn extract_xfa_packets_from_array(
-        doc: &mut PdfDocument,
-        arr: &[Object],
-    ) -> Result<Vec<(String, Vec<u8>)>> {
+    fn extract_xfa_packets_from_array(doc: &mut PdfDocument, arr: &[Object]) -> Result<Vec<(String, Vec<u8>)>> {
         let mut packets = Vec::new();
 
         let mut i = 0;

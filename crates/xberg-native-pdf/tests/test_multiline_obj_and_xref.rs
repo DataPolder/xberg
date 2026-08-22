@@ -17,15 +17,11 @@ fn build_pdf_custom_headers(header_fmt: impl Fn(u32, u16) -> String) -> Vec<u8> 
 
     let off1 = pdf.len();
     let h1 = header_fmt(1, 0);
-    pdf.extend_from_slice(
-        format!("{}\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n", h1).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("{}\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n", h1).as_bytes());
 
     let off2 = pdf.len();
     let h2 = header_fmt(2, 0);
-    pdf.extend_from_slice(
-        format!("{}\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n", h2).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("{}\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n", h2).as_bytes());
 
     let off3 = pdf.len();
     let h3 = header_fmt(3, 0);
@@ -131,10 +127,7 @@ fn test_corrupt_xref_triggers_reconstruction() {
     // Find and corrupt the xref table — replace offset digits with zeros
     // to make the xref point to wrong locations ~keep
     let xref_marker = b"xref\n";
-    if let Some(pos) = pdf
-        .windows(xref_marker.len())
-        .position(|w| w == xref_marker)
-    {
+    if let Some(pos) = pdf.windows(xref_marker.len()).position(|w| w == xref_marker) {
         // Corrupt the xref entries: overwrite the offset numbers
         // Skip "xref\n0 N\n" and the free entry, then corrupt in-use entries ~keep
         let xref_start = pos + xref_marker.len();
@@ -155,8 +148,7 @@ fn test_corrupt_xref_triggers_reconstruction() {
     }
 
     // Should still open via xref reconstruction ~keep
-    let doc =
-        PdfDocument::from_bytes(pdf).expect("should open PDF with corrupt xref via reconstruction");
+    let doc = PdfDocument::from_bytes(pdf).expect("should open PDF with corrupt xref via reconstruction");
     assert_eq!(doc.page_count().expect("page count"), 1);
 }
 
@@ -175,8 +167,7 @@ fn test_endobj_not_confused_with_obj() {
 
 #[test]
 fn test_multiline_header_with_extra_whitespace() {
-    let pdf =
-        build_pdf_custom_headers(|id, generation| format!("{}  \t {}  \t obj", id, generation));
+    let pdf = build_pdf_custom_headers(|id, generation| format!("{}  \t {}  \t obj", id, generation));
     let doc = PdfDocument::from_bytes(pdf).expect("should handle extra whitespace in headers");
     assert_eq!(doc.page_count().expect("page count"), 1);
 }

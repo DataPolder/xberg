@@ -73,11 +73,7 @@ impl SyntheticStructureGenerator {
     /// 3. Detect headings based on font size
     /// 4. Group paragraphs based on proximity
     /// 5. Build hierarchical structure: Document → Sections → Paragraphs → Content
-    pub fn generate(
-        &self,
-        content_elements: &[ContentElement],
-        page_bbox: Rect,
-    ) -> Result<StructureElement> {
+    pub fn generate(&self, content_elements: &[ContentElement], page_bbox: Rect) -> Result<StructureElement> {
         if content_elements.is_empty() {
             return Ok(StructureElement {
                 structure_type: "Document".to_string(),
@@ -93,10 +89,7 @@ impl SyntheticStructureGenerator {
 
         let sections = self.group_into_sections(&paragraphs);
 
-        let children = sections
-            .into_iter()
-            .map(ContentElement::Structure)
-            .collect();
+        let children = sections.into_iter().map(ContentElement::Structure).collect();
 
         Ok(StructureElement {
             structure_type: "Document".to_string(),
@@ -177,13 +170,9 @@ impl SyntheticStructureGenerator {
 
     /// Create a section structure element.
     fn create_section(&self, children: Vec<StructureElement>) -> StructureElement {
-        let bbox =
-            Self::calculate_struct_bbox(&children.iter().map(|s| s.bbox).collect::<Vec<_>>());
+        let bbox = Self::calculate_struct_bbox(&children.iter().map(|s| s.bbox).collect::<Vec<_>>());
 
-        let children_as_content: Vec<ContentElement> = children
-            .into_iter()
-            .map(ContentElement::Structure)
-            .collect();
+        let children_as_content: Vec<ContentElement> = children.into_iter().map(ContentElement::Structure).collect();
 
         StructureElement {
             structure_type: "Sect".to_string(),
@@ -410,10 +399,7 @@ mod tests {
 
     #[test]
     fn test_calculate_struct_bbox_multiple() {
-        let rects = vec![
-            Rect::new(0.0, 0.0, 100.0, 50.0),
-            Rect::new(50.0, 30.0, 120.0, 40.0),
-        ];
+        let rects = vec![Rect::new(0.0, 0.0, 100.0, 50.0), Rect::new(50.0, 30.0, 120.0, 40.0)];
         let bbox = SyntheticStructureGenerator::calculate_struct_bbox(&rects);
         assert_eq!(bbox.x, 0.0);
         assert_eq!(bbox.y, 0.0);
@@ -426,9 +412,7 @@ mod tests {
         let generator = SyntheticStructureGenerator::new();
         let page_bbox = Rect::new(0.0, 0.0, 595.0, 842.0);
         let elements: Vec<ContentElement> = (0..10)
-            .map(|i| {
-                make_text_element(&format!("Line {}", i), 10.0, 100.0 + i as f32 * 1.0, 200.0, 12.0)
-            })
+            .map(|i| make_text_element(&format!("Line {}", i), 10.0, 100.0 + i as f32 * 1.0, 200.0, 12.0))
             .collect();
         let result = generator.generate(&elements, page_bbox).unwrap();
         assert_eq!(result.structure_type, "Document");

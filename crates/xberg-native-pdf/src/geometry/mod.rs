@@ -58,11 +58,7 @@ impl Rect {
     /// assert_eq!(rect.height, 50.0);
     /// ```
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        let (nx, nw) = if width < 0.0 {
-            (x + width, -width)
-        } else {
-            (x, width)
-        };
+        let (nx, nw) = if width < 0.0 { (x + width, -width) } else { (x, width) };
         let (ny, nh) = if height < 0.0 {
             (y + height, -height)
         } else {

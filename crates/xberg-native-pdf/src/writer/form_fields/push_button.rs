@@ -292,22 +292,22 @@ impl PushButtonWidget {
                     if flag_bits != 0 {
                         dict.insert("Flags".to_string(), Object::Integer(flag_bits));
                     }
-                },
+                }
                 FormAction::ResetForm => {
                     dict.insert("S".to_string(), Object::Name("ResetForm".to_string()));
-                },
+                }
                 FormAction::JavaScript { script } => {
                     dict.insert("S".to_string(), Object::Name("JavaScript".to_string()));
                     dict.insert("JS".to_string(), Object::text_string(script));
-                },
+                }
                 FormAction::Uri { uri } => {
                     dict.insert("S".to_string(), Object::Name("URI".to_string()));
                     dict.insert("URI".to_string(), Object::text_string(uri));
-                },
+                }
                 FormAction::GoToNamed { name } => {
                     dict.insert("S".to_string(), Object::Name("GoToR".to_string()));
                     dict.insert("D".to_string(), Object::Name(name.clone()));
-                },
+                }
             }
 
             dict

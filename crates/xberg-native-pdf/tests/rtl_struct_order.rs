@@ -41,10 +41,7 @@ impl TaggedRtlPdf {
             "/CIDInit /ProcSet findresource begin\n12 dict begin begincmap\n\
              1 begincodespacerange <00> <FF> endcodespacerange\n\
              {} beginbfchar\n{}endbfchar\nendcmap CMapName currentdict /CMap defineresource pop end end",
-            self.tounicode_bfchars
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .count(),
+            self.tounicode_bfchars.lines().filter(|l| !l.trim().is_empty()).count(),
             self.tounicode_bfchars,
         );
 
@@ -57,15 +54,12 @@ impl TaggedRtlPdf {
             off[id] = buf.len();
             buf.extend_from_slice(format!("{id} 0 obj\n{body}\nendobj\n").as_bytes());
         };
-        let stream =
-            |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, dict: &str, data: &[u8]| {
-                off[id] = buf.len();
-                buf.extend_from_slice(
-                    format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes(),
-                );
-                buf.extend_from_slice(data);
-                buf.extend_from_slice(b"\nendstream\nendobj\n");
-            };
+        let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, dict: &str, data: &[u8]| {
+            off[id] = buf.len();
+            buf.extend_from_slice(format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes());
+            buf.extend_from_slice(data);
+            buf.extend_from_slice(b"\nendstream\nendobj\n");
+        };
 
         buf.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
         obj(
@@ -92,7 +86,12 @@ impl TaggedRtlPdf {
         );
         stream(&mut buf, &mut off, 6, "", tounicode.as_bytes());
         obj(&mut buf, &mut off, 7, "<< /Type /StructTreeRoot /K [8 0 R] >>");
-        obj(&mut buf, &mut off, 8, "<< /Type /StructElem /S /P /P 7 0 R /Pg 3 0 R /K [0] >>");
+        obj(
+            &mut buf,
+            &mut off,
+            8,
+            "<< /Type /StructElem /S /P /P 7 0 R /Pg 3 0 R /K [0] >>",
+        );
 
         let xref_off = buf.len();
         buf.extend_from_slice(b"xref\n0 9\n0000000000 65535 f \n");

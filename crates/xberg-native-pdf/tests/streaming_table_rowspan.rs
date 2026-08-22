@@ -14,10 +14,7 @@ use xberg_native_pdf::writer::{DocumentBuilder, StreamingColumn, StreamingTableC
 
 fn build_table_pdf() -> Vec<u8> {
     let mut builder = DocumentBuilder::new();
-    let page = builder
-        .letter_page()
-        .font("Helvetica", 10.0)
-        .at(72.0, 720.0);
+    let page = builder.letter_page().font("Helvetica", 10.0).at(72.0, 720.0);
 
     let mut t = page.streaming_table(
         StreamingTableConfig::new()

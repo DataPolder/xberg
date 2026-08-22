@@ -210,12 +210,7 @@ impl TextMarkupAnnotation {
         {
             dict.insert(
                 "C".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 

@@ -46,8 +46,11 @@ fn build_pdf(title_literal: &[u8], title_hex: &str) -> Vec<u8> {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     pdf.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF", n, xref_offset)
-            .as_bytes(),
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF",
+            n, xref_offset
+        )
+        .as_bytes(),
     );
     pdf
 }
@@ -112,8 +115,11 @@ fn utf16be_bookmark_title_indirect_reference() {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     pdf.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF", n, xref_offset)
-            .as_bytes(),
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF",
+            n, xref_offset
+        )
+        .as_bytes(),
     );
 
     let doc = PdfDocument::from_bytes(pdf).expect("open");

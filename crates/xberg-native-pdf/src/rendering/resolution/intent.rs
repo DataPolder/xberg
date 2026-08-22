@@ -249,7 +249,7 @@ mod tests {
             LogicalColor::Spaced { components, .. } => {
                 assert_eq!(components.len(), 4);
                 assert!(!components.spilled(), "≤8 components must stay inline");
-            },
+            }
             _ => panic!("expected Spaced variant"),
         }
     }

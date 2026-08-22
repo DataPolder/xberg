@@ -93,9 +93,7 @@ fn build_pdf_image_mask_ex(
     for off in [cat_off, pages_off, page_off, stream_off, xobj_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -430,9 +428,7 @@ fn build_pdf_standard_image_named_cs(
     for off in [cat_off, pages_off, page_off, stream_off, xobj_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -497,9 +493,7 @@ fn build_pdf_standard_image_indexed(
     for off in [cat_off, pages_off, page_off, stream_off, xobj_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -595,9 +589,7 @@ fn qa_image_with_explicit_imagemask_false_routes_to_standard_image() {
     for off in [cat_off, pages_off, page_off, stream_off, xobj_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
 
     let doc = PdfDocument::from_bytes(buf).expect("PDF parses");
     let on = render_with_pipeline(&doc, true);
@@ -668,9 +660,7 @@ fn qa_standard_image_iccbased_n4_pass_through_paints_visible_ink() {
     for off in [cat_off, pages_off, page_off, stream_off, xobj_off, icc_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     let doc = PdfDocument::from_bytes(buf).expect("PDF parses");
     let on = render_with_pipeline(&doc, true);
     // Routing pin: the ICCBased N=4 image must be routed through
@@ -724,9 +714,7 @@ fn build_pdf_inline_image_bytes(content_ops: &[u8]) -> Vec<u8> {
     for off in [cat_off, pages_off, page_off, stream_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -846,9 +834,7 @@ fn build_pdf_form_with_inner_image_mask(
     for off in [cat_off, pages_off, page_off, stream_off, form_off, im_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -913,14 +899,10 @@ fn build_pdf_form_in_form_with_image_mask(
 
     let xref_off = buf.len();
     buf.extend_from_slice(b"xref\n0 8\n0000000000 65535 f \n");
-    for off in [
-        cat_off, pages_off, page_off, stream_off, outer_off, inner_off, im_off,
-    ] {
+    for off in [cat_off, pages_off, page_off, stream_off, outer_off, inner_off, im_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -987,14 +969,10 @@ fn build_pdf_form_with_imagemask_and_type4_separation(
 
     let xref_off = buf.len();
     buf.extend_from_slice(b"xref\n0 8\n0000000000 65535 f \n");
-    for off in [
-        cat_off, pages_off, page_off, stream_off, form_off, im_off, func_off,
-    ] {
+    for off in [cat_off, pages_off, page_off, stream_off, form_off, im_off, func_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -1159,9 +1137,7 @@ fn build_pdf_two_image_masks(content_ops: &str, w1: u32, h1: u32, w2: u32, h2: u
     for off in [cat_off, pages_off, page_off, stream_off, im1_off, im2_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -1220,9 +1196,7 @@ fn build_pdf_mask_plus_standard_image(
     for off in [cat_off, pages_off, page_off, stream_off, im_off, si_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -1266,7 +1240,10 @@ fn qa_image_mask_then_standard_then_mask_interleaved_keep_state_isolated() {
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
     let on = render_with_pipeline(&doc, true);
     let (r1, g1, b1, _a) = pixel_at(&on, 15, 50);
-    assert!(r1 > 200 && g1 < 60 && b1 < 60, "left strip must be red, got ({r1},{g1},{b1})");
+    assert!(
+        r1 > 200 && g1 < 60 && b1 < 60,
+        "left strip must be red, got ({r1},{g1},{b1})"
+    );
     // Middle: dark grey from the standard image (≈0x60 with possible filter). ~keep
     let (r2, g2, b2, _a) = pixel_at(&on, 50, 50);
     assert!(
@@ -1274,7 +1251,10 @@ fn qa_image_mask_then_standard_then_mask_interleaved_keep_state_isolated() {
         "middle must be grey from standard image, got ({r2},{g2},{b2})"
     );
     let (r3, g3, b3, _a) = pixel_at(&on, 85, 50);
-    assert!(b3 > 200 && r3 < 60 && g3 < 60, "right strip must be blue, got ({r3},{g3},{b3})");
+    assert!(
+        b3 > 200 && r3 < 60 && g3 < 60,
+        "right strip must be blue, got ({r3},{g3},{b3})"
+    );
 }
 
 /// Probe 20 — ImageMask under an active SMask. The renderer must apply
@@ -1418,9 +1398,7 @@ fn build_pdf_image_mask_with_devicen_type4(
     for off in [cat_off, pages_off, page_off, stream_off, xobj_off, func_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     buf
 }
 
@@ -1486,9 +1464,7 @@ fn qa_image_mask_100_paints_type4_separation_capability_at_scale() {
     for off in [cat_off, pages_off, page_off, stream_off, xobj_off, func_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
 
     let doc = PdfDocument::from_bytes(buf).expect("PDF parses");
     let on = render_with_pipeline(&doc, true);
@@ -1544,16 +1520,8 @@ fn qa_image_mask_separation_all_colorant_pipeline_paints_type4_output() {
     let content = "/All_CS cs 0.5 scn\n100 0 0 100 0 0 cm\n/IM1 Do\n";
     let resources = "/ColorSpace << /All_CS [/Separation /All /DeviceCMYK 6 0 R] >>";
 
-    let bytes = build_pdf_image_mask_with_devicen_type4(
-        content,
-        resources,
-        8,
-        8,
-        &mask,
-        type4,
-        "[0 1 0 1 0 1 0 1]",
-        &[0, 1],
-    );
+    let bytes =
+        build_pdf_image_mask_with_devicen_type4(content, resources, 8, 8, &mask, type4, "[0 1 0 1 0 1 0 1]", &[0, 1]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
     let on = render_with_pipeline(&doc, true);
     let (r_on, g_on, b_on, _a) = center_pixel(&on);
@@ -1577,16 +1545,8 @@ fn qa_image_mask_separation_none_colorant_paints_zero_ink() {
     let content = "/None_CS cs 0.5 scn\n100 0 0 100 0 0 cm\n/IM1 Do\n";
     let resources = "/ColorSpace << /None_CS [/Separation /None /DeviceCMYK 6 0 R] >>";
 
-    let bytes = build_pdf_image_mask_with_devicen_type4(
-        content,
-        resources,
-        8,
-        8,
-        &mask,
-        type4,
-        "[0 1 0 1 0 1 0 1]",
-        &[0, 1],
-    );
+    let bytes =
+        build_pdf_image_mask_with_devicen_type4(content, resources, 8, 8, &mask, type4, "[0 1 0 1 0 1 0 1]", &[0, 1]);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
     let on = render_with_pipeline(&doc, true);
     let on_ink = count_ink_pixels(&on, 0, 0, 100, 100);
@@ -1619,8 +1579,7 @@ fn qa_image_mask_too_short_stream_no_panic_pin() {
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
     // No-panic invariant: a short stream falls through to the helper's
     // size-check bail and leaves the page unpainted. ~keep
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("too-short ImageMask stream must not panic");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("too-short ImageMask stream must not panic");
     let (r, g, b, _a) = center_pixel(&on);
     assert_eq!(
         (r, g, b),
@@ -1690,8 +1649,7 @@ fn qa_image_mask_huge_dimensions_short_stream_no_panic() {
     let content = "q\n1 0 0 rg\n100 0 0 100 0 0 cm\n/IM1 Do\nQ\n";
     let bytes = build_pdf_image_mask(content, "", 0xFFFFFF, 1, &mask);
     let doc = PdfDocument::from_bytes(bytes).expect("PDF parses");
-    let on = render_with_pipeline_allow_fail(&doc, true)
-        .expect("huge-dim short-stream ImageMask must not panic");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("huge-dim short-stream ImageMask must not panic");
     // The expected-size check bails before allocating 64MB of pixels;
     // no paint reaches the centre. ~keep
     let (r, g, b, _a) = center_pixel(&on);
@@ -1746,13 +1704,10 @@ fn qa_image_mask_negative_dimension_field_no_panic() {
     for off in [cat_off, pages_off, page_off, stream_off, xobj_off] {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
 
     let doc = PdfDocument::from_bytes(buf).expect("PDF parses");
-    let on =
-        render_with_pipeline_allow_fail(&doc, true).expect("negative-dim ImageMask must not panic");
+    let on = render_with_pipeline_allow_fail(&doc, true).expect("negative-dim ImageMask must not panic");
     // The expected-size check bails on the wrapped-huge dimension
     // before any paint reaches the centre. ~keep
     let (r, g, b, _a) = center_pixel(&on);

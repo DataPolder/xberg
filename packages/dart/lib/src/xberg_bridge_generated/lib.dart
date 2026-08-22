@@ -9,7 +9,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'lib.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ChunkClassificationEnrichmentConfig`, `DocumentExtractorDartCallbacks`, `EmbeddingBackendDartCallbacks`, `OcrBackendDartCallbacks`, `PostProcessorDartCallbacks`, `RendererDartCallbacks`, `RerankerBackendDartCallbacks`, `TokenizerBackendDartCallbacks`, `ValidatorDartCallbacks`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `confidence_semantics`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `page_orientation_handling`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `confidence_semantics`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `page_orientation_handling`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
 
 /// Whether enabling layout detection while `output_format` stays `Plain`
 /// wastes the layout pass.
@@ -265,7 +265,7 @@ Future<DoctorReport> doctor({required ExtractionConfig config}) =>
 /// claims it. If something else already holds it — an application wiring
 /// `tracing_subscriber.fmt()...try_init()`, which is what `xberg-cli` does in `main()` —
 /// `set_global_default` fails and this is a no-op, so the engine's glyph-drop records go to
-/// that other subscriber and `take_pdf_oxide_render_warnings` stays empty. This function is
+/// that other subscriber and `take_xberg_native_pdf_render_warnings` stays empty. This function is
 /// the fallback for embedders that have no subscriber at all; composing the layer is what
 /// works when they do.
 ///
@@ -287,7 +287,7 @@ Future<DoctorReport> doctor({required ExtractionConfig config}) =>
 /// some other component owns the dispatcher slot and no layer was composed.
 ///
 /// Without one of the two opt-ins the #1364 warnings are not produced. The glyph drop itself is
-/// decided inside `pdf_oxide`, which reports it only through `tracing.warn!`; there is no
+/// decided inside `xberg_native_pdf`, which reports it only through `tracing.warn!`; there is no
 /// return-value channel to read instead.
 Future<bool> installPdfRenderDiagnostics() =>
     RustLib.instance.api.crateInstallPdfRenderDiagnostics();
@@ -311,7 +311,7 @@ Future<bool> installPdfRenderDiagnostics() =>
 /// extraction that renders at least one page picks up any captured
 /// glyph-drop warnings for free. that drain only ever observes
 /// warnings from render calls that happened on the *same OS thread* before it
-/// ran, because `PDF_OXIDE_PENDING_WARNINGS` is thread-local. OCR page
+/// ran, because `ENGINE_PENDING_WARNINGS` is thread-local. OCR page
 /// rendering runs inline on the extracting task's thread, so it is covered.
 /// Layout-detection rasterization runs inside `tokio.task.spawn_blocking`,
 /// which always executes on a different OS thread, so this function alone
@@ -322,8 +322,8 @@ Future<bool> installPdfRenderDiagnostics() =>
 /// and threads the drained warnings back through its return value for the
 /// caller in `extractors.pdf.mod` to merge, so layout-path glyph drops are
 /// no longer silently lost.
-Future<List<ProcessingWarning>> takePdfOxideRenderWarnings() =>
-    RustLib.instance.api.crateTakePdfOxideRenderWarnings();
+Future<List<ProcessingWarning>> takeXbergNativePdfRenderWarnings() =>
+    RustLib.instance.api.crateTakeXbergNativePdfRenderWarnings();
 
 /// Build the four (or three) token Whisper decoder prompt.
 ///
@@ -3655,6 +3655,12 @@ class ContentFilterConfig {
           includeWatermarks == other.includeWatermarks;
 }
 
+/// Content filter applied to each crawled page before it reaches the result.
+enum ContentFilterKind {
+  /// Keep only pages scoring at or above `bm25_threshold` for `bm25_query`.
+  bm25,
+}
+
 /// Content layer classification for document nodes.
 ///
 /// Replaces separate body/furniture arrays with per-node granularity.
@@ -4132,6 +4138,23 @@ class CrawlConfig {
   /// Maximum number of concurrent requests.
   final PlatformInt64? maxConcurrent;
 
+  /// Traversal order. Defaults to breadth-first.
+  ///
+  /// A frontier or strategy set explicitly on `CrawlEngineBuilder` takes precedence over
+  /// this field.
+  final CrawlStrategyKind crawlStrategy;
+
+  /// Content filter applied to each page. `None` keeps every page.
+  ///
+  /// A content filter set explicitly on `CrawlEngineBuilder` takes precedence.
+  final ContentFilterKind? contentFilter;
+
+  /// Query the BM25 content filter scores pages against. Required by `ContentFilterKind::Bm25`.
+  final String? bm25Query;
+
+  /// Minimum BM25 score a page must reach to be kept. Defaults to `0.0`.
+  final double? bm25Threshold;
+
   /// Whether to respect robots.txt directives.
   final bool respectRobotsTxt;
 
@@ -4322,6 +4345,10 @@ class CrawlConfig {
     this.maxPages,
     this.maxLinksPerPage,
     this.maxConcurrent,
+    required this.crawlStrategy,
+    this.contentFilter,
+    this.bm25Query,
+    this.bm25Threshold,
     required this.respectRobotsTxt,
     required this.softHttpErrors,
     this.userAgent,
@@ -4369,6 +4396,10 @@ class CrawlConfig {
       maxPages.hashCode ^
       maxLinksPerPage.hashCode ^
       maxConcurrent.hashCode ^
+      crawlStrategy.hashCode ^
+      contentFilter.hashCode ^
+      bm25Query.hashCode ^
+      bm25Threshold.hashCode ^
       respectRobotsTxt.hashCode ^
       softHttpErrors.hashCode ^
       userAgent.hashCode ^
@@ -4418,6 +4449,10 @@ class CrawlConfig {
           maxPages == other.maxPages &&
           maxLinksPerPage == other.maxLinksPerPage &&
           maxConcurrent == other.maxConcurrent &&
+          crawlStrategy == other.crawlStrategy &&
+          contentFilter == other.contentFilter &&
+          bm25Query == other.bm25Query &&
+          bm25Threshold == other.bm25Threshold &&
           respectRobotsTxt == other.respectRobotsTxt &&
           softHttpErrors == other.softHttpErrors &&
           userAgent == other.userAgent &&
@@ -4457,6 +4492,25 @@ class CrawlConfig {
           saveBrowserProfile == other.saveBrowserProfile &&
           ssrf == other.ssrf &&
           ssrfDenyPrivateExplicit == other.ssrfDenyPrivateExplicit;
+}
+
+/// Traversal order for a crawl.
+///
+/// Selects both the queue discipline and the selection strategy, because global order is a
+/// property of the frontier: the engine hands its bounded selection window to the strategy, so
+/// a strategy alone can only reorder URLs that have already been dequeued.
+enum CrawlStrategyKind {
+  /// Breadth-first: a FIFO frontier visits every URL at one depth before the next.
+  bfs,
+
+  /// Depth-first: a LIFO frontier descends into a page's children before its siblings.
+  dfs,
+
+  /// Highest-priority-first within the selection window, scored by `CrawlStrategy::score_url`.
+  bestFirst,
+
+  /// Like `BestFirst`, but stops once newly crawled pages stop contributing new terms.
+  adaptive,
 }
 
 @freezed
@@ -8243,7 +8297,7 @@ class FootnoteDefinition {
 
 /// Kind of a PDF form field.
 ///
-/// Mirrors `pdf_oxide`'s widget field taxonomy without leaking the upstream
+/// Mirrors `xberg_native_pdf`'s widget field taxonomy without leaking the upstream
 /// type across the binding surface.
 enum FormFieldType {
   /// Single- or multi-line text input.
@@ -10748,6 +10802,32 @@ class LlmConfig {
   /// `liter-llm` dependency of their own.
   final CredentialProviderConfig? credentialProvider;
 
+  /// Maximum number of simultaneously in-flight requests to the LLM provider this
+  /// config resolves to.
+  ///
+  /// This is a real, global bound on *provider* concurrency, not a per-extraction
+  /// allowance: `xberg::llm::client::create_client` shares one process-wide client
+  /// instance per distinct resolved config, so every concurrent extraction that
+  /// resolves to the same config shares the one in-flight-request limit this value
+  /// configures, instead of each minting its own (GH#1465). `None` means unlimited.
+  ///
+  /// PDF and image OCR batch sizing are **not** derived from this field, even when the
+  /// configured OCR backend or `vlm_fallback` policy can reach a VLM — those call sites
+  /// mix CPU-bound raster/OCR work with, at most, occasional remote requests, so they
+  /// size their batches from the general thread budget
+  /// (`max_threads`) unconditionally (GH#1465). Captioning is
+  /// the one feature that *additionally* uses this value to bound its own
+  /// per-extraction async request fan-out (issuing only VLM requests, with no CPU
+  /// batching to protect), on top of the global provider-side limit described above;
+  /// that per-extraction bound clamps a value below 1 up to 1. The global provider-side
+  /// limit does not clamp: `Some(0)` reaches liter-llm as-is, and liter-llm rejects it
+  /// when building the client (zero permitted in-flight requests is never useful), so it
+  /// surfaces as a `create_client` error rather than a silent clamp to 1.
+  ///
+  /// This field is intentionally last to preserve positional constructor
+  /// compatibility in generated language bindings.
+  final PlatformInt64? maxConcurrency;
+
   const LlmConfig({
     required this.model,
     this.apiKey,
@@ -10775,6 +10855,7 @@ class LlmConfig {
     this.healthCheckSecs,
     this.bedrock,
     this.credentialProvider,
+    this.maxConcurrency,
   });
 
   @override
@@ -10804,7 +10885,8 @@ class LlmConfig {
       cooldownSecs.hashCode ^
       healthCheckSecs.hashCode ^
       bedrock.hashCode ^
-      credentialProvider.hashCode;
+      credentialProvider.hashCode ^
+      maxConcurrency.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -10836,7 +10918,8 @@ class LlmConfig {
           cooldownSecs == other.cooldownSecs &&
           healthCheckSecs == other.healthCheckSecs &&
           bedrock == other.bedrock &&
-          credentialProvider == other.credentialProvider;
+          credentialProvider == other.credentialProvider &&
+          maxConcurrency == other.maxConcurrency;
 }
 
 /// A custom provider configuration entry, in addition to liter-llm's built-in providers.
@@ -12322,6 +12405,24 @@ class OcrQualityThresholds {
   /// short words, so the ratio is not meaningful on them and the veto stays disabled.
   final PlatformInt64 minWordsForOcrOutputCheck;
 
+  /// Maximum fraction of a Tesseract page's dictionary-checkable words that
+  /// `TesseractAPI::is_valid_word` may reject before the page is treated as recognition
+  /// noise, supplementing (never replacing) [`Self::max_ocr_output_fragmented_word_ratio`].
+  ///
+  /// Tesseract-only: other backends never report this ratio (see
+  /// `dictionary_invalid_word_ratio` in `ocr::processor::execution`), so this threshold is
+  /// simply never consulted for them.
+  ///
+  /// Calibration owed, same as `min_confidence`:
+  /// unlike [`Self::max_ocr_output_fragmented_word_ratio`] (measured across a recorded
+  /// ordinance's prose vs. drawing pages), this ratio has not yet had a page-level
+  /// measurement run over a labeled corpus. The default therefore disables the check
+  /// entirely (`1.01`, above the `[0.0, 1.0]` range a ratio can reach) rather than guess an
+  /// operating point. Do not lower this without running that measurement first — the cost
+  /// of a wrong threshold here is the same as for the fragmented-word-ratio veto: a false
+  /// positive deletes real content, a false negative only leaves noise in place.
+  final double maxOcrOutputDictInvalidWordRatio;
+
   /// Minimum average word length. Below this with enough words indicates garbled extraction.
   final double minAvgWordLength;
 
@@ -12355,9 +12456,9 @@ class OcrQualityThresholds {
   /// two do not trip this check.
   final double minUndecodableRatio;
 
-  /// Whether to route a page to OCR when pdf_oxide reports that a high
+  /// Whether to route a page to OCR when xberg_native_pdf reports that a high
   /// fraction of its text was fabricated rather than read from the file
-  /// (`MappingProvenance::Fallback`, pdf_oxide 0.3.75+, issue #1254). This is
+  /// (`MappingProvenance::Fallback`, xberg_native_pdf 0.3.75+, issue #1254). This is
   /// a direct fact from the extractor's ISO 32000-1 §9.10.2 mapping cascade,
   /// distinct from the character-heuristic proxy behind `min_undecodable_ratio`.
   /// Defaults to `true`.
@@ -12383,6 +12484,7 @@ class OcrQualityThresholds {
     required this.maxOcrOutputFragmentedWordRatio,
     required this.minOcrMeanConfidence,
     required this.minWordsForOcrOutputCheck,
+    required this.maxOcrOutputDictInvalidWordRatio,
     required this.minAvgWordLength,
     required this.minWordsForAvgLengthCheck,
     required this.minConsecutiveRepeatRatio,
@@ -12409,6 +12511,7 @@ class OcrQualityThresholds {
       maxOcrOutputFragmentedWordRatio.hashCode ^
       minOcrMeanConfidence.hashCode ^
       minWordsForOcrOutputCheck.hashCode ^
+      maxOcrOutputDictInvalidWordRatio.hashCode ^
       minAvgWordLength.hashCode ^
       minWordsForAvgLengthCheck.hashCode ^
       minConsecutiveRepeatRatio.hashCode ^
@@ -12438,6 +12541,8 @@ class OcrQualityThresholds {
               other.maxOcrOutputFragmentedWordRatio &&
           minOcrMeanConfidence == other.minOcrMeanConfidence &&
           minWordsForOcrOutputCheck == other.minWordsForOcrOutputCheck &&
+          maxOcrOutputDictInvalidWordRatio ==
+              other.maxOcrOutputDictInvalidWordRatio &&
           minAvgWordLength == other.minAvgWordLength &&
           minWordsForAvgLengthCheck == other.minWordsForAvgLengthCheck &&
           minConsecutiveRepeatRatio == other.minConsecutiveRepeatRatio &&
@@ -13618,17 +13723,24 @@ enum PdfAnnotationType {
 ///
 /// Controls which engine parses and renders PDF documents. Wire format is
 /// snake_case in all serializers (JSON, TOML, YAML). Defaults to
-/// [`PdfBackend::PdfOxide`] -- selecting anything else never changes behavior
+/// [`PdfBackend::Native`] -- selecting anything else never changes behavior
 /// for a caller who does not opt in.
 enum PdfBackend {
-  /// pdf_oxide (default) -- the pure-Rust PDF engine xberg ships today.
-  pdfOxide,
+  /// xberg's own pure-Rust PDF engine (default), `crates/xberg-native-pdf`.
+  native,
 
   /// pdfium -- Google's PDFium engine, gated behind the `pdf-pdfium` Cargo
-  /// feature. Selection only: no extraction implementation exists yet
-  /// (issue #700 adds the selection level, not the engine). A build
-  /// without the `pdf-pdfium` feature must reject this at the CLI
-  /// validation layer rather than silently falling back to `PdfOxide`.
+  /// feature (#700 added the selection level; #702 added the extraction
+  /// engine, `extractors::pdf::pdfium_engine`, deliberately smaller in scope
+  /// than `Native` -- see that module's doc comment for exactly what it
+  /// extracts). A build without the `pdf-pdfium` feature rejects this at the
+  /// CLI validation layer rather than silently falling back to `Native`.
+  /// A build *with* the feature still enforces the selection at extraction
+  /// time (`extractors::pdf::PdfExtractor::extract_core`), because that is
+  /// the one dispatch point every caller -- CLI, library use, API/MCP
+  /// servers, language bindings -- passes through; see that function's doc
+  /// comment for why the enforcement lives there and not only in CLI
+  /// validation.
   pdfium,
 }
 
@@ -13639,7 +13751,7 @@ class PdfConfig {
 
   /// Extract tables from PDF.
   ///
-  /// When `true` (default), runs pdf_oxide's native grid detector and, if it
+  /// When `true` (default), runs the native engine's grid detector and, if it
   /// finds nothing, falls back to the heuristic text-layer reconstruction in
   /// `pdf::oxide::table::extract_tables_heuristic`. Set to `false` to skip
   /// both passes — `tables` will then be empty in the result.
@@ -13710,7 +13822,7 @@ class PdfConfig {
 
   /// Which engine parses and renders this PDF.
   ///
-  /// Defaults to [`PdfBackend::PdfOxide`] -- the only backend with an
+  /// Defaults to [`PdfBackend::Native`] -- the only backend with an
   /// extraction implementation today. Selecting [`PdfBackend::Pdfium`]
   /// requires the `pdf-pdfium` feature and is rejected otherwise; see
   /// [`PdfBackend`].
@@ -15602,7 +15714,7 @@ class SecurityLimits {
   /// Maximum number of files in archive (10,000)
   final PlatformInt64 maxFilesInArchive;
 
-  /// Maximum nesting depth for structures (100)
+  /// Maximum nesting depth for structures (1024)
   final PlatformInt64 maxNestingDepth;
 
   /// Maximum length of any single XML entity / attribute / token (1 MiB).
@@ -15618,11 +15730,37 @@ class SecurityLimits {
   /// Maximum iterations per operation
   final PlatformInt64 maxIterations;
 
-  /// Maximum XML depth (100 levels)
+  /// Maximum XML depth (1024 levels)
   final PlatformInt64 maxXmlDepth;
 
   /// Maximum cells per table (100,000)
   final PlatformInt64 maxTableCells;
+
+  /// Maximum number of pages (or slides, or frames) in a single document.
+  /// `None` means unlimited.
+  ///
+  /// Checked once the count is known and before any per-page work (OCR, layout
+  /// detection, rendering) starts. Byte-size limits do not bound page count: a
+  /// scanned page can compress to a few kilobytes, so a document well under
+  /// `max_content_size` or `max_archive_size` can still hold thousands of pages
+  /// of per-page work. Defaults to `None` (unlimited) because a real ceiling
+  /// here is workload-specific and a low default would silently reject
+  /// legitimate large documents; callers that want a ceiling set this
+  /// explicitly.
+  ///
+  /// Enforced for: PDF (`extractors::pdf`, page count via `xberg_native_pdf`/`lopdf`),
+  /// PPTX (`extraction::pptx`, slide count from the archive's slide parts),
+  /// Keynote (`extractors::iwork::keynote`, slide count from `Index/Slide-*.iwa`
+  /// entry names), ODP (`extractors::odp`, `draw:page` count in `content.xml`),
+  /// and multi-frame TIFF images built with the `ocr` feature
+  /// (`extractors::image`, frame count via the `tiff` crate). Not enforced for
+  /// any other format, including DOCX, ODT, XLSX, legacy PPT/DOC, Pages/Numbers,
+  /// and TIFF images when the `ocr` feature is disabled: those formats either
+  /// have no fixed "page" the crate can count without doing the expensive work
+  /// itself (DOCX/ODT page count is a layout outcome, not a stored value), or
+  /// have no per-page pipeline to gate at all. Setting `max_pages` on a
+  /// document of an unenforced format is silently a no-op, not a guarantee.
+  final PlatformInt64? maxPages;
 
   const SecurityLimits({
     required this.maxArchiveSize,
@@ -15634,6 +15772,7 @@ class SecurityLimits {
     required this.maxIterations,
     required this.maxXmlDepth,
     required this.maxTableCells,
+    this.maxPages,
   });
 
   @override
@@ -15646,7 +15785,8 @@ class SecurityLimits {
       maxContentSize.hashCode ^
       maxIterations.hashCode ^
       maxXmlDepth.hashCode ^
-      maxTableCells.hashCode;
+      maxTableCells.hashCode ^
+      maxPages.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -15661,7 +15801,8 @@ class SecurityLimits {
           maxContentSize == other.maxContentSize &&
           maxIterations == other.maxIterations &&
           maxXmlDepth == other.maxXmlDepth &&
-          maxTableCells == other.maxTableCells;
+          maxTableCells == other.maxTableCells &&
+          maxPages == other.maxPages;
 }
 
 /// API server configuration.
@@ -16537,6 +16678,20 @@ enum TableOverlapPreference {
 /// Provides fine-grained control over Tesseract OCR engine parameters.
 /// Most users can use the defaults, but these settings allow optimization
 /// for specific document types (invoices, handwriting, etc.).
+///
+/// **This is the public-facing counterpart of `TesseractConfig`
+/// (the internal, engine-facing representation with `u8`/`String` fields instead of
+/// `i32`/`Vec<String>`).** They are two independent struct definitions bridged only by
+/// an explicit `From<&TesseractConfig> for crate::ocr::types::TesseractConfig` impl in
+/// `ocr/types.rs` — that conversion carries field *values* across, but each struct keeps
+/// its own `Default` impl, and the conversion does nothing to keep those two defaults in
+/// sync. Several production call sites (`extractors::image::apply_default_tesseract_psm`,
+/// `configured_region_ocr`, `sparse_image_ocr_fallback_config`) construct *this* struct's
+/// default and convert it, bypassing the internal struct's `Default` entirely — so if the
+/// two defaults disagree, standalone image OCR silently uses this struct's value while
+/// PDF-embedded OCR (which can reach the internal `Default` directly when no
+/// `tesseract_config` is set) uses the other. When changing a default here, also update
+/// `default`, and vice versa.
 class TesseractConfig {
   /// Language code(s) for OCR recognition. For Tesseract, languages are joined with "+".
   ///
@@ -16595,7 +16750,11 @@ class TesseractConfig {
   /// Use pre-adapted templates for character classification
   final bool classifyUsePreAdaptedTemplates;
 
-  /// Enable N-gram language model
+  /// Enable N-gram language model.
+  ///
+  /// Kept on by default (see [`Self::default`] and
+  /// `language_model_ngram_on` for the rationale);
+  /// keep this field's default in sync with the internal struct's.
   final bool languageModelNgramOn;
 
   /// Don't reject good words during block-level processing

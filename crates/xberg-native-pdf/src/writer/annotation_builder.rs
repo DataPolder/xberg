@@ -31,9 +31,7 @@ use super::richmedia::RichMediaAnnotation;
 use super::screen::ScreenAnnotation;
 use super::shape_annotations::{LineAnnotation, PolygonAnnotation, ShapeAnnotation};
 use super::sound::SoundAnnotation;
-use super::special_annotations::{
-    CaretAnnotation, FileAttachmentAnnotation, PopupAnnotation, RedactAnnotation,
-};
+use super::special_annotations::{CaretAnnotation, FileAttachmentAnnotation, PopupAnnotation, RedactAnnotation};
 use super::stamp::StampAnnotation;
 use super::text_annotations::TextAnnotation;
 use super::text_markup::TextMarkupAnnotation;
@@ -294,59 +292,49 @@ impl LinkAnnotation {
                 action.insert("S".to_string(), Object::Name("URI".to_string()));
                 action.insert("URI".to_string(), Object::text_string(uri));
                 dict.insert("A".to_string(), Object::Dictionary(action));
-            },
+            }
             LinkAction::GoTo { page, fit } => {
                 if let Some(page_ref) = page_refs.get(*page) {
                     let dest = if let Some(fit_mode) = fit {
                         self.build_destination(*page_ref, fit_mode)
                     } else {
-                        Object::Array(vec![
-                            Object::Reference(*page_ref),
-                            Object::Name("Fit".to_string()),
-                        ])
+                        Object::Array(vec![Object::Reference(*page_ref), Object::Name("Fit".to_string())])
                     };
                     dict.insert("Dest".to_string(), dest);
                 }
-            },
+            }
             LinkAction::GoToNamed(name) => {
                 dict.insert("Dest".to_string(), Object::text_string(name));
-            },
+            }
             LinkAction::GoToRemote { file, page } => {
                 let mut action = HashMap::new();
                 action.insert("S".to_string(), Object::Name("GoToR".to_string()));
                 action.insert("F".to_string(), Object::text_string(file));
                 action.insert(
                     "D".to_string(),
-                    Object::Array(vec![
-                        Object::Integer(*page as i64),
-                        Object::Name("Fit".to_string()),
-                    ]),
+                    Object::Array(vec![Object::Integer(*page as i64), Object::Name("Fit".to_string())]),
                 );
                 dict.insert("A".to_string(), Object::Dictionary(action));
-            },
+            }
             LinkAction::Launch(app) => {
                 let mut action = HashMap::new();
                 action.insert("S".to_string(), Object::Name("Launch".to_string()));
                 action.insert("F".to_string(), Object::text_string(app));
                 dict.insert("A".to_string(), Object::Dictionary(action));
-            },
+            }
             LinkAction::JavaScript(script) => {
                 let mut action = HashMap::new();
                 action.insert("S".to_string(), Object::Name("JavaScript".to_string()));
                 action.insert("JS".to_string(), Object::text_string(script));
                 dict.insert("A".to_string(), Object::Dictionary(action));
-            },
+            }
         }
 
         dict
     }
 
     /// Build a destination array.
-    fn build_destination(
-        &self,
-        page_ref: ObjectRef,
-        fit: &super::outline_builder::FitMode,
-    ) -> Object {
+    fn build_destination(&self, page_ref: ObjectRef, fit: &super::outline_builder::FitMode) -> Object {
         use super::outline_builder::FitMode;
 
         let mut arr = vec![Object::Reference(page_ref)];
@@ -354,15 +342,15 @@ impl LinkAnnotation {
         match fit {
             FitMode::Fit => {
                 arr.push(Object::Name("Fit".to_string()));
-            },
+            }
             FitMode::FitH(top) => {
                 arr.push(Object::Name("FitH".to_string()));
                 arr.push(top.map(|t| Object::Real(t as f64)).unwrap_or(Object::Null));
-            },
+            }
             FitMode::FitV(left) => {
                 arr.push(Object::Name("FitV".to_string()));
                 arr.push(left.map(|l| Object::Real(l as f64)).unwrap_or(Object::Null));
-            },
+            }
             FitMode::FitR {
                 left,
                 bottom,
@@ -374,24 +362,24 @@ impl LinkAnnotation {
                 arr.push(Object::Real(*bottom as f64));
                 arr.push(Object::Real(*right as f64));
                 arr.push(Object::Real(*top as f64));
-            },
+            }
             FitMode::FitB => {
                 arr.push(Object::Name("FitB".to_string()));
-            },
+            }
             FitMode::FitBH(top) => {
                 arr.push(Object::Name("FitBH".to_string()));
                 arr.push(top.map(|t| Object::Real(t as f64)).unwrap_or(Object::Null));
-            },
+            }
             FitMode::FitBV(left) => {
                 arr.push(Object::Name("FitBV".to_string()));
                 arr.push(left.map(|l| Object::Real(l as f64)).unwrap_or(Object::Null));
-            },
+            }
             FitMode::XYZ { left, top, zoom } => {
                 arr.push(Object::Name("XYZ".to_string()));
                 arr.push(left.map(|l| Object::Real(l as f64)).unwrap_or(Object::Null));
                 arr.push(top.map(|t| Object::Real(t as f64)).unwrap_or(Object::Null));
                 arr.push(zoom.map(|z| Object::Real(z as f64)).unwrap_or(Object::Null));
-            },
+            }
         }
 
         Object::Array(arr)
@@ -464,7 +452,7 @@ impl Annotation {
                 // Watermark build needs a page ref, use first page if available ~keep
                 let page_ref = page_refs.first().copied().unwrap_or(ObjectRef::new(0, 0));
                 watermark.build(page_ref)
-            },
+            }
             Annotation::Sound(sound) => sound.build(page_refs),
             Annotation::Movie(movie) => movie.build(page_refs),
             Annotation::Screen(screen) => screen.build(page_refs),
@@ -842,10 +830,7 @@ impl AnnotationBuilder {
     ///
     /// Returns a vector of annotation dictionaries.
     pub fn build(&self, page_refs: &[ObjectRef]) -> Vec<HashMap<String, Object>> {
-        self.annotations
-            .iter()
-            .map(|annot| annot.build(page_refs))
-            .collect()
+        self.annotations.iter().map(|annot| annot.build(page_refs)).collect()
     }
 }
 
@@ -966,7 +951,7 @@ mod tests {
         match obj {
             Object::Array(arr) => {
                 assert_eq!(arr.len(), 3);
-            },
+            }
             _ => panic!("Expected array"),
         }
     }
@@ -982,7 +967,7 @@ mod tests {
                     Object::Array(dash) => assert_eq!(dash.len(), 2),
                     _ => panic!("Expected dash array"),
                 }
-            },
+            }
             _ => panic!("Expected array"),
         }
     }
@@ -996,7 +981,7 @@ mod tests {
                 assert_eq!(arr.len(), 3);
                 assert_eq!(arr[0], Object::Real(3.0));
                 assert_eq!(arr[1], Object::Real(3.0));
-            },
+            }
             _ => panic!("Expected array"),
         }
     }
@@ -1022,7 +1007,7 @@ mod tests {
         match dict.get("Dest") {
             Some(Object::String(s)) => {
                 assert_eq!(s, b"chapter1");
-            },
+            }
             _ => panic!("Expected string Dest"),
         }
     }
@@ -1046,7 +1031,7 @@ mod tests {
         match dict.get("A") {
             Some(Object::Dictionary(action)) => {
                 assert_eq!(action.get("S"), Some(&Object::Name("GoToR".to_string())));
-            },
+            }
             _ => panic!("Expected action dict"),
         }
     }
@@ -1066,7 +1051,7 @@ mod tests {
         match dict.get("A") {
             Some(Object::Dictionary(action)) => {
                 assert_eq!(action.get("S"), Some(&Object::Name("Launch".to_string())));
-            },
+            }
             _ => panic!("Expected action dict"),
         }
     }
@@ -1086,22 +1071,22 @@ mod tests {
         match dict.get("A") {
             Some(Object::Dictionary(action)) => {
                 assert_eq!(action.get("S"), Some(&Object::Name("JavaScript".to_string())));
-            },
+            }
             _ => panic!("Expected action dict"),
         }
     }
 
     #[test]
     fn test_link_annotation_build_with_color() {
-        let link = LinkAnnotation::uri(Rect::new(0.0, 0.0, 100.0, 20.0), "https://example.com")
-            .with_color(1.0, 0.0, 0.0);
+        let link =
+            LinkAnnotation::uri(Rect::new(0.0, 0.0, 100.0, 20.0), "https://example.com").with_color(1.0, 0.0, 0.0);
         let dict = link.build(&[]);
         assert!(dict.contains_key("C"));
         match dict.get("C") {
             Some(Object::Array(arr)) => {
                 assert_eq!(arr.len(), 3);
                 assert_eq!(arr[0], Object::Real(1.0));
-            },
+            }
             _ => panic!("Expected color array"),
         }
     }
@@ -1448,7 +1433,7 @@ mod tests {
                 assert_eq!(arr[1], Object::Real(720.0));
                 assert_eq!(arr[2], Object::Real(172.0));
                 assert_eq!(arr[3], Object::Real(732.0));
-            },
+            }
             _ => panic!("Expected Rect array"),
         }
     }

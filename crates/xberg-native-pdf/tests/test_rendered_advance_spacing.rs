@@ -35,7 +35,11 @@ fn pdf_with_char_spacing(tc: f32) -> Vec<u8> {
         &mut offsets,
         &format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len() + 1),
     );
-    push(&mut out, &mut offsets, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
 
     let xref_offset = out.len();
     out.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
@@ -81,7 +85,11 @@ fn pdf_with_word_spacing(tc: f32, tw: f32) -> Vec<u8> {
         &mut offsets,
         &format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len() + 1),
     );
-    push(&mut out, &mut offsets, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
 
     let xref_offset = out.len();
     out.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
@@ -205,7 +213,11 @@ fn tj_kern_offset_is_separate_synthetic_space_not_in_rendered_advance() {
         &mut offsets,
         &format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len() + 1),
     );
-    push(&mut out, &mut offsets, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
     let xref_offset = out.len();
     out.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
     out.extend_from_slice(b"0000000000 65535 f \n");
@@ -282,7 +294,11 @@ fn horizontal_scaling_multiplies_both_glyph_and_tc_terms() {
         &mut offsets,
         &format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len() + 1),
     );
-    push(&mut out, &mut offsets, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
     let xref_offset = out.len();
     out.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
     out.extend_from_slice(b"0000000000 65535 f \n");
@@ -343,9 +359,16 @@ fn flipped_ctm_rendered_advance_is_positive() {
     push(
         &mut out,
         &mut offsets,
-        &format!("<< /Length {} >>\nstream\n{page_stream}\nendstream", page_stream.len() + 1),
+        &format!(
+            "<< /Length {} >>\nstream\n{page_stream}\nendstream",
+            page_stream.len() + 1
+        ),
     );
-    push(&mut out, &mut offsets, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
     let xref_offset = out.len();
     out.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
     out.extend_from_slice(b"0000000000 65535 f \n");

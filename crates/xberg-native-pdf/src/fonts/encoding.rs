@@ -42,11 +42,7 @@ impl UnicodeEncoder {
     ///
     /// # Returns
     /// Hex-encoded string suitable for Tj/TJ operators, e.g., "<00410042>"
-    pub fn encode_identity_h(
-        &mut self,
-        text: &str,
-        glyph_lookup: impl Fn(u32) -> Option<u16>,
-    ) -> String {
+    pub fn encode_identity_h(&mut self, text: &str, glyph_lookup: impl Fn(u32) -> Option<u16>) -> String {
         let mut hex = String::with_capacity(text.len() * 4 + 2);
         hex.push('<');
 
@@ -93,7 +89,7 @@ impl UnicodeEncoder {
                 c if c.is_ascii() && c >= ' ' => result.push(c),
                 c if (c as u32) < 256 => {
                     result.push_str(&format!("\\{:03o}", c as u32));
-                },
+                }
                 _ => result.push('?'),
             }
         }

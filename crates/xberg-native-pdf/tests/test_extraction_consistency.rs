@@ -15,13 +15,13 @@ fn finalize_pdf(pdf: &mut Vec<u8>, obj_offsets: &[usize]) {
         .as_bytes(),
     );
     pdf.extend_from_slice(
-        b"0000000000 65535 f 
+        b"0000000000 65535 f
 ",
     );
     for &off in &obj_offsets[1..] {
         pdf.extend_from_slice(
             format!(
-                "{:010} 00000 n 
+                "{:010} 00000 n
 ",
                 off
             )
@@ -68,8 +68,8 @@ endobj
     let obj3 = pdf.len();
     pdf.extend_from_slice(
         b"3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] 
-          /Resources << /Font << /F1 5 0 R >> /XObject << /X0 4 0 R >> >> 
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]
+          /Resources << /Font << /F1 5 0 R >> /XObject << /X0 4 0 R >> >>
           /Contents 6 0 R >>
 endobj
 
@@ -80,7 +80,7 @@ endobj
     let stream = b"BT /F1 12 Tf 10 10 Td (XObjectContent) Tj ET";
     let header = format!(
         "4 0 obj
-<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] 
+<< /Type /XObject /Subtype /Form /BBox [0 0 100 100]
          /Resources << /Font << /F1 5 0 R >> >> /Length {} >>
 stream
 ",
@@ -99,7 +99,7 @@ endobj
     let obj5 = pdf.len();
     pdf.extend_from_slice(
         b"5 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica 
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica
           /Encoding /WinAnsiEncoding >>
 endobj
 

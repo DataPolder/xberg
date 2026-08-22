@@ -46,14 +46,10 @@ fn test_load_catalog() {
 fn test_load_object_by_reference() {
     let pdf = PdfDocument::open(SIMPLE_PDF_PATH).expect("Failed to open simple.pdf");
 
-    let obj1 = pdf
-        .load_object(ObjectRef::new(1, 0))
-        .expect("Failed to load object 1");
+    let obj1 = pdf.load_object(ObjectRef::new(1, 0)).expect("Failed to load object 1");
     assert!(obj1.as_dict().is_some(), "Object 1 should be a dictionary");
 
-    let obj2 = pdf
-        .load_object(ObjectRef::new(2, 0))
-        .expect("Failed to load object 2");
+    let obj2 = pdf.load_object(ObjectRef::new(2, 0)).expect("Failed to load object 2");
     let dict2 = obj2.as_dict().expect("Object 2 should be a dictionary");
 
     assert_eq!(
@@ -68,9 +64,7 @@ fn test_load_object_by_reference() {
         "Object 2 /Count should be 1"
     );
 
-    let obj3 = pdf
-        .load_object(ObjectRef::new(3, 0))
-        .expect("Failed to load object 3");
+    let obj3 = pdf.load_object(ObjectRef::new(3, 0)).expect("Failed to load object 3");
     let dict3 = obj3.as_dict().expect("Object 3 should be a dictionary");
 
     assert_eq!(
@@ -86,9 +80,7 @@ fn test_load_object_by_reference() {
 fn test_object_caching() {
     let pdf = PdfDocument::open(SIMPLE_PDF_PATH).expect("Failed to open simple.pdf");
 
-    let obj1_first = pdf
-        .load_object(ObjectRef::new(1, 0))
-        .expect("Failed to load object 1");
+    let obj1_first = pdf.load_object(ObjectRef::new(1, 0)).expect("Failed to load object 1");
     let obj1_second = pdf
         .load_object(ObjectRef::new(1, 0))
         .expect("Failed to load object 1 (cached)");
@@ -102,7 +94,10 @@ fn test_load_nonexistent_object() {
 
     // Per PDF spec §7.3.10, missing object references "shall be treated as null" ~keep
     let result = pdf.load_object(ObjectRef::new(999, 0));
-    assert!(result.is_ok(), "Loading nonexistent object should return Ok(Null) per §7.3.10");
+    assert!(
+        result.is_ok(),
+        "Loading nonexistent object should return Ok(Null) per §7.3.10"
+    );
     assert!(
         matches!(result.unwrap(), xberg_native_pdf::object::Object::Null),
         "Nonexistent object should resolve to Null"
@@ -136,9 +131,7 @@ fn test_catalog_to_pages_to_count_flow() {
 fn test_media_box_array() {
     let pdf = PdfDocument::open(SIMPLE_PDF_PATH).expect("Failed to open simple.pdf");
 
-    let page = pdf
-        .load_object(ObjectRef::new(3, 0))
-        .expect("Failed to load page");
+    let page = pdf.load_object(ObjectRef::new(3, 0)).expect("Failed to load page");
     let page_dict = page.as_dict().expect("Page should be dict");
 
     let media_box = page_dict
@@ -165,13 +158,7 @@ fn test_full_document_structure() {
     let count = pdf.page_count().expect("Should have page count");
     assert_eq!(count, 1);
 
-    let _ = pdf
-        .load_object(ObjectRef::new(1, 0))
-        .expect("Object 1 exists");
-    let _ = pdf
-        .load_object(ObjectRef::new(2, 0))
-        .expect("Object 2 exists");
-    let _ = pdf
-        .load_object(ObjectRef::new(3, 0))
-        .expect("Object 3 exists");
+    let _ = pdf.load_object(ObjectRef::new(1, 0)).expect("Object 1 exists");
+    let _ = pdf.load_object(ObjectRef::new(2, 0)).expect("Object 2 exists");
+    let _ = pdf.load_object(ObjectRef::new(3, 0)).expect("Object 3 exists");
 }

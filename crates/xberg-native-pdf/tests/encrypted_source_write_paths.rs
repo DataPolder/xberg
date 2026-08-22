@@ -17,9 +17,7 @@
 //! `/V 4 /R 4` derives its key via MD5.
 
 use xberg_native_pdf::PdfDocument;
-use xberg_native_pdf::editor::{
-    DocumentEditor, EditableDocument, EncryptionAlgorithm, EncryptionConfig, SaveOptions,
-};
+use xberg_native_pdf::editor::{DocumentEditor, EditableDocument, EncryptionAlgorithm, EncryptionConfig, SaveOptions};
 use xberg_native_pdf::writer::{DocumentBuilder, DocumentMetadata, PageSize};
 
 const SECRET_TEXT: &str = "HELLO-FROM-PAGE-ONE";
@@ -38,8 +36,7 @@ fn build_encrypted_source() -> Vec<u8> {
     let plain_pdf = builder.build().expect("build plain pdf");
 
     let mut editor = DocumentEditor::from_bytes(plain_pdf).expect("open plain pdf");
-    let config = EncryptionConfig::new(USER_PASSWORD, "owner-password")
-        .with_algorithm(EncryptionAlgorithm::Aes128);
+    let config = EncryptionConfig::new(USER_PASSWORD, "owner-password").with_algorithm(EncryptionAlgorithm::Aes128);
     editor
         .save_to_bytes_with_options(SaveOptions::with_encryption(config))
         .expect("save encrypted pdf")
@@ -50,9 +47,7 @@ fn build_encrypted_source() -> Vec<u8> {
 fn open_authenticated_editor() -> DocumentEditor {
     let doc = PdfDocument::from_bytes(build_encrypted_source()).expect("parse encrypted pdf");
     assert!(doc.is_encrypted(), "fixture must actually be encrypted");
-    let authed = doc
-        .authenticate(USER_PASSWORD.as_bytes())
-        .expect("authenticate");
+    let authed = doc.authenticate(USER_PASSWORD.as_bytes()).expect("authenticate");
     assert!(authed, "authentication with the correct password must succeed");
     assert!(doc.is_authenticated(), "document must report authenticated");
     DocumentEditor::from_document(doc).expect("wrap authenticated document")
@@ -77,9 +72,7 @@ fn assert_output_is_readable_plaintext(output_bytes: &[u8]) {
 #[test]
 fn save_to_bytes_decrypts_encrypted_source() {
     let mut editor = open_authenticated_editor();
-    let output = editor
-        .save_to_bytes()
-        .expect("save_to_bytes on authenticated source");
+    let output = editor.save_to_bytes().expect("save_to_bytes on authenticated source");
     assert_output_is_readable_plaintext(&output);
 }
 
@@ -106,15 +99,13 @@ fn remove_page_then_save_decrypts_remaining_pages() {
     }
     let plain_pdf = builder.build().expect("build plain pdf");
     let mut plain_editor = DocumentEditor::from_bytes(plain_pdf).expect("open plain pdf");
-    let config = EncryptionConfig::new(USER_PASSWORD, "owner-password")
-        .with_algorithm(EncryptionAlgorithm::Aes128);
+    let config = EncryptionConfig::new(USER_PASSWORD, "owner-password").with_algorithm(EncryptionAlgorithm::Aes128);
     let encrypted = plain_editor
         .save_to_bytes_with_options(SaveOptions::with_encryption(config))
         .expect("save encrypted 2-page pdf");
 
     let doc = PdfDocument::from_bytes(encrypted).expect("parse encrypted pdf");
-    doc.authenticate(USER_PASSWORD.as_bytes())
-        .expect("authenticate");
+    doc.authenticate(USER_PASSWORD.as_bytes()).expect("authenticate");
     let mut editor = DocumentEditor::from_document(doc).expect("wrap authenticated document");
 
     EditableDocument::remove_page(&mut editor, 0).expect("remove first page");

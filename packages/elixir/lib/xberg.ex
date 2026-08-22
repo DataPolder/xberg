@@ -234,9 +234,9 @@ defmodule Xberg do
   end
 
   @doc "Drain the glyph-drop [`ProcessingWarning`]s accumulated on this thread by render calls since the last call to this function."
-  @spec take_pdf_oxide_render_warnings() :: [map()]
-  def take_pdf_oxide_render_warnings do
-    Xberg.Native.take_pdf_oxide_render_warnings()
+  @spec take_engine_render_warnings() :: [map()]
+  def take_engine_render_warnings do
+    Xberg.Native.take_engine_render_warnings()
   end
 
   @doc "Build the four (or three) token Whisper decoder prompt."

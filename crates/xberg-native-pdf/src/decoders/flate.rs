@@ -76,9 +76,7 @@ fn looks_like_real_stream(output: &[u8]) -> bool {
     if output.is_empty() {
         return false;
     }
-    const MARKERS: &[&[u8]] = &[
-        b"BT", b"ET", b"Tj", b"TJ", b"Tm", b"Td", b"stream", b"endobj", b"%PDF-",
-    ];
+    const MARKERS: &[&[u8]] = &[b"BT", b"ET", b"Tj", b"TJ", b"Tm", b"Td", b"stream", b"endobj", b"%PDF-"];
     for m in MARKERS {
         if output.windows(m.len()).any(|w| w == *m) {
             return true;
@@ -142,7 +140,7 @@ impl StreamDecoder for FlateDecoder {
             Ok(_) => {
                 check_limit(&output, self.max_decompressed_bytes)?;
                 Ok(output)
-            },
+            }
             Err(e) => {
                 // Partial recovery: return only if output *looks like* a
                 // plausible stream. The pre-fix behaviour accepted any
@@ -164,8 +162,7 @@ impl StreamDecoder for FlateDecoder {
                 // Some PDFs have corrupt zlib headers but valid deflate data ~keep
                 tracing::debug!(filter = "FlateDecode", "zlib decode failed, trying raw deflate");
                 output.clear();
-                let mut deflate_decoder =
-                    DeflateDecoder::new(input).take(self.max_decompressed_bytes);
+                let mut deflate_decoder = DeflateDecoder::new(input).take(self.max_decompressed_bytes);
 
                 match deflate_decoder.read_to_end(&mut output) {
                     Ok(_) => {
@@ -176,7 +173,7 @@ impl StreamDecoder for FlateDecoder {
                             "recovered via raw deflate fallback after corrupt zlib header"
                         );
                         Ok(output)
-                    },
+                    }
                     Err(deflate_err) => {
                         if !output.is_empty() && looks_like_real_stream(&output) {
                             check_limit(&output, self.max_decompressed_bytes)?;
@@ -206,7 +203,7 @@ impl StreamDecoder for FlateDecoder {
                                         "recovered by skipping corrupt zlib header bytes"
                                     );
                                     return Ok(output);
-                                },
+                                }
                                 Err(_) => {
                                     if !output.is_empty() && looks_like_real_stream(&output) {
                                         check_limit(&output, self.max_decompressed_bytes)?;
@@ -217,7 +214,7 @@ impl StreamDecoder for FlateDecoder {
                                         );
                                         return Ok(output);
                                     }
-                                },
+                                }
                             }
                         }
 
@@ -240,8 +237,7 @@ impl StreamDecoder for FlateDecoder {
                                 corrected[0] = (first_byte & 0xF0) | 0x08;
 
                                 output.clear();
-                                let mut decoder = ZlibDecoder::new(&corrected[..])
-                                    .take(self.max_decompressed_bytes);
+                                let mut decoder = ZlibDecoder::new(&corrected[..]).take(self.max_decompressed_bytes);
                                 match decoder.read_to_end(&mut output) {
                                     Ok(_) if !output.is_empty() => {
                                         check_limit(&output, self.max_decompressed_bytes)?;
@@ -251,11 +247,8 @@ impl StreamDecoder for FlateDecoder {
                                             "recovered via corrected zlib header byte"
                                         );
                                         return Ok(output);
-                                    },
-                                    Err(_)
-                                        if !output.is_empty()
-                                            && looks_like_real_stream(&output) =>
-                                    {
+                                    }
+                                    Err(_) if !output.is_empty() && looks_like_real_stream(&output) => {
                                         check_limit(&output, self.max_decompressed_bytes)?;
                                         tracing::warn!(
                                             filter = "FlateDecode",
@@ -263,13 +256,10 @@ impl StreamDecoder for FlateDecoder {
                                             "header-correction partial recovery"
                                         );
                                         return Ok(output);
-                                    },
+                                    }
                                     _ => {
-                                        tracing::debug!(
-                                            filter = "FlateDecode",
-                                            "header correction failed"
-                                        );
-                                    },
+                                        tracing::debug!(filter = "FlateDecode", "header correction failed");
+                                    }
                                 }
                             }
                         }
@@ -277,10 +267,7 @@ impl StreamDecoder for FlateDecoder {
                         // Strategy 5: Brute-force scan for valid deflate data
                         // Try starting deflate decompression from offsets 0-20
                         // BUT validate the output contains valid PDF operators ~keep
-                        tracing::debug!(
-                            filter = "FlateDecode",
-                            "trying brute-force scan for valid deflate data"
-                        );
+                        tracing::debug!(filter = "FlateDecode", "trying brute-force scan for valid deflate data");
                         let max_offset = std::cmp::min(20, input.len());
                         for offset in 0..max_offset {
                             if offset == 0 || offset == 2 {
@@ -288,8 +275,8 @@ impl StreamDecoder for FlateDecoder {
                             }
 
                             output.clear();
-                            let mut deflate_decoder = DeflateDecoder::new(&input[offset..])
-                                .take(self.max_decompressed_bytes);
+                            let mut deflate_decoder =
+                                DeflateDecoder::new(&input[offset..]).take(self.max_decompressed_bytes);
 
                             match deflate_decoder.read_to_end(&mut output) {
                                 Ok(_) if !output.is_empty() => {
@@ -319,7 +306,7 @@ impl StreamDecoder for FlateDecoder {
                                         );
                                         continue;
                                     }
-                                },
+                                }
                                 Err(_) if !output.is_empty() => {
                                     check_limit(&output, self.max_decompressed_bytes)?;
                                     let decoded_str = String::from_utf8_lossy(&output);
@@ -347,7 +334,7 @@ impl StreamDecoder for FlateDecoder {
                                         );
                                         continue;
                                     }
-                                },
+                                }
                                 _ => continue,
                             }
                         }
@@ -384,9 +371,9 @@ impl StreamDecoder for FlateDecoder {
                             deflate_err,
                             input.len()
                         )))
-                    },
+                    }
                 }
-            },
+            }
         }
     }
 
@@ -411,7 +398,9 @@ mod tests {
     fn looks_like_real_stream_rejects_repeating_garbage() {
         // Actual symptom before the fix: 128 bytes of
         // `P\xffj!}\xef\xbd\xbd\xef\xbd\xbd...` high-bit-heavy repetition. ~keep
-        let garbage = b"P\xffj!}\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd".repeat(4);
+        let garbage =
+            b"P\xffj!}\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd\xef\xbd\xbd"
+                .repeat(4);
         assert!(
             !looks_like_real_stream(&garbage),
             "misaligned-deflate garbage must be rejected as a partial recovery"
@@ -553,7 +542,10 @@ mod tests {
     fn test_effective_limit_env_variable() {
         assert_eq!(effective_limit_from_str(None), DEFAULT_MAX_DECOMPRESSED_BYTES);
         assert_eq!(effective_limit_from_str(Some("64")), 64 * 1024 * 1024);
-        assert_eq!(effective_limit_from_str(Some("not_a_number")), DEFAULT_MAX_DECOMPRESSED_BYTES);
+        assert_eq!(
+            effective_limit_from_str(Some("not_a_number")),
+            DEFAULT_MAX_DECOMPRESSED_BYTES
+        );
     }
 
     #[test]
@@ -562,6 +554,9 @@ mod tests {
         // New name unset: the pre-rename name still works, so an upgrade
         // never silently reverts a deployment to the compile-time default. ~keep
         assert_eq!(effective_limit_from_env_pair(None, Some("64")), 64 * 1024 * 1024);
-        assert_eq!(effective_limit_from_env_pair(None, None), DEFAULT_MAX_DECOMPRESSED_BYTES);
+        assert_eq!(
+            effective_limit_from_env_pair(None, None),
+            DEFAULT_MAX_DECOMPRESSED_BYTES
+        );
     }
 }

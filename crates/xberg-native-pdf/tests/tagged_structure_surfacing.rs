@@ -34,9 +34,7 @@ fn tagged_two_chapter_pdf() -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
@@ -81,7 +79,12 @@ fn tagged_two_chapter_pdf() -> Vec<u8> {
         8,
         "<< /Type /StructTreeRoot /K [9 0 R] /ParentTree 17 0 R >>",
     );
-    obj(&mut buf, &mut off, 9, "<< /Type /StructElem /S /Document /K [10 0 R 14 0 R] >>");
+    obj(
+        &mut buf,
+        &mut off,
+        9,
+        "<< /Type /StructElem /S /Document /K [10 0 R 14 0 R] >>",
+    );
     obj(
         &mut buf,
         &mut off,

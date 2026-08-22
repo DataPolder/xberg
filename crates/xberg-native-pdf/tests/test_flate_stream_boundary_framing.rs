@@ -75,9 +75,7 @@ fn push_stream(
     let length_str = length_literal
         .map(|s| s.to_string())
         .unwrap_or_else(|| compressed.len().to_string());
-    out.extend_from_slice(
-        format!("<< /Length {length_str} /Filter /FlateDecode >>\nstream").as_bytes(),
-    );
+    out.extend_from_slice(format!("<< /Length {length_str} /Filter /FlateDecode >>\nstream").as_bytes());
     out.extend_from_slice(open_eol);
     out.extend_from_slice(compressed);
     out.extend_from_slice(close_eol);

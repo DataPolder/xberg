@@ -54,7 +54,11 @@ fn minimal_shared_xobject_pdf() -> Vec<u8> {
     };
 
     push(&mut out, &mut offsets, "<< /Type /Catalog /Pages 2 0 R >>");
-    push(&mut out, &mut offsets, "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+    );
     let page_common = "/Type /Page /Parent 2 0 R /MediaBox [0 0 600 900] \
                        /Resources << /Font << /F0 7 0 R >> /XObject << /X0 8 0 R >> >>";
     push(&mut out, &mut offsets, &format!("<< {page_common} /Contents 5 0 R >>"));
@@ -78,7 +82,11 @@ fn minimal_shared_xobject_pdf() -> Vec<u8> {
         &format!("<< /Length {} >>\nstream\n{page2}\nendstream", page2.len() + 1),
     );
 
-    push(&mut out, &mut offsets, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
 
     let xo = b"q BT /F0 24 Tf 100 800 Td (Top Page) Tj ET \
                  BT /F0 24 Tf 100 100 Td (Bottom Page) Tj ET Q\n";
@@ -125,7 +133,10 @@ fn shared_xobject_with_per_page_ctm_yields_distinct_page_text() {
     // Page 0 applies identity CTM — both labels are within MediaBox
     // [0 0 600 900], so both stay. ~keep
     assert!(p0.contains("Top Page"), "page 0 should contain 'Top Page', got {p0:?}");
-    assert!(p0.contains("Bottom Page"), "page 0 should contain 'Bottom Page', got {p0:?}");
+    assert!(
+        p0.contains("Bottom Page"),
+        "page 0 should contain 'Bottom Page', got {p0:?}"
+    );
 
     // Page 1 translates by -700. `Top Page` at Y_obj=800 lands at page
     // Y=100 (on page). `Bottom Page` at Y_obj=100 lands at page Y=-600

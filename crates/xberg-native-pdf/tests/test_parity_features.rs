@@ -5,12 +5,23 @@ fn test_word_extraction() {
     let mut pdf = Pdf::from_text("Hello World").unwrap();
     let words = pdf.extract_words(0).unwrap();
 
-    println!("Extracted words: {:?}", words.iter().map(|w| &w.text).collect::<Vec<_>>());
+    println!(
+        "Extracted words: {:?}",
+        words.iter().map(|w| &w.text).collect::<Vec<_>>()
+    );
 
     assert!(words.len() >= 2, "Expected at least 2 words, found {}", words.len());
     let texts: Vec<String> = words.iter().map(|w| w.text.trim().to_string()).collect();
-    assert!(texts.iter().any(|t| t == "Hello"), "Could not find 'Hello' in {:?}", texts);
-    assert!(texts.iter().any(|t| t == "World"), "Could not find 'World' in {:?}", texts);
+    assert!(
+        texts.iter().any(|t| t == "Hello"),
+        "Could not find 'Hello' in {:?}",
+        texts
+    );
+    assert!(
+        texts.iter().any(|t| t == "World"),
+        "Could not find 'World' in {:?}",
+        texts
+    );
 }
 
 #[test]
@@ -18,7 +29,10 @@ fn test_line_extraction() {
     let mut pdf = Pdf::from_text("Line One\n\nLine Two\n\nLine Three").unwrap();
     let lines = pdf.extract_text_lines(0).unwrap();
 
-    println!("Extracted lines: {:?}", lines.iter().map(|l| &l.text).collect::<Vec<_>>());
+    println!(
+        "Extracted lines: {:?}",
+        lines.iter().map(|l| &l.text).collect::<Vec<_>>()
+    );
 
     assert!(lines.len() >= 3, "Expected at least 3 lines, found {}", lines.len());
     let texts: Vec<String> = lines.iter().map(|l| l.text.clone()).collect();

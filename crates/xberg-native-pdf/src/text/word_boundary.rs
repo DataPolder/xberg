@@ -21,13 +21,12 @@
 
 use crate::text::cjk_punctuation;
 use crate::text::complex_script_detector::{
-    ComplexScript, detect_complex_script, handle_devanagari_boundary, handle_indic_boundary,
-    handle_khmer_boundary, handle_thai_boundary,
+    ComplexScript, detect_complex_script, handle_devanagari_boundary, handle_indic_boundary, handle_khmer_boundary,
+    handle_thai_boundary,
 };
 use crate::text::rtl_detector::should_split_at_rtl_boundary;
 use crate::text::script_detector::{
-    DocumentLanguage, detect_cjk_script, handle_japanese_text, handle_korean_text,
-    should_split_on_script_transition,
+    DocumentLanguage, detect_cjk_script, handle_japanese_text, handle_korean_text, should_split_on_script_transition,
 };
 
 /// Information about a character in the text stream for boundary detection.
@@ -373,11 +372,7 @@ impl WordBoundaryDetector {
     /// # Returns
     ///
     /// Vector of indices where word boundaries occur (between characters)
-    pub fn detect_word_boundaries(
-        &self,
-        characters: &[CharacterInfo],
-        context: &BoundaryContext,
-    ) -> Vec<usize> {
+    pub fn detect_word_boundaries(&self, characters: &[CharacterInfo], context: &BoundaryContext) -> Vec<usize> {
         if characters.is_empty() {
             return Vec::new();
         }
@@ -448,30 +443,24 @@ impl WordBoundaryDetector {
                     return decision;
                 }
                 self.is_word_boundary_basic(prev_char, curr_char, context)
-            },
+            }
 
             DocumentScript::RTL => {
-                if let Some(decision) =
-                    should_split_at_rtl_boundary(prev_char, curr_char, Some(context))
-                {
+                if let Some(decision) = should_split_at_rtl_boundary(prev_char, curr_char, Some(context)) {
                     return decision;
                 }
                 self.is_word_boundary_basic(prev_char, curr_char, context)
-            },
+            }
 
             DocumentScript::Complex => {
-                if let Some(decision) =
-                    self.should_split_at_complex_script_boundary(prev_char, curr_char)
-                {
+                if let Some(decision) = self.should_split_at_complex_script_boundary(prev_char, curr_char) {
                     return decision;
                 }
                 self.is_word_boundary_basic(prev_char, curr_char, context)
-            },
+            }
 
             DocumentScript::Mixed => {
-                if let Some(decision) =
-                    should_split_at_rtl_boundary(prev_char, curr_char, Some(context))
-                {
+                if let Some(decision) = should_split_at_rtl_boundary(prev_char, curr_char, Some(context)) {
                     return decision;
                 }
 
@@ -481,14 +470,12 @@ impl WordBoundaryDetector {
                     return decision;
                 }
 
-                if let Some(decision) =
-                    self.should_split_at_complex_script_boundary(prev_char, curr_char)
-                {
+                if let Some(decision) = self.should_split_at_complex_script_boundary(prev_char, curr_char) {
                     return decision;
                 }
 
                 self.is_word_boundary_basic(prev_char, curr_char, context)
-            },
+            }
         }
     }
 
@@ -561,13 +548,13 @@ impl WordBoundaryDetector {
         match (prev_script, curr_script) {
             (Some(ComplexScript::Devanagari), _) | (_, Some(ComplexScript::Devanagari)) => {
                 handle_devanagari_boundary(prev_char, curr_char)
-            },
+            }
             (Some(ComplexScript::Thai), _) | (_, Some(ComplexScript::Thai)) => {
                 handle_thai_boundary(prev_char, curr_char)
-            },
+            }
             (Some(ComplexScript::Khmer), _) | (_, Some(ComplexScript::Khmer)) => {
                 handle_khmer_boundary(prev_char, curr_char)
-            },
+            }
             (Some(ComplexScript::Tamil), _)
             | (_, Some(ComplexScript::Tamil))
             | (Some(ComplexScript::Telugu), _)
@@ -600,16 +587,11 @@ impl WordBoundaryDetector {
     /// - `Some(true)` - Must create boundary
     /// - `Some(false)` - Must not create boundary
     /// - `None` - Use other signals (TJ offset, geometry)
-    fn should_split_at_cjk_boundary(
-        &self,
-        prev_char: &CharacterInfo,
-        curr_char: &CharacterInfo,
-    ) -> Option<bool> {
+    fn should_split_at_cjk_boundary(&self, prev_char: &CharacterInfo, curr_char: &CharacterInfo) -> Option<bool> {
         // Check CJK punctuation (always creates boundary with high confidence)
         // Note: Using None for density to maintain current behavior
         // Future: Could integrate document-wide density measurement here ~keep
-        let prev_punctuation_score =
-            cjk_punctuation::get_cjk_punctuation_boundary_score(prev_char.code, None);
+        let prev_punctuation_score = cjk_punctuation::get_cjk_punctuation_boundary_score(prev_char.code, None);
         if prev_punctuation_score >= 0.9 {
             // Sentence-ending and enumeration punctuation create boundaries ~keep
             return Some(true);
@@ -623,15 +605,11 @@ impl WordBoundaryDetector {
         }
 
         match self.document_language {
-            Some(DocumentLanguage::Japanese) => {
-                handle_japanese_text(prev_char, curr_char, prev_script, curr_script)
-            },
-            Some(DocumentLanguage::Korean) => {
-                handle_korean_text(prev_char, curr_char, prev_script, curr_script)
-            },
+            Some(DocumentLanguage::Japanese) => handle_japanese_text(prev_char, curr_char, prev_script, curr_script),
+            Some(DocumentLanguage::Korean) => handle_korean_text(prev_char, curr_char, prev_script, curr_script),
             Some(DocumentLanguage::Chinese) | None => {
                 should_split_on_script_transition(prev_script, curr_script, self.document_language)
-            },
+            }
         }
     }
 
@@ -639,11 +617,7 @@ impl WordBoundaryDetector {
     ///
     /// When a ligature like 'fi' (U+FB01) is expanded into 'f' + 'i',
     /// the geometric gap between expanded components should not create a word boundary.
-    fn is_ligature_internal_gap(
-        &self,
-        prev_char: &CharacterInfo,
-        curr_char: &CharacterInfo,
-    ) -> bool {
+    fn is_ligature_internal_gap(&self, prev_char: &CharacterInfo, curr_char: &CharacterInfo) -> bool {
         // Ligature Unicode range: U+FB00-U+FB06 ~keep
         const LIGATURES: [u32; 7] = [0xFB00, 0xFB01, 0xFB02, 0xFB03, 0xFB04, 0xFB05, 0xFB06];
 
@@ -770,10 +744,7 @@ impl WordBoundaryDetector {
 /// # Returns
 ///
 /// Vector of indices where word boundaries occur
-pub fn detect_word_boundaries(
-    characters: &[CharacterInfo],
-    context: &BoundaryContext,
-) -> Vec<usize> {
+pub fn detect_word_boundaries(characters: &[CharacterInfo], context: &BoundaryContext) -> Vec<usize> {
     let detector = WordBoundaryDetector::new();
     detector.detect_word_boundaries(characters, context)
 }
@@ -947,7 +918,11 @@ mod tests {
 
         // Gap between 't' (ends at 15.9) and 'B' (at 27.0) is 11.1 units > threshold (3.6)
         // This creates a boundary at index 4 (the 'B' character) ~keep
-        assert!(boundaries.contains(&4), "Expected boundary at index 4, got: {:?}", boundaries);
+        assert!(
+            boundaries.contains(&4),
+            "Expected boundary at index 4, got: {:?}",
+            boundaries
+        );
     }
 
     #[test]
@@ -1076,17 +1051,18 @@ mod tests {
         // With 100% scaling, gap (7.5) doesn't exceed threshold (9.6) ~keep
         let mut context = BoundaryContext::new(12.0);
         context.horizontal_scaling = 100.0;
-        let boundaries_normal =
-            WordBoundaryDetector::new().detect_word_boundaries(&characters, &context);
+        let boundaries_normal = WordBoundaryDetector::new().detect_word_boundaries(&characters, &context);
 
         // With 75% scaling, gap (7.5) exceeds threshold (7.2) ~keep
         context.horizontal_scaling = 75.0;
-        let boundaries_scaled =
-            WordBoundaryDetector::new().detect_word_boundaries(&characters, &context);
+        let boundaries_scaled = WordBoundaryDetector::new().detect_word_boundaries(&characters, &context);
 
         // Scaling affects the effective threshold, so results should differ
         // Normal: no boundary, Scaled: boundary at index 1 ~keep
-        assert!(boundaries_normal.is_empty(), "Should have no boundaries at 100% scaling");
+        assert!(
+            boundaries_normal.is_empty(),
+            "Should have no boundaries at 100% scaling"
+        );
         assert!(boundaries_scaled.contains(&1), "Should have boundary at 75% scaling");
     }
 
@@ -1219,7 +1195,10 @@ mod tests {
         let context = BoundaryContext::new(12.0);
         let boundaries = WordBoundaryDetector::new().detect_word_boundaries(&characters, &context);
 
-        assert!(boundaries.contains(&1), "Should have boundary after first CJK character");
+        assert!(
+            boundaries.contains(&1),
+            "Should have boundary after first CJK character"
+        );
     }
 
     #[test]
@@ -1355,7 +1334,10 @@ mod tests {
         };
 
         let boundary = detector.is_word_boundary(&prev, &curr, &context);
-        assert!(!boundary, "TJ offset -50 should NOT trigger boundary when static -100 is used");
+        assert!(
+            !boundary,
+            "TJ offset -50 should NOT trigger boundary when static -100 is used"
+        );
     }
 
     #[test]

@@ -123,7 +123,7 @@ fn test_font(kind: CmapKind, n_mapped: u16) -> Vec<u8> {
                 glyph_ids[0x40 + g as usize] = g as u8;
             }
             cmap.extend(glyph_ids);
-        },
+        }
         CmapKind::WindowsUnicode => {
             cmap.extend(be16(3));
             cmap.extend(be16(1));
@@ -144,7 +144,7 @@ fn test_font(kind: CmapKind, n_mapped: u16) -> Vec<u8> {
             cmap.extend(be16(1));
             cmap.extend(be16(0));
             cmap.extend(be16(0));
-        },
+        }
     }
 
     let tables: [(&[u8; 4], &Vec<u8>); 7] = [
@@ -230,8 +230,11 @@ fn build_pdf(font_objects: &[String], content: &str, font: &[u8], font_obj_id: u
         buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
     }
     buf.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", n_objs + 1)
-            .as_bytes(),
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            n_objs + 1
+        )
+        .as_bytes(),
     );
     buf
 }
@@ -267,8 +270,7 @@ fn type0_identity_pdf() -> Vec<u8> {
     let descriptor = "<< /Type /FontDescriptor /FontName /CharBox /Flags 4 \
                       /FontBBox [0 0 450 700] /ItalicAngle 0 /Ascent 800 /Descent -200 \
                       /CapHeight 700 /StemV 80 /FontFile2 9 0 R >>";
-    let tounicode_obj =
-        format!("<< /Length {} >>\nstream\n{tounicode}\nendstream", tounicode.len() + 1);
+    let tounicode_obj = format!("<< /Length {} >>\nstream\n{tounicode}\nendstream", tounicode.len() + 1);
     build_pdf(
         &[
             font_dict.to_string(),
@@ -305,10 +307,7 @@ fn chars_and_advances(pdf: Vec<u8>) -> (String, Vec<char>, Vec<f32>) {
         .collect();
     let chars = doc.extract_chars(0).expect("extract_chars");
     let seq: Vec<char> = chars.iter().map(|c| c.char).collect();
-    let advances: Vec<f32> = chars
-        .windows(2)
-        .map(|w| w[1].origin_x - w[0].origin_x)
-        .collect();
+    let advances: Vec<f32> = chars.windows(2).map(|w| w[1].origin_x - w[0].origin_x).collect();
     (text, seq, advances)
 }
 
@@ -324,8 +323,7 @@ fn assert_advances(advances: &[f32], expected: &[f32]) {
 
 #[test]
 fn byte_indexed_truetype_decodes_abc_with_declared_advances() {
-    let (text, seq, advances) =
-        chars_and_advances(simple_truetype_pdf(CmapKind::ByteIndexed, "ABC"));
+    let (text, seq, advances) = chars_and_advances(simple_truetype_pdf(CmapKind::ByteIndexed, "ABC"));
     assert_eq!(text, "ABC");
     assert_eq!(seq, vec!['A', 'B', 'C']);
     // /Widths [500 600 700] at 10 pt: A advances 5, B advances 6. ~keep
@@ -334,8 +332,7 @@ fn byte_indexed_truetype_decodes_abc_with_declared_advances() {
 
 #[test]
 fn unicode_cmap_truetype_decodes_abc_with_declared_advances() {
-    let (text, seq, advances) =
-        chars_and_advances(simple_truetype_pdf(CmapKind::WindowsUnicode, "ABC"));
+    let (text, seq, advances) = chars_and_advances(simple_truetype_pdf(CmapKind::WindowsUnicode, "ABC"));
     assert_eq!(text, "ABC");
     assert_eq!(seq, vec!['A', 'B', 'C']);
     assert_advances(&advances, &[5.0, 6.0]);

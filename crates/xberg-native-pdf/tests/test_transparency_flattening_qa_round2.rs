@@ -51,7 +51,10 @@ macro_rules! smask_op_gap {
 }
 
 smask_op_gap!(HONEST_GAP_SMASK_FILLSTROKE_NOT_WIRED, "B (fill+stroke)");
-smask_op_gap!(HONEST_GAP_SMASK_FILLSTROKE_EVENODD_NOT_WIRED, "B* (fill+stroke EvenOdd)");
+smask_op_gap!(
+    HONEST_GAP_SMASK_FILLSTROKE_EVENODD_NOT_WIRED,
+    "B* (fill+stroke EvenOdd)"
+);
 smask_op_gap!(HONEST_GAP_SMASK_CLOSE_FILLSTROKE_NOT_WIRED, "b (close+fill+stroke)");
 smask_op_gap!(
     HONEST_GAP_SMASK_CLOSE_FILLSTROKE_EVENODD_NOT_WIRED,
@@ -60,7 +63,10 @@ smask_op_gap!(
 smask_op_gap!(HONEST_GAP_SMASK_FILL_EVENODD_NOT_WIRED, "f* (fill EvenOdd)");
 smask_op_gap!(HONEST_GAP_SMASK_PAINT_SHADING_NOT_WIRED, "sh (paint shading)");
 smask_op_gap!(HONEST_GAP_SMASK_DO_NOT_WIRED, "Do (Form XObject + image invocation)");
-smask_op_gap!(HONEST_GAP_SMASK_TEXT_SHOWING_NOT_WIRED, "Tj / TJ / ' / \" (text-showing)");
+smask_op_gap!(
+    HONEST_GAP_SMASK_TEXT_SHOWING_NOT_WIRED,
+    "Tj / TJ / ' / \" (text-showing)"
+);
 
 macro_rules! overprint_op_gap {
     ($name:ident, $op_desc:literal) => {
@@ -78,7 +84,10 @@ macro_rules! overprint_op_gap {
 }
 
 overprint_op_gap!(HONEST_GAP_OVERPRINT_FILLSTROKE_NOT_WIRED, "B (fill+stroke)");
-overprint_op_gap!(HONEST_GAP_OVERPRINT_FILLSTROKE_EVENODD_NOT_WIRED, "B* (fill+stroke EvenOdd)");
+overprint_op_gap!(
+    HONEST_GAP_OVERPRINT_FILLSTROKE_EVENODD_NOT_WIRED,
+    "B* (fill+stroke EvenOdd)"
+);
 overprint_op_gap!(HONEST_GAP_OVERPRINT_CLOSE_FILLSTROKE_NOT_WIRED, "b (close+fill+stroke)");
 overprint_op_gap!(
     HONEST_GAP_OVERPRINT_CLOSE_FILLSTROKE_EVENODD_NOT_WIRED,
@@ -699,8 +708,7 @@ fn qa_round2_overprint_modulates_close_fill_stroke_combo() {
 #[test]
 fn qa_round2_overprint_modulates_close_fill_stroke_evenodd_combo() {
     let with_op = render_rgba(fixture_overprint_for_op("30 30 m\n80 30 l\n80 80 l\n30 80 l\nb*\n"));
-    let no_op =
-        render_rgba(fixture_no_overprint_for_op("30 30 m\n80 30 l\n80 80 l\n30 80 l\nb*\n"));
+    let no_op = render_rgba(fixture_no_overprint_for_op("30 30 m\n80 30 l\n80 80 l\n30 80 l\nb*\n"));
     let (r_op, g_op, b_op) = mean_rgb(&with_op, 40, 60, 40, 60);
     let (r_no, g_no, b_no) = mean_rgb(&no_op, 40, 60, 40, 60);
     let delta = (r_op - r_no).abs() + (g_op - g_no).abs() + (b_op - b_no).abs();
@@ -1034,7 +1042,11 @@ fn qa_round3_compose_first_under_icc_backdrop_press_accurate() {
     let (r_actual, g_actual, b_actual) = mean_rgb(&rgba_two, 35, 65, 35, 65);
     let (r_ref, g_ref, b_ref) = mean_rgb(&rgba_ref, 35, 65, 35, 65);
 
-    let actual = (r_actual.round() as i32, g_actual.round() as i32, b_actual.round() as i32);
+    let actual = (
+        r_actual.round() as i32,
+        g_actual.round() as i32,
+        b_actual.round() as i32,
+    );
     let press = (r_ref.round() as i32, g_ref.round() as i32, b_ref.round() as i32);
 
     assert_eq!(

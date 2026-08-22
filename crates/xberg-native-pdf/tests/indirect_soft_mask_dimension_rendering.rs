@@ -137,8 +137,7 @@ fn pdf_painting_a_masked_image(indirect_height: bool, indirect_width: bool) -> V
 /// the white page background).
 fn painted_pixels(pdf: Vec<u8>) -> usize {
     let doc = PdfDocument::from_bytes(pdf).expect("fixture parses");
-    let rendered =
-        render_page(&doc, 0, &RenderOptions::with_dpi(72).as_raw()).expect("render page 0");
+    let rendered = render_page(&doc, 0, &RenderOptions::with_dpi(72).as_raw()).expect("render page 0");
     rendered
         .data
         .chunks(4)

@@ -86,8 +86,7 @@ impl<'a> TrueTypeFont<'a> {
         // verbatim so embedded FontDescriptor flags do not shift. ~keep
         let selection = font.os2().ok().map(|os2| os2.fs_selection());
         let is_bold = selection.is_some_and(|f| f.contains(SelectionFlags::BOLD));
-        let is_italic = selection.is_some_and(|f| f.contains(SelectionFlags::ITALIC))
-            || metrics.italic_angle != 0.0;
+        let is_italic = selection.is_some_and(|f| f.contains(SelectionFlags::ITALIC)) || metrics.italic_angle != 0.0;
 
         let mut font = Self {
             font,
@@ -118,8 +117,7 @@ impl<'a> TrueTypeFont<'a> {
             if let Some(char) = char::from_u32(codepoint)
                 && let Some(glyph_id) = charmap.map(char)
             {
-                self.unicode_to_glyph
-                    .insert(codepoint, glyph_id.to_u32() as u16);
+                self.unicode_to_glyph.insert(codepoint, glyph_id.to_u32() as u16);
             }
         }
     }
@@ -219,9 +217,7 @@ impl<'a> TrueTypeFont<'a> {
 
     /// Get width for a Unicode character in 1/1000 em units.
     pub fn char_width(&self, codepoint: u32) -> u16 {
-        self.glyph_id(codepoint)
-            .map(|gid| self.glyph_width(gid))
-            .unwrap_or(500)
+        self.glyph_id(codepoint).map(|gid| self.glyph_width(gid)).unwrap_or(500)
     }
 
     /// Get the number of glyphs in the font.
@@ -338,10 +334,7 @@ impl<'a> TrueTypeFont<'a> {
         cmap.push_str("<0000> <FFFF>\n");
         cmap.push_str("endcodespacerange\n");
 
-        let mut mappings: Vec<(u16, u32)> = used_chars
-            .iter()
-            .map(|(&unicode, &gid)| (gid, unicode))
-            .collect();
+        let mut mappings: Vec<(u16, u32)> = used_chars.iter().map(|(&unicode, &gid)| (gid, unicode)).collect();
         mappings.sort_by_key(|&(gid, _)| gid);
 
         // Write bfchar entries (max 100 per section per PDF spec) ~keep
@@ -405,17 +398,13 @@ impl FontMetrics {
     /// Extract metrics from a parsed TrueType font.
     pub fn from_font(font: &TrueTypeFont) -> Self {
         Self {
-            name: font
-                .postscript_name()
-                .unwrap_or_else(|| "Unknown".to_string()),
+            name: font.postscript_name().unwrap_or_else(|| "Unknown".to_string()),
             family: font.family_name().unwrap_or_else(|| "Unknown".to_string()),
             units_per_em: font.units_per_em(),
             ascender: font.ascender(),
             descender: font.descender(),
             cap_height: font.cap_height().unwrap_or(font.ascender()),
-            x_height: font
-                .x_height()
-                .unwrap_or((font.ascender() as f32 * 0.5) as i16),
+            x_height: font.x_height().unwrap_or((font.ascender() as f32 * 0.5) as i16),
             italic_angle: font.italic_angle(),
             bbox: font.bbox(),
             stem_v: font.stem_v(),
@@ -718,7 +707,12 @@ mod tests {
 
         let w_big = font.char_width(0x0057);
         let w_small = font.char_width(0x0069);
-        assert!(w_big > w_small, "'W' width ({}) should be > 'i' width ({})", w_big, w_small);
+        assert!(
+            w_big > w_small,
+            "'W' width ({}) should be > 'i' width ({})",
+            w_big,
+            w_small
+        );
     }
 
     #[test]
@@ -777,7 +771,11 @@ mod tests {
 
         let stem_regular = font_regular.stem_v();
         let stem_bold = font_bold.stem_v();
-        assert!(stem_regular > 0, "Regular stem_v should be positive, got {}", stem_regular);
+        assert!(
+            stem_regular > 0,
+            "Regular stem_v should be positive, got {}",
+            stem_regular
+        );
         assert!(
             stem_bold > stem_regular,
             "Bold stem_v ({}) should be greater than regular stem_v ({})",
@@ -795,7 +793,11 @@ mod tests {
         let font = TrueTypeFont::parse(&data).unwrap();
         let flags = font.font_flags();
 
-        assert!(flags & (1 << 5) != 0, "Nonsymbolic flag should be set, got flags: {}", flags);
+        assert!(
+            flags & (1 << 5) != 0,
+            "Nonsymbolic flag should be set, got flags: {}",
+            flags
+        );
 
         assert!(flags & (1 << 6) == 0, "Italic flag should not be set for regular font");
     }
@@ -805,8 +807,8 @@ mod tests {
                 tests/fixtures/fonts, so this can never run against a published crate; \
                 run manually with a local copy of the font and --include-ignored"]
     fn test_font_flags_monospace() {
-        let data = load_dejavu_sans_mono()
-            .expect("DejaVuSansMono.ttf must be present locally to run this ignored test");
+        let data =
+            load_dejavu_sans_mono().expect("DejaVuSansMono.ttf must be present locally to run this ignored test");
         let font = TrueTypeFont::parse(&data).unwrap();
         let flags = font.font_flags();
 
@@ -916,7 +918,10 @@ mod tests {
 
         assert!(cmap.contains("begincmap"), "CMap should contain header");
         assert!(cmap.contains("endcmap"), "CMap should contain footer");
-        assert!(!cmap.contains("beginbfchar"), "Empty chars should not produce bfchar section");
+        assert!(
+            !cmap.contains("beginbfchar"),
+            "Empty chars should not produce bfchar section"
+        );
     }
 
     #[test]

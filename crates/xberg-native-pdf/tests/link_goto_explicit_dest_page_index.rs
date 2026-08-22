@@ -43,9 +43,7 @@ fn two_page_link_pdf() -> Vec<u8> {
     for id in 1..=8 {
         out.extend_from_slice(format!("{:010} 00000 n \n", offsets[id]).as_bytes());
     }
-    out.extend_from_slice(
-        format!("trailer\n<< /Size 9 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
-    );
+    out.extend_from_slice(format!("trailer\n<< /Size 9 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     out
 }
 
@@ -58,7 +56,7 @@ fn assert_page_index(dest: &LinkDestination, route: &str) {
                 "{route}: destination must be the 0-based page-tree index \
                  (page object 6 is page 1), not the raw object number"
             );
-        },
+        }
         other => panic!("{route}: expected explicit destination, got {other:?}"),
     }
 }
@@ -102,9 +100,7 @@ fn nested_tree_link_pdf() -> Vec<u8> {
     for id in 1..=11 {
         out.extend_from_slice(format!("{:010} 00000 n \n", offsets[id]).as_bytes());
     }
-    out.extend_from_slice(
-        format!("trailer\n<< /Size 12 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
-    );
+    out.extend_from_slice(format!("trailer\n<< /Size 12 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     out
 }
 

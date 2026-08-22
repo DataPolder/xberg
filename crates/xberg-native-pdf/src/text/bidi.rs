@@ -46,8 +46,7 @@ use unicode_bidi::{BidiInfo, Level};
 /// previous inline copy of those ranges in this module risked
 /// silent drift when one was updated and the other was not.
 pub fn looks_rtl(text: &str) -> bool {
-    text.chars()
-        .any(|c| crate::text::rtl_detector::is_rtl_text(c as u32))
+    text.chars().any(|c| crate::text::rtl_detector::is_rtl_text(c as u32))
 }
 
 /// Reorder a single line of visual-order text into logical order using
@@ -88,10 +87,7 @@ pub fn paragraph_is_rtl(text: &str) -> bool {
         return false;
     }
     let info = BidiInfo::new(text, None);
-    info.paragraphs
-        .first()
-        .map(|p| p.level.is_rtl())
-        .unwrap_or(false)
+    info.paragraphs.first().map(|p| p.level.is_rtl()).unwrap_or(false)
 }
 
 /// Is `c` a digit that participates as an embedded left-to-right
@@ -440,7 +436,7 @@ pub(crate) fn apply_rtl_verdict(
             } else {
                 text.to_string()
             }
-        },
+        }
     }
 }
 
@@ -561,7 +557,7 @@ pub fn wrap_rtl_isolates(text: &str, block_is_rtl: bool) -> String {
                 } else {
                     pending_neutrals.push(c);
                 }
-            },
+            }
             CharDir::Rtl | CharDir::Ltr => {
                 if let Some(last) = runs.last_mut()
                     && last.0 == dir
@@ -572,7 +568,7 @@ pub fn wrap_rtl_isolates(text: &str, block_is_rtl: bool) -> String {
                 let mut buf = std::mem::take(&mut pending_neutrals);
                 buf.push(c);
                 runs.push((dir, buf));
-            },
+            }
         }
     }
     // Trailing-only-neutrals input (no strong chars at all) — return
@@ -597,15 +593,15 @@ pub fn wrap_rtl_isolates(text: &str, block_is_rtl: bool) -> String {
                 out.push(isolation::RLI);
                 out.push_str(&run_text);
                 out.push(isolation::PDI);
-            },
+            }
             (true, CharDir::Ltr) => {
                 out.push(isolation::LRI);
                 out.push_str(&run_text);
                 out.push(isolation::PDI);
-            },
+            }
             _ => {
                 out.push_str(&run_text);
-            },
+            }
         }
     }
     out
@@ -796,7 +792,11 @@ mod tests {
     fn reorder_arabic_with_numerals_keeps_digits_logical() {
         let logical = "عام 2024 كان جيدا";
         let result = reorder_visual_to_logical(logical);
-        assert!(result.contains("2024"), "expected `2024` in reordered line, got {:?}", result);
+        assert!(
+            result.contains("2024"),
+            "expected `2024` in reordered line, got {:?}",
+            result
+        );
         assert_eq!(result.chars().count(), logical.chars().count());
     }
 
@@ -818,8 +818,8 @@ mod tests {
     fn looks_rtl_delegates_to_rtl_detector() {
         for cp in [
             // Edges of every supported block. ~keep
-            0x058F, 0x0590, 0x05FF, 0x0600, 0x0633, 0x06FF, 0x0700, 0x074F, 0x0750, 0x077F, 0x0780,
-            0x08A0, 0x08FF, 0x0900, 0xFB4F, 0xFB50, 0xFDFF, 0xFE00, 0xFE70, 0xFEFE, 0xFEFF, 0xFF00,
+            0x058F, 0x0590, 0x05FF, 0x0600, 0x0633, 0x06FF, 0x0700, 0x074F, 0x0750, 0x077F, 0x0780, 0x08A0, 0x08FF,
+            0x0900, 0xFB4F, 0xFB50, 0xFDFF, 0xFE00, 0xFE70, 0xFEFE, 0xFEFF, 0xFF00,
         ] {
             if let Some(c) = char::from_u32(cp) {
                 let s = c.to_string();
@@ -882,15 +882,7 @@ mod tests {
     /// punctuation, the BOM area near U+FEFF).
     #[test]
     fn looks_rtl_rejects_neutral_and_cjk() {
-        for s in [
-            "中文",
-            "日本語",
-            "α β γ",
-            "1234567890",
-            "!@#$%^&*()",
-            "café",
-            "naïve",
-        ] {
+        for s in ["中文", "日本語", "α β γ", "1234567890", "!@#$%^&*()", "café", "naïve"] {
             assert!(!looks_rtl(s), "looks_rtl({:?}) should be false", s);
         }
     }
@@ -974,7 +966,12 @@ mod tests {
         // Embedded LTR tokens stay left-to-right (not reversed). ~keep
         assert!(out.contains("1434"), "`1434` reversed/lost: {:?} -> {:?}", line, out);
         assert!(out.contains("april"), "`april` reversed/lost: {:?} -> {:?}", line, out);
-        assert!(out.contains("14 "), "leading `14` reversed/lost: {:?} -> {:?}", line, out);
+        assert!(
+            out.contains("14 "),
+            "leading `14` reversed/lost: {:?} -> {:?}",
+            line,
+            out
+        );
         // Relative line position preserved: `14` precedes `april`, which
         // precedes `1434`, in the emitted (logical) order. ~keep
         let p14 = out.find("14").expect("14 present");
@@ -1048,13 +1045,7 @@ mod tests {
     fn detect_visual_run_hebrew_visual_order() {
         // Hebrew word "מקלדת" (keyboard, 5 letters) emitted in visual
         // order: leftmost glyph first in stream, ascending x. ~keep
-        let visual = [
-            ('מ', 0.0),
-            ('ק', 6.0),
-            ('ל', 12.0),
-            ('ד', 18.0),
-            ('ת', 24.0),
-        ];
+        let visual = [('מ', 0.0), ('ק', 6.0), ('ל', 12.0), ('ד', 18.0), ('ת', 24.0)];
         assert_eq!(detect_visual_order_run(&visual), RunOrder::Visual);
     }
 
@@ -1063,13 +1054,7 @@ mod tests {
         // Same letters, logical order: rightmost glyph first in stream
         // (descending x — the PDF producer ran its own bidi pass before
         // drawing). ~keep
-        let logical = [
-            ('מ', 24.0),
-            ('ק', 18.0),
-            ('ל', 12.0),
-            ('ד', 6.0),
-            ('ת', 0.0),
-        ];
+        let logical = [('מ', 24.0), ('ק', 18.0), ('ל', 12.0), ('ד', 6.0), ('ת', 0.0)];
         assert_eq!(detect_visual_order_run(&logical), RunOrder::Logical);
     }
 
@@ -1115,13 +1100,7 @@ mod tests {
         // Embedded LTR digit ("2024") between Hebrew letters — filtered
         // out before the monotonicity check. Hebrew chars still need
         // to be ≥4 and monotonic. ~keep
-        let with_digit = [
-            ('ק', 0.0),
-            ('ר', 6.0),
-            ('2', 12.0),
-            ('ח', 18.0),
-            ('ל', 24.0),
-        ];
+        let with_digit = [('ק', 0.0), ('ר', 6.0), ('2', 12.0), ('ח', 18.0), ('ל', 24.0)];
         assert_eq!(detect_visual_order_run(&with_digit), RunOrder::Visual);
     }
 

@@ -18,9 +18,7 @@ fn is_png(b: &[u8]) -> bool {
 fn render_page_region_returns_clipped_png() {
     let doc = setup();
     let full = render_page(&doc, 0, &RenderOptions::with_dpi(72)).unwrap();
-    let region =
-        render_page_region(&doc, 0, (36.0, 36.0, 144.0, 144.0), &RenderOptions::with_dpi(72))
-            .unwrap();
+    let region = render_page_region(&doc, 0, (36.0, 36.0, 144.0, 144.0), &RenderOptions::with_dpi(72)).unwrap();
 
     assert!(is_png(&region.data));
     assert!(region.width < full.width);
@@ -68,7 +66,11 @@ fn render_page_fit_constrained_width_is_exact() {
     let doc = setup();
     let img = render_page_fit(&doc, 0, 1040, 2048, &RenderOptions::default()).unwrap();
     assert!(is_png(&img.data));
-    assert_eq!(img.width, 1040, "width must equal fit_w (old floor-DPI gave {})", img.width);
+    assert_eq!(
+        img.width, 1040,
+        "width must equal fit_w (old floor-DPI gave {})",
+        img.width
+    );
     assert!(img.height <= 2048, "height {} must not exceed fit_h 2048", img.height);
 }
 
@@ -79,7 +81,11 @@ fn render_page_fit_constrained_height_is_exact() {
     let doc = setup();
     let img = render_page_fit(&doc, 0, 2048, 1040, &RenderOptions::default()).unwrap();
     assert!(is_png(&img.data));
-    assert_eq!(img.height, 1040, "height must equal fit_h (old floor-DPI gave {})", img.height);
+    assert_eq!(
+        img.height, 1040,
+        "height must equal fit_h (old floor-DPI gave {})",
+        img.height
+    );
     assert!(img.width <= 2048, "width {} must not exceed fit_w 2048", img.width);
 }
 
@@ -87,13 +93,7 @@ fn render_page_fit_constrained_height_is_exact() {
 fn render_page_fit_never_exceeds_box() {
     // The output must never overflow the requested fit box by even 1 pixel. ~keep
     let doc = setup();
-    for (fw, fh) in [
-        (100u32, 200u32),
-        (200, 100),
-        (150, 150),
-        (1040, 2048),
-        (99, 99),
-    ] {
+    for (fw, fh) in [(100u32, 200u32), (200, 100), (150, 150), (1040, 2048), (99, 99)] {
         let img = render_page_fit(&doc, 0, fw, fh, &RenderOptions::default()).unwrap();
         assert!(img.width <= fw, "fit ({fw}×{fh}): width {} exceeds {fw}", img.width);
         assert!(img.height <= fh, "fit ({fw}×{fh}): height {} exceeds {fh}", img.height);

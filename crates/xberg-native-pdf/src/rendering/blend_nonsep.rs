@@ -85,21 +85,21 @@ pub(crate) fn compose_in_place(dest: &mut [u8], source: &[u8], mode: NonSeparabl
                 let sat_cb = sat((dr, dg, db));
                 let sat_applied = set_sat((sr, sg, sb), sat_cb);
                 set_lum(sat_applied, lum((dr, dg, db)))
-            },
+            }
             NonSeparableBlend::Saturation => {
                 // SetLum(SetSat(Cb, Sat(Cs)), Lum(Cb)) ~keep
                 let sat_cs = sat((sr, sg, sb));
                 let sat_applied = set_sat((dr, dg, db), sat_cs);
                 set_lum(sat_applied, lum((dr, dg, db)))
-            },
+            }
             NonSeparableBlend::Color => {
                 // SetLum(Cs, Lum(Cb)) ~keep
                 set_lum((sr, sg, sb), lum((dr, dg, db)))
-            },
+            }
             NonSeparableBlend::Luminosity => {
                 // SetLum(Cb, Lum(Cs)) ~keep
                 set_lum((dr, dg, db), lum((sr, sg, sb)))
-            },
+            }
         };
 
         // §11.3.4 general (non-isolated, non-knockout) composition with
@@ -308,7 +308,11 @@ mod tests {
             .abs()
             .max((dest[0] as i32 - dest[2] as i32).abs())
             .max((dest[1] as i32 - dest[2] as i32).abs());
-        assert!(max_diff < 30, "Saturation grey-over-red should desaturate; got {:?}", dest);
+        assert!(
+            max_diff < 30,
+            "Saturation grey-over-red should desaturate; got {:?}",
+            dest
+        );
     }
 
     // ============================================================

@@ -25,8 +25,7 @@ pub fn cluster_chars_into_words(chars: &[TextChar], epsilon: f32) -> Vec<Vec<usi
 
     let mut indices: Vec<usize> = (0..chars.len()).collect();
     indices.sort_by(|&a, &b| {
-        let y_cmp =
-            crate::utils::safe_float_cmp(chars[b].bbox.center().y, chars[a].bbox.center().y);
+        let y_cmp = crate::utils::safe_float_cmp(chars[b].bbox.center().y, chars[a].bbox.center().y);
         if y_cmp != std::cmp::Ordering::Equal {
             return y_cmp;
         }
@@ -67,9 +66,7 @@ pub fn cluster_chars_into_words(chars: &[TextChar], epsilon: f32) -> Vec<Vec<usi
             if x_gap <= epsilon {
                 cluster.push(idx);
             } else {
-                cluster.sort_by(|&a, &b| {
-                    crate::utils::safe_float_cmp(chars[a].bbox.x, chars[b].bbox.x)
-                });
+                cluster.sort_by(|&a, &b| crate::utils::safe_float_cmp(chars[a].bbox.x, chars[b].bbox.x));
                 clusters.push(std::mem::take(&mut cluster));
                 cluster.push(idx);
             }
@@ -357,7 +354,11 @@ mod tests {
             word_spanning(180.0, 20.0, 700.0),
         ];
         let header_lines = cluster_words_into_lines(&header, 5.0);
-        assert_eq!(header_lines.len(), 3, "narrow-word header row should split into 3 cells");
+        assert_eq!(
+            header_lines.len(),
+            3,
+            "narrow-word header row should split into 3 cells"
+        );
 
         // Value row: wide words, same 90pt column step -> 40pt gap (under
         // the old flat 50pt threshold but over the new font-relative one). ~keep

@@ -124,10 +124,7 @@ fn condensed_heading_word_gap_is_recovered() {
         g(6, 't', 153.6),
     ];
     let pdf = identity_line_pdf(&glyphs, 20.0);
-    let text = PdfDocument::from_bytes(pdf)
-        .unwrap()
-        .extract_text(0)
-        .unwrap();
+    let text = PdfDocument::from_bytes(pdf).unwrap().extract_text(0).unwrap();
     let joined: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         joined.contains("the cat"),
@@ -153,10 +150,7 @@ fn single_condensed_word_is_not_split() {
         g(6, 's', 150.0),
     ];
     let pdf = identity_line_pdf(&glyphs, 20.0);
-    let text = PdfDocument::from_bytes(pdf)
-        .unwrap()
-        .extract_text(0)
-        .unwrap();
+    let text = PdfDocument::from_bytes(pdf).unwrap().extract_text(0).unwrap();
     assert!(
         text.contains("guards"),
         "a single tightly-set word must not be split, got: {text:?}"

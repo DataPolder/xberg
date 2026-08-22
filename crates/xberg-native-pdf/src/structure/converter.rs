@@ -60,17 +60,17 @@ impl StructureConverter {
                 StructChild::StructElem(nested) => {
                     let nested_structure = self.convert_struct_elem(nested)?;
                     children.push(ContentElement::Structure(nested_structure));
-                },
+                }
                 StructChild::MarkedContentRef { mcid, .. } => {
                     if let Some(content_elements) = self.mcid_map.get(mcid) {
                         children.extend(content_elements.clone());
                     }
                     // If MCID not found, silently skip (per spec, missing MCIDs may occur) ~keep
-                },
+                }
                 StructChild::ObjectRef(_, _) => {
                     // Object references to other struct elements are deferred
                     // In a full implementation, would resolve indirect references ~keep
-                },
+                }
             }
         }
 
@@ -230,7 +230,10 @@ mod tests {
 
     #[test]
     fn test_format_struct_type() {
-        assert_eq!(StructureConverter::format_struct_type(&StructType::Document), "Document");
+        assert_eq!(
+            StructureConverter::format_struct_type(&StructType::Document),
+            "Document"
+        );
         assert_eq!(StructureConverter::format_struct_type(&StructType::H1), "H1");
         assert_eq!(StructureConverter::format_struct_type(&StructType::P), "P");
         assert_eq!(StructureConverter::format_struct_type(&StructType::Table), "Table");

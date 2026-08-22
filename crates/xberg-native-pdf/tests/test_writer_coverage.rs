@@ -7,9 +7,7 @@
 
 use xberg_native_pdf::api::{Pdf, PdfBuilder};
 use xberg_native_pdf::document::PdfDocument;
-use xberg_native_pdf::writer::{
-    ContentStreamBuilder, DocumentBuilder, DocumentMetadata, LineCap, LineJoin, PageSize,
-};
+use xberg_native_pdf::writer::{ContentStreamBuilder, DocumentBuilder, DocumentMetadata, LineCap, LineJoin, PageSize};
 
 mod common;
 
@@ -267,9 +265,7 @@ fn test_content_stream_builder_ellipse() {
 #[test]
 fn test_content_stream_builder_rounded_rect() {
     let mut builder = ContentStreamBuilder::new();
-    builder
-        .rounded_rect(50.0, 50.0, 200.0, 100.0, 10.0)
-        .fill_stroke();
+    builder.rounded_rect(50.0, 50.0, 200.0, 100.0, 10.0).fill_stroke();
 
     let data = builder.build().unwrap();
     assert!(!data.is_empty());

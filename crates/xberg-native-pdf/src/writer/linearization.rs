@@ -261,10 +261,8 @@ impl HintTables {
                 bit_writer.write_bits(num as u64, header.bits_shared_numerator);
             }
 
-            bit_writer
-                .write_bits(entry.content_stream_offset_delta as u64, header.bits_content_offset);
-            bit_writer
-                .write_bits(entry.content_stream_length_delta as u64, header.bits_content_length);
+            bit_writer.write_bits(entry.content_stream_offset_delta as u64, header.bits_content_offset);
+            bit_writer.write_bits(entry.content_stream_length_delta as u64, header.bits_content_length);
         }
 
         data.extend(bit_writer.finish());
@@ -548,11 +546,7 @@ pub fn calculate_delta_encoding(values: &[u32]) -> (u32, u8) {
     }
 
     let min = *values.iter().min().unwrap_or(&0);
-    let max_delta = values
-        .iter()
-        .map(|&v| v.saturating_sub(min))
-        .max()
-        .unwrap_or(0);
+    let max_delta = values.iter().map(|&v| v.saturating_sub(min)).max().unwrap_or(0);
 
     (min, bits_needed(max_delta))
 }

@@ -214,9 +214,9 @@ impl PdfDocument {
     fn parse_annotation(&self, annot_ref: crate::object::ObjectRef) -> Result<Annotation> {
         let annot_obj = self.load_object(annot_ref)?;
 
-        let dict = annot_obj.as_dict().ok_or_else(|| {
-            crate::error::Error::InvalidPdf("Annotation is not a dictionary".to_string())
-        })?;
+        let dict = annot_obj
+            .as_dict()
+            .ok_or_else(|| crate::error::Error::InvalidPdf("Annotation is not a dictionary".to_string()))?;
 
         let annotation_type = dict
             .get("Type")
@@ -224,10 +224,7 @@ impl PdfDocument {
             .unwrap_or("Unknown")
             .to_string();
 
-        let subtype = dict
-            .get("Subtype")
-            .and_then(|s| s.as_name())
-            .map(|s| s.to_string());
+        let subtype = dict.get("Subtype").and_then(|s| s.as_name()).map(|s| s.to_string());
 
         let subtype_enum = subtype
             .as_deref()
@@ -250,7 +247,7 @@ impl PdfDocument {
                     };
                 }
                 Some(rect_arr)
-            },
+            }
             _ => None,
         });
 
@@ -301,7 +298,7 @@ impl PdfDocument {
                     };
                 }
                 Some(border_arr)
-            },
+            }
             _ => None,
         });
 
@@ -314,28 +311,19 @@ impl PdfDocument {
         };
 
         let (destination, action) = if subtype_enum == AnnotationSubtype::Link {
-            let dest = dict
-                .get("Dest")
-                .and_then(|d| self.parse_destination(d).ok());
+            let dest = dict.get("Dest").and_then(|d| self.parse_destination(d).ok());
             let act = dict.get("A").and_then(|a| self.parse_action(a).ok());
             (dest, act)
         } else {
             (None, None)
         };
 
-        let (
-            field_type,
-            field_name,
-            field_value,
-            default_value,
-            field_flags,
-            options,
-            appearance_state,
-        ) = if subtype_enum == AnnotationSubtype::Widget {
-            self.parse_widget_fields(dict)
-        } else {
-            (None, None, None, None, None, None, None)
-        };
+        let (field_type, field_name, field_value, default_value, field_flags, options, appearance_state) =
+            if subtype_enum == AnnotationSubtype::Widget {
+                self.parse_widget_fields(dict)
+            } else {
+                (None, None, None, None, None, None, None)
+            };
 
         Ok(Annotation {
             annotation_type,
@@ -381,10 +369,7 @@ impl PdfDocument {
         Option<Vec<String>>,
         Option<String>,
     ) {
-        let mut ft = dict
-            .get("FT")
-            .and_then(|f| f.as_name())
-            .map(|s| s.to_string());
+        let mut ft = dict.get("FT").and_then(|f| f.as_name()).map(|s| s.to_string());
 
         let mut field_flags = dict.get("Ff").and_then(|f| match f {
             Object::Integer(n) => Some(*n as u32),
@@ -396,15 +381,10 @@ impl PdfDocument {
         let mut default_value = Self::parse_string_value(dict.get("DV"));
 
         // Walk up /Parent chain to inherit missing fields (PDF spec 12.7.3.1) ~keep
-        if ft.is_none() || field_flags.is_none() || field_value.is_none() || default_value.is_none()
-        {
-            let mut parent_ref = dict.get("Parent").and_then(|p| {
-                if let Object::Reference(r) = p {
-                    Some(*r)
-                } else {
-                    None
-                }
-            });
+        if ft.is_none() || field_flags.is_none() || field_value.is_none() || default_value.is_none() {
+            let mut parent_ref = dict
+                .get("Parent")
+                .and_then(|p| if let Object::Reference(r) = p { Some(*r) } else { None });
             let mut depth = 0;
             while let Some(pref) = parent_ref {
                 if depth >= 10 {
@@ -415,10 +395,7 @@ impl PdfDocument {
                     Ok(parent_obj) => {
                         if let Some(parent_dict) = parent_obj.as_dict() {
                             if ft.is_none() {
-                                ft = parent_dict
-                                    .get("FT")
-                                    .and_then(|f| f.as_name())
-                                    .map(|s| s.to_string());
+                                ft = parent_dict.get("FT").and_then(|f| f.as_name()).map(|s| s.to_string());
                             }
                             if field_flags.is_none() {
                                 field_flags = parent_dict.get("Ff").and_then(|f| match f {
@@ -432,20 +409,16 @@ impl PdfDocument {
                             if default_value.is_none() {
                                 default_value = Self::parse_string_value(parent_dict.get("DV"));
                             }
-                            parent_ref = parent_dict.get("Parent").and_then(|p| {
-                                if let Object::Reference(r) = p {
-                                    Some(*r)
-                                } else {
-                                    None
-                                }
-                            });
+                            parent_ref = parent_dict
+                                .get("Parent")
+                                .and_then(|p| if let Object::Reference(r) = p { Some(*r) } else { None });
                         } else {
                             break;
                         }
-                    },
+                    }
                     _ => {
                         break;
-                    },
+                    }
                 }
             }
         }
@@ -455,10 +428,7 @@ impl PdfDocument {
             _ => None,
         });
 
-        let appearance_state = dict
-            .get("AS")
-            .and_then(|a| a.as_name())
-            .map(|s| s.to_string());
+        let appearance_state = dict.get("AS").and_then(|a| a.as_name()).map(|s| s.to_string());
 
         let options = Self::parse_options_array(dict.get("Opt"));
 
@@ -481,7 +451,7 @@ impl PdfDocument {
                         .unwrap_or(false);
                     Some(WidgetFieldType::Checkbox { checked })
                 }
-            },
+            }
             Some("Ch") => Some(WidgetFieldType::Choice {
                 options: options.clone().unwrap_or_default(),
                 selected: field_value.clone(),
@@ -527,12 +497,12 @@ impl PdfDocument {
                                 Object::String(s) => Some(String::from_utf8_lossy(s).to_string()),
                                 _ => None,
                             })
-                        },
+                        }
                         _ => None,
                     })
                     .collect();
                 if opts.is_empty() { None } else { Some(opts) }
-            },
+            }
             _ => None,
         }
     }
@@ -550,7 +520,7 @@ impl PdfDocument {
                     })
                     .collect();
                 if nums.is_empty() { None } else { Some(nums) }
-            },
+            }
             _ => None,
         }
     }
@@ -582,7 +552,7 @@ impl PdfDocument {
                     .collect();
 
                 if quads.is_empty() { None } else { Some(quads) }
-            },
+            }
             _ => None,
         }
     }
@@ -602,7 +572,7 @@ impl PdfDocument {
                         // is the 0-based position in the page tree
                         // (ISO 32000-1 §12.3.2.2). ~keep
                         self.page_index_of_ref(*r)? as u32
-                    },
+                    }
                     _ => 0,
                 };
 
@@ -622,17 +592,15 @@ impl PdfDocument {
                     })
                     .collect();
 
-                Ok(LinkDestination::Explicit {
-                    page,
-                    fit_type,
-                    params,
-                })
-            },
+                Ok(LinkDestination::Explicit { page, fit_type, params })
+            }
             Object::Reference(r) => {
                 let dest_loaded = self.load_object(*r)?;
                 self.parse_destination(&dest_loaded)
-            },
-            _ => Err(crate::error::Error::InvalidPdf("Invalid destination format".to_string())),
+            }
+            _ => Err(crate::error::Error::InvalidPdf(
+                "Invalid destination format".to_string(),
+            )),
         }
     }
 
@@ -646,13 +614,14 @@ impl PdfDocument {
             action_obj.clone()
         };
 
-        let dict = action.as_dict().ok_or_else(|| {
-            crate::error::Error::InvalidPdf("Action is not a dictionary".to_string())
-        })?;
+        let dict = action
+            .as_dict()
+            .ok_or_else(|| crate::error::Error::InvalidPdf("Action is not a dictionary".to_string()))?;
 
-        let action_type = dict.get("S").and_then(|s| s.as_name()).ok_or_else(|| {
-            crate::error::Error::InvalidPdf("Action missing /S field".to_string())
-        })?;
+        let action_type = dict
+            .get("S")
+            .and_then(|s| s.as_name())
+            .ok_or_else(|| crate::error::Error::InvalidPdf("Action missing /S field".to_string()))?;
 
         match action_type {
             "URI" => {
@@ -662,16 +631,14 @@ impl PdfDocument {
                         Object::String(s) => Some(String::from_utf8_lossy(s).to_string()),
                         _ => None,
                     })
-                    .ok_or_else(|| {
-                        crate::error::Error::InvalidPdf("URI action missing /URI field".to_string())
-                    })?;
+                    .ok_or_else(|| crate::error::Error::InvalidPdf("URI action missing /URI field".to_string()))?;
 
                 Ok(LinkAction::Uri(uri))
-            },
+            }
             "GoTo" => {
-                let dest_obj = dict.get("D").ok_or_else(|| {
-                    crate::error::Error::InvalidPdf("GoTo action missing /D field".to_string())
-                })?;
+                let dest_obj = dict
+                    .get("D")
+                    .ok_or_else(|| crate::error::Error::InvalidPdf("GoTo action missing /D field".to_string()))?;
 
                 // A destination that cannot be resolved (e.g. a dangling
                 // reference to a deleted page) invalidates the action, not
@@ -684,9 +651,9 @@ impl PdfDocument {
                         Ok(LinkAction::Other {
                             action_type: "GoTo".to_string(),
                         })
-                    },
+                    }
                 }
-            },
+            }
             "GoToR" => {
                 let file = dict
                     .get("F")
@@ -698,14 +665,12 @@ impl PdfDocument {
                         }),
                         _ => None,
                     })
-                    .ok_or_else(|| {
-                        crate::error::Error::InvalidPdf("GoToR action missing /F field".to_string())
-                    })?;
+                    .ok_or_else(|| crate::error::Error::InvalidPdf("GoToR action missing /F field".to_string()))?;
 
                 let destination = dict.get("D").and_then(|d| self.parse_destination(d).ok());
 
                 Ok(LinkAction::GoToRemote { file, destination })
-            },
+            }
             other => Ok(LinkAction::Other {
                 action_type: other.to_string(),
             }),
@@ -925,11 +890,7 @@ mod tests {
             border: None,
             interior_color: None,
             field_type: Some(WidgetFieldType::Choice {
-                options: vec![
-                    "Option A".to_string(),
-                    "Option B".to_string(),
-                    "Option C".to_string(),
-                ],
+                options: vec!["Option A".to_string(), "Option B".to_string(), "Option C".to_string()],
                 selected: Some("Option B".to_string()),
             }),
             field_name: Some("Selection".to_string()),
@@ -950,7 +911,7 @@ mod tests {
             Some(WidgetFieldType::Choice { options, selected }) => {
                 assert_eq!(options.len(), 3);
                 assert_eq!(selected, &Some("Option B".to_string()));
-            },
+            }
             _ => panic!("Expected Choice field type"),
         }
         assert_eq!(annot.options.as_ref().unwrap().len(), 3);

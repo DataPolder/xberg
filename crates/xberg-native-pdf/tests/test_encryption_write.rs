@@ -9,8 +9,7 @@
 use std::fs;
 use tempfile::tempdir;
 use xberg_native_pdf::editor::{
-    DocumentEditor, EditableDocument, EncryptionAlgorithm, EncryptionConfig, Permissions,
-    SaveOptions,
+    DocumentEditor, EditableDocument, EncryptionAlgorithm, EncryptionConfig, Permissions, SaveOptions,
 };
 use xberg_native_pdf::writer::{DocumentBuilder, DocumentMetadata, PageSize};
 
@@ -52,8 +51,7 @@ mod encryption_config_tests {
 
     #[test]
     fn test_encryption_config_with_algorithm() {
-        let config =
-            EncryptionConfig::new("user", "owner").with_algorithm(EncryptionAlgorithm::Aes128);
+        let config = EncryptionConfig::new("user", "owner").with_algorithm(EncryptionAlgorithm::Aes128);
 
         assert_eq!(config.algorithm, EncryptionAlgorithm::Aes128);
     }
@@ -147,11 +145,7 @@ mod aes256_encryption_tests {
         let input_path = dir.path().join("input.pdf");
         let output_path = dir.path().join("encrypted.pdf");
 
-        create_test_pdf_with_content(
-            input_path.to_str().unwrap(),
-            "Secret document content for AES-256 test",
-        )
-        .unwrap();
+        create_test_pdf_with_content(input_path.to_str().unwrap(), "Secret document content for AES-256 test").unwrap();
 
         let mut editor = DocumentEditor::open(&input_path).unwrap();
         let config = EncryptionConfig::new("userpass", "ownerpass")
@@ -177,12 +171,10 @@ mod aes256_encryption_tests {
         let input_path = dir.path().join("input.pdf");
         let encrypted_path = dir.path().join("encrypted.pdf");
 
-        create_test_pdf_with_content(input_path.to_str().unwrap(), "AES-256 structure test")
-            .unwrap();
+        create_test_pdf_with_content(input_path.to_str().unwrap(), "AES-256 structure test").unwrap();
 
         let mut editor = DocumentEditor::open(&input_path).unwrap();
-        let config = EncryptionConfig::new("user256", "owner256")
-            .with_algorithm(EncryptionAlgorithm::Aes256);
+        let config = EncryptionConfig::new("user256", "owner256").with_algorithm(EncryptionAlgorithm::Aes256);
         editor
             .save_with_options(&encrypted_path, SaveOptions::with_encryption(config))
             .unwrap();
@@ -214,8 +206,7 @@ mod aes128_encryption_tests {
         create_test_pdf_with_content(input_path.to_str().unwrap(), "AES-128 test content").unwrap();
 
         let mut editor = DocumentEditor::open(&input_path).unwrap();
-        let config =
-            EncryptionConfig::new("user", "owner").with_algorithm(EncryptionAlgorithm::Aes128);
+        let config = EncryptionConfig::new("user", "owner").with_algorithm(EncryptionAlgorithm::Aes128);
 
         editor
             .save_with_options(&output_path, SaveOptions::with_encryption(config))
@@ -244,8 +235,7 @@ mod rc4_encryption_tests {
         create_test_pdf_with_content(input_path.to_str().unwrap(), "RC4-128 test content").unwrap();
 
         let mut editor = DocumentEditor::open(&input_path).unwrap();
-        let config =
-            EncryptionConfig::new("user", "owner").with_algorithm(EncryptionAlgorithm::Rc4_128);
+        let config = EncryptionConfig::new("user", "owner").with_algorithm(EncryptionAlgorithm::Rc4_128);
 
         editor
             .save_with_options(&output_path, SaveOptions::with_encryption(config))
@@ -267,8 +257,7 @@ mod rc4_encryption_tests {
         create_test_pdf_with_content(input_path.to_str().unwrap(), "RC4-40 test content").unwrap();
 
         let mut editor = DocumentEditor::open(&input_path).unwrap();
-        let config =
-            EncryptionConfig::new("user", "owner").with_algorithm(EncryptionAlgorithm::Rc4_40);
+        let config = EncryptionConfig::new("user", "owner").with_algorithm(EncryptionAlgorithm::Rc4_40);
 
         editor
             .save_with_options(&output_path, SaveOptions::with_encryption(config))
@@ -297,8 +286,7 @@ mod permission_tests {
         create_test_pdf_with_content(input_path.to_str().unwrap(), "Read-only document").unwrap();
 
         let mut editor = DocumentEditor::open(&input_path).unwrap();
-        let config =
-            EncryptionConfig::new("user", "owner").with_permissions(Permissions::read_only());
+        let config = EncryptionConfig::new("user", "owner").with_permissions(Permissions::read_only());
 
         editor
             .save_with_options(&output_path, SaveOptions::with_encryption(config))
@@ -316,8 +304,7 @@ mod permission_tests {
         let input_path = dir.path().join("input.pdf");
         let output_path = dir.path().join("custom_perms.pdf");
 
-        create_test_pdf_with_content(input_path.to_str().unwrap(), "Custom permissions test")
-            .unwrap();
+        create_test_pdf_with_content(input_path.to_str().unwrap(), "Custom permissions test").unwrap();
 
         let mut editor = DocumentEditor::open(&input_path).unwrap();
 
@@ -350,12 +337,10 @@ mod empty_password_tests {
         let input_path = dir.path().join("input.pdf");
         let output_path = dir.path().join("owner_only.pdf");
 
-        create_test_pdf_with_content(input_path.to_str().unwrap(), "Owner password only test")
-            .unwrap();
+        create_test_pdf_with_content(input_path.to_str().unwrap(), "Owner password only test").unwrap();
 
         let mut editor = DocumentEditor::open(&input_path).unwrap();
-        let config =
-            EncryptionConfig::new("", "ownerpass").with_permissions(Permissions::read_only());
+        let config = EncryptionConfig::new("", "ownerpass").with_permissions(Permissions::read_only());
 
         editor
             .save_with_options(&output_path, SaveOptions::with_encryption(config))
@@ -397,8 +382,7 @@ mod api_encryption_tests {
         let input_path = dir.path().join("input.pdf");
         let output_path = dir.path().join("encrypted_config.pdf");
 
-        create_test_pdf_with_content(input_path.to_str().unwrap(), "Config encryption test")
-            .unwrap();
+        create_test_pdf_with_content(input_path.to_str().unwrap(), "Config encryption test").unwrap();
 
         let mut pdf = Pdf::open(&input_path).unwrap();
         let config = EncryptionConfig::new("myuser", "myowner")
@@ -419,8 +403,7 @@ mod api_encryption_tests {
         let input_path = dir.path().join("input.pdf");
         let output_path = dir.path().join("encrypted_empty.pdf");
 
-        create_test_pdf_with_content(input_path.to_str().unwrap(), "API empty password test")
-            .unwrap();
+        create_test_pdf_with_content(input_path.to_str().unwrap(), "API empty password test").unwrap();
 
         let mut pdf = Pdf::open(&input_path).unwrap();
         pdf.save_encrypted(&output_path, "", "owner").unwrap();

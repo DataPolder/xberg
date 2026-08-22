@@ -27,7 +27,9 @@ use crate::error::{Error, Result};
 /// Pixels are encoded as: 0 = white, 1 = black (unless /BlackIs1=true, then inverted).
 pub fn decompress_ccitt(data: &[u8], params: &CcittParams) -> Result<Vec<u8>> {
     if params.columns == 0 {
-        return Err(Error::Decode("CCITT decompression requires /Columns parameter".to_string()));
+        return Err(Error::Decode(
+            "CCITT decompression requires /Columns parameter".to_string(),
+        ));
     }
 
     // `fax` 0.3 takes u32 dimensions, which is what CcittParams already holds:
@@ -67,13 +69,13 @@ pub fn decompress_ccitt(data: &[u8], params: &CcittParams) -> Result<Vec<u8>> {
                 );
             }
             Ok(decoded.data)
-        },
+        }
         Err(in_house_err) => {
             // A stream the in-house decoder couldn't make progress on: fall
             // back to the legacy fax crate before giving up. ~keep
             tracing::debug!("CCITT in-house decode declined ({in_house_err}); trying fax crate");
             decompress_with_fax(data, width, height_opt, params)
-        },
+        }
     };
 
     match fax_result {
@@ -82,7 +84,7 @@ pub fn decompress_ccitt(data: &[u8], params: &CcittParams) -> Result<Vec<u8>> {
                 invert_bilevel_pixels(&mut output);
             }
             Ok(output)
-        },
+        }
         Err(e) => {
             // Both decoders failed. Do NOT silently return an all-white page
             // (the old behavior that produced the blank-page bug) — warn loudly
@@ -98,20 +100,19 @@ pub fn decompress_ccitt(data: &[u8], params: &CcittParams) -> Result<Vec<u8>> {
                 e
             );
             let bytes_per_row = (width as usize).div_ceil(8);
-            let rows = usize::try_from(params.rows.unwrap_or(1)).map_err(|_| {
-                Error::Decode("CCITT row count exceeds platform limits".to_string())
-            })?;
+            let rows = usize::try_from(params.rows.unwrap_or(1))
+                .map_err(|_| Error::Decode("CCITT row count exceeds platform limits".to_string()))?;
             let expected_bytes = rows
                 .checked_mul(bytes_per_row)
                 .ok_or_else(|| Error::Decode("CCITT fallback size overflow".to_string()))?;
             let fallback_len = expected_bytes.max(bytes_per_row);
             let mut fallback = Vec::new();
-            fallback.try_reserve_exact(fallback_len).map_err(|_| {
-                Error::Decode(format!("Unable to allocate {fallback_len} bytes for CCITT fallback"))
-            })?;
+            fallback
+                .try_reserve_exact(fallback_len)
+                .map_err(|_| Error::Decode(format!("Unable to allocate {fallback_len} bytes for CCITT fallback")))?;
             fallback.resize(fallback_len, 0);
             Ok(fallback)
-        },
+        }
     }
 }
 
@@ -120,12 +121,7 @@ pub fn decompress_ccitt(data: &[u8], params: &CcittParams) -> Result<Vec<u8>> {
 /// The fax crate is more lenient with malformed EOFB markers compared to ccitt-t4-t6,
 /// which makes it better suited for handling real-world PDF files that don't strictly
 /// comply with the CCITT specification.
-fn decompress_with_fax(
-    data: &[u8],
-    width: u32,
-    height: Option<u32>,
-    params: &CcittParams,
-) -> Result<Vec<u8>> {
+fn decompress_with_fax(data: &[u8], width: u32, height: Option<u32>, params: &CcittParams) -> Result<Vec<u8>> {
     let width_usize = width as usize;
 
     tracing::debug!(
@@ -139,24 +135,23 @@ fn decompress_with_fax(
     match try_decode_with_fax(data, width_usize, height, params) {
         Ok(output) if !output.is_empty() => {
             return Ok(output);
-        },
+        }
         Ok(_empty) => {
             tracing::debug!("First attempt returned no data, trying with leading zeros stripped");
-        },
+        }
         Err(e) => {
             tracing::debug!("First attempt failed: {}, trying with leading zeros stripped", e);
-        },
+        }
     }
 
     // If that failed, try stripping leading zeros (common in some PDFs) ~keep
-    let first_nonzero = data
-        .iter()
-        .position(|byte| *byte != 0)
-        .unwrap_or(data.len());
+    let first_nonzero = data.iter().position(|byte| *byte != 0).unwrap_or(data.len());
     let trimmed_len = data.len() - first_nonzero;
     let mut trimmed_data = Vec::new();
     trimmed_data.try_reserve_exact(trimmed_len).map_err(|_| {
-        Error::Decode(format!("Unable to allocate {trimmed_len} bytes for trimmed CCITT input"))
+        Error::Decode(format!(
+            "Unable to allocate {trimmed_len} bytes for trimmed CCITT input"
+        ))
     })?;
     trimmed_data.extend_from_slice(&data[first_nonzero..]);
 
@@ -182,13 +177,13 @@ fn decompress_with_fax(
             Ok(output) if !output.is_empty() => {
                 tracing::trace!("Successfully decompressed after stripping leading zeros!");
                 return Ok(output);
-            },
+            }
             Ok(_) => {
                 tracing::debug!("Strip attempt also returned no data");
-            },
+            }
             Err(e) => {
                 tracing::debug!("Strip attempt also failed: {}", e);
-            },
+            }
         }
     }
 
@@ -197,12 +192,7 @@ fn decompress_with_fax(
     ))
 }
 
-fn try_decode_with_fax(
-    data: &[u8],
-    width: usize,
-    height: Option<u32>,
-    params: &CcittParams,
-) -> Result<Vec<u8>> {
+fn try_decode_with_fax(data: &[u8], width: usize, height: Option<u32>, params: &CcittParams) -> Result<Vec<u8>> {
     use fax::decoder;
 
     let bytes_per_row = width.div_ceil(8);
@@ -212,9 +202,9 @@ fn try_decode_with_fax(
         let capacity = bytes_per_row
             .checked_mul(rows)
             .ok_or_else(|| Error::Decode("CCITT fax output size overflow".to_string()))?;
-        output.try_reserve_exact(capacity).map_err(|_| {
-            Error::Decode(format!("Unable to allocate {capacity} bytes for CCITT fax output"))
-        })?;
+        output
+            .try_reserve_exact(capacity)
+            .map_err(|_| Error::Decode(format!("Unable to allocate {capacity} bytes for CCITT fax output")))?;
     }
     let mut rows_decoded = 0usize;
 
@@ -223,16 +213,15 @@ fn try_decode_with_fax(
     let success = if params.is_group_4() {
         tracing::debug!("Using Group 4 (T.6) decoder");
         let mut callback_error = None;
-        let success =
-            decoder::decode_g4(bytes_iter, width as u32, height, |transitions: &[u32]| {
-                if callback_error.is_none() && max_rows.is_none_or(|rows| rows_decoded < rows) {
-                    if let Err(error) = append_transition_row(&mut output, transitions, width) {
-                        callback_error = Some(error);
-                        return;
-                    }
-                    rows_decoded += 1;
+        let success = decoder::decode_g4(bytes_iter, width as u32, height, |transitions: &[u32]| {
+            if callback_error.is_none() && max_rows.is_none_or(|rows| rows_decoded < rows) {
+                if let Err(error) = append_transition_row(&mut output, transitions, width) {
+                    callback_error = Some(error);
+                    return;
                 }
-            });
+                rows_decoded += 1;
+            }
+        });
         if let Some(error) = callback_error {
             return Err(error);
         }
@@ -286,15 +275,12 @@ fn try_decode_with_fax(
 /// without converting a row: the in-house decoder emits `u16`, while the `fax`
 /// crate emits `u32` (widened in fax 0.3). Positions are compared in `usize`,
 /// so neither width is truncated.
-pub(crate) fn transitions_to_bytes<T: Copy + Into<u32>>(
-    transitions: &[T],
-    width: usize,
-) -> Result<Vec<u8>> {
+pub(crate) fn transitions_to_bytes<T: Copy + Into<u32>>(transitions: &[T], width: usize) -> Result<Vec<u8>> {
     let bytes_per_row = width.div_ceil(8);
     let mut row_bytes = Vec::new();
-    row_bytes.try_reserve_exact(bytes_per_row).map_err(|_| {
-        Error::Decode(format!("Unable to allocate {bytes_per_row} bytes for a CCITT row"))
-    })?;
+    row_bytes
+        .try_reserve_exact(bytes_per_row)
+        .map_err(|_| Error::Decode(format!("Unable to allocate {bytes_per_row} bytes for a CCITT row")))?;
     row_bytes.resize(bytes_per_row, 0);
 
     let mut is_black = false;
@@ -330,9 +316,9 @@ pub(crate) fn append_transition_row<T: Copy + Into<u32>>(
     width: usize,
 ) -> Result<()> {
     let row = transitions_to_bytes(transitions, width)?;
-    output.try_reserve(row.len()).map_err(|_| {
-        Error::Decode(format!("Unable to grow CCITT output by {} bytes", row.len()))
-    })?;
+    output
+        .try_reserve(row.len())
+        .map_err(|_| Error::Decode(format!("Unable to grow CCITT output by {} bytes", row.len())))?;
     output.extend_from_slice(&row);
     Ok(())
 }
@@ -340,10 +326,7 @@ pub(crate) fn append_transition_row<T: Copy + Into<u32>>(
 /// Decompresses CCITT Group 4 encoded data (legacy API for backwards compatibility).
 ///
 /// This is a convenience function that uses default CCITT parameters.
-#[deprecated(
-    since = "0.1.5",
-    note = "Use decompress_ccitt with CcittParams instead"
-)]
+#[deprecated(since = "0.1.5", note = "Use decompress_ccitt with CcittParams instead")]
 pub fn decompress_ccitt_group4(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
     let params = CcittParams {
         columns: width,
@@ -458,6 +441,9 @@ mod tests {
         let row = transitions_to_bytes(&[65_536u32, 65_544], width).expect("pack wide row");
         assert_eq!(row.len(), width.div_ceil(8));
         assert_eq!(row[65_536 / 8], 0xFF, "the 8 pixels at 65536.. must be black");
-        assert!(row[..65_536 / 8].iter().all(|&b| b == 0), "everything before must stay white");
+        assert!(
+            row[..65_536 / 8].iter().all(|&b| b == 0),
+            "everything before must stay white"
+        );
     }
 }

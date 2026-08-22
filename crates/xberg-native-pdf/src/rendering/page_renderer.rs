@@ -22,16 +22,12 @@ use crate::object::{Object, ObjectRef};
 use crate::rendering::ext_gstate::{ParsedExtGState, parse_ext_g_state_inner};
 use crate::rendering::path_rasterizer::PathRasterizer;
 use crate::rendering::resolution::{
-    DeviceColor, IccTransformCache, LogicalColor, PaintIntent, PaintKind, PaintSide,
-    ResolutionContext, ResolutionPipeline, ResolvedColor,
+    DeviceColor, IccTransformCache, LogicalColor, PaintIntent, PaintKind, PaintSide, ResolutionContext,
+    ResolutionPipeline, ResolvedColor,
 };
-use crate::rendering::sidecar::{
-    self as sidecar_mod, CmykSidecar, page_declares_transparency_or_overprint,
-};
+use crate::rendering::sidecar::{self as sidecar_mod, CmykSidecar, page_declares_transparency_or_overprint};
 use crate::rendering::text_rasterizer::TextRasterizer;
-use crate::rendering::{
-    device_bounds_rasterizable, guarded_fill_path, guarded_mask_fill_path, guarded_stroke_path,
-};
+use crate::rendering::{device_bounds_rasterizable, guarded_fill_path, guarded_mask_fill_path, guarded_stroke_path};
 
 use crate::fonts::FontInfo;
 use std::collections::{HashMap, HashSet};
@@ -193,8 +189,7 @@ pub struct RenderedImage {
 impl RenderedImage {
     /// Save the image to a file.
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
-        std::fs::write(path, &self.data)
-            .map_err(|e| Error::InvalidPdf(format!("Failed to write image: {}", e)))
+        std::fs::write(path, &self.data).map_err(|e| Error::InvalidPdf(format!("Failed to write image: {}", e)))
     }
 
     /// Get the image data as bytes.
@@ -425,11 +420,7 @@ impl PageRenderer {
     }
 
     /// Render a page with specific options.
-    pub fn render_page_with_options(
-        &mut self,
-        page_num: usize,
-        doc: &PdfDocument,
-    ) -> Result<RenderedImage> {
+    pub fn render_page_with_options(&mut self, page_num: usize, doc: &PdfDocument) -> Result<RenderedImage> {
         self.fonts.clear();
         self.color_spaces.clear();
         // The qcms transform cache is per-page: dropping every entry
@@ -478,10 +469,7 @@ impl PageRenderer {
         } else {
             (media_box.width, media_box.height)
         };
-        let scale = self
-            .options
-            .scale_override
-            .unwrap_or(self.options.dpi as f32 / 72.0);
+        let scale = self.options.scale_override.unwrap_or(self.options.dpi as f32 / 72.0);
         let (width, height) = if self.options.scale_override.is_some() {
             // Float scale path: round to avoid off-by-one from exact fractional pixels.
             // Clamp to 1 so extreme aspect ratios never produce a 0-sized pixmap. ~keep
@@ -493,8 +481,8 @@ impl PageRenderer {
             ((page_w * scale).ceil() as u32, (page_h * scale).ceil() as u32)
         };
 
-        let mut pixmap = Pixmap::new(width, height)
-            .ok_or_else(|| Error::InvalidPdf("Failed to create pixmap".to_string()))?;
+        let mut pixmap =
+            Pixmap::new(width, height).ok_or_else(|| Error::InvalidPdf("Failed to create pixmap".to_string()))?;
 
         if let Some(bg) = self.options.background {
             let [r, g, b, a] = bg;
@@ -512,7 +500,7 @@ impl PageRenderer {
                 // PDF y-up (x,y) → screen y-down: screen_x = y*s, screen_y = x*s ~keep
                 Transform::from_translate(-media_box.x, -media_box.y)
                     .post_concat(Transform::from_row(0.0, scale, scale, 0.0, 0.0, 0.0))
-            },
+            }
             180 => Transform::from_translate(-media_box.x, -media_box.y)
                 .post_scale(-scale, scale)
                 .post_translate(media_box.width * scale, 0.0),
@@ -525,17 +513,15 @@ impl PageRenderer {
                 // it is a MIRROR: the old matrix has a POSITIVE determinant, while
                 // 0°/90°/180° all have a negative one (they carry the PDF y-up →
                 // raster y-down flip). Text came out reversed. ~keep
-                Transform::from_translate(-media_box.x, -media_box.y).post_concat(
-                    Transform::from_row(
-                        0.0,
-                        -scale,
-                        -scale,
-                        0.0,
-                        media_box.height * scale,
-                        media_box.width * scale,
-                    ),
-                )
-            },
+                Transform::from_translate(-media_box.x, -media_box.y).post_concat(Transform::from_row(
+                    0.0,
+                    -scale,
+                    -scale,
+                    0.0,
+                    media_box.height * scale,
+                    media_box.width * scale,
+                ))
+            }
             _ => Transform::from_translate(-media_box.x, -media_box.y)
                 .post_scale(scale, -scale)
                 .post_translate(0.0, page_h * scale),
@@ -581,8 +567,7 @@ impl PageRenderer {
         // detection-ON page regardless of OutputIntent — the per-plate
         // output is meaningful even without a press ICC profile (it is
         // the raw subtractive tint at every pixel). ~keep
-        let needs_cmyk_sidecar = (self.force_cmyk_sidecar
-            || doc.output_intent_cmyk_profile().is_some())
+        let needs_cmyk_sidecar = (self.force_cmyk_sidecar || doc.output_intent_cmyk_profile().is_some())
             && page_declares_transparency_or_overprint(doc, &resources);
         if needs_cmyk_sidecar {
             let spot_names = sidecar_mod::discover_page_spot_inks(doc, page_num);
@@ -595,7 +580,7 @@ impl PageRenderer {
             Ok(ops) => ops,
             Err(e) => {
                 return Err(e);
-            },
+            }
         };
 
         self.execute_operators(&mut pixmap, transform, &operators, doc, page_num, &resources)?;
@@ -638,14 +623,14 @@ impl PageRenderer {
                                     info.embedded_font_data.is_some()
                                 );
                                 self.fonts.insert(name.clone(), info);
-                            },
+                            }
                             Err(e) => {
                                 tracing::warn!(
                                     "Failed to parse font '{}': {}. Text using this font may render incorrectly.",
                                     name,
                                     e
                                 );
-                            },
+                            }
                         }
                     }
                 }
@@ -685,8 +670,7 @@ impl PageRenderer {
     /// tie-break, strict subset-prefix stripping. Only the write loop is
     /// local, because this table stores fonts behind a `OnceLock` cmap slot.
     fn share_truetype_cmaps(&mut self) {
-        let best_cmaps =
-            crate::fonts::unicode_decode::best_truetype_cmaps(self.fonts.values().map(|f| &**f));
+        let best_cmaps = crate::fonts::unicode_decode::best_truetype_cmaps(self.fonts.values().map(|f| &**f));
         if best_cmaps.is_empty() {
             return;
         }
@@ -815,7 +799,7 @@ impl PageRenderer {
                         gs_stack.depth(),
                         clip_stack.len()
                     );
-                },
+                }
                 Operator::RestoreState => {
                     gs_stack.restore();
                     if clip_stack.len() > 1 {
@@ -826,7 +810,7 @@ impl PageRenderer {
                         gs_stack.depth(),
                         clip_stack.len()
                     );
-                },
+                }
                 Operator::Cm { a, b, c, d, e, f } => {
                     let matrix = Matrix {
                         a: *a,
@@ -849,7 +833,7 @@ impl PageRenderer {
                         f,
                         current.ctm
                     );
-                },
+                }
 
                 Operator::SetFillRgb { r, g, b } => {
                     let gs = gs_stack.current_mut();
@@ -874,7 +858,7 @@ impl PageRenderer {
                     // new RGB paint's region. ~keep
                     gs.fill_color_cmyk = None;
                     tracing::trace!("SetFillRgb: [{}, {}, {}]", r, g, b);
-                },
+                }
                 Operator::SetStrokeRgb { r, g, b } => {
                     let gs = gs_stack.current_mut();
                     gs.stroke_color_rgb = (*r, *g, *b);
@@ -884,7 +868,7 @@ impl PageRenderer {
                     gs.stroke_spot_inks.clear();
                     gs.stroke_color_cmyk = None;
                     tracing::trace!("SetStrokeRgb: [{}, {}, {}]", r, g, b);
-                },
+                }
                 Operator::SetFillGray { gray } => {
                     let g = *gray;
                     let gs = gs_stack.current_mut();
@@ -895,7 +879,7 @@ impl PageRenderer {
                     gs.fill_spot_inks.clear();
                     gs.fill_color_cmyk = None;
                     tracing::trace!("SetFillGray: {}", g);
-                },
+                }
                 Operator::SetStrokeGray { gray } => {
                     let g = *gray;
                     let gs = gs_stack.current_mut();
@@ -906,7 +890,7 @@ impl PageRenderer {
                     gs.stroke_spot_inks.clear();
                     gs.stroke_color_cmyk = None;
                     tracing::trace!("SetStrokeGray: {}", g);
-                },
+                }
                 Operator::SetFillCmyk { c, m, y, k } => {
                     let (r, g, b) = cmyk_to_rgb(*c, *m, *y, *k);
                     let gs = gs_stack.current_mut();
@@ -914,11 +898,10 @@ impl PageRenderer {
                     gs.fill_color_cmyk = Some((*c, *m, *y, *k));
                     gs.fill_color_space = "DeviceCMYK".to_string();
                     gs.fill_color_components.clear();
-                    gs.fill_color_components
-                        .extend_from_slice(&[*c, *m, *y, *k]);
+                    gs.fill_color_components.extend_from_slice(&[*c, *m, *y, *k]);
                     gs.fill_spot_inks.clear();
                     tracing::trace!("SetFillCmyk: [{}, {}, {}, {}] -> {:?}", c, m, y, k, (r, g, b));
-                },
+                }
                 Operator::SetStrokeCmyk { c, m, y, k } => {
                     let (r, g, b) = cmyk_to_rgb(*c, *m, *y, *k);
                     let gs = gs_stack.current_mut();
@@ -926,18 +909,10 @@ impl PageRenderer {
                     gs.stroke_color_cmyk = Some((*c, *m, *y, *k));
                     gs.stroke_color_space = "DeviceCMYK".to_string();
                     gs.stroke_color_components.clear();
-                    gs.stroke_color_components
-                        .extend_from_slice(&[*c, *m, *y, *k]);
+                    gs.stroke_color_components.extend_from_slice(&[*c, *m, *y, *k]);
                     gs.stroke_spot_inks.clear();
-                    tracing::trace!(
-                        "SetStrokeCmyk: [{}, {}, {}, {}] -> {:?}",
-                        c,
-                        m,
-                        y,
-                        k,
-                        (r, g, b)
-                    );
-                },
+                    tracing::trace!("SetStrokeCmyk: [{}, {}, {}, {}] -> {:?}", c, m, y, k, (r, g, b));
+                }
 
                 Operator::SetFillColorSpace { name } => {
                     // ISO 32000-1 §8.6.8: the `cs` operator shall also
@@ -957,9 +932,8 @@ impl PageRenderer {
                     // ICC retarget for DeviceN /Process /ICCBased; thread
                     // the live gs intent through so a prior `/Perceptual ri`
                     // / ExtGState /RI propagates into the retarget tag pick. ~keep
-                    let intent_for_initial = crate::color::RenderingIntent::from_pdf_name(
-                        &gs_stack.current().rendering_intent,
-                    );
+                    let intent_for_initial =
+                        crate::color::RenderingIntent::from_pdf_name(&gs_stack.current().rendering_intent);
                     let initial = sidecar_mod::initial_colour_for_space(
                         name,
                         resolved.as_ref(),
@@ -972,19 +946,17 @@ impl PageRenderer {
                     gs.fill_color_rgb = initial.rgb;
                     gs.fill_color_cmyk = initial.cmyk;
                     gs.fill_color_components.clear();
-                    gs.fill_color_components
-                        .extend_from_slice(&initial.components);
+                    gs.fill_color_components.extend_from_slice(&initial.components);
                     gs.fill_spot_inks = initial.spot_inks;
                     // Selecting a colour space clears any previously selected
                     // fill pattern; a fresh scn must re-name it (§8.7.3). ~keep
                     gs.fill_pattern_name = None;
                     tracing::trace!("SetFillColorSpace: {}", name);
-                },
+                }
                 Operator::SetStrokeColorSpace { name } => {
                     let resolved = self.color_spaces.get(name).cloned();
-                    let intent_for_initial = crate::color::RenderingIntent::from_pdf_name(
-                        &gs_stack.current().rendering_intent,
-                    );
+                    let intent_for_initial =
+                        crate::color::RenderingIntent::from_pdf_name(&gs_stack.current().rendering_intent);
                     let initial = sidecar_mod::initial_colour_for_space(
                         name,
                         resolved.as_ref(),
@@ -997,10 +969,9 @@ impl PageRenderer {
                     gs.stroke_color_rgb = initial.rgb;
                     gs.stroke_color_cmyk = initial.cmyk;
                     gs.stroke_color_components.clear();
-                    gs.stroke_color_components
-                        .extend_from_slice(&initial.components);
+                    gs.stroke_color_components.extend_from_slice(&initial.components);
                     gs.stroke_spot_inks = initial.spot_inks;
-                },
+                }
                 Operator::SetFillColor { components } => {
                     let gs = gs_stack.current_mut();
                     let space_name = gs.fill_color_space.clone();
@@ -1021,20 +992,14 @@ impl PageRenderer {
                         "DeviceGray" | "G" if !components.is_empty() => {
                             let g = components[0];
                             gs.fill_color_rgb = (g, g, g);
-                        },
+                        }
                         "DeviceRGB" | "RGB" if components.len() >= 3 => {
                             gs.fill_color_rgb = (components[0], components[1], components[2]);
-                        },
+                        }
                         "DeviceCMYK" | "CMYK" if components.len() >= 4 => {
-                            gs.fill_color_rgb = cmyk_to_rgb(
-                                components[0],
-                                components[1],
-                                components[2],
-                                components[3],
-                            );
-                            gs.fill_color_cmyk =
-                                Some((components[0], components[1], components[2], components[3]));
-                        },
+                            gs.fill_color_rgb = cmyk_to_rgb(components[0], components[1], components[2], components[3]);
+                            gs.fill_color_cmyk = Some((components[0], components[1], components[2], components[3]));
+                        }
                         _ => {
                             let mut handled = false;
                             if let Some(rs) = resolved_space {
@@ -1044,24 +1009,18 @@ impl PageRenderer {
                                             "ICCBased" if arr.len() > 1 => {
                                                 if let Ok(dict_obj) = doc.resolve_object(&arr[1]) {
                                                     if let Some(dict) = dict_obj.as_dict() {
-                                                        let n = dict
-                                                            .get("N")
-                                                            .and_then(|o| o.as_integer())
-                                                            .unwrap_or(3);
+                                                        let n = dict.get("N").and_then(|o| o.as_integer()).unwrap_or(3);
                                                         match n {
                                                             1 if !components.is_empty() => {
                                                                 let g = components[0];
                                                                 gs.fill_color_rgb = (g, g, g);
                                                                 handled = true;
-                                                            },
+                                                            }
                                                             3 if components.len() >= 3 => {
-                                                                gs.fill_color_rgb = (
-                                                                    components[0],
-                                                                    components[1],
-                                                                    components[2],
-                                                                );
+                                                                gs.fill_color_rgb =
+                                                                    (components[0], components[1], components[2]);
                                                                 handled = true;
-                                                            },
+                                                            }
                                                             4 if components.len() >= 4 => {
                                                                 gs.fill_color_rgb = cmyk_to_rgb(
                                                                     components[0],
@@ -1070,12 +1029,12 @@ impl PageRenderer {
                                                                     components[3],
                                                                 );
                                                                 handled = true;
-                                                            },
-                                                            _ => {},
+                                                            }
+                                                            _ => {}
                                                         }
                                                     }
                                                 }
-                                            },
+                                            }
                                             "Separation" | "DeviceN" => {
                                                 // Inline Separation/DeviceN evaluation used to
                                                 // live here as a partial reimplementation of the
@@ -1094,15 +1053,15 @@ impl PageRenderer {
                                                 // (no fallback gray write) and let the pipeline
                                                 // own the colour. ~keep
                                                 handled = true;
-                                            },
+                                            }
                                             "Indexed" => {
                                                 if !components.is_empty() {
                                                     let g = components[0] / 255.0;
                                                     gs.fill_color_rgb = (g, g, g);
                                                     handled = true;
                                                 }
-                                            },
-                                            _ => {},
+                                            }
+                                            _ => {}
                                         }
                                     }
                                 }
@@ -1112,7 +1071,7 @@ impl PageRenderer {
                                 let g = components[0];
                                 gs.fill_color_rgb = (g, g, g);
                             }
-                        },
+                        }
                     }
                     // Per ISO 32000-1 §8.6.6.4 / §8.6.6.5: when the fill
                     // colour space is /Separation or /DeviceN, record the
@@ -1121,9 +1080,7 @@ impl PageRenderer {
                     // subsequent paint does not inherit stale spot data
                     // from a prior /Separation set. ~keep
                     gs.fill_spot_inks = resolved_space
-                        .map(|rs| {
-                            crate::rendering::sidecar::extract_paint_spot_inks(rs, components, doc)
-                        })
+                        .map(|rs| crate::rendering::sidecar::extract_paint_spot_inks(rs, components, doc))
                         .unwrap_or_default();
                     tracing::trace!(
                         "SetFillColor: {} {:?} -> {:?}",
@@ -1131,7 +1088,7 @@ impl PageRenderer {
                         components,
                         gs.fill_color_rgb
                     );
-                },
+                }
                 Operator::SetStrokeColor { components } => {
                     let gs = gs_stack.current_mut();
                     let space_name = gs.stroke_color_space.clone();
@@ -1144,20 +1101,15 @@ impl PageRenderer {
                         "DeviceGray" | "G" if !components.is_empty() => {
                             let g = components[0];
                             gs.stroke_color_rgb = (g, g, g);
-                        },
+                        }
                         "DeviceRGB" | "RGB" if components.len() >= 3 => {
                             gs.stroke_color_rgb = (components[0], components[1], components[2]);
-                        },
+                        }
                         "DeviceCMYK" | "CMYK" if components.len() >= 4 => {
-                            gs.stroke_color_rgb = cmyk_to_rgb(
-                                components[0],
-                                components[1],
-                                components[2],
-                                components[3],
-                            );
-                            gs.stroke_color_cmyk =
-                                Some((components[0], components[1], components[2], components[3]));
-                        },
+                            gs.stroke_color_rgb =
+                                cmyk_to_rgb(components[0], components[1], components[2], components[3]);
+                            gs.stroke_color_cmyk = Some((components[0], components[1], components[2], components[3]));
+                        }
                         _ => {
                             let mut handled = false;
                             if let Some(rs) = resolved_space {
@@ -1167,24 +1119,18 @@ impl PageRenderer {
                                             "ICCBased" if arr.len() > 1 => {
                                                 if let Ok(dict_obj) = doc.resolve_object(&arr[1]) {
                                                     if let Some(dict) = dict_obj.as_dict() {
-                                                        let n = dict
-                                                            .get("N")
-                                                            .and_then(|o| o.as_integer())
-                                                            .unwrap_or(3);
+                                                        let n = dict.get("N").and_then(|o| o.as_integer()).unwrap_or(3);
                                                         match n {
                                                             1 if !components.is_empty() => {
                                                                 let g = components[0];
                                                                 gs.stroke_color_rgb = (g, g, g);
                                                                 handled = true;
-                                                            },
+                                                            }
                                                             3 if components.len() >= 3 => {
-                                                                gs.stroke_color_rgb = (
-                                                                    components[0],
-                                                                    components[1],
-                                                                    components[2],
-                                                                );
+                                                                gs.stroke_color_rgb =
+                                                                    (components[0], components[1], components[2]);
                                                                 handled = true;
-                                                            },
+                                                            }
                                                             4 if components.len() >= 4 => {
                                                                 gs.stroke_color_rgb = cmyk_to_rgb(
                                                                     components[0],
@@ -1193,13 +1139,13 @@ impl PageRenderer {
                                                                     components[3],
                                                                 );
                                                                 handled = true;
-                                                            },
-                                                            _ => {},
+                                                            }
+                                                            _ => {}
                                                         }
                                                     }
                                                 }
-                                            },
-                                            _ => {},
+                                            }
+                                            _ => {}
                                         }
                                     }
                                 }
@@ -1208,12 +1154,10 @@ impl PageRenderer {
                                 let g = components[0];
                                 gs.stroke_color_rgb = (g, g, g);
                             }
-                        },
+                        }
                     }
                     gs.stroke_spot_inks = resolved_space
-                        .map(|rs| {
-                            crate::rendering::sidecar::extract_paint_spot_inks(rs, components, doc)
-                        })
+                        .map(|rs| crate::rendering::sidecar::extract_paint_spot_inks(rs, components, doc))
                         .unwrap_or_default();
                     tracing::trace!(
                         "SetStrokeColor: {} {:?} -> {:?}",
@@ -1221,7 +1165,7 @@ impl PageRenderer {
                         components,
                         gs.stroke_color_rgb
                     );
-                },
+                }
                 Operator::SetFillColorN { components, name } => {
                     let gs = gs_stack.current_mut();
                     let space_name = gs.fill_color_space.clone();
@@ -1242,20 +1186,14 @@ impl PageRenderer {
                         "DeviceGray" | "G" if !components.is_empty() => {
                             let g = components[0];
                             gs.fill_color_rgb = (g, g, g);
-                        },
+                        }
                         "DeviceRGB" | "RGB" if components.len() >= 3 => {
                             gs.fill_color_rgb = (components[0], components[1], components[2]);
-                        },
+                        }
                         "DeviceCMYK" | "CMYK" if components.len() >= 4 => {
-                            gs.fill_color_rgb = cmyk_to_rgb(
-                                components[0],
-                                components[1],
-                                components[2],
-                                components[3],
-                            );
-                            gs.fill_color_cmyk =
-                                Some((components[0], components[1], components[2], components[3]));
-                        },
+                            gs.fill_color_rgb = cmyk_to_rgb(components[0], components[1], components[2], components[3]);
+                            gs.fill_color_cmyk = Some((components[0], components[1], components[2], components[3]));
+                        }
                         _ => {
                             let mut handled = false;
                             if let Some(rs) = resolved_space {
@@ -1265,24 +1203,18 @@ impl PageRenderer {
                                             "ICCBased" if arr.len() > 1 => {
                                                 if let Ok(dict_obj) = doc.resolve_object(&arr[1]) {
                                                     if let Some(dict) = dict_obj.as_dict() {
-                                                        let n = dict
-                                                            .get("N")
-                                                            .and_then(|o| o.as_integer())
-                                                            .unwrap_or(3);
+                                                        let n = dict.get("N").and_then(|o| o.as_integer()).unwrap_or(3);
                                                         match n {
                                                             1 if !components.is_empty() => {
                                                                 let g = components[0];
                                                                 gs.fill_color_rgb = (g, g, g);
                                                                 handled = true;
-                                                            },
+                                                            }
                                                             3 if components.len() >= 3 => {
-                                                                gs.fill_color_rgb = (
-                                                                    components[0],
-                                                                    components[1],
-                                                                    components[2],
-                                                                );
+                                                                gs.fill_color_rgb =
+                                                                    (components[0], components[1], components[2]);
                                                                 handled = true;
-                                                            },
+                                                            }
                                                             4 if components.len() >= 4 => {
                                                                 gs.fill_color_rgb = cmyk_to_rgb(
                                                                     components[0],
@@ -1291,12 +1223,12 @@ impl PageRenderer {
                                                                     components[3],
                                                                 );
                                                                 handled = true;
-                                                            },
-                                                            _ => {},
+                                                            }
+                                                            _ => {}
                                                         }
                                                     }
                                                 }
-                                            },
+                                            }
                                             "Separation" | "DeviceN" => {
                                                 // Pipeline owns the colour at paint time —
                                                 // see the matching comment in the SetFillColor
@@ -1331,13 +1263,11 @@ impl PageRenderer {
                                                         )
                                                     {
                                                         gs.fill_color_cmyk = Some(cmyk);
-                                                        gs.fill_color_rgb = cmyk_to_rgb(
-                                                            cmyk.0, cmyk.1, cmyk.2, cmyk.3,
-                                                        );
+                                                        gs.fill_color_rgb = cmyk_to_rgb(cmyk.0, cmyk.1, cmyk.2, cmyk.3);
                                                     }
                                                 }
                                                 handled = true;
-                                            },
+                                            }
                                             "Indexed" => {
                                                 // Pipeline's resolve_indexed handles index/255
                                                 // gray fallback at paint time. The inline path
@@ -1348,8 +1278,8 @@ impl PageRenderer {
                                                 // splice clone runs — either way the colour is
                                                 // correct. ~keep
                                                 handled = true;
-                                            },
-                                            _ => {},
+                                            }
+                                            _ => {}
                                         }
                                     }
                                 }
@@ -1358,12 +1288,10 @@ impl PageRenderer {
                                 let g = components[0];
                                 gs.fill_color_rgb = (g, g, g);
                             }
-                        },
+                        }
                     }
                     gs.fill_spot_inks = resolved_space
-                        .map(|rs| {
-                            crate::rendering::sidecar::extract_paint_spot_inks(rs, components, doc)
-                        })
+                        .map(|rs| crate::rendering::sidecar::extract_paint_spot_inks(rs, components, doc))
                         .unwrap_or_default();
                     tracing::trace!(
                         "SetFillColorN: {} {:?} -> {:?}",
@@ -1371,7 +1299,7 @@ impl PageRenderer {
                         components,
                         gs.fill_color_rgb
                     );
-                },
+                }
                 Operator::SetStrokeColorN { components, .. } => {
                     let gs = gs_stack.current_mut();
                     let space_name = gs.stroke_color_space.clone();
@@ -1383,20 +1311,15 @@ impl PageRenderer {
                         "DeviceGray" | "G" if !components.is_empty() => {
                             let g = components[0];
                             gs.stroke_color_rgb = (g, g, g);
-                        },
+                        }
                         "DeviceRGB" | "RGB" if components.len() >= 3 => {
                             gs.stroke_color_rgb = (components[0], components[1], components[2]);
-                        },
+                        }
                         "DeviceCMYK" | "CMYK" if components.len() >= 4 => {
-                            gs.stroke_color_rgb = cmyk_to_rgb(
-                                components[0],
-                                components[1],
-                                components[2],
-                                components[3],
-                            );
-                            gs.stroke_color_cmyk =
-                                Some((components[0], components[1], components[2], components[3]));
-                        },
+                            gs.stroke_color_rgb =
+                                cmyk_to_rgb(components[0], components[1], components[2], components[3]);
+                            gs.stroke_color_cmyk = Some((components[0], components[1], components[2], components[3]));
+                        }
                         _ => {
                             let mut handled = false;
                             if let Some(rs) = resolved_space {
@@ -1406,24 +1329,18 @@ impl PageRenderer {
                                             "ICCBased" if arr.len() > 1 => {
                                                 if let Ok(dict_obj) = doc.resolve_object(&arr[1]) {
                                                     if let Some(dict) = dict_obj.as_dict() {
-                                                        let n = dict
-                                                            .get("N")
-                                                            .and_then(|o| o.as_integer())
-                                                            .unwrap_or(3);
+                                                        let n = dict.get("N").and_then(|o| o.as_integer()).unwrap_or(3);
                                                         match n {
                                                             1 if !components.is_empty() => {
                                                                 let g = components[0];
                                                                 gs.stroke_color_rgb = (g, g, g);
                                                                 handled = true;
-                                                            },
+                                                            }
                                                             3 if components.len() >= 3 => {
-                                                                gs.stroke_color_rgb = (
-                                                                    components[0],
-                                                                    components[1],
-                                                                    components[2],
-                                                                );
+                                                                gs.stroke_color_rgb =
+                                                                    (components[0], components[1], components[2]);
                                                                 handled = true;
-                                                            },
+                                                            }
                                                             4 if components.len() >= 4 => {
                                                                 gs.stroke_color_rgb = cmyk_to_rgb(
                                                                     components[0],
@@ -1432,12 +1349,12 @@ impl PageRenderer {
                                                                     components[3],
                                                                 );
                                                                 handled = true;
-                                                            },
-                                                            _ => {},
+                                                            }
+                                                            _ => {}
                                                         }
                                                     }
                                                 }
-                                            },
+                                            }
                                             "Separation" | "DeviceN" => {
                                                 // Pipeline owns the colour at paint time —
                                                 // see the matching comment in the SetFillColor
@@ -1461,19 +1378,18 @@ impl PageRenderer {
                                                         )
                                                     {
                                                         gs.stroke_color_cmyk = Some(cmyk);
-                                                        gs.stroke_color_rgb = cmyk_to_rgb(
-                                                            cmyk.0, cmyk.1, cmyk.2, cmyk.3,
-                                                        );
+                                                        gs.stroke_color_rgb =
+                                                            cmyk_to_rgb(cmyk.0, cmyk.1, cmyk.2, cmyk.3);
                                                     }
                                                 }
                                                 handled = true;
-                                            },
+                                            }
                                             "Indexed" => {
                                                 // Pipeline's resolve_indexed handles
                                                 // index/255 gray fallback at paint time. ~keep
                                                 handled = true;
-                                            },
-                                            _ => {},
+                                            }
+                                            _ => {}
                                         }
                                     }
                                 }
@@ -1482,12 +1398,10 @@ impl PageRenderer {
                                 let g = components[0];
                                 gs.stroke_color_rgb = (g, g, g);
                             }
-                        },
+                        }
                     }
                     gs.stroke_spot_inks = resolved_space
-                        .map(|rs| {
-                            crate::rendering::sidecar::extract_paint_spot_inks(rs, components, doc)
-                        })
+                        .map(|rs| crate::rendering::sidecar::extract_paint_spot_inks(rs, components, doc))
                         .unwrap_or_default();
                     tracing::trace!(
                         "SetStrokeColorN: {} {:?} -> {:?}",
@@ -1495,23 +1409,23 @@ impl PageRenderer {
                         components,
                         gs.stroke_color_rgb
                     );
-                },
+                }
 
                 Operator::SetLineWidth { width } => {
                     gs_stack.current_mut().line_width = *width;
-                },
+                }
                 Operator::SetLineCap { cap_style } => {
                     gs_stack.current_mut().line_cap = *cap_style;
-                },
+                }
                 Operator::SetLineJoin { join_style } => {
                     gs_stack.current_mut().line_join = *join_style;
-                },
+                }
                 Operator::SetMiterLimit { limit } => {
                     gs_stack.current_mut().miter_limit = *limit;
-                },
+                }
                 Operator::SetDash { array, phase } => {
                     gs_stack.current_mut().dash_pattern = (array.clone(), *phase);
-                },
+                }
                 Operator::SetRenderingIntent { intent } => {
                     // ISO 32000-1:2008 §10.7.3 `/RI` operator. Updates
                     // the graphics-state rendering-intent string; the
@@ -1526,38 +1440,26 @@ impl PageRenderer {
                     // CMYK transform cache would collapse every
                     // intent's paint into a single shared entry. ~keep
                     gs_stack.current_mut().rendering_intent = intent.clone();
-                },
+                }
 
                 Operator::MoveTo { x, y } => {
                     current_path.move_to(*x, *y);
-                },
+                }
                 Operator::LineTo { x, y } => {
                     current_path.line_to(*x, *y);
-                },
-                Operator::CurveTo {
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    x3,
-                    y3,
-                } => {
+                }
+                Operator::CurveTo { x1, y1, x2, y2, x3, y3 } => {
                     current_path.cubic_to(*x1, *y1, *x2, *y2, *x3, *y3);
-                },
+                }
                 Operator::CurveToV { x2, y2, x3, y3 } => {
                     if let Some(last) = current_path.last_point() {
                         current_path.cubic_to(last.x, last.y, *x2, *y2, *x3, *y3);
                     }
-                },
+                }
                 Operator::CurveToY { x1, y1, x3, y3 } => {
                     current_path.cubic_to(*x1, *y1, *x3, *y3, *x3, *y3);
-                },
-                Operator::Rectangle {
-                    x,
-                    y,
-                    width,
-                    height,
-                } => {
+                }
+                Operator::Rectangle { x, y, width, height } => {
                     // Normalize negative width/height per PDF spec:
                     // re with negative dimensions means the rect extends in the opposite direction
                     // ~keep
@@ -1574,20 +1476,14 @@ impl PageRenderer {
                     if let Some(rect) = tiny_skia::Rect::from_xywh(nx, ny, nw, nh) {
                         current_path.push_rect(rect);
                     }
-                },
+                }
                 Operator::ClosePath => {
                     current_path.close();
-                },
+                }
 
                 Operator::Stroke => {
                     if excluded_layer_depth == 0 {
-                        apply_pending_clip(
-                            &mut pending_clip,
-                            &mut clip_stack,
-                            pixmap,
-                            base_transform,
-                            &gs_stack,
-                        );
+                        apply_pending_clip(&mut pending_clip, &mut clip_stack, pixmap, base_transform, &gs_stack);
                         let clip = clip_stack.last().and_then(|c| c.as_ref());
                         if let Some(path) = current_path.finish() {
                             let gs_clone = gs_stack.current().clone();
@@ -1597,24 +1493,16 @@ impl PageRenderer {
                             // join / dash come from the cloned `gs`
                             // unchanged, so the stroke geometry is unaffected
                             // by the colour splice. ~keep
-                            let spliced = self.pipeline_resolve_paint_gs(
-                                doc,
-                                &gs_clone,
-                                PipelinePaintKind::PathStroke,
-                            );
+                            let spliced = self.pipeline_resolve_paint_gs(doc, &gs_clone, PipelinePaintKind::PathStroke);
                             let render_gs: &GraphicsState = spliced.as_ref().unwrap_or(&gs_clone);
                             let transform = combine_transforms(base_transform, &gs_clone.ctm);
                             let smask_snap = self.smask_snapshot(pixmap, &gs_clone);
                             let smask_spot_snap = self.smask_spot_snapshot(&gs_clone);
                             let overprint_snap = self.overprint_snapshot(pixmap, &gs_clone, false);
-                            let cmyk_compose_snap =
-                                self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, false);
-                            let cmyk_sidecar_snap =
-                                self.cmyk_sidecar_snapshot(pixmap, &gs_clone, false);
-                            let rgb_sidecar_snap =
-                                self.cmyk_sidecar_snapshot_for_rgb_paint(pixmap, &gs_clone, false);
-                            let cmyk_coverage =
-                                self.rasterise_stroke_coverage(&path, transform, &gs_clone, clip);
+                            let cmyk_compose_snap = self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, false);
+                            let cmyk_sidecar_snap = self.cmyk_sidecar_snapshot(pixmap, &gs_clone, false);
+                            let rgb_sidecar_snap = self.cmyk_sidecar_snapshot_for_rgb_paint(pixmap, &gs_clone, false);
+                            let cmyk_coverage = self.rasterise_stroke_coverage(&path, transform, &gs_clone, clip);
                             self.path_rasterizer
                                 .stroke_path_clipped(pixmap, &path, transform, render_gs, clip);
                             if let Some(snap) = cmyk_compose_snap {
@@ -1681,16 +1569,10 @@ impl PageRenderer {
                         let _ = current_path.finish();
                     }
                     current_path = PathBuilder::new();
-                },
+                }
                 Operator::Fill => {
                     if excluded_layer_depth == 0 {
-                        apply_pending_clip(
-                            &mut pending_clip,
-                            &mut clip_stack,
-                            pixmap,
-                            base_transform,
-                            &gs_stack,
-                        );
+                        apply_pending_clip(&mut pending_clip, &mut clip_stack, pixmap, base_transform, &gs_stack);
                         let clip = clip_stack.last().and_then(|c| c.as_ref());
                         if let Some(path) = current_path.finish() {
                             let gs_clone = gs_stack.current().clone();
@@ -1699,11 +1581,7 @@ impl PageRenderer {
                             // ICCBased N=4, etc.) and splice the resulting
                             // RGBA into a transient GraphicsState copy the
                             // rasteriser consumes. ~keep
-                            let spliced = self.pipeline_resolve_paint_gs(
-                                doc,
-                                &gs_clone,
-                                PipelinePaintKind::PathFill,
-                            );
+                            let spliced = self.pipeline_resolve_paint_gs(doc, &gs_clone, PipelinePaintKind::PathFill);
                             let render_gs: &GraphicsState = spliced.as_ref().unwrap_or(&gs_clone);
                             let transform = combine_transforms(base_transform, &gs_clone.ctm);
                             // §8.7.3: a Pattern-space fill routes to the
@@ -1734,20 +1612,13 @@ impl PageRenderer {
                                 // painted result. ~keep
                                 let smask_snap = self.smask_snapshot(pixmap, &gs_clone);
                                 let smask_spot_snap = self.smask_spot_snapshot(&gs_clone);
-                                let overprint_snap =
-                                    self.overprint_snapshot(pixmap, &gs_clone, true);
-                                let cmyk_compose_snap =
-                                    self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, true);
-                                let cmyk_sidecar_snap =
-                                    self.cmyk_sidecar_snapshot(pixmap, &gs_clone, true);
-                                let rgb_sidecar_snap = self
-                                    .cmyk_sidecar_snapshot_for_rgb_paint(pixmap, &gs_clone, true);
-                                let cmyk_coverage = self.rasterise_fill_coverage(
-                                    &path,
-                                    transform,
-                                    tiny_skia::FillRule::Winding,
-                                    clip,
-                                );
+                                let overprint_snap = self.overprint_snapshot(pixmap, &gs_clone, true);
+                                let cmyk_compose_snap = self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, true);
+                                let cmyk_sidecar_snap = self.cmyk_sidecar_snapshot(pixmap, &gs_clone, true);
+                                let rgb_sidecar_snap =
+                                    self.cmyk_sidecar_snapshot_for_rgb_paint(pixmap, &gs_clone, true);
+                                let cmyk_coverage =
+                                    self.rasterise_fill_coverage(&path, transform, tiny_skia::FillRule::Winding, clip);
                                 self.path_rasterizer.fill_path_clipped(
                                     pixmap,
                                     &path,
@@ -1821,18 +1692,10 @@ impl PageRenderer {
                         let _ = current_path.finish();
                     }
                     current_path = PathBuilder::new();
-                },
-                Operator::FillStroke
-                | Operator::CloseFillStroke
-                | Operator::CloseFillStrokeEvenOdd => {
+                }
+                Operator::FillStroke | Operator::CloseFillStroke | Operator::CloseFillStrokeEvenOdd => {
                     if excluded_layer_depth == 0 {
-                        apply_pending_clip(
-                            &mut pending_clip,
-                            &mut clip_stack,
-                            pixmap,
-                            base_transform,
-                            &gs_stack,
-                        );
+                        apply_pending_clip(&mut pending_clip, &mut clip_stack, pixmap, base_transform, &gs_stack);
                         let clip = clip_stack.last().and_then(|c| c.as_ref());
                         // ISO 32000-1 §8.5.3.1 Table 60: `b` and `b*` close
                         // the path before fill+stroke. The parser does not
@@ -1840,10 +1703,7 @@ impl PageRenderer {
                         // `ClosePath` + `Stroke`), so the dispatcher must
                         // perform the close itself or the final segment of
                         // an open subpath will not be painted by the stroke. ~keep
-                        if matches!(
-                            op,
-                            Operator::CloseFillStroke | Operator::CloseFillStrokeEvenOdd
-                        ) {
+                        if matches!(op, Operator::CloseFillStroke | Operator::CloseFillStrokeEvenOdd) {
                             current_path.close();
                         }
                         if let Some(path) = current_path.finish() {
@@ -1868,11 +1728,8 @@ impl PageRenderer {
                             // fields for the stroke pass, so one clone with
                             // both sides written is equivalent to two
                             // single-side clones. ~keep
-                            let spliced = self.pipeline_resolve_paint_gs(
-                                doc,
-                                &gs_clone,
-                                PipelinePaintKind::PathFillStroke,
-                            );
+                            let spliced =
+                                self.pipeline_resolve_paint_gs(doc, &gs_clone, PipelinePaintKind::PathFillStroke);
                             let render_gs: &GraphicsState = spliced.as_ref().unwrap_or(&gs_clone);
 
                             // §8.7.3: Pattern-space fills route to the tiling
@@ -1904,12 +1761,9 @@ impl PageRenderer {
                             if !fill_by_pattern {
                                 let fill_smask_snap = self.smask_snapshot(pixmap, &gs_clone);
                                 let fill_smask_spot_snap = self.smask_spot_snapshot(&gs_clone);
-                                let fill_overprint_snap =
-                                    self.overprint_snapshot(pixmap, &gs_clone, true);
-                                let fill_cmyk_compose_snap =
-                                    self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, true);
-                                let fill_spot_snap =
-                                    self.spot_paint_snapshot(pixmap, &gs_clone, true);
+                                let fill_overprint_snap = self.overprint_snapshot(pixmap, &gs_clone, true);
+                                let fill_cmyk_compose_snap = self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, true);
+                                let fill_spot_snap = self.spot_paint_snapshot(pixmap, &gs_clone, true);
                                 // §11.7.3 + §11.3.3 require per-pixel
                                 // coverage on every lane. The path-Fill
                                 // helper uses `rasterise_fill_coverage`;
@@ -1920,18 +1774,13 @@ impl PageRenderer {
                                 // mirror's diff branch. ~keep
                                 let fill_cmyk_coverage =
                                     self.rasterise_fill_coverage(&path, transform, fill_rule, clip);
-                                self.path_rasterizer.fill_path_clipped(
-                                    pixmap, &path, transform, render_gs, fill_rule, clip,
-                                );
+                                self.path_rasterizer
+                                    .fill_path_clipped(pixmap, &path, transform, render_gs, fill_rule, clip);
                                 if let Some(snap) = fill_cmyk_compose_snap {
-                                    self.apply_cmyk_compose_after_paint(
-                                        pixmap, &snap, &gs_clone, doc, true,
-                                    );
+                                    self.apply_cmyk_compose_after_paint(pixmap, &snap, &gs_clone, doc, true);
                                 }
                                 if let Some(snap) = fill_overprint_snap {
-                                    self.apply_overprint_after_paint(
-                                        pixmap, &snap, &gs_clone, doc, true,
-                                    );
+                                    self.apply_overprint_after_paint(pixmap, &snap, &gs_clone, doc, true);
                                 }
                                 if let Some(snap) = fill_spot_snap {
                                     self.mirror_spot_paint_into_sidecar_with_coverage(
@@ -1958,25 +1807,18 @@ impl PageRenderer {
 
                             let stroke_smask_snap = self.smask_snapshot(pixmap, &gs_clone);
                             let stroke_smask_spot_snap = self.smask_spot_snapshot(&gs_clone);
-                            let stroke_overprint_snap =
-                                self.overprint_snapshot(pixmap, &gs_clone, false);
-                            let stroke_cmyk_compose_snap =
-                                self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, false);
-                            let stroke_spot_snap =
-                                self.spot_paint_snapshot(pixmap, &gs_clone, false);
+                            let stroke_overprint_snap = self.overprint_snapshot(pixmap, &gs_clone, false);
+                            let stroke_cmyk_compose_snap = self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, false);
+                            let stroke_spot_snap = self.spot_paint_snapshot(pixmap, &gs_clone, false);
                             let stroke_cmyk_coverage =
                                 self.rasterise_stroke_coverage(&path, transform, &gs_clone, clip);
                             self.path_rasterizer
                                 .stroke_path_clipped(pixmap, &path, transform, render_gs, clip);
                             if let Some(snap) = stroke_cmyk_compose_snap {
-                                self.apply_cmyk_compose_after_paint(
-                                    pixmap, &snap, &gs_clone, doc, false,
-                                );
+                                self.apply_cmyk_compose_after_paint(pixmap, &snap, &gs_clone, doc, false);
                             }
                             if let Some(snap) = stroke_overprint_snap {
-                                self.apply_overprint_after_paint(
-                                    pixmap, &snap, &gs_clone, doc, false,
-                                );
+                                self.apply_overprint_after_paint(pixmap, &snap, &gs_clone, doc, false);
                             }
                             if let Some(snap) = stroke_spot_snap {
                                 self.mirror_spot_paint_into_sidecar_with_coverage(
@@ -2004,16 +1846,10 @@ impl PageRenderer {
                         let _ = current_path.finish();
                     }
                     current_path = PathBuilder::new();
-                },
+                }
                 Operator::FillEvenOdd | Operator::FillStrokeEvenOdd => {
                     if excluded_layer_depth == 0 {
-                        apply_pending_clip(
-                            &mut pending_clip,
-                            &mut clip_stack,
-                            pixmap,
-                            base_transform,
-                            &gs_stack,
-                        );
+                        apply_pending_clip(&mut pending_clip, &mut clip_stack, pixmap, base_transform, &gs_stack);
                         let clip = clip_stack.last().and_then(|c| c.as_ref());
                         if let Some(path) = current_path.finish() {
                             let gs_clone = gs_stack.current().clone();
@@ -2050,18 +1886,11 @@ impl PageRenderer {
                             if !fill_by_pattern {
                                 let fill_smask_snap = self.smask_snapshot(pixmap, &gs_clone);
                                 let fill_smask_spot_snap = self.smask_spot_snapshot(&gs_clone);
-                                let fill_overprint_snap =
-                                    self.overprint_snapshot(pixmap, &gs_clone, true);
-                                let fill_cmyk_compose_snap =
-                                    self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, true);
-                                let fill_spot_snap =
-                                    self.spot_paint_snapshot(pixmap, &gs_clone, true);
-                                let fill_cmyk_coverage = self.rasterise_fill_coverage(
-                                    &path,
-                                    transform,
-                                    tiny_skia::FillRule::EvenOdd,
-                                    clip,
-                                );
+                                let fill_overprint_snap = self.overprint_snapshot(pixmap, &gs_clone, true);
+                                let fill_cmyk_compose_snap = self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, true);
+                                let fill_spot_snap = self.spot_paint_snapshot(pixmap, &gs_clone, true);
+                                let fill_cmyk_coverage =
+                                    self.rasterise_fill_coverage(&path, transform, tiny_skia::FillRule::EvenOdd, clip);
                                 self.path_rasterizer.fill_path_clipped(
                                     pixmap,
                                     &path,
@@ -2071,14 +1900,10 @@ impl PageRenderer {
                                     clip,
                                 );
                                 if let Some(snap) = fill_cmyk_compose_snap {
-                                    self.apply_cmyk_compose_after_paint(
-                                        pixmap, &snap, &gs_clone, doc, true,
-                                    );
+                                    self.apply_cmyk_compose_after_paint(pixmap, &snap, &gs_clone, doc, true);
                                 }
                                 if let Some(snap) = fill_overprint_snap {
-                                    self.apply_overprint_after_paint(
-                                        pixmap, &snap, &gs_clone, doc, true,
-                                    );
+                                    self.apply_overprint_after_paint(pixmap, &snap, &gs_clone, doc, true);
                                 }
                                 if let Some(snap) = fill_spot_snap {
                                     self.mirror_spot_paint_into_sidecar_with_coverage(
@@ -2106,25 +1931,19 @@ impl PageRenderer {
                             if matches!(op, Operator::FillStrokeEvenOdd) {
                                 let stroke_smask_snap = self.smask_snapshot(pixmap, &gs_clone);
                                 let stroke_smask_spot_snap = self.smask_spot_snapshot(&gs_clone);
-                                let stroke_overprint_snap =
-                                    self.overprint_snapshot(pixmap, &gs_clone, false);
+                                let stroke_overprint_snap = self.overprint_snapshot(pixmap, &gs_clone, false);
                                 let stroke_cmyk_compose_snap =
                                     self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, false);
-                                let stroke_spot_snap =
-                                    self.spot_paint_snapshot(pixmap, &gs_clone, false);
-                                let stroke_cmyk_coverage = self
-                                    .rasterise_stroke_coverage(&path, transform, &gs_clone, clip);
+                                let stroke_spot_snap = self.spot_paint_snapshot(pixmap, &gs_clone, false);
+                                let stroke_cmyk_coverage =
+                                    self.rasterise_stroke_coverage(&path, transform, &gs_clone, clip);
                                 self.path_rasterizer
                                     .stroke_path_clipped(pixmap, &path, transform, render_gs, clip);
                                 if let Some(snap) = stroke_cmyk_compose_snap {
-                                    self.apply_cmyk_compose_after_paint(
-                                        pixmap, &snap, &gs_clone, doc, false,
-                                    );
+                                    self.apply_cmyk_compose_after_paint(pixmap, &snap, &gs_clone, doc, false);
                                 }
                                 if let Some(snap) = stroke_overprint_snap {
-                                    self.apply_overprint_after_paint(
-                                        pixmap, &snap, &gs_clone, doc, false,
-                                    );
+                                    self.apply_overprint_after_paint(pixmap, &snap, &gs_clone, doc, false);
                                 }
                                 if let Some(snap) = stroke_spot_snap {
                                     self.mirror_spot_paint_into_sidecar_with_coverage(
@@ -2153,7 +1972,7 @@ impl PageRenderer {
                         let _ = current_path.finish();
                     }
                     current_path = PathBuilder::new();
-                },
+                }
 
                 // Clipping — suppressed inside an excluded OCG scope. Per PDF
                 // spec the clip is a graphics-state side-effect; without
@@ -2166,14 +1985,14 @@ impl PageRenderer {
                             pending_clip = Some((path, tiny_skia::FillRule::Winding));
                         }
                     }
-                },
+                }
                 Operator::ClipEvenOdd => {
                     if excluded_layer_depth == 0 {
                         if let Some(path) = current_path.clone().finish() {
                             pending_clip = Some((path, tiny_skia::FillRule::EvenOdd));
                         }
                     }
-                },
+                }
 
                 Operator::BeginText => {
                     in_text_object = true;
@@ -2186,7 +2005,7 @@ impl PageRenderer {
                     gs.text_matrix = Matrix::identity();
                     gs.text_line_matrix = Matrix::identity();
                     tracing::trace!("BT (BeginText)");
-                },
+                }
                 Operator::EndText => {
                     in_text_object = false;
                     // WS1.5b — apply the accumulated text clip path (Tr 4–7).
@@ -2196,48 +2015,39 @@ impl PageRenderer {
                     // outline) is treated as degenerate and leaves the clip
                     // unchanged rather than collapsing it to empty. ~keep
                     if let Some(scratch) = text_clip_accum.take() {
-                        let has_coverage = scratch
-                            .data()
-                            .as_chunks::<4>()
-                            .0
-                            .iter()
-                            .any(|px| px[3] != 0);
+                        let has_coverage = scratch.data().as_chunks::<4>().0.iter().any(|px| px[3] != 0);
                         if has_coverage {
-                            let text_mask = tiny_skia::Mask::from_pixmap(
-                                scratch.as_ref(),
-                                tiny_skia::MaskType::Alpha,
-                            );
+                            let text_mask = tiny_skia::Mask::from_pixmap(scratch.as_ref(), tiny_skia::MaskType::Alpha);
                             // Intersect (logical AND) the glyph silhouette with
                             // the current scope's clip so subsequent content is
                             // confined to the text shape *within* the existing
                             // clip — never widened past it. ~keep
                             if let Some(slot) = clip_stack.last_mut() {
                                 let existing = slot.take();
-                                *slot =
-                                    Some(intersect_with_inherited(text_mask, existing.as_ref()));
+                                *slot = Some(intersect_with_inherited(text_mask, existing.as_ref()));
                             }
                         }
                     }
-                },
+                }
 
                 Operator::Tc { char_space } => {
                     gs_stack.current_mut().char_space = *char_space;
-                },
+                }
                 Operator::Tw { word_space } => {
                     gs_stack.current_mut().word_space = *word_space;
-                },
+                }
                 Operator::Tz { scale } => {
                     gs_stack.current_mut().horizontal_scaling = *scale;
-                },
+                }
                 Operator::TL { leading } => {
                     gs_stack.current_mut().leading = *leading;
-                },
+                }
                 Operator::Ts { rise } => {
                     gs_stack.current_mut().text_rise = *rise;
-                },
+                }
                 Operator::Tr { render } => {
                     gs_stack.current_mut().render_mode = *render;
-                },
+                }
 
                 // Text showing — glyphs suppressed inside an excluded OCG layer,
                 // but the text matrix still advances so that subsequent visible
@@ -2261,11 +2071,7 @@ impl PageRenderer {
                                     resources,
                                 )?
                             } else {
-                                self.text_rasterizer.measure_text(
-                                    text,
-                                    gs_stack.current(),
-                                    &self.fonts,
-                                )
+                                self.text_rasterizer.measure_text(text, gs_stack.current(), &self.fonts)
                             };
                             gs_stack.current_mut().advance_text_matrix(advance);
                             continue;
@@ -2304,8 +2110,7 @@ impl PageRenderer {
                             let smask_snap = self.smask_snapshot(pixmap, gs);
                             let smask_spot_snap = self.smask_spot_snapshot(gs);
                             let overprint_snap = self.overprint_snapshot(pixmap, gs, true);
-                            let cmyk_compose_snap =
-                                self.cmyk_compose_snapshot(pixmap, gs, doc, true);
+                            let cmyk_compose_snap = self.cmyk_compose_snapshot(pixmap, gs, doc, true);
                             let spot_snap = self.text_fill_spot_snapshot(pixmap, gs);
                             // §9.4 + §11.7.3 + §11.3.3: rasterise the
                             // glyph-outline coverage in parallel with
@@ -2315,9 +2120,7 @@ impl PageRenderer {
                             // collision insulated) instead of a
                             // snapshot-vs-post-paint diff. ~keep
                             let text_coverage = spot_snap.as_ref().and_then(|_| {
-                                self.rasterise_text_coverage_render_text(
-                                    text, transform, gs, resources, doc, clip,
-                                )
+                                self.rasterise_text_coverage_render_text(text, transform, gs, resources, doc, clip)
                             });
                             let adv = self.text_rasterizer.render_text(
                                 pixmap,
@@ -2332,22 +2135,10 @@ impl PageRenderer {
                             )?;
                             let gs_for_apply = gs_stack.current().clone();
                             if let Some(snap) = cmyk_compose_snap {
-                                self.apply_cmyk_compose_after_paint(
-                                    pixmap,
-                                    &snap,
-                                    &gs_for_apply,
-                                    doc,
-                                    true,
-                                );
+                                self.apply_cmyk_compose_after_paint(pixmap, &snap, &gs_for_apply, doc, true);
                             }
                             if let Some(snap) = overprint_snap {
-                                self.apply_overprint_after_paint(
-                                    pixmap,
-                                    &snap,
-                                    &gs_for_apply,
-                                    doc,
-                                    true,
-                                );
+                                self.apply_overprint_after_paint(pixmap, &snap, &gs_for_apply, doc, true);
                             }
                             if let Some(snap) = spot_snap {
                                 self.mirror_spot_paint_into_sidecar_with_coverage(
@@ -2381,7 +2172,7 @@ impl PageRenderer {
                         // swap in exactly one place. ~keep
                         gs_stack.current_mut().advance_text_matrix(advance);
                     }
-                },
+                }
                 Operator::Quote { text } => {
                     if in_text_object {
                         // Quote (') is T* followed by Tj — always advance line ~keep
@@ -2404,11 +2195,7 @@ impl PageRenderer {
                                     resources,
                                 )?
                             } else {
-                                self.text_rasterizer.measure_text(
-                                    text,
-                                    gs_stack.current(),
-                                    &self.fonts,
-                                )
+                                self.text_rasterizer.measure_text(text, gs_stack.current(), &self.fonts)
                             };
                             gs_stack.current_mut().advance_text_matrix(advance);
                             continue;
@@ -2447,13 +2234,10 @@ impl PageRenderer {
                             let smask_snap = self.smask_snapshot(pixmap, gs);
                             let smask_spot_snap = self.smask_spot_snapshot(gs);
                             let overprint_snap = self.overprint_snapshot(pixmap, gs, true);
-                            let cmyk_compose_snap =
-                                self.cmyk_compose_snapshot(pixmap, gs, doc, true);
+                            let cmyk_compose_snap = self.cmyk_compose_snapshot(pixmap, gs, doc, true);
                             let spot_snap = self.text_fill_spot_snapshot(pixmap, gs);
                             let text_coverage = spot_snap.as_ref().and_then(|_| {
-                                self.rasterise_text_coverage_render_text(
-                                    text, transform, gs, resources, doc, clip,
-                                )
+                                self.rasterise_text_coverage_render_text(text, transform, gs, resources, doc, clip)
                             });
                             let adv = self.text_rasterizer.render_text(
                                 pixmap,
@@ -2468,22 +2252,10 @@ impl PageRenderer {
                             )?;
                             let gs_for_apply = gs_stack.current().clone();
                             if let Some(snap) = cmyk_compose_snap {
-                                self.apply_cmyk_compose_after_paint(
-                                    pixmap,
-                                    &snap,
-                                    &gs_for_apply,
-                                    doc,
-                                    true,
-                                );
+                                self.apply_cmyk_compose_after_paint(pixmap, &snap, &gs_for_apply, doc, true);
                             }
                             if let Some(snap) = overprint_snap {
-                                self.apply_overprint_after_paint(
-                                    pixmap,
-                                    &snap,
-                                    &gs_for_apply,
-                                    doc,
-                                    true,
-                                );
+                                self.apply_overprint_after_paint(pixmap, &snap, &gs_for_apply, doc, true);
                             }
                             if let Some(snap) = spot_snap {
                                 self.mirror_spot_paint_into_sidecar_with_coverage(
@@ -2513,7 +2285,7 @@ impl PageRenderer {
 
                         gs_stack.current_mut().advance_text_matrix(advance);
                     }
-                },
+                }
                 Operator::TJ { array } => {
                     if in_text_object {
                         if self.current_font_is_type3(gs_stack.current()) {
@@ -2529,11 +2301,8 @@ impl PageRenderer {
                                     resources,
                                 )?
                             } else {
-                                self.text_rasterizer.measure_tj_array(
-                                    array,
-                                    gs_stack.current(),
-                                    &self.fonts,
-                                )
+                                self.text_rasterizer
+                                    .measure_tj_array(array, gs_stack.current(), &self.fonts)
                             };
                             gs_stack.current_mut().advance_text_matrix(advance);
                             continue;
@@ -2574,13 +2343,10 @@ impl PageRenderer {
                             let smask_snap = self.smask_snapshot(pixmap, gs);
                             let smask_spot_snap = self.smask_spot_snapshot(gs);
                             let overprint_snap = self.overprint_snapshot(pixmap, gs, true);
-                            let cmyk_compose_snap =
-                                self.cmyk_compose_snapshot(pixmap, gs, doc, true);
+                            let cmyk_compose_snap = self.cmyk_compose_snapshot(pixmap, gs, doc, true);
                             let spot_snap = self.text_fill_spot_snapshot(pixmap, gs);
                             let text_coverage = spot_snap.as_ref().and_then(|_| {
-                                self.rasterise_text_coverage_render_tj_array(
-                                    array, transform, gs, resources, doc, clip,
-                                )
+                                self.rasterise_text_coverage_render_tj_array(array, transform, gs, resources, doc, clip)
                             });
                             let adv = self.text_rasterizer.render_tj_array(
                                 pixmap,
@@ -2595,22 +2361,10 @@ impl PageRenderer {
                             )?;
                             let gs_for_apply = gs_stack.current().clone();
                             if let Some(snap) = cmyk_compose_snap {
-                                self.apply_cmyk_compose_after_paint(
-                                    pixmap,
-                                    &snap,
-                                    &gs_for_apply,
-                                    doc,
-                                    true,
-                                );
+                                self.apply_cmyk_compose_after_paint(pixmap, &snap, &gs_for_apply, doc, true);
                             }
                             if let Some(snap) = overprint_snap {
-                                self.apply_overprint_after_paint(
-                                    pixmap,
-                                    &snap,
-                                    &gs_for_apply,
-                                    doc,
-                                    true,
-                                );
+                                self.apply_overprint_after_paint(pixmap, &snap, &gs_for_apply, doc, true);
                             }
                             if let Some(snap) = spot_snap {
                                 self.mirror_spot_paint_into_sidecar_with_coverage(
@@ -2635,13 +2389,12 @@ impl PageRenderer {
                             }
                             adv
                         } else {
-                            self.text_rasterizer
-                                .measure_tj_array(array, gs, &self.fonts)
+                            self.text_rasterizer.measure_tj_array(array, gs, &self.fonts)
                         };
 
                         gs_stack.current_mut().advance_text_matrix(advance);
                     }
-                },
+                }
                 Operator::DoubleQuote {
                     word_space,
                     char_space,
@@ -2671,11 +2424,7 @@ impl PageRenderer {
                                     resources,
                                 )?
                             } else {
-                                self.text_rasterizer.measure_text(
-                                    text,
-                                    gs_stack.current(),
-                                    &self.fonts,
-                                )
+                                self.text_rasterizer.measure_text(text, gs_stack.current(), &self.fonts)
                             };
                             gs_stack.current_mut().advance_text_matrix(advance);
                             continue;
@@ -2715,13 +2464,10 @@ impl PageRenderer {
                             let smask_snap = self.smask_snapshot(pixmap, gs);
                             let smask_spot_snap = self.smask_spot_snapshot(gs);
                             let overprint_snap = self.overprint_snapshot(pixmap, gs, true);
-                            let cmyk_compose_snap =
-                                self.cmyk_compose_snapshot(pixmap, gs, doc, true);
+                            let cmyk_compose_snap = self.cmyk_compose_snapshot(pixmap, gs, doc, true);
                             let spot_snap = self.text_fill_spot_snapshot(pixmap, gs);
                             let text_coverage = spot_snap.as_ref().and_then(|_| {
-                                self.rasterise_text_coverage_render_text(
-                                    text, transform, gs, resources, doc, clip,
-                                )
+                                self.rasterise_text_coverage_render_text(text, transform, gs, resources, doc, clip)
                             });
                             let adv = self.text_rasterizer.render_text(
                                 pixmap,
@@ -2736,22 +2482,10 @@ impl PageRenderer {
                             )?;
                             let gs_for_apply = gs_stack.current().clone();
                             if let Some(snap) = cmyk_compose_snap {
-                                self.apply_cmyk_compose_after_paint(
-                                    pixmap,
-                                    &snap,
-                                    &gs_for_apply,
-                                    doc,
-                                    true,
-                                );
+                                self.apply_cmyk_compose_after_paint(pixmap, &snap, &gs_for_apply, doc, true);
                             }
                             if let Some(snap) = overprint_snap {
-                                self.apply_overprint_after_paint(
-                                    pixmap,
-                                    &snap,
-                                    &gs_for_apply,
-                                    doc,
-                                    true,
-                                );
+                                self.apply_overprint_after_paint(pixmap, &snap, &gs_for_apply, doc, true);
                             }
                             if let Some(snap) = spot_snap {
                                 self.mirror_spot_paint_into_sidecar_with_coverage(
@@ -2781,7 +2515,7 @@ impl PageRenderer {
 
                         gs_stack.current_mut().advance_text_matrix(advance);
                     }
-                },
+                }
 
                 Operator::Do { name } => {
                     if excluded_layer_depth == 0 {
@@ -2853,17 +2587,11 @@ impl PageRenderer {
                         // post-Do mirror for Forms is already
                         // suppressed by round 3's P0 fix). ~keep
                         let image_coverage = spot_snap.as_ref().and_then(|_| {
-                            self.rasterise_image_xobject_coverage(
-                                name, transform, &gs_clone, resources, doc, clip,
-                            )
+                            self.rasterise_image_xobject_coverage(name, transform, &gs_clone, resources, doc, clip)
                         });
-                        self.render_xobject(
-                            pixmap, name, transform, &gs_clone, resources, doc, page_num, clip,
-                        )?;
+                        self.render_xobject(pixmap, name, transform, &gs_clone, resources, doc, page_num, clip)?;
                         if let Some(snap) = cmyk_compose_snap {
-                            self.apply_cmyk_compose_after_paint(
-                                pixmap, &snap, &gs_clone, doc, true,
-                            );
+                            self.apply_cmyk_compose_after_paint(pixmap, &snap, &gs_clone, doc, true);
                         }
                         if let Some(snap) = overprint_snap {
                             self.apply_overprint_after_paint(pixmap, &snap, &gs_clone, doc, true);
@@ -2890,7 +2618,7 @@ impl PageRenderer {
                             )?;
                         }
                     }
-                },
+                }
 
                 // Inline image (`BI ... ID <data> EI`) — §8.9.7. Unlike a
                 // `Do`-invoked image XObject, the pixel data sits directly in
@@ -2906,8 +2634,7 @@ impl PageRenderer {
                         let gs_clone = gs_stack.current().clone();
                         let transform = combine_transforms(base_transform, &gs_clone.ctm);
                         let clip = clip_stack.last().and_then(|c| c.as_ref());
-                        let expanded =
-                            crate::extractors::images::expand_inline_image_dict((**dict).clone());
+                        let expanded = crate::extractors::images::expand_inline_image_dict((**dict).clone());
                         let is_image_mask = expanded
                             .get("ImageMask")
                             .map(|o| matches!(o, Object::Boolean(true)))
@@ -2917,18 +2644,18 @@ impl PageRenderer {
                             data: bytes::Bytes::from(data.clone()),
                         };
                         if is_image_mask {
-                            if let Err(e) = self.render_image_mask(
-                                pixmap, &synthetic, None, transform, doc, clip, &gs_clone,
-                            ) {
+                            if let Err(e) =
+                                self.render_image_mask(pixmap, &synthetic, None, transform, doc, clip, &gs_clone)
+                            {
                                 tracing::warn!("Skipping unrenderable inline ImageMask: {}", e);
                             }
-                        } else if let Err(e) = self.render_image(
-                            pixmap, &synthetic, None, transform, doc, clip, None, None, &gs_clone,
-                        ) {
+                        } else if let Err(e) =
+                            self.render_image(pixmap, &synthetic, None, transform, doc, clip, None, None, &gs_clone)
+                        {
                             tracing::warn!("Skipping unrenderable inline image: {}", e);
                         }
                     }
-                },
+                }
 
                 Operator::Td { tx, ty } => {
                     if in_text_object {
@@ -2936,14 +2663,9 @@ impl PageRenderer {
                         let translation = Matrix::translation(*tx, *ty);
                         gs.text_line_matrix = translation.multiply(&gs.text_line_matrix);
                         gs.text_matrix = gs.text_line_matrix;
-                        tracing::trace!(
-                            "Td: [{}, {}], text_matrix now: {:?}",
-                            tx,
-                            ty,
-                            gs.text_matrix
-                        );
+                        tracing::trace!("Td: [{}, {}], text_matrix now: {:?}", tx, ty, gs.text_matrix);
                     }
-                },
+                }
                 Operator::TD { tx, ty } => {
                     if in_text_object {
                         let gs = gs_stack.current_mut();
@@ -2951,14 +2673,9 @@ impl PageRenderer {
                         let translation = Matrix::translation(*tx, *ty);
                         gs.text_line_matrix = translation.multiply(&gs.text_line_matrix);
                         gs.text_matrix = gs.text_line_matrix;
-                        tracing::trace!(
-                            "TD: [{}, {}], text_matrix now: {:?}",
-                            tx,
-                            ty,
-                            gs.text_matrix
-                        );
+                        tracing::trace!("TD: [{}, {}], text_matrix now: {:?}", tx, ty, gs.text_matrix);
                     }
-                },
+                }
                 Operator::Tm { a, b, c, d, e, f } => {
                     if in_text_object {
                         let gs = gs_stack.current_mut();
@@ -2982,7 +2699,7 @@ impl PageRenderer {
                             gs.text_matrix
                         );
                     }
-                },
+                }
                 Operator::TStar => {
                     if in_text_object {
                         let gs = gs_stack.current_mut();
@@ -2992,7 +2709,7 @@ impl PageRenderer {
                         gs.text_matrix = gs.text_line_matrix;
                         tracing::trace!("T*: text_matrix now: {:?}", gs.text_matrix);
                     }
-                },
+                }
                 Operator::Tf { font, size } => {
                     // Cache the font's writing mode on the graphics state so
                     // the rasterizer hot path can branch on a single
@@ -3003,25 +2720,22 @@ impl PageRenderer {
                     gs.font_name = Some(font.clone());
                     gs.font_size = *size;
                     gs.text_wmode = wmode;
-                },
+                }
 
                 Operator::SetExtGState { dict_name } => {
                     // Fast path: resource dict is already resolved (see top of
                     // this function), so the per-`gs` cost is one HashMap
                     // lookup + one resolve of the small inner state dict. ~keep
-                    let entry = ext_g_state_cache
-                        .entry(dict_name.clone())
-                        .or_insert_with(|| {
-                            if let Some(states) = ext_g_states {
-                                if let Some(state_obj) = states.get(dict_name) {
-                                    return parse_ext_g_state_inner(state_obj, doc)
-                                        .unwrap_or_default();
-                                }
+                    let entry = ext_g_state_cache.entry(dict_name.clone()).or_insert_with(|| {
+                        if let Some(states) = ext_g_states {
+                            if let Some(state_obj) = states.get(dict_name) {
+                                return parse_ext_g_state_inner(state_obj, doc).unwrap_or_default();
                             }
-                            ParsedExtGState::default()
-                        });
+                        }
+                        ParsedExtGState::default()
+                    });
                     entry.apply(gs_stack.current_mut());
-                },
+                }
 
                 // EndPath (n operator): discard current path without painting,
                 // but apply any pending clip. Per PDF spec, W n is the standard
@@ -3030,18 +2744,12 @@ impl PageRenderer {
                 // the clip doesn't leak past EMC into visible content. ~keep
                 Operator::EndPath => {
                     if excluded_layer_depth == 0 {
-                        apply_pending_clip(
-                            &mut pending_clip,
-                            &mut clip_stack,
-                            pixmap,
-                            base_transform,
-                            &gs_stack,
-                        );
+                        apply_pending_clip(&mut pending_clip, &mut clip_stack, pixmap, base_transform, &gs_stack);
                     } else {
                         let _ = pending_clip.take();
                     }
                     current_path = PathBuilder::new();
-                },
+                }
 
                 Operator::PaintShading { name } => {
                     if excluded_layer_depth == 0 {
@@ -3059,8 +2767,7 @@ impl PageRenderer {
                         // populated only by `cs`/`scn` colour-set
                         // operators — none of which fire before `sh`. ~keep
                         if !self.spot_paint_active(&gs_clone, true) && self.cmyk_sidecar.is_some() {
-                            if let Some(inks) = self.resolve_shading_spot_inks(name, resources, doc)
-                            {
+                            if let Some(inks) = self.resolve_shading_spot_inks(name, resources, doc) {
                                 if !inks.is_empty() {
                                     gs_clone.fill_spot_inks = inks;
                                 }
@@ -3081,25 +2788,18 @@ impl PageRenderer {
                         let smask_snap = self.smask_snapshot(pixmap, &gs_clone);
                         let smask_spot_snap = self.smask_spot_snapshot(&gs_clone);
                         let overprint_snap = self.overprint_snapshot(pixmap, &gs_clone, true);
-                        let cmyk_compose_snap =
-                            self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, true);
+                        let cmyk_compose_snap = self.cmyk_compose_snapshot(pixmap, &gs_clone, doc, true);
                         let spot_snap = self.spot_paint_snapshot(pixmap, &gs_clone, true);
                         // §8.7.4 + §11.7.3: rasterise the shading
                         // geometry (intersected with the active clip)
                         // so the spot mirror sees the geometry-true
                         // per-pixel coverage of the gradient. ~keep
                         let shading_coverage = spot_snap.as_ref().and_then(|_| {
-                            self.rasterise_shading_coverage(
-                                name, transform, &gs_clone, resources, doc, clip,
-                            )
+                            self.rasterise_shading_coverage(name, transform, &gs_clone, resources, doc, clip)
                         });
-                        self.render_shading(
-                            pixmap, name, transform, &gs_clone, resources, doc, clip,
-                        )?;
+                        self.render_shading(pixmap, name, transform, &gs_clone, resources, doc, clip)?;
                         if let Some(snap) = cmyk_compose_snap {
-                            self.apply_cmyk_compose_after_paint(
-                                pixmap, &snap, &gs_clone, doc, true,
-                            );
+                            self.apply_cmyk_compose_after_paint(pixmap, &snap, &gs_clone, doc, true);
                         }
                         if let Some(snap) = overprint_snap {
                             self.apply_overprint_after_paint(pixmap, &snap, &gs_clone, doc, true);
@@ -3126,11 +2826,11 @@ impl PageRenderer {
                             )?;
                         }
                     }
-                },
+                }
 
                 Operator::BeginMarkedContent { .. } => {
                     marked_content_is_excluded.push(false);
-                },
+                }
                 Operator::BeginMarkedContentDict { tag, properties } => {
                     let mut is_excluded = false;
                     // Tag "OC" scopes can hide content even with empty excluded_layers
@@ -3150,16 +2850,16 @@ impl PageRenderer {
                         excluded_layer_depth += 1;
                     }
                     marked_content_is_excluded.push(is_excluded);
-                },
+                }
                 Operator::EndMarkedContent => {
                     if let Some(was_excluded) = marked_content_is_excluded.pop() {
                         if was_excluded && excluded_layer_depth > 0 {
                             excluded_layer_depth -= 1;
                         }
                     }
-                },
+                }
 
-                _ => {},
+                _ => {}
             }
         }
 
@@ -3199,23 +2899,16 @@ impl PageRenderer {
         for element in array {
             match element {
                 TextElement::String(text) => {
-                    let adv = self.render_type3_text(
-                        pixmap,
-                        text,
-                        base_transform,
-                        &gs_local,
-                        doc,
-                        page_num,
-                        resources,
-                    )?;
+                    let adv =
+                        self.render_type3_text(pixmap, text, base_transform, &gs_local, doc, page_num, resources)?;
                     gs_local.advance_text_matrix(adv);
                     total += adv;
-                },
+                }
                 TextElement::Offset(offset) => {
                     let shift = (-offset / 1000.0) * gs_local.font_size;
                     gs_local.advance_text_matrix(shift);
                     total += shift;
-                },
+                }
             }
         }
         Ok(total)
@@ -3264,9 +2957,7 @@ impl PageRenderer {
         // Glyph-space → text-space FontMatrix (default 1/1000 em, Type 1-like). ~keep
         let font_matrix = type3_font_matrix(font_dict);
 
-        let char_procs_obj = font_dict
-            .get("CharProcs")
-            .and_then(|o| doc.resolve_object(o).ok());
+        let char_procs_obj = font_dict.get("CharProcs").and_then(|o| doc.resolve_object(o).ok());
         let char_procs = match char_procs_obj.as_ref().and_then(|o| o.as_dict()) {
             Some(cp) => cp,
             None => return Ok(string_advance),
@@ -3281,8 +2972,7 @@ impl PageRenderer {
         // combined_base = base · CTM · Tm  (user→device · text matrix). ~keep
         let transform = combine_transforms(base_transform, &gs.ctm);
         let tm = &gs.text_matrix;
-        let combined_base =
-            transform.pre_concat(Transform::from_row(tm.a, tm.b, tm.c, tm.d, tm.e, tm.f));
+        let combined_base = transform.pre_concat(Transform::from_row(tm.a, tm.b, tm.c, tm.d, tm.e, tm.f));
 
         let font_size = gs.font_size;
         let h_scale = gs.horizontal_scaling / 100.0;
@@ -3377,8 +3067,7 @@ impl PageRenderer {
         if is_d1 {
             self.type3_fill_lock = Some(fill_rgb);
         }
-        let result =
-            self.execute_operators(pixmap, glyph_transform, &operators, doc, page_num, resources);
+        let result = self.execute_operators(pixmap, glyph_transform, &operators, doc, page_num, resources);
         self.type3_fill_lock = prev_lock;
         self.type3_depth -= 1;
         result
@@ -3422,13 +3111,10 @@ impl PageRenderer {
             None => {
                 tracing::warn!("Shading '{}' not found in resources", name);
                 return Ok(());
-            },
+            }
         };
 
-        let shading_type = shading
-            .get("ShadingType")
-            .and_then(|o| o.as_integer())
-            .unwrap_or(0);
+        let shading_type = shading.get("ShadingType").and_then(|o| o.as_integer()).unwrap_or(0);
 
         // Pre-resolve gradient endpoint colours through the resolution
         // pipeline for the shading types we migrate (axial=2, radial=3).
@@ -3455,22 +3141,8 @@ impl PageRenderer {
         };
 
         match shading_type {
-            2 => self.render_axial_shading(
-                pixmap,
-                &shading,
-                transform,
-                gs,
-                clip_mask,
-                resolved_endpoints,
-            ),
-            3 => self.render_radial_shading(
-                pixmap,
-                &shading,
-                transform,
-                gs,
-                clip_mask,
-                resolved_endpoints,
-            ),
+            2 => self.render_axial_shading(pixmap, &shading, transform, gs, clip_mask, resolved_endpoints),
+            3 => self.render_radial_shading(pixmap, &shading, transform, gs, clip_mask, resolved_endpoints),
             1 | 4 | 5 | 6 | 7 => {
                 // Mesh (Types 4-7) and function-based (Type 1) shadings are
                 // rasterised by the dedicated hand-written backend — they do
@@ -3484,18 +3156,10 @@ impl PageRenderer {
                     Some(o) => o,
                     None => return Ok(()),
                 };
-                let resolved_cs = shading
-                    .get("ColorSpace")
-                    .and_then(|o| doc.resolve_object(o).ok());
+                let resolved_cs = shading.get("ColorSpace").and_then(|o| doc.resolve_object(o).ok());
                 let resolve_color = |comps: &[f32]| -> Option<(f32, f32, f32, f32)> {
                     let cs = resolved_cs.as_ref()?;
-                    self.pipeline_resolve_components(
-                        doc,
-                        &self.color_spaces,
-                        cs,
-                        comps,
-                        gs.fill_alpha,
-                    )
+                    self.pipeline_resolve_components(doc, &self.color_spaces, cs, comps, gs.fill_alpha)
                 };
                 crate::rendering::mesh_shading::render_mesh_shading(
                     pixmap,
@@ -3507,11 +3171,11 @@ impl PageRenderer {
                     clip_mask,
                     &resolve_color,
                 )
-            },
+            }
             _ => {
                 tracing::warn!("Unsupported shading type {} for '{}'", shading_type, name);
                 Ok(())
-            },
+            }
         }
     }
 
@@ -3604,13 +3268,10 @@ impl PageRenderer {
                     .unwrap_or(1.0);
                 let eval = |x: f32| -> Vec<f32> {
                     let p = x.abs().powf(n) * x.signum();
-                    c0.iter()
-                        .zip(c1.iter())
-                        .map(|(a, b)| *a + p * (*b - *a))
-                        .collect()
+                    c0.iter().zip(c1.iter()).map(|(a, b)| *a + p * (*b - *a)).collect()
                 };
                 (eval(domain0), eval(domain1))
-            },
+            }
             3 => {
                 // Type 3: stitching. The shading's `/Domain` maps to a
                 // sub-function via stitching `/Bounds` and `/Encode`
@@ -3629,7 +3290,7 @@ impl PageRenderer {
                 let c0 = first_dict.get("C0").and_then(|o| o.as_array())?;
                 let c1 = last_dict.get("C1").and_then(|o| o.as_array())?;
                 (to_components(c0), to_components(c1))
-            },
+            }
             // Function types 0 (sampled) and 4 (PostScript Type 4
             // calculator) used as the shading's own /Function are
             // out-of-scope for endpoint pre-resolution — they produce
@@ -3641,20 +3302,8 @@ impl PageRenderer {
         // Fold in `gs.fill_alpha` here — it's the alpha the inline
         // code path multiplies into each gradient stop's RGBA when
         // building the tiny-skia LinearGradient / RadialGradient. ~keep
-        let c0 = self.pipeline_resolve_components(
-            doc,
-            &self.color_spaces,
-            &resolved_cs,
-            &c0_comps,
-            gs.fill_alpha,
-        )?;
-        let c1 = self.pipeline_resolve_components(
-            doc,
-            &self.color_spaces,
-            &resolved_cs,
-            &c1_comps,
-            gs.fill_alpha,
-        )?;
+        let c0 = self.pipeline_resolve_components(doc, &self.color_spaces, &resolved_cs, &c0_comps, gs.fill_alpha)?;
+        let c1 = self.pipeline_resolve_components(doc, &self.color_spaces, &resolved_cs, &c1_comps, gs.fill_alpha)?;
         Some((c0, c1))
     }
 
@@ -3692,14 +3341,8 @@ impl PageRenderer {
 
         let extend = shading.get("Extend").and_then(|o| o.as_array());
         let (extend_start, extend_end) = if let Some(ext) = extend {
-            let e0 = ext
-                .get(0)
-                .map(|o| matches!(o, Object::Boolean(true)))
-                .unwrap_or(false);
-            let e1 = ext
-                .get(1)
-                .map(|o| matches!(o, Object::Boolean(true)))
-                .unwrap_or(false);
+            let e0 = ext.get(0).map(|o| matches!(o, Object::Boolean(true))).unwrap_or(false);
+            let e1 = ext.get(1).map(|o| matches!(o, Object::Boolean(true))).unwrap_or(false);
             (e0, e1)
         } else {
             (false, false)
@@ -3736,8 +3379,7 @@ impl PageRenderer {
         // perpendicular lines through `p0` and `p1`; for asymmetric
         // `/Extend`, one side of the strip is the page boundary, the
         // other is the perpendicular. ~keep
-        let slab_clip_mask =
-            build_axial_extend_clip(pixmap, p0, p1, extend_start, extend_end, clip_mask);
+        let slab_clip_mask = build_axial_extend_clip(pixmap, p0, p1, extend_start, extend_end, clip_mask);
         let effective_clip = slab_clip_mask.as_ref().or(clip_mask);
 
         let gradient = tiny_skia::LinearGradient::new(
@@ -3746,13 +3388,11 @@ impl PageRenderer {
             vec![
                 tiny_skia::GradientStop::new(
                     0.0,
-                    tiny_skia::Color::from_rgba(stop0.0, stop0.1, stop0.2, stop0.3)
-                        .unwrap_or(tiny_skia::Color::BLACK),
+                    tiny_skia::Color::from_rgba(stop0.0, stop0.1, stop0.2, stop0.3).unwrap_or(tiny_skia::Color::BLACK),
                 ),
                 tiny_skia::GradientStop::new(
                     1.0,
-                    tiny_skia::Color::from_rgba(stop1.0, stop1.1, stop1.2, stop1.3)
-                        .unwrap_or(tiny_skia::Color::BLACK),
+                    tiny_skia::Color::from_rgba(stop1.0, stop1.1, stop1.2, stop1.3).unwrap_or(tiny_skia::Color::BLACK),
                 ),
             ],
             spread,
@@ -3764,9 +3404,7 @@ impl PageRenderer {
             paint.shader = shader;
             paint.anti_alias = true;
 
-            let rect =
-                tiny_skia::Rect::from_xywh(0.0, 0.0, pixmap.width() as f32, pixmap.height() as f32)
-                    .unwrap();
+            let rect = tiny_skia::Rect::from_xywh(0.0, 0.0, pixmap.width() as f32, pixmap.height() as f32).unwrap();
             let path = PathBuilder::from_rect(rect);
             pixmap.fill_path(
                 &path,
@@ -3821,14 +3459,8 @@ impl PageRenderer {
 
         let extend = shading.get("Extend").and_then(|o| o.as_array());
         let (extend_start, extend_end) = if let Some(ext) = extend {
-            let e0 = ext
-                .first()
-                .map(|o| matches!(o, Object::Boolean(true)))
-                .unwrap_or(false);
-            let e1 = ext
-                .get(1)
-                .map(|o| matches!(o, Object::Boolean(true)))
-                .unwrap_or(false);
+            let e0 = ext.first().map(|o| matches!(o, Object::Boolean(true))).unwrap_or(false);
+            let e1 = ext.get(1).map(|o| matches!(o, Object::Boolean(true))).unwrap_or(false);
             (e0, e1)
         } else {
             (false, false)
@@ -3889,13 +3521,11 @@ impl PageRenderer {
             vec![
                 tiny_skia::GradientStop::new(
                     0.0,
-                    tiny_skia::Color::from_rgba(stop0.0, stop0.1, stop0.2, stop0.3)
-                        .unwrap_or(tiny_skia::Color::BLACK),
+                    tiny_skia::Color::from_rgba(stop0.0, stop0.1, stop0.2, stop0.3).unwrap_or(tiny_skia::Color::BLACK),
                 ),
                 tiny_skia::GradientStop::new(
                     1.0,
-                    tiny_skia::Color::from_rgba(stop1.0, stop1.1, stop1.2, stop1.3)
-                        .unwrap_or(tiny_skia::Color::BLACK),
+                    tiny_skia::Color::from_rgba(stop1.0, stop1.1, stop1.2, stop1.3).unwrap_or(tiny_skia::Color::BLACK),
                 ),
             ],
             tiny_skia::SpreadMode::Pad,
@@ -3906,9 +3536,7 @@ impl PageRenderer {
             let mut paint = tiny_skia::Paint::default();
             paint.shader = shader;
             paint.anti_alias = true;
-            let rect =
-                tiny_skia::Rect::from_xywh(0.0, 0.0, pixmap.width() as f32, pixmap.height() as f32)
-                    .unwrap();
+            let rect = tiny_skia::Rect::from_xywh(0.0, 0.0, pixmap.width() as f32, pixmap.height() as f32).unwrap();
             let path = PathBuilder::from_rect(rect);
             pixmap.fill_path(
                 &path,
@@ -3947,10 +3575,7 @@ impl PageRenderer {
         let xobj_ref_obj = xobjects.get(name)?;
         let xobj = doc.resolve_object(xobj_ref_obj).ok()?;
         if let Object::Stream { ref dict, .. } = xobj {
-            return dict
-                .get("Subtype")
-                .and_then(|o| o.as_name())
-                .map(String::from);
+            return dict.get("Subtype").and_then(|o| o.as_name()).map(String::from);
         }
         None
     }
@@ -4006,16 +3631,11 @@ impl PageRenderer {
                                             .map(|o| matches!(o, Object::Boolean(true)))
                                             .unwrap_or(false);
                                         if is_image_mask {
-                                            let spliced = self.pipeline_resolve_paint_gs(
-                                                doc,
-                                                gs,
-                                                PipelinePaintKind::ImageMask,
-                                            );
-                                            let render_gs: &GraphicsState =
-                                                spliced.as_ref().unwrap_or(gs);
+                                            let spliced =
+                                                self.pipeline_resolve_paint_gs(doc, gs, PipelinePaintKind::ImageMask);
+                                            let render_gs: &GraphicsState = spliced.as_ref().unwrap_or(gs);
                                             if let Err(e) = self.render_image_mask(
-                                                pixmap, &xobj, xobj_ref, transform, doc, clip_mask,
-                                                render_gs,
+                                                pixmap, &xobj, xobj_ref, transform, doc, clip_mask, render_gs,
                                             ) {
                                                 tracing::warn!(
                                                     "Skipping unrenderable ImageMask XObject '{}': {}",
@@ -4027,17 +3647,12 @@ impl PageRenderer {
                                             let smask = dict.get("SMask").cloned();
                                             let mask = dict.get("Mask").cloned();
                                             if let Err(e) = self.render_image(
-                                                pixmap, &xobj, xobj_ref, transform, doc, clip_mask,
-                                                smask, mask, gs,
+                                                pixmap, &xobj, xobj_ref, transform, doc, clip_mask, smask, mask, gs,
                                             ) {
-                                                tracing::warn!(
-                                                    "Skipping unrenderable image XObject '{}': {}",
-                                                    name,
-                                                    e
-                                                );
+                                                tracing::warn!("Skipping unrenderable image XObject '{}': {}", name, e);
                                             }
                                         }
-                                    },
+                                    }
                                     "Form" => {
                                         tracing::trace!("XObject '{}' is a Form", name);
                                         let stream_data = if let Some(r) = xobj_ref {
@@ -4046,8 +3661,7 @@ impl PageRenderer {
                                             xobj.decode_stream_data()?
                                         };
 
-                                        let form_resources =
-                                            dict.get("Resources").unwrap_or(resources);
+                                        let form_resources = dict.get("Resources").unwrap_or(resources);
 
                                         let old_fonts = self.fonts.clone();
                                         let old_cs = self.color_spaces.clone();
@@ -4062,17 +3676,13 @@ impl PageRenderer {
                                             page_num,
                                             form_resources,
                                         ) {
-                                            tracing::warn!(
-                                                "Skipping malformed Form XObject '{}': {}",
-                                                name,
-                                                e
-                                            );
+                                            tracing::warn!("Skipping malformed Form XObject '{}': {}", name, e);
                                         }
 
                                         self.fonts = old_fonts;
                                         self.color_spaces = old_cs;
-                                    },
-                                    _ => {},
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
@@ -4099,8 +3709,7 @@ impl PageRenderer {
         use crate::extractors::images::extract_image_from_xobject;
 
         let color_space_map = self.color_spaces.clone();
-        let pdf_image =
-            extract_image_from_xobject(Some(doc), xobject, obj_ref, Some(&color_space_map))?;
+        let pdf_image = extract_image_from_xobject(Some(doc), xobject, obj_ref, Some(&color_space_map))?;
         let dynamic_image = pdf_image.to_dynamic_image()?;
         let mut rgba_image = dynamic_image.to_rgba8();
 
@@ -4109,12 +3718,7 @@ impl PageRenderer {
         if let Some(mask_ref) = mask_obj {
             if let Some(ref_obj) = mask_ref.as_reference() {
                 if let Ok(mask_stream) = doc.load_object(ref_obj) {
-                    match extract_image_from_xobject(
-                        Some(doc),
-                        &mask_stream,
-                        Some(ref_obj),
-                        Some(&color_space_map),
-                    ) {
+                    match extract_image_from_xobject(Some(doc), &mask_stream, Some(ref_obj), Some(&color_space_map)) {
                         Ok(mask_image) => {
                             if let Ok(mask_dyn) = mask_image.to_dynamic_image() {
                                 let mask_gray = mask_dyn.to_luma8();
@@ -4131,27 +3735,18 @@ impl PageRenderer {
                                     );
                                 } else {
                                     for y in 0..ih {
-                                        let my =
-                                            ((y as u64 * mh as u64 / ih as u64) as u32).min(mh - 1);
+                                        let my = ((y as u64 * mh as u64 / ih as u64) as u32).min(mh - 1);
                                         for x in 0..iw {
-                                            let mx = ((x as u64 * mw as u64 / iw as u64) as u32)
-                                                .min(mw - 1);
+                                            let mx = ((x as u64 * mw as u64 / iw as u64) as u32).min(mw - 1);
                                             let mask_val = mask_gray.get_pixel(mx, my)[0];
                                             let pixel = rgba_image.get_pixel_mut(x, y);
-                                            pixel[3] =
-                                                ((pixel[3] as u32 * mask_val as u32) / 255) as u8;
+                                            pixel[3] = ((pixel[3] as u32 * mask_val as u32) / 255) as u8;
                                         }
                                     }
-                                    tracing::trace!(
-                                        "Applied image Mask ({}x{}) to image ({}x{})",
-                                        mw,
-                                        mh,
-                                        iw,
-                                        ih
-                                    );
+                                    tracing::trace!("Applied image Mask ({}x{}) to image ({}x{})", mw, mh, iw, ih);
                                 }
                             }
-                        },
+                        }
                         Err(_) => {
                             if let Object::Stream { ref dict, .. } = mask_stream {
                                 let mask_dict = dict;
@@ -4168,9 +3763,7 @@ impl PageRenderer {
                                     // skipped with no warning at all. ~keep
                                     let resolve_int = |o: &Object| -> Option<i64> {
                                         match o.as_reference() {
-                                            Some(r) => {
-                                                doc.load_object(r).ok().and_then(|v| v.as_integer())
-                                            },
+                                            Some(r) => doc.load_object(r).ok().and_then(|v| v.as_integer()),
                                             None => o.as_integer(),
                                         }
                                     };
@@ -4193,11 +3786,8 @@ impl PageRenderer {
                                         {
                                             // CCITT data may be pass-through (not decompressed).
                                             // Check if we need to decompress Group 4 CCITT. ~keep
-                                            let expected_bytes =
-                                                ((mw as usize + 7) / 8) * mh as usize;
-                                            let mask_data = if raw_mask_data.len()
-                                                < expected_bytes / 2
-                                            {
+                                            let expected_bytes = ((mw as usize + 7) / 8) * mh as usize;
+                                            let mask_data = if raw_mask_data.len() < expected_bytes / 2 {
                                                 let k = mask_dict
                                                     .get("DecodeParms")
                                                     .and_then(|o| o.as_dict())
@@ -4206,7 +3796,12 @@ impl PageRenderer {
                                                     .unwrap_or(0);
                                                 if k == -1 {
                                                     #[allow(deprecated)]
-                                                    let ccitt_result = crate::extractors::ccitt_bilevel::decompress_ccitt_group4(&raw_mask_data, mw, mh);
+                                                    let ccitt_result =
+                                                        crate::extractors::ccitt_bilevel::decompress_ccitt_group4(
+                                                            &raw_mask_data,
+                                                            mw,
+                                                            mh,
+                                                        );
                                                     match ccitt_result {
                                                         Ok(decompressed) => {
                                                             tracing::trace!(
@@ -4215,14 +3810,14 @@ impl PageRenderer {
                                                                 decompressed.len()
                                                             );
                                                             decompressed
-                                                        },
+                                                        }
                                                         Err(e) => {
                                                             tracing::warn!(
                                                                 "CCITT decompression failed: {}, using raw data",
                                                                 e
                                                             );
                                                             raw_mask_data
-                                                        },
+                                                        }
                                                     }
                                                 } else {
                                                     raw_mask_data
@@ -4235,21 +3830,17 @@ impl PageRenderer {
                                             let ih = rgba_image.height();
                                             let row_bytes = (mw as usize + 7) / 8;
                                             for y in 0..ih {
-                                                let my = ((y as u64 * mh as u64 / ih as u64) as u32)
-                                                    .min(mh - 1)
-                                                    as usize;
+                                                let my =
+                                                    ((y as u64 * mh as u64 / ih as u64) as u32).min(mh - 1) as usize;
                                                 for x in 0..iw {
-                                                    let mx = ((x as u64 * mw as u64 / iw as u64)
-                                                        as u32)
-                                                        .min(mw - 1)
+                                                    let mx = ((x as u64 * mw as u64 / iw as u64) as u32).min(mw - 1)
                                                         as usize;
                                                     let byte_idx = my * row_bytes + mx / 8;
                                                     let bit_idx = 7 - (mx % 8);
                                                     // PDF spec 8.9.6.2: mask bit 1 = paint (opaque), 0 = don't paint (transparent)
                                                     // ~keep
                                                     let mask_val = if byte_idx < mask_data.len() {
-                                                        if (mask_data[byte_idx] >> bit_idx) & 1 == 1
-                                                        {
+                                                        if (mask_data[byte_idx] >> bit_idx) & 1 == 1 {
                                                             255u8
                                                         } else {
                                                             0u8
@@ -4258,9 +3849,7 @@ impl PageRenderer {
                                                         255u8
                                                     };
                                                     let pixel = rgba_image.get_pixel_mut(x, y);
-                                                    pixel[3] = ((pixel[3] as u32 * mask_val as u32)
-                                                        / 255)
-                                                        as u8;
+                                                    pixel[3] = ((pixel[3] as u32 * mask_val as u32) / 255) as u8;
                                                 }
                                             }
                                             tracing::trace!(
@@ -4274,7 +3863,7 @@ impl PageRenderer {
                                     }
                                 }
                             }
-                        },
+                        }
                     }
                 }
             } else if let Object::Array(mask_array) = &mask_ref {
@@ -4298,13 +3887,10 @@ impl PageRenderer {
                     match parse_color_key_mask(mask_array, ncomp) {
                         Some(ranges) => {
                             apply_color_key_mask(&pdf_image, &ranges, &mut rgba_image);
-                        },
+                        }
                         None => {
-                            tracing::warn!(
-                                "Ignoring malformed color-key /Mask array (ncomp={})",
-                                ncomp
-                            );
-                        },
+                            tracing::warn!("Ignoring malformed color-key /Mask array (ncomp={})", ncomp);
+                        }
                     }
                 }
             }
@@ -4313,12 +3899,9 @@ impl PageRenderer {
         if let Some(smask_ref) = smask_obj {
             if let Ok(resolved_smask) = doc.resolve_object(&smask_ref) {
                 let smask_obj_ref = smask_ref.as_reference();
-                if let Ok(smask_image) = extract_image_from_xobject(
-                    Some(doc),
-                    &resolved_smask,
-                    smask_obj_ref,
-                    Some(&color_space_map),
-                ) {
+                if let Ok(smask_image) =
+                    extract_image_from_xobject(Some(doc), &resolved_smask, smask_obj_ref, Some(&color_space_map))
+                {
                     if let Ok(smask_dyn) = smask_image.to_dynamic_image() {
                         let smask_gray = smask_dyn.to_luma8();
 
@@ -4382,8 +3965,8 @@ impl PageRenderer {
             (src_w, src_h, rgba_image.into_raw(), image_transform)
         };
 
-        if let Some(img_pixmap) = tiny_skia::IntSize::from_wh(blit_w, blit_h)
-            .and_then(|size| Pixmap::from_vec(blit_data, size))
+        if let Some(img_pixmap) =
+            tiny_skia::IntSize::from_wh(blit_w, blit_h).and_then(|size| Pixmap::from_vec(blit_data, size))
         {
             pixmap.draw_pixmap(0, 0, img_pixmap.as_ref(), &paint, blit_transform, clip_mask);
         }
@@ -4429,7 +4012,7 @@ impl PageRenderer {
                     return Ok(None);
                 };
                 (index, filters.len())
-            },
+            }
             _ => return Ok(None),
         };
 
@@ -4453,8 +4036,7 @@ impl PageRenderer {
                 })?;
                 if params.as_reference().is_some() && matches!(&resolved, Object::Null) {
                     return Err(Error::Image(
-                        "Unable to resolve CCITT ImageMask /DecodeParms: reference resolved to null"
-                            .to_string(),
+                        "Unable to resolve CCITT ImageMask /DecodeParms: reference resolved to null".to_string(),
                     ));
                 }
                 Ok(resolved)
@@ -4483,9 +4065,11 @@ impl PageRenderer {
         let params_obj = selected_params.as_ref();
         let params_dict = match params_obj {
             None | Some(Object::Null) => None,
-            Some(params) => Some(params.as_dict().ok_or_else(|| {
-                Error::Image("CCITT ImageMask /DecodeParms must be a dictionary".to_string())
-            })?),
+            Some(params) => Some(
+                params
+                    .as_dict()
+                    .ok_or_else(|| Error::Image("CCITT ImageMask /DecodeParms must be a dictionary".to_string()))?,
+            ),
         };
         if params_dict
             .and_then(|decode_params| decode_params.get("K"))
@@ -4498,14 +4082,15 @@ impl PageRenderer {
         Self::validate_ccitt_mask_dimension(params_dict, "Columns", width)?;
         Self::validate_ccitt_mask_dimension(params_dict, "Rows", height)?;
 
-        let mut params = crate::object::extract_ccitt_params_with_width(params_obj, Some(width))
-            .unwrap_or_else(|| crate::decoders::CcittParams {
+        let mut params = crate::object::extract_ccitt_params_with_width(params_obj, Some(width)).unwrap_or_else(|| {
+            crate::decoders::CcittParams {
                 // ISO 32000-1 Table 11: absent /K defaults to Group 3 1-D. ~keep
                 k: 0,
                 columns: width,
                 rows: Some(height),
                 ..Default::default()
-            });
+            }
+        });
         let has_explicit_k = params_obj
             .and_then(Object::as_dict)
             .is_some_and(|decode_params| decode_params.contains_key("K"));
@@ -4522,20 +4107,15 @@ impl PageRenderer {
         Ok(Some(params))
     }
 
-    fn validate_ccitt_mask_dimension(
-        params: Option<&HashMap<String, Object>>,
-        key: &str,
-        expected: u32,
-    ) -> Result<()> {
+    fn validate_ccitt_mask_dimension(params: Option<&HashMap<String, Object>>, key: &str, expected: u32) -> Result<()> {
         let Some(value) = params.and_then(|decode_params| decode_params.get(key)) else {
             return Ok(());
         };
-        let integer = value.as_integer().ok_or_else(|| {
-            Error::Image(format!("CCITT ImageMask /DecodeParms /{key} must be an integer"))
-        })?;
-        let actual = u32::try_from(integer).map_err(|_| {
-            Error::Image(format!("CCITT ImageMask /DecodeParms /{key} must be positive"))
-        })?;
+        let integer = value
+            .as_integer()
+            .ok_or_else(|| Error::Image(format!("CCITT ImageMask /DecodeParms /{key} must be an integer")))?;
+        let actual = u32::try_from(integer)
+            .map_err(|_| Error::Image(format!("CCITT ImageMask /DecodeParms /{key} must be positive")))?;
         if actual == 0 {
             return Err(Error::Image(format!(
                 "CCITT ImageMask /DecodeParms /{key} must be positive"
@@ -4574,8 +4154,8 @@ impl PageRenderer {
                 None => raw.as_integer(),
             }
             .ok_or_else(|| Error::Image(format!("ImageMask missing /{key}")))?;
-            let dimension = u32::try_from(value)
-                .map_err(|_| Error::Image(format!("ImageMask /{key} must be positive")))?;
+            let dimension =
+                u32::try_from(value).map_err(|_| Error::Image(format!("ImageMask /{key} must be positive")))?;
             if dimension == 0 {
                 return Err(Error::Image(format!("ImageMask /{key} must be positive")));
             }
@@ -4584,8 +4164,8 @@ impl PageRenderer {
 
         let width = dimension("Width")?;
         let height = dimension("Height")?;
-        let width_usize = usize::try_from(width)
-            .map_err(|_| Error::Image("ImageMask /Width exceeds platform limits".to_string()))?;
+        let width_usize =
+            usize::try_from(width).map_err(|_| Error::Image("ImageMask /Width exceeds platform limits".to_string()))?;
         let height_usize = usize::try_from(height)
             .map_err(|_| Error::Image("ImageMask /Height exceeds platform limits".to_string()))?;
         let pixel_count = width_usize
@@ -4647,12 +4227,11 @@ impl PageRenderer {
                 None => obj.as_integer(),
             }
         };
-        let bpc = dict
-            .get("BitsPerComponent")
-            .and_then(resolve_int)
-            .unwrap_or(1);
+        let bpc = dict.get("BitsPerComponent").and_then(resolve_int).unwrap_or(1);
         if bpc != 1 {
-            return Err(Error::Image(format!("ImageMask requires BitsPerComponent 1, got {bpc}")));
+            return Err(Error::Image(format!(
+                "ImageMask requires BitsPerComponent 1, got {bpc}"
+            )));
         }
 
         // /Decode array: [0 1] means sample 0 paints (default); [1 0]
@@ -4665,7 +4244,7 @@ impl PageRenderer {
                     _ => 0.0,
                 };
                 first > 0.5
-            },
+            }
             _ => false,
         };
 
@@ -4710,15 +4289,9 @@ impl PageRenderer {
         // Premultiplied opaque sample: tiny-skia's Pixmap is
         // premultiplied; build the channels accordingly so blends and
         // SMask composition stay correct. ~keep
-        let pr = ((fr.clamp(0.0, 1.0) * fa) * 255.0)
-            .round()
-            .clamp(0.0, 255.0) as u8;
-        let pg = ((fg.clamp(0.0, 1.0) * fa) * 255.0)
-            .round()
-            .clamp(0.0, 255.0) as u8;
-        let pb = ((fb.clamp(0.0, 1.0) * fa) * 255.0)
-            .round()
-            .clamp(0.0, 255.0) as u8;
+        let pr = ((fr.clamp(0.0, 1.0) * fa) * 255.0).round().clamp(0.0, 255.0) as u8;
+        let pg = ((fg.clamp(0.0, 1.0) * fa) * 255.0).round().clamp(0.0, 255.0) as u8;
+        let pb = ((fb.clamp(0.0, 1.0) * fa) * 255.0).round().clamp(0.0, 255.0) as u8;
 
         if raw.len() < expected {
             return Err(Error::Image(format!(
@@ -4793,17 +4366,10 @@ impl PageRenderer {
                         } else {
                             0.0
                         }
-                    },
+                    }
                 }
             };
-            Transform::from_row(
-                get_f32(0),
-                get_f32(1),
-                get_f32(2),
-                get_f32(3),
-                get_f32(4),
-                get_f32(5),
-            )
+            Transform::from_row(get_f32(0), get_f32(1), get_f32(2), get_f32(3), get_f32(4), get_f32(5))
         } else {
             Transform::identity()
         };
@@ -4826,7 +4392,7 @@ impl PageRenderer {
             Ok(ops) => ops,
             Err(e) => {
                 return Err(e);
-            },
+            }
         };
 
         if is_transparency_group {
@@ -4864,10 +4430,8 @@ impl PageRenderer {
                 is_knockout
             );
 
-            let mut group_pixmap =
-                Pixmap::new(pixmap.width(), pixmap.height()).ok_or_else(|| {
-                    crate::error::Error::InvalidPdf("Failed to create group pixmap".into())
-                })?;
+            let mut group_pixmap = Pixmap::new(pixmap.width(), pixmap.height())
+                .ok_or_else(|| crate::error::Error::InvalidPdf("Failed to create group pixmap".into()))?;
 
             if !is_isolated {
                 // Non-isolated: copy parent content as initial backdrop ~keep
@@ -4915,14 +4479,7 @@ impl PageRenderer {
                 pixmap.data_mut().copy_from_slice(group_pixmap.data());
             }
         } else {
-            self.execute_operators(
-                pixmap,
-                combined_transform,
-                &operators,
-                doc,
-                page_num,
-                &form_resources,
-            )?;
+            self.execute_operators(pixmap, combined_transform, &operators, doc, page_num, &form_resources)?;
         }
 
         Ok(())
@@ -4994,18 +4551,10 @@ impl PageRenderer {
 
         // Only tiling patterns (PatternType 1) are handled here; shading
         // patterns (PatternType 2) are left to the caller's solid fallback. ~keep
-        if pdict
-            .get("PatternType")
-            .and_then(|o| o.as_integer())
-            .unwrap_or(1)
-            != 1
-        {
+        if pdict.get("PatternType").and_then(|o| o.as_integer()).unwrap_or(1) != 1 {
             return Ok(false);
         }
-        let paint_type = pdict
-            .get("PaintType")
-            .and_then(|o| o.as_integer())
-            .unwrap_or(1);
+        let paint_type = pdict.get("PaintType").and_then(|o| o.as_integer()).unwrap_or(1);
 
         let num = |o: &Object| -> Option<f32> {
             o.as_integer()
@@ -5023,14 +4572,8 @@ impl PageRenderer {
         let Some(bbox) = read_array("BBox", 4) else {
             return Ok(false);
         };
-        let x_step = pdict
-            .get("XStep")
-            .and_then(&num)
-            .unwrap_or(bbox[2] - bbox[0]);
-        let y_step = pdict
-            .get("YStep")
-            .and_then(&num)
-            .unwrap_or(bbox[3] - bbox[1]);
+        let x_step = pdict.get("XStep").and_then(&num).unwrap_or(bbox[2] - bbox[0]);
+        let y_step = pdict.get("YStep").and_then(&num).unwrap_or(bbox[3] - bbox[1]);
         let m = read_array("Matrix", 6).unwrap_or_else(|| vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
         let pattern_matrix = Transform::from_row(m[0], m[1], m[2], m[3], m[4], m[5]);
 
@@ -5042,9 +4585,7 @@ impl PageRenderer {
         };
 
         let t = base_transform.pre_concat(pattern_matrix);
-        let map = |x: f32, y: f32| -> (f32, f32) {
-            (x * t.sx + y * t.kx + t.tx, x * t.ky + y * t.sy + t.ty)
-        };
+        let map = |x: f32, y: f32| -> (f32, f32) { (x * t.sx + y * t.kx + t.tx, x * t.ky + y * t.sy + t.ty) };
 
         let corners = [
             map(bbox[0], bbox[1]),
@@ -5073,12 +4614,7 @@ impl PageRenderer {
         // step vectors). For an axis-aligned matrix the cross terms are ~0. ~keep
         let step_x = (x_step * t.sx, x_step * t.ky);
         let step_y = (y_step * t.kx, y_step * t.sy);
-        let scale =
-            t.sx.abs()
-                .max(t.sy.abs())
-                .max(t.kx.abs())
-                .max(t.ky.abs())
-                .max(1e-6);
+        let scale = t.sx.abs().max(t.sy.abs()).max(t.kx.abs()).max(t.ky.abs()).max(1e-6);
         let axis_aligned = t.kx.abs() <= 1e-3 * scale && t.ky.abs() <= 1e-3 * scale;
         let step_x_len = step_x.0.hypot(step_x.1);
         let step_y_len = step_y.0.hypot(step_y.1);
@@ -5105,14 +4641,8 @@ impl PageRenderer {
         let saved_fonts = self.fonts.clone();
         let saved_cs = self.color_spaces.clone();
         let _ = self.load_resources(doc, &pattern_resources);
-        let render_res = self.execute_operators(
-            &mut cell,
-            cell_transform,
-            &cell_ops,
-            doc,
-            page_num,
-            &pattern_resources,
-        );
+        let render_res =
+            self.execute_operators(&mut cell, cell_transform, &cell_ops, doc, page_num, &pattern_resources);
         self.fonts = saved_fonts;
         self.color_spaces = saved_cs;
         self.cmyk_sidecar = saved_sidecar;
@@ -5159,8 +4689,7 @@ impl PageRenderer {
                 (((sum / npix) as f32) * 255.0 / avg_a as f32).min(255.0) as u8
             }
         };
-        let avg_color =
-            tiny_skia::Color::from_rgba8(unpremul(sr), unpremul(sg), unpremul(sb), avg_a);
+        let avg_color = tiny_skia::Color::from_rgba8(unpremul(sr), unpremul(sg), unpremul(sb), avg_a);
 
         let b = path.bounds();
         let pm = |x: f32, y: f32| -> (f32, f32) {
@@ -5226,7 +4755,7 @@ impl PageRenderer {
             None => {
                 flood(pixmap);
                 return Ok(true);
-            },
+            }
         };
         guarded_mask_fill_path(&mut mask, path, fill_rule, true, path_transform);
         if let Some(c) = clip {
@@ -5333,11 +4862,7 @@ impl PageRenderer {
         if overprint {
             return false;
         }
-        let alpha = if fill_side {
-            gs.fill_alpha
-        } else {
-            gs.stroke_alpha
-        };
+        let alpha = if fill_side { gs.fill_alpha } else { gs.stroke_alpha };
         let non_trivial = alpha < 1.0 || gs.blend_mode != "Normal" || gs.smask.is_some();
         if !non_trivial {
             return false;
@@ -5374,12 +4899,7 @@ impl PageRenderer {
     /// post-paint diff when the caller has no pre-rasterised coverage
     /// mask. Path-paint callers pass the pre-rasterised coverage
     /// directly and ignore the snapshot's diff role.
-    fn spot_paint_snapshot(
-        &self,
-        pixmap: &Pixmap,
-        gs: &GraphicsState,
-        fill_side: bool,
-    ) -> Option<Vec<u8>> {
+    fn spot_paint_snapshot(&self, pixmap: &Pixmap, gs: &GraphicsState, fill_side: bool) -> Option<Vec<u8>> {
         if !self.spot_paint_active(gs, fill_side) {
             return None;
         }
@@ -5410,12 +4930,7 @@ impl PageRenderer {
     /// `mirror_cmyk_paint_into_sidecar` consumes the snapshot + post-
     /// paint pixmap to identify the painted region and writes updated
     /// CMYK quadruples at those pixels.
-    fn cmyk_sidecar_snapshot(
-        &self,
-        pixmap: &Pixmap,
-        gs: &GraphicsState,
-        fill_side: bool,
-    ) -> Option<Vec<u8>> {
+    fn cmyk_sidecar_snapshot(&self, pixmap: &Pixmap, gs: &GraphicsState, fill_side: bool) -> Option<Vec<u8>> {
         self.cmyk_sidecar.as_ref()?;
         let has_cmyk = if fill_side {
             gs.fill_color_cmyk.is_some()
@@ -5468,11 +4983,7 @@ impl PageRenderer {
         // sidecar update themselves. Those paths run within their
         // own `apply_*_after_paint` helpers and write composed /
         // merged CMYK directly. ~keep
-        let alpha = if fill_side {
-            gs.fill_alpha
-        } else {
-            gs.stroke_alpha
-        };
+        let alpha = if fill_side { gs.fill_alpha } else { gs.stroke_alpha };
         let overprint = if fill_side {
             gs.fill_overprint
         } else {
@@ -5498,11 +5009,7 @@ impl PageRenderer {
                 let intent = crate::color::RenderingIntent::from_pdf_name(&gs.rendering_intent);
                 let transform = self.icc_transform_cache.get_or_build(&profile, intent);
                 let rgb = transform.convert_cmyk_pixel(c_u8, m_u8, y_u8, k_u8);
-                [
-                    rgb[0] as f32 / 255.0,
-                    rgb[1] as f32 / 255.0,
-                    rgb[2] as f32 / 255.0,
-                ]
+                [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0]
             } else {
                 let (r, g, b) = cmyk_to_rgb(sc, sm, sy, sk);
                 [r, g, b]
@@ -5717,13 +5224,7 @@ impl PageRenderer {
     /// AA-edge partial coverage. The buffer is then handed to the
     /// spot-mirror's coverage-aware path verbatim.
     fn extract_alpha_as_coverage(pixmap: &Pixmap) -> Vec<u8> {
-        pixmap
-            .data()
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|px| px[3])
-            .collect()
+        pixmap.data().as_chunks::<4>().0.iter().map(|px| px[3]).collect()
     }
 
     /// WS1.5b — union a clip-mode (`Tr` 4–7) `Tj` / `'` / `"` show's glyph
@@ -6030,11 +5531,7 @@ impl PageRenderer {
             })
             .collect();
 
-        let inks = crate::rendering::sidecar::extract_paint_spot_inks(
-            &cs_array_object,
-            &c0_components,
-            doc,
-        );
+        let inks = crate::rendering::sidecar::extract_paint_spot_inks(&cs_array_object, &c0_components, doc);
         if inks.is_empty() { None } else { Some(inks) }
     }
 
@@ -6060,8 +5557,7 @@ impl PageRenderer {
         let (w, h) = sidecar.dims();
         let mut scratch = Pixmap::new(w, h)?;
         let cov_gs = Self::coverage_only_gs(gs);
-        let _ =
-            self.render_shading(&mut scratch, name, transform, &cov_gs, resources, doc, clip_mask);
+        let _ = self.render_shading(&mut scratch, name, transform, &cov_gs, resources, doc, clip_mask);
         Some(Self::extract_alpha_as_coverage(&scratch))
     }
 
@@ -6100,11 +5596,7 @@ impl PageRenderer {
                 None => return,
             }
         };
-        let alpha_g = if fill_side {
-            gs.fill_alpha
-        } else {
-            gs.stroke_alpha
-        };
+        let alpha_g = if fill_side { gs.fill_alpha } else { gs.stroke_alpha };
         let profile = match doc.output_intent_cmyk_profile() {
             Some(p) => p,
             None => return,
@@ -6179,11 +5671,7 @@ impl PageRenderer {
                 None => return,
             }
         };
-        let alpha_g = if fill_side {
-            gs.fill_alpha
-        } else {
-            gs.stroke_alpha
-        };
+        let alpha_g = if fill_side { gs.fill_alpha } else { gs.stroke_alpha };
         let profile = match doc.output_intent_cmyk_profile() {
             Some(p) => p,
             None => return,
@@ -6213,11 +5701,7 @@ impl PageRenderer {
             let y_u8 = (sy.clamp(0.0, 1.0) * 255.0).round() as u8;
             let k_u8 = (sk.clamp(0.0, 1.0) * 255.0).round() as u8;
             let rgb = transform.convert_cmyk_pixel(c_u8, m_u8, y_u8, k_u8);
-            [
-                rgb[0] as f32 / 255.0,
-                rgb[1] as f32 / 255.0,
-                rgb[2] as f32 / 255.0,
-            ]
+            [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0]
         };
 
         let dest = pixmap.data_mut();
@@ -6286,22 +5770,21 @@ impl PageRenderer {
             //      fallback OutputIntent path; bounded-loss when the
             //      backdrop went through a non-linear ICC. Documented
             //      gap, kept for the detection-OFF path. ~keep
-            let (dc, dm, dy, dk) =
-                if let Some(plane) = self.cmyk_sidecar.as_ref().map(CmykSidecar::cmyk) {
-                    (
-                        plane[off] as f32 / 255.0,
-                        plane[off + 1] as f32 / 255.0,
-                        plane[off + 2] as f32 / 255.0,
-                        plane[off + 3] as f32 / 255.0,
-                    )
-                } else {
-                    (
-                        (1.0 - snap_r).max(0.0),
-                        (1.0 - snap_g).max(0.0),
-                        (1.0 - snap_b).max(0.0),
-                        0.0_f32,
-                    )
-                };
+            let (dc, dm, dy, dk) = if let Some(plane) = self.cmyk_sidecar.as_ref().map(CmykSidecar::cmyk) {
+                (
+                    plane[off] as f32 / 255.0,
+                    plane[off + 1] as f32 / 255.0,
+                    plane[off + 2] as f32 / 255.0,
+                    plane[off + 3] as f32 / 255.0,
+                )
+            } else {
+                (
+                    (1.0 - snap_r).max(0.0),
+                    (1.0 - snap_g).max(0.0),
+                    (1.0 - snap_b).max(0.0),
+                    0.0_f32,
+                )
+            };
 
             let mc = c_alpha * sc + (1.0 - c_alpha) * dc;
             let mm = c_alpha * sm + (1.0 - c_alpha) * dm;
@@ -6348,12 +5831,7 @@ impl PageRenderer {
     /// Separation/DeviceN. The per-channel blend function dispatches
     /// on the source class; without the snapshot the painted region
     /// could not be identified for compositing.
-    fn overprint_snapshot(
-        &self,
-        pixmap: &Pixmap,
-        gs: &GraphicsState,
-        fill_side: bool,
-    ) -> Option<Vec<u8>> {
+    fn overprint_snapshot(&self, pixmap: &Pixmap, gs: &GraphicsState, fill_side: bool) -> Option<Vec<u8>> {
         if source_for_overprint(gs, fill_side).is_some() {
             Some(pixmap.data().to_vec())
         } else {
@@ -6401,11 +5879,7 @@ impl PageRenderer {
             return;
         };
         let opm = gs.overprint_mode;
-        let alpha_g = if fill_side {
-            gs.fill_alpha
-        } else {
-            gs.stroke_alpha
-        };
+        let alpha_g = if fill_side { gs.fill_alpha } else { gs.stroke_alpha };
         let (sc, sm, sy, sk) = source.cmyk;
         let coverage = coverage.expect("checked above");
 
@@ -6421,9 +5895,7 @@ impl PageRenderer {
             None
         };
         let icc_transform = match (icc_profile.as_ref(), icc_intent) {
-            (Some(profile), Some(intent)) => {
-                Some(self.icc_transform_cache.get_or_build(profile, intent))
-            },
+            (Some(profile), Some(intent)) => Some(self.icc_transform_cache.get_or_build(profile, intent)),
             _ => None,
         };
 
@@ -6444,20 +5916,10 @@ impl PageRenderer {
             let dk_existing = plane[off + 3] as f32 / 255.0;
 
             // §11.7.4.3 per-channel CompatibleOverprint composed with α. ~keep
-            let mc =
-                compose_overprint_channel(source.class, ProcessChannel::C, sc, dc, opm, c_alpha);
-            let mm =
-                compose_overprint_channel(source.class, ProcessChannel::M, sm, dm, opm, c_alpha);
-            let my =
-                compose_overprint_channel(source.class, ProcessChannel::Y, sy, dy, opm, c_alpha);
-            let mk = compose_overprint_channel(
-                source.class,
-                ProcessChannel::K,
-                sk,
-                dk_existing,
-                opm,
-                c_alpha,
-            );
+            let mc = compose_overprint_channel(source.class, ProcessChannel::C, sc, dc, opm, c_alpha);
+            let mm = compose_overprint_channel(source.class, ProcessChannel::M, sm, dm, opm, c_alpha);
+            let my = compose_overprint_channel(source.class, ProcessChannel::Y, sy, dy, opm, c_alpha);
+            let mk = compose_overprint_channel(source.class, ProcessChannel::K, sk, dk_existing, opm, c_alpha);
 
             let (r_byte, g_byte, b_byte) = if let Some(transform) = icc_transform.as_ref() {
                 let mc_u8 = (mc.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -6544,10 +6006,7 @@ impl PageRenderer {
         let b = b.clamp(0.0, 1.0);
         if let Some(profile) = doc.output_intent_cmyk_profile() {
             let intent = crate::color::RenderingIntent::from_pdf_name(&gs.rendering_intent);
-            if let Some(transform) = self
-                .icc_transform_cache
-                .get_or_build_srgb_to_cmyk(&profile, intent)
-            {
+            if let Some(transform) = self.icc_transform_cache.get_or_build_srgb_to_cmyk(&profile, intent) {
                 let cmyk = transform.convert_pixel([r, g, b]);
                 return (cmyk[0], cmyk[1], cmyk[2], cmyk[3]);
             }
@@ -6620,11 +6079,7 @@ impl PageRenderer {
             return;
         }
 
-        let alpha = if fill_side {
-            gs.fill_alpha
-        } else {
-            gs.stroke_alpha
-        };
+        let alpha = if fill_side { gs.fill_alpha } else { gs.stroke_alpha };
         let (sc, sm, sy, sk) = self.resolve_rgb_paint_to_cmyk(gs, doc, fill_side);
 
         let post = pixmap.data();
@@ -6701,19 +6156,11 @@ impl PageRenderer {
         if overprint {
             return;
         }
-        let alpha = if fill_side {
-            gs.fill_alpha
-        } else {
-            gs.stroke_alpha
-        };
+        let alpha = if fill_side { gs.fill_alpha } else { gs.stroke_alpha };
         let (sc, sm, sy, sk) = self.resolve_rgb_paint_to_cmyk(gs, doc, fill_side);
 
         let coverage = coverage.expect("checked above");
-        let plane = self
-            .cmyk_sidecar
-            .as_mut()
-            .expect("checked above")
-            .cmyk_mut();
+        let plane = self.cmyk_sidecar.as_mut().expect("checked above").cmyk_mut();
         for px in 0..(plane.len() / 4) {
             let cov = coverage[px];
             if cov == 0 {
@@ -6768,11 +6215,7 @@ impl PageRenderer {
         };
         // Skip when the paint is transparent or overprint — those
         // paths handle the sidecar update themselves. ~keep
-        let alpha = if fill_side {
-            gs.fill_alpha
-        } else {
-            gs.stroke_alpha
-        };
+        let alpha = if fill_side { gs.fill_alpha } else { gs.stroke_alpha };
         let overprint = if fill_side {
             gs.fill_overprint
         } else {
@@ -6784,11 +6227,7 @@ impl PageRenderer {
         }
 
         let coverage = coverage.expect("checked above");
-        let plane = self
-            .cmyk_sidecar
-            .as_mut()
-            .expect("checked above")
-            .cmyk_mut();
+        let plane = self.cmyk_sidecar.as_mut().expect("checked above").cmyk_mut();
         for px in 0..(plane.len() / 4) {
             let cov = coverage[px];
             if cov == 0 {
@@ -6840,8 +6279,7 @@ impl PageRenderer {
         if inks.is_empty() {
             return false;
         }
-        inks.iter()
-            .any(|(name, _)| sidecar.spot_index(name).is_some())
+        inks.iter().any(|(name, _)| sidecar.spot_index(name).is_some())
     }
 
     /// Apply per-pixel spot lane composition for the most recent paint.
@@ -6909,11 +6347,7 @@ impl PageRenderer {
         } else {
             gs.stroke_spot_inks.clone()
         };
-        let gs_alpha = if fill_side {
-            gs.fill_alpha
-        } else {
-            gs.stroke_alpha
-        };
+        let gs_alpha = if fill_side { gs.fill_alpha } else { gs.stroke_alpha };
 
         // §11.7.4.2 dispatch: classify the requested BM once. ~keep
         let class = crate::rendering::sidecar::BlendModeClass::from_name(&gs.blend_mode);
@@ -7042,11 +6476,7 @@ impl PageRenderer {
             return;
         };
         let opm = gs.overprint_mode;
-        let alpha_g = if fill_side {
-            gs.fill_alpha
-        } else {
-            gs.stroke_alpha
-        };
+        let alpha_g = if fill_side { gs.fill_alpha } else { gs.stroke_alpha };
         let (sc, sm, sy, sk) = source.cmyk;
         // ICC path active when the CMYK sidecar plane is present AND an
         // OutputIntent CMYK profile is available. The merged CMYK then
@@ -7064,9 +6494,7 @@ impl PageRenderer {
             None
         };
         let icc_transform = match (icc_profile.as_ref(), icc_intent) {
-            (Some(profile), Some(intent)) => {
-                Some(self.icc_transform_cache.get_or_build(profile, intent))
-            },
+            (Some(profile), Some(intent)) => Some(self.icc_transform_cache.get_or_build(profile, intent)),
             _ => None,
         };
 
@@ -7081,11 +6509,7 @@ impl PageRenderer {
             let y_u8 = (sy.clamp(0.0, 1.0) * 255.0).round() as u8;
             let k_u8 = (sk.clamp(0.0, 1.0) * 255.0).round() as u8;
             let rgb = transform.convert_cmyk_pixel(c_u8, m_u8, y_u8, k_u8);
-            [
-                rgb[0] as f32 / 255.0,
-                rgb[1] as f32 / 255.0,
-                rgb[2] as f32 / 255.0,
-            ]
+            [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0]
         } else {
             let (r, g, b) = cmyk_to_rgb(sc, sm, sy, sk);
             [r, g, b]
@@ -7133,37 +6557,26 @@ impl PageRenderer {
 
             // Backdrop CMYK from sidecar; additive-clamp fallback when
             // the sidecar is None. ~keep
-            let (dc, dm, dy, dk_existing) =
-                if let Some(plane) = self.cmyk_sidecar.as_ref().map(CmykSidecar::cmyk) {
-                    (
-                        plane[off] as f32 / 255.0,
-                        plane[off + 1] as f32 / 255.0,
-                        plane[off + 2] as f32 / 255.0,
-                        plane[off + 3] as f32 / 255.0,
-                    )
-                } else {
-                    let dr = snapshot[off] as f32 / 255.0;
-                    let dg = snapshot[off + 1] as f32 / 255.0;
-                    let db = snapshot[off + 2] as f32 / 255.0;
-                    ((1.0 - dr).max(0.0), (1.0 - dg).max(0.0), (1.0 - db).max(0.0), 0.0_f32)
-                };
+            let (dc, dm, dy, dk_existing) = if let Some(plane) = self.cmyk_sidecar.as_ref().map(CmykSidecar::cmyk) {
+                (
+                    plane[off] as f32 / 255.0,
+                    plane[off + 1] as f32 / 255.0,
+                    plane[off + 2] as f32 / 255.0,
+                    plane[off + 3] as f32 / 255.0,
+                )
+            } else {
+                let dr = snapshot[off] as f32 / 255.0;
+                let dg = snapshot[off + 1] as f32 / 255.0;
+                let db = snapshot[off + 2] as f32 / 255.0;
+                ((1.0 - dr).max(0.0), (1.0 - dg).max(0.0), (1.0 - db).max(0.0), 0.0_f32)
+            };
 
             // Per-channel §11.7.4.3 CompatibleOverprint blend function,
             // then §11.3.3 composition with effective alpha. ~keep
-            let mc =
-                compose_overprint_channel(source.class, ProcessChannel::C, sc, dc, opm, c_alpha);
-            let mm =
-                compose_overprint_channel(source.class, ProcessChannel::M, sm, dm, opm, c_alpha);
-            let my =
-                compose_overprint_channel(source.class, ProcessChannel::Y, sy, dy, opm, c_alpha);
-            let mk = compose_overprint_channel(
-                source.class,
-                ProcessChannel::K,
-                sk,
-                dk_existing,
-                opm,
-                c_alpha,
-            );
+            let mc = compose_overprint_channel(source.class, ProcessChannel::C, sc, dc, opm, c_alpha);
+            let mm = compose_overprint_channel(source.class, ProcessChannel::M, sm, dm, opm, c_alpha);
+            let my = compose_overprint_channel(source.class, ProcessChannel::Y, sy, dy, opm, c_alpha);
+            let mk = compose_overprint_channel(source.class, ProcessChannel::K, sk, dk_existing, opm, c_alpha);
 
             // CMYK → RGB conversion. ICC path for the press-accurate
             // case; additive-clamp `cmyk_to_rgb` for the fallback. ~keep
@@ -7289,7 +6702,7 @@ impl PageRenderer {
                 // emitting an unmasked paint. ~keep
                 pixmap.data_mut().copy_from_slice(snapshot);
                 return Ok(());
-            },
+            }
         };
 
         // Resolve the Form XObject. We load it before the /BC pre-fill
@@ -7301,7 +6714,7 @@ impl PageRenderer {
             Err(_) => {
                 pixmap.data_mut().copy_from_slice(snapshot);
                 return Ok(());
-            },
+            }
         };
 
         let (form_dict, form_data) = match &form_obj {
@@ -7311,11 +6724,11 @@ impl PageRenderer {
                 // dispatch site (page_renderer:2320). ~keep
                 let data = doc.decode_stream_with_encryption(&form_obj, smask.form_ref)?;
                 (dict.clone(), data)
-            },
+            }
             _ => {
                 pixmap.data_mut().copy_from_slice(snapshot);
                 return Ok(());
-            },
+            }
         };
 
         // For /S /Luminosity, pre-fill with the /BC backdrop if
@@ -7335,7 +6748,7 @@ impl PageRenderer {
                     1 => {
                         let v = (bc[0].clamp(0.0, 1.0) * 255.0).round() as u8;
                         (v, v, v)
-                    },
+                    }
                     3 => (
                         (bc[0].clamp(0.0, 1.0) * 255.0).round() as u8,
                         (bc[1].clamp(0.0, 1.0) * 255.0).round() as u8,
@@ -7348,7 +6761,7 @@ impl PageRenderer {
                             (gf * 255.0).round() as u8,
                             (bf * 255.0).round() as u8,
                         )
-                    },
+                    }
                     n if n >= 5 => {
                         // §11.6.5.2 Table 144 + §8.6.6.5: when the
                         // Form group declares DeviceN / NChannel as
@@ -7359,7 +6772,7 @@ impl PageRenderer {
                         // black-point default) if the group's CS is
                         // not a recognised DeviceN. ~keep
                         evaluate_devicen_bc_to_rgb(&form_dict, bc, doc).unwrap_or((0, 0, 0))
-                    },
+                    }
                     _ => (0, 0, 0),
                 };
                 let data = mask_pixmap.data_mut();
@@ -7425,15 +6838,13 @@ impl PageRenderer {
         for px in 0..pixel_count {
             let off = px * 4;
             let mut m = match smask.subtype {
-                crate::content::graphics_state::SoftMaskSubtype::Alpha => {
-                    mask_data[off + 3] as f32 / 255.0
-                },
+                crate::content::graphics_state::SoftMaskSubtype::Alpha => mask_data[off + 3] as f32 / 255.0,
                 crate::content::graphics_state::SoftMaskSubtype::Luminosity => {
                     let r = mask_data[off] as f32 / 255.0;
                     let g = mask_data[off + 1] as f32 / 255.0;
                     let b = mask_data[off + 2] as f32 / 255.0;
                     0.30 * r + 0.59 * g + 0.11 * b
-                },
+                }
             };
 
             if let Some(ref tf) = transfer {
@@ -7531,10 +6942,8 @@ impl PageRenderer {
         // the previous element's lane state — that is non-isolated
         // group semantics, NOT knockout. The brief calls this out as
         // the round-2 gap the secondary scope of round 3 closes. ~keep
-        let sidecar_backdrop_cmyk: Option<Vec<u8>> =
-            self.cmyk_sidecar.as_ref().map(|s| s.cmyk().to_vec());
-        let sidecar_backdrop_spots: Option<Vec<u8>> =
-            self.cmyk_sidecar.as_ref().map(|s| s.spots_all().to_vec());
+        let sidecar_backdrop_cmyk: Option<Vec<u8>> = self.cmyk_sidecar.as_ref().map(|s| s.cmyk().to_vec());
+        let sidecar_backdrop_spots: Option<Vec<u8>> = self.cmyk_sidecar.as_ref().map(|s| s.spots_all().to_vec());
 
         // Identify paint-operator indices. These define element
         // boundaries. ~keep
@@ -7546,14 +6955,7 @@ impl PageRenderer {
 
         if paint_indices.is_empty() {
             // No paint ops — still execute for state side effects (rare). ~keep
-            return self.execute_operators(
-                pixmap,
-                base_transform,
-                operators,
-                doc,
-                page_num,
-                resources,
-            );
+            return self.execute_operators(pixmap, base_transform, operators, doc, page_num, resources);
         }
 
         // Accumulator starts as the backdrop. Each element's painted
@@ -7574,9 +6976,8 @@ impl PageRenderer {
             // element's pixel contribution reaches the scratch. The
             // scratch is initialised to the backdrop so the paint
             // composites against the group's initial backdrop only. ~keep
-            let mut scratch = Pixmap::new(width, height).ok_or_else(|| {
-                crate::error::Error::InvalidPdf("knockout scratch pixmap alloc failed".into())
-            })?;
+            let mut scratch = Pixmap::new(width, height)
+                .ok_or_else(|| crate::error::Error::InvalidPdf("knockout scratch pixmap alloc failed".into()))?;
             scratch.data_mut().copy_from_slice(&backdrop_data);
 
             // Reset sidecar lanes to the group's backdrop before this
@@ -7587,14 +6988,10 @@ impl PageRenderer {
             // the group's initial backdrop rather than with each
             // other". This restoration extends that rule to the
             // process / spot lanes the round-1/2 sidecar carries. ~keep
-            if let (Some(sidecar), Some(cmyk_b)) =
-                (self.cmyk_sidecar.as_mut(), sidecar_backdrop_cmyk.as_ref())
-            {
+            if let (Some(sidecar), Some(cmyk_b)) = (self.cmyk_sidecar.as_mut(), sidecar_backdrop_cmyk.as_ref()) {
                 sidecar.restore_cmyk(cmyk_b);
             }
-            if let (Some(sidecar), Some(spots_b)) =
-                (self.cmyk_sidecar.as_mut(), sidecar_backdrop_spots.as_ref())
-            {
+            if let (Some(sidecar), Some(spots_b)) = (self.cmyk_sidecar.as_mut(), sidecar_backdrop_spots.as_ref()) {
                 sidecar.restore_spots(spots_b);
             }
 
@@ -7610,14 +7007,7 @@ impl PageRenderer {
                 })
                 .collect();
 
-            self.execute_operators(
-                &mut scratch,
-                base_transform,
-                &element_ops,
-                doc,
-                page_num,
-                resources,
-            )?;
+            self.execute_operators(&mut scratch, base_transform, &element_ops, doc, page_num, resources)?;
 
             // Merge: where scratch differs from backdrop, this element
             // touched the pixel — its value overrides the accumulator.
@@ -7690,14 +7080,10 @@ impl PageRenderer {
         // sidecar. The group's spot and process lanes are now the
         // accumulated knockout result — later operators (outside the
         // group) compose against this state. ~keep
-        if let (Some(sidecar), Some(cmyk_a)) =
-            (self.cmyk_sidecar.as_mut(), sidecar_accum_cmyk.as_ref())
-        {
+        if let (Some(sidecar), Some(cmyk_a)) = (self.cmyk_sidecar.as_mut(), sidecar_accum_cmyk.as_ref()) {
             sidecar.restore_cmyk(cmyk_a);
         }
-        if let (Some(sidecar), Some(spots_a)) =
-            (self.cmyk_sidecar.as_mut(), sidecar_accum_spots.as_ref())
-        {
+        if let (Some(sidecar), Some(spots_a)) = (self.cmyk_sidecar.as_mut(), sidecar_accum_spots.as_ref()) {
             sidecar.restore_spots(spots_a);
         }
         Ok(())
@@ -7737,8 +7123,7 @@ impl PageRenderer {
             // the annotation entirely if its layer is excluded. ~keep
             if let Some(ref excluded_layers) = excluded_snapshot {
                 if let Some(oc_obj) = annot.raw_dict.as_ref().and_then(|d| d.get("OC")) {
-                    if crate::optional_content::annotation_is_excluded(oc_obj, doc, excluded_layers)
-                    {
+                    if crate::optional_content::annotation_is_excluded(oc_obj, doc, excluded_layers) {
                         continue;
                     }
                 }
@@ -7919,11 +7304,7 @@ impl PageRenderer {
     /// * `3` is invisible (no painting); skip resolution entirely so
     ///   PDFs that emit text-as-OCR-overlay don't pay any pipeline
     ///   cost.
-    pub(crate) fn pipeline_resolve_text_colors(
-        &self,
-        doc: &PdfDocument,
-        gs: &GraphicsState,
-    ) -> Option<ResolvedColors> {
+    pub(crate) fn pipeline_resolve_text_colors(&self, doc: &PdfDocument, gs: &GraphicsState) -> Option<ResolvedColors> {
         if gs.render_mode == 3 {
             return None;
         }
@@ -7945,11 +7326,7 @@ impl PageRenderer {
             None
         };
         let colors = ResolvedColors { fill, stroke };
-        if colors.is_empty() {
-            None
-        } else {
-            Some(colors)
-        }
+        if colors.is_empty() { None } else { Some(colors) }
     }
 
     /// Resolve the active colour for `side` through the resolution pipeline.
@@ -8067,9 +7444,7 @@ impl PageRenderer {
         // transform 1000×" into "cache miss once, hit 999×". ~keep
         let ctx = ResolutionContext::new(doc, color_spaces)
             .with_output_intent(output_intent.as_ref())
-            .with_rendering_intent(crate::color::RenderingIntent::from_pdf_name(
-                &gs.rendering_intent,
-            ))
+            .with_rendering_intent(crate::color::RenderingIntent::from_pdf_name(&gs.rendering_intent))
             .with_defaults(
                 color_spaces.get("DefaultGray"),
                 color_spaces.get("DefaultRGB"),
@@ -8096,10 +7471,9 @@ impl PageRenderer {
             // document's /OutputIntents CMYK profile when present, fall
             // back to the process-ink conversion otherwise. ~keep
             ResolvedColor::Cmyk { c, m, y, k, a } => {
-                let (r, g, b) =
-                    crate::rendering::resolution::color::cmyk_to_rgb_via_intent(c, m, y, k, &ctx);
+                let (r, g, b) = crate::rendering::resolution::color::cmyk_to_rgb_via_intent(c, m, y, k, &ctx);
                 Some((r, g, b, a))
-            },
+            }
             // /ICCBased N=4 with a parseable embedded profile that
             // compiled a usable CMM. Per §8.6.5.5 the embedded profile
             // is THE conversion source for this colour space — it
@@ -8190,7 +7564,7 @@ impl SMaskTransfer {
             SMaskTransfer::Type2 { c0, c1, n } => {
                 let p = x.powf(*n);
                 c0 + p * (c1 - c0)
-            },
+            }
             SMaskTransfer::Type0 { samples } => {
                 // §7.10.2 Type-0 sampled: clamp x to [0, 1] (the
                 // domain), encode to sample-index space, linearly
@@ -8208,7 +7582,7 @@ impl SMaskTransfer {
                 let frac = pos - lo as f32;
                 let v = samples[lo] * (1.0 - frac) + samples[hi] * frac;
                 v.clamp(0.0, 1.0)
-            },
+            }
             SMaskTransfer::Type4 { program } => {
                 // §7.10.5 PostScript calculator. The compiled program
                 // takes one f64 input and emits one f64 output for a
@@ -8221,7 +7595,7 @@ impl SMaskTransfer {
                     Ok(out) if !out.is_empty() => (out[0] as f32).clamp(0.0, 1.0),
                     _ => x,
                 }
-            },
+            }
             SMaskTransfer::Type3 {
                 subfunctions,
                 bounds,
@@ -8266,12 +7640,7 @@ impl SMaskTransfer {
                 // bounds strictly ≤ x_clipped; that count IS the
                 // subinterval index because every boundary belongs to
                 // the right subinterval. ~keep
-                let i = bounds
-                    .iter()
-                    .copied()
-                    .filter(|b| x_clipped >= *b)
-                    .count()
-                    .min(k - 1);
+                let i = bounds.iter().copied().filter(|b| x_clipped >= *b).count().min(k - 1);
                 let lo_i = if i == 0 { x0 } else { bounds[i - 1] };
                 let hi_i = if i == k - 1 { x1 } else { bounds[i] };
                 let (e_lo, e_hi) = encode.get(i).copied().unwrap_or((0.0, 1.0));
@@ -8285,7 +7654,7 @@ impl SMaskTransfer {
                     e_lo + (x_clipped - lo_i) * (e_hi - e_lo) / (hi_i - lo_i)
                 };
                 subfunctions[i].eval(encoded)
-            },
+            }
         }
     }
 }
@@ -8335,7 +7704,7 @@ fn parse_transfer_function(doc: &PdfDocument, obj: &Object) -> Option<SMaskTrans
                 })
                 .unwrap_or(1.0);
             Some(SMaskTransfer::Type2 { c0, c1, n })
-        },
+        }
         3 => parse_type3_transfer_function(doc, dict).or(Some(SMaskTransfer::Identity)),
         4 => parse_type4_transfer_function(obj).or(Some(SMaskTransfer::Identity)),
         _ => Some(SMaskTransfer::Identity),
@@ -8386,10 +7755,7 @@ fn parse_type0_transfer_function(
     if size == 0 || size > 65_536 {
         return None;
     }
-    let bps = dict
-        .get("BitsPerSample")
-        .and_then(Object::as_integer)
-        .unwrap_or(8);
+    let bps = dict.get("BitsPerSample").and_then(Object::as_integer).unwrap_or(8);
     if bps != 8 {
         // Only the 8-bit packing is honoured. Other depths land at
         // Identity to keep the parser simple; a real-world /TR rarely
@@ -8636,7 +8002,7 @@ fn evaluate_bc_tint_function(
             let inputs: Vec<f64> = bc.iter().map(|&v| v as f64).collect();
             let result = program.evaluate(&inputs).ok()?;
             Some(result.into_iter().map(|v| v as f32).collect())
-        },
+        }
         _ => None,
     }
 }
@@ -8655,14 +8021,8 @@ fn evaluate_type2_multi(dict: &std::collections::HashMap<String, Object>, x: f32
     let x_pow = if n_pow == 1.0 { x } else { x.powf(n_pow) };
     let mut out = Vec::with_capacity(len);
     for j in 0..len {
-        let c0j = c0
-            .and_then(|a| a.get(j))
-            .and_then(obj_to_f32)
-            .unwrap_or(0.0);
-        let c1j = c1
-            .and_then(|a| a.get(j))
-            .and_then(obj_to_f32)
-            .unwrap_or(1.0);
+        let c0j = c0.and_then(|a| a.get(j)).and_then(obj_to_f32).unwrap_or(0.0);
+        let c1j = c1.and_then(|a| a.get(j)).and_then(obj_to_f32).unwrap_or(1.0);
         out.push(c0j + x_pow * (c1j - c0j));
     }
     out
@@ -8707,12 +8067,7 @@ fn evaluate_type3_multi(
     }
 
     let x_clipped = x.clamp(x0, x1);
-    let i = bounds
-        .iter()
-        .copied()
-        .filter(|b| x_clipped >= *b)
-        .count()
-        .min(k - 1);
+    let i = bounds.iter().copied().filter(|b| x_clipped >= *b).count().min(k - 1);
     let lo_i = if i == 0 { x0 } else { bounds[i - 1] };
     let hi_i = if i == k - 1 { x1 } else { bounds[i] };
     let e_lo = obj_to_f32(encode_arr.get(2 * i)?)?;
@@ -8777,10 +8132,7 @@ fn evaluate_type0_multi(
     }
     total_samples = total_samples.checked_mul(n_out)?;
 
-    let bps = dict
-        .get("BitsPerSample")
-        .and_then(Object::as_integer)
-        .unwrap_or(8);
+    let bps = dict.get("BitsPerSample").and_then(Object::as_integer).unwrap_or(8);
     if bps != 8 {
         // §7.10.2 admits 1/2/4/8/12/16/24/32. We accept the canonical
         // 8-bit case used by every tint-transform PDF observed in the
@@ -8834,11 +8186,7 @@ fn evaluate_type0_multi(
         let v = encoded_idx[i];
         let lo_i = (v.floor() as isize).max(0) as usize;
         let lo_i = lo_i.min(sizes[i] - 1);
-        let f_i = if lo_i + 1 >= sizes[i] {
-            0.0
-        } else {
-            v - lo_i as f32
-        };
+        let f_i = if lo_i + 1 >= sizes[i] { 0.0 } else { v - lo_i as f32 };
         lo.push(lo_i);
         frac.push(f_i);
     }
@@ -8863,10 +8211,16 @@ fn evaluate_type0_multi(
             if arr.len() == 2 * n_out {
                 (obj_to_f32(arr.get(2 * j)?)?, obj_to_f32(arr.get(2 * j + 1)?)?)
             } else {
-                (obj_to_f32(range_arr.get(2 * j)?)?, obj_to_f32(range_arr.get(2 * j + 1)?)?)
+                (
+                    obj_to_f32(range_arr.get(2 * j)?)?,
+                    obj_to_f32(range_arr.get(2 * j + 1)?)?,
+                )
             }
         } else {
-            (obj_to_f32(range_arr.get(2 * j)?)?, obj_to_f32(range_arr.get(2 * j + 1)?)?)
+            (
+                obj_to_f32(range_arr.get(2 * j)?)?,
+                obj_to_f32(range_arr.get(2 * j + 1)?)?,
+            )
         };
         let r_lo = obj_to_f32(range_arr.get(2 * j)?)?;
         let r_hi = obj_to_f32(range_arr.get(2 * j + 1)?)?;
@@ -8880,11 +8234,7 @@ fn evaluate_type0_multi(
             let mut weight = 1.0_f32;
             for i in 0..n_in {
                 let upper = (c >> i) & 1 == 1;
-                let idx_i = if upper {
-                    (lo[i] + 1).min(sizes[i] - 1)
-                } else {
-                    lo[i]
-                };
+                let idx_i = if upper { (lo[i] + 1).min(sizes[i] - 1) } else { lo[i] };
                 offset += idx_i * strides[i];
                 let w_i = if upper { frac[i] } else { 1.0 - frac[i] };
                 weight *= w_i;
@@ -8907,21 +8257,15 @@ fn evaluate_type0_multi(
 /// the linked CMM (lcms2 or qcms) — when no CMM is linked in we fall
 /// back to the embedded `/Alternate` colour space recursively, per
 /// §8.6.5.5.
-fn project_bc_altspace_to_rgb(
-    doc: &PdfDocument,
-    alt_resolved: &Object,
-    values: &[f32],
-) -> Option<(f32, f32, f32)> {
+fn project_bc_altspace_to_rgb(doc: &PdfDocument, alt_resolved: &Object, values: &[f32]) -> Option<(f32, f32, f32)> {
     if let Some(name) = alt_resolved.as_name() {
         return match name {
-            "DeviceCMYK" | "CMYK" if values.len() >= 4 => {
-                Some(cmyk_to_rgb(values[0], values[1], values[2], values[3]))
-            },
+            "DeviceCMYK" | "CMYK" if values.len() >= 4 => Some(cmyk_to_rgb(values[0], values[1], values[2], values[3])),
             "DeviceRGB" | "RGB" if values.len() >= 3 => Some((values[0], values[1], values[2])),
             "DeviceGray" | "G" if !values.is_empty() => {
                 let v = values[0];
                 Some((v, v, v))
-            },
+            }
             _ => None,
         };
     }
@@ -8932,14 +8276,12 @@ fn project_bc_altspace_to_rgb(
     };
     let family = arr.first().and_then(|o| o.as_name())?;
     match family {
-        "DeviceCMYK" | "CMYK" if values.len() >= 4 => {
-            Some(cmyk_to_rgb(values[0], values[1], values[2], values[3]))
-        },
+        "DeviceCMYK" | "CMYK" if values.len() >= 4 => Some(cmyk_to_rgb(values[0], values[1], values[2], values[3])),
         "DeviceRGB" | "RGB" if values.len() >= 3 => Some((values[0], values[1], values[2])),
         "DeviceGray" | "G" if !values.is_empty() => {
             let v = values[0];
             Some((v, v, v))
-        },
+        }
         "CalGray" => project_cal_gray_to_rgb(arr.get(1)?, values),
         "CalRGB" => project_cal_rgb_to_rgb(arr.get(1)?, values),
         "Lab" => project_lab_to_rgb(arr.get(1)?, values),
@@ -8947,7 +8289,7 @@ fn project_bc_altspace_to_rgb(
             let stream_obj = arr.get(1)?;
             let stream_resolved = doc.resolve_object(stream_obj).ok()?;
             project_iccbased_to_rgb(doc, &stream_resolved, values)
-        },
+        }
         _ => None,
     }
 }
@@ -9012,7 +8354,7 @@ fn project_cal_rgb_to_rgb(dict_obj: &Object, values: &[f32]) -> Option<(f32, f32
                 *slot = obj_to_f32(&arr[i]).unwrap_or(0.0);
             }
             m
-        },
+        }
         _ => [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
     };
 
@@ -9089,11 +8431,7 @@ fn xyz_to_srgb(x: f32, y: f32, z: f32) -> (f32, f32, f32) {
 /// recurse. Without a /Alternate, fall back to the device family
 /// inferred from the stream's /N (DeviceGray for N=1, DeviceRGB for
 /// N=3, DeviceCMYK for N=4) per §8.6.5.5.
-fn project_iccbased_to_rgb(
-    doc: &PdfDocument,
-    stream_resolved: &Object,
-    values: &[f32],
-) -> Option<(f32, f32, f32)> {
+fn project_iccbased_to_rgb(doc: &PdfDocument, stream_resolved: &Object, values: &[f32]) -> Option<(f32, f32, f32)> {
     let dict = stream_resolved.as_dict()?;
     let n = dict.get("N").and_then(|o| o.as_integer()).unwrap_or(3);
 
@@ -9102,10 +8440,7 @@ fn project_iccbased_to_rgb(
             if let Some(profile) = crate::color::IccProfile::parse(bytes, n.clamp(0, 255) as u8) {
                 let profile = std::sync::Arc::new(profile);
                 let intent = crate::color::RenderingIntent::default();
-                let transform = crate::color::Transform::new_srgb_target(
-                    std::sync::Arc::clone(&profile),
-                    intent,
-                );
+                let transform = crate::color::Transform::new_srgb_target(std::sync::Arc::clone(&profile), intent);
                 if transform.has_cmm() {
                     match n {
                         4 if values.len() >= 4 => {
@@ -9114,37 +8449,25 @@ fn project_iccbased_to_rgb(
                             let y_u8 = (values[2].clamp(0.0, 1.0) * 255.0).round() as u8;
                             let k_u8 = (values[3].clamp(0.0, 1.0) * 255.0).round() as u8;
                             let rgb = transform.convert_cmyk_pixel(c_u8, m_u8, y_u8, k_u8);
-                            return Some((
-                                rgb[0] as f32 / 255.0,
-                                rgb[1] as f32 / 255.0,
-                                rgb[2] as f32 / 255.0,
-                            ));
-                        },
+                            return Some((rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0));
+                        }
                         3 if values.len() >= 3 => {
                             let r_u8 = (values[0].clamp(0.0, 1.0) * 255.0).round() as u8;
                             let g_u8 = (values[1].clamp(0.0, 1.0) * 255.0).round() as u8;
                             let b_u8 = (values[2].clamp(0.0, 1.0) * 255.0).round() as u8;
                             let rgb = transform.convert_rgb_buffer(&[r_u8, g_u8, b_u8]);
                             if rgb.len() >= 3 {
-                                return Some((
-                                    rgb[0] as f32 / 255.0,
-                                    rgb[1] as f32 / 255.0,
-                                    rgb[2] as f32 / 255.0,
-                                ));
+                                return Some((rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0));
                             }
-                        },
+                        }
                         1 if !values.is_empty() => {
                             let g_u8 = (values[0].clamp(0.0, 1.0) * 255.0).round() as u8;
                             let rgb = transform.convert_gray_buffer(&[g_u8]);
                             if rgb.len() >= 3 {
-                                return Some((
-                                    rgb[0] as f32 / 255.0,
-                                    rgb[1] as f32 / 255.0,
-                                    rgb[2] as f32 / 255.0,
-                                ));
+                                return Some((rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0));
                             }
-                        },
-                        _ => {},
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -9230,12 +8553,10 @@ fn build_logical_color<'a>(
     // expansion `(g, g, g)` — both paths paint the gray value across
     // all three RGB channels. ~keep
     match space_name {
-        "DeviceGray" | "G" if !components.is_empty() => {
-            LogicalColor::Device(DeviceColor::Gray(components[0]))
-        },
+        "DeviceGray" | "G" if !components.is_empty() => LogicalColor::Device(DeviceColor::Gray(components[0])),
         "DeviceRGB" | "RGB" if components.len() >= 3 => {
             LogicalColor::Device(DeviceColor::Rgb(components[0], components[1], components[2]))
-        },
+        }
         "DeviceCMYK" | "CMYK" if components.len() >= 4 => LogicalColor::Device(DeviceColor::Cmyk(
             components[0],
             components[1],
@@ -9253,14 +8574,13 @@ fn build_logical_color<'a>(
             // `'a` lifetime on the fallback arm without cloning. ~keep
             use std::sync::OnceLock;
             static GRAY_FALLBACK: OnceLock<Object> = OnceLock::new();
-            let space = resolved_space.unwrap_or_else(|| {
-                GRAY_FALLBACK.get_or_init(|| Object::Name("DeviceGray".to_string()))
-            });
+            let space =
+                resolved_space.unwrap_or_else(|| GRAY_FALLBACK.get_or_init(|| Object::Name("DeviceGray".to_string())));
             LogicalColor::Spaced {
                 space,
                 components: components.iter().copied().collect(),
             }
-        },
+        }
     }
 }
 
@@ -9270,11 +8590,7 @@ fn build_logical_color<'a>(
 /// a pre-resolved resource dict (the per-form ExtGState dict has 10 000+
 /// entries on heavy vector figures and deep-cloning it on every `gs` op was
 /// the previous bottleneck).
-fn parse_ext_g_state(
-    dict_name: &str,
-    resources: &Object,
-    doc: &PdfDocument,
-) -> Result<ParsedExtGState> {
+fn parse_ext_g_state(dict_name: &str, resources: &Object, doc: &PdfDocument) -> Result<ParsedExtGState> {
     let out = ParsedExtGState::default();
     let res_dict = match resources {
         Object::Dictionary(d) => d,
@@ -9367,9 +8683,7 @@ fn type3_font_matrix(font_dict: &HashMap<String, Object>) -> Transform {
                     .map(|r| r as f32)
                     .or_else(|| arr[i].as_integer().map(|v| v as f32))
             };
-            if let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(g)) =
-                (f(0), f(1), f(2), f(3), f(4), f(5))
-            {
+            if let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(g)) = (f(0), f(1), f(2), f(3), f(4), f(5)) {
                 if [a, b, c, d, e, g].iter().all(|v| v.is_finite()) {
                     return Transform::from_row(a, b, c, d, e, g);
                 }
@@ -9410,13 +8724,7 @@ fn decode_type3_charproc(doc: &PdfDocument, obj: &Object) -> Option<Vec<u8>> {
 ///
 /// `step` must be non-zero — callers guard `|step| >= 0.5` device px
 /// before calling — so this never divides by zero.
-fn axis_tile_range(
-    region_lo: f32,
-    region_hi: f32,
-    cell_min: f32,
-    cell_extent: f32,
-    step: f32,
-) -> (i32, i32) {
+fn axis_tile_range(region_lo: f32, region_hi: f32, cell_min: f32, cell_extent: f32, step: f32) -> (i32, i32) {
     let a = (region_lo - cell_extent - cell_min) / step;
     let b = (region_hi - cell_min) / step;
     let lo = a.min(b).floor();
@@ -9457,11 +8765,7 @@ fn image_unit_square_transform(parent: Transform, src_w: u32, src_h: u32) -> Tra
 /// name from `gs.blend_mode`.
 ///
 /// Shared by `render_image` and `render_image_mask`.
-fn pixmap_paint_for_image_blit(
-    image_transform: Transform,
-    opacity: f32,
-    blend_mode_pdf: &str,
-) -> PixmapPaint {
+fn pixmap_paint_for_image_blit(image_transform: Transform, opacity: f32, blend_mode_pdf: &str) -> PixmapPaint {
     let mut paint = PixmapPaint::default();
     paint.opacity = opacity;
     paint.blend_mode = crate::rendering::pdf_blend_mode_to_skia(blend_mode_pdf);
@@ -9575,8 +8879,7 @@ fn apply_color_key_mask(
 // materialized a clip (i.e. did real rasterization work). Used by the
 // regression probe below to lock in the per-paint-op fast path. ~keep
 #[cfg(test)]
-pub(crate) static APC_MATERIALIZED: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
+pub(crate) static APC_MATERIALIZED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// ISO 32000-1 §11.7.4.3 / Table 149 source colour space classes.
 ///
@@ -9690,7 +8993,7 @@ fn source_for_overprint(gs: &GraphicsState, fill_side: bool) -> Option<Overprint
                 class: SourceCsClass::DeviceCmykDirect,
                 cmyk,
             })
-        },
+        }
         "DeviceGray" | "G" | "CalGray" => {
             // Table 149 row 2: DeviceGray maps to CMYK as (0, 0, 0, 1-g)
             // per the standard gray→CMYK conversion (used by the
@@ -9701,7 +9004,7 @@ fn source_for_overprint(gs: &GraphicsState, fill_side: bool) -> Option<Overprint
                 class: SourceCsClass::OtherProcess,
                 cmyk: (0.0, 0.0, 0.0, k),
             })
-        },
+        }
         "DeviceRGB" | "RGB" | "CalRGB" => {
             // Table 149 row 2: DeviceRGB maps to CMYK via the §10.3.5
             // additive-clamp inverse `C = 1 - R`, `M = 1 - G`,
@@ -9716,7 +9019,7 @@ fn source_for_overprint(gs: &GraphicsState, fill_side: bool) -> Option<Overprint
                 class: SourceCsClass::OtherProcess,
                 cmyk: (c, m, y, 0.0),
             })
-        },
+        }
         _ => {
             // Composite-named space — Separation, DeviceN, ICCBased,
             // Indexed, Pattern. The spot lanes (if any) are mirrored
@@ -9772,7 +9075,7 @@ fn source_for_overprint(gs: &GraphicsState, fill_side: bool) -> Option<Overprint
                     cmyk: (c, m, y, 0.0),
                 })
             }
-        },
+        }
     }
 }
 
@@ -9805,18 +9108,18 @@ fn compose_overprint_channel(
             // The §11.7.4.5 NOTE 1 explicitly restricts the OPM=1
             // preserve rule to the directly-specified-DeviceCMYK case. ~keep
             if opm == 1 && c_s == 0.0 { c_b } else { c_s }
-        },
+        }
         SourceCsClass::OtherProcess => {
             // Table 149 row 2: B = c_s for every process colour
             // component of the group CS regardless of OPM. ~keep
             c_s
-        },
+        }
         SourceCsClass::SeparationOrDeviceN => {
             // Table 149 row 3: process colour components preserve
             // backdrop. The named-spot lanes are handled by the spot
             // sidecar mirror, not by this per-process-channel pass. ~keep
             c_b
-        },
+        }
     };
     let alpha = alpha.clamp(0.0, 1.0);
     alpha * b + (1.0 - alpha) * c_b
@@ -9859,12 +9162,12 @@ fn apply_pending_clip(
             // mutated in place. ~keep
             Some(existing_mask) => {
                 existing_mask.intersect_path(&path, fill_rule, true, transform);
-            },
+            }
             None => {
                 let mut new_mask = tiny_skia::Mask::new(pixmap.width(), pixmap.height()).unwrap();
                 new_mask.fill_path(&path, fill_rule, true, transform);
                 *slot = Some(new_mask);
-            },
+            }
         }
     }
 }
@@ -9989,12 +9292,7 @@ fn build_radial_extend_clip(
         } else {
             // No outer-side clip: the outer boundary is the full
             // pixmap rectangle. ~keep
-            let rect = tiny_skia::Rect::from_xywh(
-                0.0,
-                0.0,
-                pixmap.width() as f32,
-                pixmap.height() as f32,
-            )?;
+            let rect = tiny_skia::Rect::from_xywh(0.0, 0.0, pixmap.width() as f32, pixmap.height() as f32)?;
             pb.push_rect(rect);
         }
         pb.finish()?
@@ -10037,10 +9335,7 @@ fn build_radial_extend_clip(
 
 /// Multiply the per-pixel coverage of `mask` by the inherited
 /// `clip_mask` so the gradient is bounded by both at once.
-fn intersect_with_inherited(
-    mut mask: tiny_skia::Mask,
-    inherited: Option<&tiny_skia::Mask>,
-) -> tiny_skia::Mask {
+fn intersect_with_inherited(mut mask: tiny_skia::Mask, inherited: Option<&tiny_skia::Mask>) -> tiny_skia::Mask {
     if let Some(existing) = inherited {
         let data = mask.data_mut();
         let other = existing.data();
@@ -10080,8 +9375,7 @@ mod tests {
             pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
         }
         pdf.extend_from_slice(
-            format!("trailer\n<< /Size {object_count} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n")
-                .as_bytes(),
+            format!("trailer\n<< /Size {object_count} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
         );
         PdfDocument::from_bytes(pdf).expect("open minimal PDF")
     }
@@ -10097,12 +9391,7 @@ mod tests {
         ])
     }
 
-    fn ccitt_mask_dict(
-        width: i64,
-        height: i64,
-        columns: i64,
-        rows: i64,
-    ) -> HashMap<String, Object> {
+    fn ccitt_mask_dict(width: i64, height: i64, columns: i64, rows: i64) -> HashMap<String, Object> {
         let mut dict = image_mask_dict(width, height);
         dict.insert("Filter".to_string(), Object::Name("CCITTFaxDecode".to_string()));
         dict.insert(
@@ -10152,8 +9441,7 @@ mod tests {
         )]);
         assert!(!PageRenderer::image_mask_is_jbig2(&not_final));
 
-        let ccitt =
-            HashMap::from([("Filter".to_string(), Object::Name("CCITTFaxDecode".to_string()))]);
+        let ccitt = HashMap::from([("Filter".to_string(), Object::Name("CCITTFaxDecode".to_string()))]);
         assert!(!PageRenderer::image_mask_is_jbig2(&ccitt));
 
         assert!(!PageRenderer::image_mask_is_jbig2(&HashMap::new()));
@@ -10172,8 +9460,7 @@ mod tests {
     #[test]
     fn image_mask_layout_accepts_large_valid_dimensions_without_allocating() {
         let doc = minimal_pdf_doc();
-        let layout = PageRenderer::image_mask_layout(&image_mask_dict(5_000, 4_000), &doc)
-            .expect("valid layout");
+        let layout = PageRenderer::image_mask_layout(&image_mask_dict(5_000, 4_000), &doc).expect("valid layout");
         assert_eq!(layout, (5_000, 4_000, 625, 2_500_000, 80_000_000));
     }
 
@@ -10186,8 +9473,7 @@ mod tests {
         let mut dict = image_mask_dict(400, 1);
         dict.insert("Height".to_string(), Object::Reference(ObjectRef::new(4, 0)));
 
-        let layout =
-            PageRenderer::image_mask_layout(&dict, &doc).expect("indirect /Height resolves");
+        let layout = PageRenderer::image_mask_layout(&dict, &doc).expect("indirect /Height resolves");
         assert_eq!(layout, (400, 600, 50, 30_000, 960_000));
     }
 
@@ -10220,9 +9506,7 @@ mod tests {
         };
         invalid_params.insert("K".to_string(), Object::Name("invalid".to_string()));
         let result = PageRenderer::image_mask_ccitt_params(&invalid, 8, 1, &doc);
-        assert!(
-            matches!(result, Err(Error::Image(message)) if message.contains("/K must be an integer"))
-        );
+        assert!(matches!(result, Err(Error::Image(message)) if message.contains("/K must be an integer")));
 
         let mut negative = ccitt_mask_dict(8, 1, 8, 1);
         let Some(Object::Dictionary(negative_params)) = negative.get_mut("DecodeParms") else {
@@ -10259,9 +9543,8 @@ mod tests {
             "DecodeParms".to_string(),
             Object::Array(vec![Object::Null, Object::Reference(ObjectRef::new(99, 0))]),
         );
-        let error =
-            PageRenderer::image_mask_ccitt_params(&dangling_array, 8, 1, &minimal_pdf_doc())
-                .expect_err("dangling array entry must fail");
+        let error = PageRenderer::image_mask_ccitt_params(&dangling_array, 8, 1, &minimal_pdf_doc())
+            .expect_err("dangling array entry must fail");
         assert!(
             matches!(&error, Error::Image(message) if message.contains("array entry")),
             "unexpected dangling array-entry error: {error:?}"
@@ -10271,9 +9554,7 @@ mod tests {
         wrong_type.insert("DecodeParms".to_string(), Object::Reference(ObjectRef::new(4, 0)));
         let doc = pdf_doc_with_extra_object(Some(b"42"));
         let result = PageRenderer::image_mask_ccitt_params(&wrong_type, 8, 1, &doc);
-        assert!(
-            matches!(result, Err(Error::Image(message)) if message.contains("must be a dictionary"))
-        );
+        assert!(matches!(result, Err(Error::Image(message)) if message.contains("must be a dictionary")));
     }
 
     #[test]
@@ -10426,9 +9707,7 @@ mod tests {
     /// arm runs, minus glyph shaping (which the coverage rasteriser handles).
     #[test]
     fn text_clip_intersects_glyph_silhouette_within_existing_clip() {
-        use tiny_skia::{
-            Color, FillRule, Mask, MaskType, Paint, PathBuilder, Pixmap, Rect, Transform,
-        };
+        use tiny_skia::{Color, FillRule, Mask, MaskType, Paint, PathBuilder, Pixmap, Rect, Transform};
 
         let w = 20u32;
         let h = 20u32;
@@ -10530,8 +9809,10 @@ mod tests {
         let program = b"{ 0.0 exch 0.0 0.0 }";
         let mut func_dict: HashMap<String, Object> = HashMap::new();
         func_dict.insert("FunctionType".into(), Object::Integer(4));
-        func_dict
-            .insert("Domain".into(), Object::Array(vec![Object::Integer(0), Object::Integer(1)]));
+        func_dict.insert(
+            "Domain".into(),
+            Object::Array(vec![Object::Integer(0), Object::Integer(1)]),
+        );
         func_dict.insert(
             "Range".into(),
             Object::Array(vec![
@@ -10757,10 +10038,7 @@ mod tests {
             .expect("Type 4 Separation full-tint must resolve to Some(rgba)");
         let (r, g, b, a) = rgba;
         assert!(
-            (r - 0.9255).abs() < 1.0e-3
-                && g.abs() < 1.0e-3
-                && (b - 0.5490).abs() < 1.0e-3
-                && (a - 1.0).abs() < 1.0e-3,
+            (r - 0.9255).abs() < 1.0e-3 && g.abs() < 1.0e-3 && (b - 0.5490).abs() < 1.0e-3 && (a - 1.0).abs() < 1.0e-3,
             "Type 4 Separation at tint=1 must produce process-ink magenta RGBA \
              (#EC008C ≈ 0.9255, 0, 0.5490, 1); got ({r}, {g}, {b}, {a})"
         );
@@ -10808,13 +10086,7 @@ mod tests {
         // measured cyan corner #00ADEF = (0, 0.6784, 0.9373). ~keep
         let cmyk_space = Object::Name("DeviceCMYK".to_string());
         let rgba = renderer
-            .pipeline_resolve_components(
-                &doc,
-                &color_spaces,
-                &cmyk_space,
-                &[1.0, 0.0, 0.0, 0.0],
-                1.0,
-            )
+            .pipeline_resolve_components(&doc, &color_spaces, &cmyk_space, &[1.0, 0.0, 0.0, 0.0], 1.0)
             .expect("DeviceCMYK must resolve");
         let (r, g, b, _a) = rgba;
         assert!(
@@ -10860,8 +10132,7 @@ mod tests {
         const K: usize = 100;
         APC_MATERIALIZED.store(0, Ordering::Relaxed);
         let mut clip_stack: Vec<Option<tiny_skia::Mask>> = vec![None];
-        let mut pending: Option<(tiny_skia::Path, FillRule)> =
-            Some((make_clip_path(), FillRule::Winding));
+        let mut pending: Option<(tiny_skia::Path, FillRule)> = Some((make_clip_path(), FillRule::Winding));
         for _ in 0..K {
             apply_pending_clip(&mut pending, &mut clip_stack, &pixmap, base_transform, &gs_stack);
         }
@@ -10878,16 +10149,9 @@ mod tests {
         APC_MATERIALIZED.store(0, Ordering::Relaxed);
         let mut clip_stack: Vec<Option<tiny_skia::Mask>> = vec![None];
         for _ in 0..N {
-            let mut pending: Option<(tiny_skia::Path, FillRule)> =
-                Some((make_clip_path(), FillRule::Winding));
+            let mut pending: Option<(tiny_skia::Path, FillRule)> = Some((make_clip_path(), FillRule::Winding));
             for _ in 0..K {
-                apply_pending_clip(
-                    &mut pending,
-                    &mut clip_stack,
-                    &pixmap,
-                    base_transform,
-                    &gs_stack,
-                );
+                apply_pending_clip(&mut pending, &mut clip_stack, &pixmap, base_transform, &gs_stack);
             }
         }
         let after_n_clips = APC_MATERIALIZED.load(Ordering::Relaxed);
@@ -10970,9 +10234,7 @@ mod tests {
         );
 
         offsets.push(pdf.len());
-        pdf.extend_from_slice(
-            b"6 0 obj\n<< /Type /Encoding /Differences [65 /rect] >>\nendobj\n\n",
-        );
+        pdf.extend_from_slice(b"6 0 obj\n<< /Type /Encoding /Differences [65 /rect] >>\nendobj\n\n");
 
         offsets.push(pdf.len());
         pdf.extend_from_slice(b"7 0 obj\n<< /rect 8 0 R >>\nendobj\n\n");

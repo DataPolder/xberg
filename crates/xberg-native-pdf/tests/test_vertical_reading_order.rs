@@ -99,9 +99,7 @@ end";
     for off in [o1, o2, o3, o4, o5, o6, o7] {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    pdf.extend_from_slice(
-        format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes());
 
     pdf
 }

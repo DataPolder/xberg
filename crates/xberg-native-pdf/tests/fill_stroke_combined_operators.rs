@@ -62,9 +62,7 @@ fn close_fill_stroke_even_odd_operator_is_extracted_from_page_content() {
 #[test]
 fn fill_stroke_operator_is_extracted_from_form_xobject() {
     let content: &[u8] = b"q 1 0 0 1 0 0 cm /Fm1 Do Q";
-    let doc =
-        PdfDocument::from_bytes(build_form_xobject_pdf(content, b"0 0 0 rg 50 50 100 75 re B"))
-            .expect("parse");
+    let doc = PdfDocument::from_bytes(build_form_xobject_pdf(content, b"0 0 0 rg 50 50 100 75 re B")).expect("parse");
     let paths = doc.extract_paths(0).expect("paths");
     assert_eq!(
         paths.len(),
@@ -88,14 +86,10 @@ fn build_form_xobject_pdf(page_content: &[u8], xobject_content: &[u8]) -> Vec<u8
 
     let off3 = pdf.len();
     pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]");
-    pdf.extend_from_slice(
-        b" /Contents 4 0 R /Resources << /XObject << /Fm1 5 0 R >> >> >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b" /Contents 4 0 R /Resources << /XObject << /Fm1 5 0 R >> >> >>\nendobj\n");
 
     let off4 = pdf.len();
-    pdf.extend_from_slice(
-        format!("4 0 obj\n<< /Length {} >>\nstream\n", page_content.len()).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", page_content.len()).as_bytes());
     pdf.extend_from_slice(page_content);
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
 

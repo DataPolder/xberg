@@ -34,9 +34,7 @@ fn jpeg_decoder_returns_straight_cmyk_for_app14_inverted_input() {
     }
     let mut jpeg = Vec::new();
     let encoder = Encoder::new(&mut jpeg, 95);
-    encoder
-        .encode(&cmyk, 8, 8, ColorType::Cmyk)
-        .expect("encode CMYK JPEG");
+    encoder.encode(&cmyk, 8, 8, ColorType::Cmyk).expect("encode CMYK JPEG");
 
     let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(&jpeg));
     let decoded = decoder.decode().expect("decode CMYK JPEG");
@@ -50,8 +48,17 @@ fn jpeg_decoder_returns_straight_cmyk_for_app14_inverted_input() {
             chunk[0] > 200,
             "pixel {i}: Cyan channel after jpeg-decoder auto-inversion (expected ≳255); got {chunk:?}"
         );
-        assert!(chunk[1] < 50, "pixel {i}: Magenta channel low (expected ≈0); got {chunk:?}");
-        assert!(chunk[2] < 50, "pixel {i}: Yellow channel low (expected ≈0); got {chunk:?}");
-        assert!(chunk[3] < 50, "pixel {i}: Black channel low (expected ≈0); got {chunk:?}");
+        assert!(
+            chunk[1] < 50,
+            "pixel {i}: Magenta channel low (expected ≈0); got {chunk:?}"
+        );
+        assert!(
+            chunk[2] < 50,
+            "pixel {i}: Yellow channel low (expected ≈0); got {chunk:?}"
+        );
+        assert!(
+            chunk[3] < 50,
+            "pixel {i}: Black channel low (expected ≈0); got {chunk:?}"
+        );
     }
 }

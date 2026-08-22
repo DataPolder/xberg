@@ -4,7 +4,6 @@ build/
 dist/
 .polylint/
 # Ad-hoc PDF/image debug binaries
-/check_pdf_oxide
 /check_*
 # Hand-authored WASM JS distribution files (intentionally committed)
 !crates/xberg-wasm/dist/index.js

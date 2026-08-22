@@ -26,18 +26,13 @@ fn big_stream_pdf() -> Vec<u8> {
 /// the differential pair for the injection test below.
 fn big_stream_pdf_with_quote_spacing(aw: &str) -> Vec<u8> {
     let mut content: Vec<u8> = Vec::new();
-    content.extend_from_slice(
-        b"BT /F1 24 Tf 1 0 0 rg 1 0 0 1 100 700 Tm (Before the big stream) Tj ET\n",
-    );
+    content.extend_from_slice(b"BT /F1 24 Tf 1 0 0 rg 1 0 0 1 100 700 Tm (Before the big stream) Tj ET\n");
     for _ in 0..20000 {
         content.extend_from_slice(b"0 0 m 1 1 l S\n");
     }
     content.extend_from_slice(b"BT 1 0 0 1 100 600 Tm (After the big stream) Tj ET\n");
     content.extend_from_slice(
-        format!(
-            "BT /F1 12 Tf 1 0 0 1 100 500 Tm (first line) Tj 0 -20 TD {aw} 2 (quote line) \" ET\n"
-        )
-        .as_bytes(),
+        format!("BT /F1 12 Tf 1 0 0 1 100 500 Tm (first line) Tj 0 -20 TD {aw} 2 (quote line) \" ET\n").as_bytes(),
     );
     for _ in 0..500 {
         content.extend_from_slice(b"0 0 m 1 1 l S\n");
@@ -63,12 +58,15 @@ fn big_stream_pdf_with_quote_spacing(aw: &str) -> Vec<u8> {
              /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
         );
         off[4] = buf.len();
-        buf.extend_from_slice(
-            format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes());
         buf.extend_from_slice(&content);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
-        obj(&mut buf, &mut off, 5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        obj(
+            &mut buf,
+            &mut off,
+            5,
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        );
     }
     let xref = buf.len();
     buf.extend_from_slice(b"xref\n0 6\n0000000000 65535 f \n");
@@ -114,8 +112,7 @@ fn text_state_survives_the_prescan_boundary() {
 #[test]
 fn quote_operator_spacing_survives_the_prescan_boundary() {
     let width_of_trailing = |aw: &str| -> f32 {
-        let doc =
-            PdfDocument::from_bytes(big_stream_pdf_with_quote_spacing(aw)).expect("fixture parses");
+        let doc = PdfDocument::from_bytes(big_stream_pdf_with_quote_spacing(aw)).expect("fixture parses");
         let spans = doc.extract_spans(0).expect("extract_spans");
         spans
             .iter()

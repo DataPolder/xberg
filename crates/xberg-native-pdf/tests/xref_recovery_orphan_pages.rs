@@ -29,9 +29,7 @@ fn truncated_pdf(keep_pages_root: bool) -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
@@ -41,7 +39,12 @@ fn truncated_pdf(keep_pages_root: bool) -> Vec<u8> {
     // Font and the two page-content streams come FIRST - this is the bulk that
     // survives a tail truncation. Each page carries its OWN /MediaBox and
     // /Resources so nothing depends on inheritance from the (doomed) parent. ~keep
-    obj(&mut buf, &mut off, 5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    obj(
+        &mut buf,
+        &mut off,
+        5,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
     stream(&mut buf, &mut off, 6, b"BT /F1 24 Tf 72 700 Td (ALPHA) Tj ET");
     stream(&mut buf, &mut off, 7, b"BT /F1 24 Tf 72 700 Td (BRAVO) Tj ET");
     obj(
@@ -134,13 +137,16 @@ fn truncated_pdf_pages_in_objstm() -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
-    obj(&mut buf, &mut off, 5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    obj(
+        &mut buf,
+        &mut off,
+        5,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
     stream(&mut buf, &mut off, 6, b"BT /F1 24 Tf 72 700 Td (GAMMA) Tj ET");
     stream(&mut buf, &mut off, 7, b"BT /F1 24 Tf 72 700 Td (DELTA) Tj ET");
 

@@ -95,7 +95,7 @@ pub fn detect_dramatic_script(row_first_glyphs: &[DetectorGlyph], row_texts: &[&
                         if (prev_x - first_glyph.x).abs() < 2.0 {
                             speaker_row_count += 1;
                         }
-                    },
+                    }
                 }
             }
         }

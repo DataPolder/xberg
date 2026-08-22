@@ -279,7 +279,7 @@ impl FormExtractor {
             Some(obj) => obj,
             None => {
                 return Ok(Vec::new());
-            },
+            }
         };
 
         let acroform = Self::resolve_object(doc, acroform_ref)?;
@@ -291,7 +291,7 @@ impl FormExtractor {
             Some(obj) => obj,
             None => {
                 return Ok(Vec::new());
-            },
+            }
         };
 
         let fields_obj = Self::resolve_object(doc, fields_ref)?;
@@ -512,7 +512,7 @@ impl FormExtractor {
                 } else {
                     FieldValue::None
                 }
-            },
+            }
             Object::Name(name) => {
                 if *field_type == FieldType::Button {
                     // ISO 32000-1 §12.7.4.2.3: a button's /V names its selected
@@ -529,7 +529,7 @@ impl FormExtractor {
                 } else {
                     FieldValue::Name(name.clone())
                 }
-            },
+            }
             Object::Array(array) => {
                 let values: Vec<String> = array
                     .iter()
@@ -540,7 +540,7 @@ impl FormExtractor {
                     })
                     .collect();
                 FieldValue::Array(values)
-            },
+            }
             Object::Boolean(b) => FieldValue::Boolean(*b),
             _ => FieldValue::None,
         }
@@ -582,10 +582,7 @@ impl FormExtractor {
     }
 
     /// Parse appearance characteristics from /MK dictionary.
-    fn parse_appearance_characteristics(
-        doc: &PdfDocument,
-        obj: &Object,
-    ) -> Option<AppearanceCharacteristics> {
+    fn parse_appearance_characteristics(doc: &PdfDocument, obj: &Object) -> Option<AppearanceCharacteristics> {
         let dict = obj.as_dict()?;
 
         let parse_color = |arr: &[Object]| -> Option<[f32; 3]> {
@@ -715,7 +712,10 @@ mod tests {
         assert_eq!(FormExtractor::parse_field_type("Tx"), FieldType::Text);
         assert_eq!(FormExtractor::parse_field_type("Ch"), FieldType::Choice);
         assert_eq!(FormExtractor::parse_field_type("Sig"), FieldType::Signature);
-        assert!(matches!(FormExtractor::parse_field_type("Unknown"), FieldType::Unknown(_)));
+        assert!(matches!(
+            FormExtractor::parse_field_type("Unknown"),
+            FieldType::Unknown(_)
+        ));
     }
 
     #[test]
@@ -946,7 +946,7 @@ mod tests {
                 assert_eq!(v.len(), 2);
                 assert_eq!(v[0], "Item1");
                 assert_eq!(v[1], "Item2");
-            },
+            }
             _ => panic!("Expected Array"),
         }
     }
@@ -964,7 +964,7 @@ mod tests {
                 assert_eq!(v.len(), 2);
                 assert_eq!(v[0], "Text");
                 assert_eq!(v[1], "Name");
-            },
+            }
             _ => panic!("Expected Array"),
         }
     }
@@ -1070,7 +1070,10 @@ mod tests {
         let mut dict = HashMap::new();
         dict.insert("W".to_string(), Object::Real(2.0));
         dict.insert("S".to_string(), Object::Name("D".to_string()));
-        dict.insert("D".to_string(), Object::Array(vec![Object::Integer(3), Object::Integer(1)]));
+        dict.insert(
+            "D".to_string(),
+            Object::Array(vec![Object::Integer(3), Object::Integer(1)]),
+        );
         let obj = Object::Dictionary(dict);
         let bs = FormExtractor::parse_border_style(&obj).unwrap();
         assert_eq!(bs.width, 2.0);

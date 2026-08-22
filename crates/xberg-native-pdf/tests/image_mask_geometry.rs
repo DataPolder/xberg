@@ -86,16 +86,14 @@ fn pantone_plate(pdf: Vec<u8>) -> xberg_native_pdf::rendering::SeparationPlate {
 #[test]
 fn separation_image_mask_negative_dimensions_render() {
     let control = PdfDocument::from_bytes(separation_imagemask_pdf("8", "8")).expect("parse");
-    let control_plates =
-        render_separations(&control, 0, 72).expect("8x8 control image mask renders");
+    let control_plates = render_separations(&control, 0, 72).expect("8x8 control image mask renders");
     assert!(
         !control_plates.is_empty(),
         "control produced no separation plates, so the image-mask path is not reached"
     );
 
     let doc = PdfDocument::from_bytes(separation_imagemask_pdf("-1", "-1")).expect("parse");
-    let plates =
-        render_separations(&doc, 0, 72).expect("page with a negative-dimension image mask renders");
+    let plates = render_separations(&doc, 0, 72).expect("page with a negative-dimension image mask renders");
     assert_eq!(
         plates.len(),
         control_plates.len(),
@@ -110,13 +108,10 @@ fn separation_image_mask_negative_dimensions_render() {
 #[test]
 fn separation_image_mask_larger_than_its_stream_renders() {
     let control = PdfDocument::from_bytes(separation_imagemask_pdf("8", "8")).expect("parse");
-    let control_plates =
-        render_separations(&control, 0, 72).expect("8x8 control image mask renders");
+    let control_plates = render_separations(&control, 0, 72).expect("8x8 control image mask renders");
 
-    let doc = PdfDocument::from_bytes(separation_imagemask_pdf("2147483648", "2147483648"))
-        .expect("parse");
-    let plates = render_separations(&doc, 0, 72)
-        .expect("page with an image mask larger than its stream renders");
+    let doc = PdfDocument::from_bytes(separation_imagemask_pdf("2147483648", "2147483648")).expect("parse");
+    let plates = render_separations(&doc, 0, 72).expect("page with an image mask larger than its stream renders");
     assert_eq!(
         plates.len(),
         control_plates.len(),
@@ -179,7 +174,6 @@ fn zero_width_mask_sub_image_renders() {
     );
     let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
 
-    let img = render_page(&doc, 0, &RenderOptions::default())
-        .expect("page with a zero-width mask renders");
+    let img = render_page(&doc, 0, &RenderOptions::default()).expect("page with a zero-width mask renders");
     assert!(!img.data.is_empty(), "renderer produced an empty buffer");
 }

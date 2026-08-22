@@ -10,13 +10,7 @@ use xberg_native_pdf::geometry::Rect;
 use xberg_native_pdf::layout::text_block::{Color, FontWeight, TextChar};
 
 /// Helper to create a TextChar with specific transformation properties.
-fn create_char_with_transform(
-    c: char,
-    x: f32,
-    y: f32,
-    rotation: f32,
-    matrix: Option<[f32; 6]>,
-) -> TextChar {
+fn create_char_with_transform(c: char, x: f32, y: f32, rotation: f32, matrix: Option<[f32; 6]>) -> TextChar {
     let bbox = Rect::new(x, y, 10.0, 12.0);
     TextChar {
         char: c,

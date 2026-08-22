@@ -70,7 +70,10 @@ fn test_parent_tree_multiple_pages() {
     parent_tree.page_mappings.insert(0, page0_map);
 
     let mut page1_map = std::collections::HashMap::new();
-    page1_map.insert(0, ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::H1))));
+    page1_map.insert(
+        0,
+        ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::H1))),
+    );
     parent_tree.page_mappings.insert(1, page1_map);
 
     assert!(parent_tree.get_parent(0, 0).is_some());
@@ -86,15 +89,19 @@ fn test_parent_tree_page_independence() {
 
     let mut page0_map = std::collections::HashMap::new();
     for mcid in 0..3 {
-        page0_map
-            .insert(mcid, ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::P))));
+        page0_map.insert(
+            mcid,
+            ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::P))),
+        );
     }
     parent_tree.page_mappings.insert(0, page0_map);
 
     let mut page1_map = std::collections::HashMap::new();
     for mcid in 0..2 {
-        page1_map
-            .insert(mcid, ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::H1))));
+        page1_map.insert(
+            mcid,
+            ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::H1))),
+        );
     }
     parent_tree.page_mappings.insert(1, page1_map);
 
@@ -128,8 +135,10 @@ fn test_parent_tree_nested_parents() {
     let mut page_map = std::collections::HashMap::new();
 
     for mcid in 0..3 {
-        page_map
-            .insert(mcid, ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::P))));
+        page_map.insert(
+            mcid,
+            ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::P))),
+        );
     }
     parent_tree.page_mappings.insert(0, page_map);
 
@@ -212,8 +221,10 @@ fn test_parent_tree_bulk_lookup_performance() {
     let mut page_map = std::collections::HashMap::new();
 
     for mcid in 0..1000 {
-        page_map
-            .insert(mcid, ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::P))));
+        page_map.insert(
+            mcid,
+            ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::P))),
+        );
     }
     parent_tree.page_mappings.insert(0, page_map);
 
@@ -242,8 +253,10 @@ fn test_parent_tree_high_mcid_values() {
     let mut page_map = std::collections::HashMap::new();
 
     let high_mcid = 999999;
-    page_map
-        .insert(high_mcid, ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::P))));
+    page_map.insert(
+        high_mcid,
+        ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::P))),
+    );
     parent_tree.page_mappings.insert(0, page_map);
 
     assert!(parent_tree.get_parent(0, high_mcid).is_some());
@@ -280,7 +293,10 @@ fn test_parent_tree_lookup_different_struct_types() {
     parent_tree.page_mappings.insert(0, page0_map);
 
     let mut page1_map = std::collections::HashMap::new();
-    page1_map.insert(0, ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::H1))));
+    page1_map.insert(
+        0,
+        ParentTreeEntry::StructElem(Box::new(StructElem::new(StructType::H1))),
+    );
     parent_tree.page_mappings.insert(1, page1_map);
 
     if let Some(ParentTreeEntry::StructElem(p0)) = parent_tree.get_parent(0, 0) {

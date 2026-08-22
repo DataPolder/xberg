@@ -13,9 +13,7 @@
 //! - Backward compatibility
 //! - Edge cases and error conditions
 
-use xberg_native_pdf::extractors::{
-    AdaptiveThresholdConfig, SpanMergingConfig, TextExtractionConfig,
-};
+use xberg_native_pdf::extractors::{AdaptiveThresholdConfig, SpanMergingConfig, TextExtractionConfig};
 use xberg_native_pdf::geometry::Rect;
 use xberg_native_pdf::layout::TextSpan;
 

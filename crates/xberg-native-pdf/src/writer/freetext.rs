@@ -18,8 +18,7 @@
 //! ```
 
 use crate::annotation_types::{
-    AnnotationColor, AnnotationFlags, BorderStyleType, FreeTextIntent, LineEndingStyle,
-    TextAlignment,
+    AnnotationColor, AnnotationFlags, BorderStyleType, FreeTextIntent, LineEndingStyle, TextAlignment,
 };
 use crate::geometry::Rect;
 use crate::object::{Object, ObjectRef};
@@ -304,12 +303,7 @@ impl FreeTextAnnotation {
         {
             dict.insert(
                 "C".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -320,12 +314,7 @@ impl FreeTextAnnotation {
         {
             dict.insert(
                 "IC".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -476,8 +465,7 @@ mod tests {
     fn test_freetext_callout_build() {
         let rect = Rect::new(72.0, 700.0, 200.0, 50.0);
         let callout = vec![50.0, 650.0, 72.0, 700.0];
-        let ft = FreeTextAnnotation::callout(rect, "Note", callout)
-            .with_line_ending(LineEndingStyle::OpenArrow);
+        let ft = FreeTextAnnotation::callout(rect, "Note", callout).with_line_ending(LineEndingStyle::OpenArrow);
 
         let dict = ft.build(&[]);
 

@@ -212,5 +212,8 @@ fn utf8_bytes_under_winansi_font_decode_as_cyrillic() {
     assert!(text.contains('\u{0438}'), "missing и. Text: {text:?}");
     assert!(text.contains('\u{0441}'), "missing с. Text: {text:?}");
     assert!(text.contains('\u{0442}'), "missing т. Text: {text:?}");
-    assert!(!text.contains('\u{00D0}'), "mojibake Ð (U+00D0) in output. Text: {text:?}");
+    assert!(
+        !text.contains('\u{00D0}'),
+        "mojibake Ð (U+00D0) in output. Text: {text:?}"
+    );
 }

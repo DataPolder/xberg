@@ -33,9 +33,7 @@
 //! split happens in [`SignatureVerifier`] vs [`Signer`].
 
 use super::error::Result;
-use super::types::{
-    AesKeySize, EcCurve, HashAlgorithm, Padding, RsaPublicKey, RsaScheme, SigningAlgorithm,
-};
+use super::types::{AesKeySize, EcCurve, HashAlgorithm, Padding, RsaPublicKey, RsaScheme, SigningAlgorithm};
 
 /// Incremental hashing.
 ///
@@ -141,13 +139,7 @@ pub trait SignatureVerifier: Send + Sync {
     /// `pubkey_sec1` is the SEC1-encoded uncompressed public point
     /// (`0x04 || X || Y`); `signature_der` is the ASN.1 DER-encoded
     /// signature (the form CMS / X.509 carry).
-    fn verify_ecdsa(
-        &self,
-        curve: EcCurve,
-        pubkey_sec1: &[u8],
-        message: &[u8],
-        signature_der: &[u8],
-    ) -> Result<()>;
+    fn verify_ecdsa(&self, curve: EcCurve, pubkey_sec1: &[u8], message: &[u8], signature_der: &[u8]) -> Result<()>;
 }
 
 /// Opaque signing handle.

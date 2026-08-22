@@ -29,7 +29,11 @@ fn test_spec_9_10_2_unmapped_character_returns_replacement() {
     // Spec 9.10.2: "conforming reader may choose a character code of their choosing"
     // Standard practice: U+FFFD REPLACEMENT CHARACTER ~keep
     assert!(result.is_some(), "Should return replacement character, not None");
-    assert_eq!(result.unwrap(), "\u{FFFD}", "Should return U+FFFD replacement character");
+    assert_eq!(
+        result.unwrap(),
+        "\u{FFFD}",
+        "Should return U+FFFD replacement character"
+    );
 }
 
 #[test]
@@ -77,14 +81,15 @@ fn test_type0_identity_encoding_no_tounicode_returns_replacement() {
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let result = font.char_to_unicode(0x0041);
 
-    assert!(result.is_some(), "Should return a character via CID-as-Unicode fallback");
+    assert!(
+        result.is_some(),
+        "Should return a character via CID-as-Unicode fallback"
+    );
     assert_eq!(result.unwrap(), "A");
 }
 
@@ -133,13 +138,14 @@ fn test_type0_zero_byte_embedded_font_returns_replacement() {
         cid_vertical_metrics: None,
         cid_default_vertical_metrics: xberg_native_pdf::fonts::VerticalMetrics::SPEC_DEFAULT,
         cjk_substitution: None,
-        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(
-            std::collections::HashMap::new(),
-        )),
+        type0_unicode_memo: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
 
     let result = font.char_to_unicode(0x0020);
 
-    assert!(result.is_some(), "Should return a character via CID-as-Unicode fallback");
+    assert!(
+        result.is_some(),
+        "Should return a character via CID-as-Unicode fallback"
+    );
     assert_eq!(result.unwrap(), " ");
 }

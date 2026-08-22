@@ -101,7 +101,7 @@ pub fn prune_run(glyphs: &[Glyph], regions: &RegionSet, min_padding: f32) -> Tex
                         anchor: g.render_matrix,
                         bytes: g.bytes.clone(),
                     });
-                },
+                }
             }
         }
     }

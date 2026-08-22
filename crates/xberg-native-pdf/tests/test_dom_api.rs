@@ -3,9 +3,7 @@
 #[cfg(test)]
 mod dom_api_tests {
     use xberg_native_pdf::editor::{ElementId, PdfPage};
-    use xberg_native_pdf::elements::{
-        ContentElement, FontSpec, StructureElement, TextContent, TextStyle,
-    };
+    use xberg_native_pdf::elements::{ContentElement, FontSpec, StructureElement, TextContent, TextStyle};
     use xberg_native_pdf::geometry::Rect;
 
     /// Create a test page with some sample content.
@@ -108,7 +106,7 @@ mod dom_api_tests {
             match element {
                 xberg_native_pdf::editor::PdfElement::Text(text) => {
                     assert!(!text.text().is_empty());
-                },
+                }
                 _ => panic!("Expected Text element"),
             }
         }
@@ -266,8 +264,7 @@ mod dom_api_tests {
     fn test_dom_with_real_pdf() {
         use xberg_native_pdf::editor::DocumentEditor;
 
-        let mut editor =
-            DocumentEditor::open("tests/fixtures/simple.pdf").expect("Failed to open test PDF");
+        let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").expect("Failed to open test PDF");
 
         let page = editor.get_page(0).expect("Failed to get page 0");
 
@@ -294,8 +291,7 @@ mod dom_api_tests {
 
         let mut page = page;
 
-        page.set_text(first_id, "MODIFIED")
-            .expect("Failed to set text");
+        page.set_text(first_id, "MODIFIED").expect("Failed to set text");
 
         if let Some(element) = page.get_element(first_id)
             && let Some(text) = element.as_text()
@@ -330,9 +326,7 @@ mod dom_api_tests {
         let pdf_bytes = builder.build().expect("Failed to build PDF");
 
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-        temp_file
-            .write_all(&pdf_bytes)
-            .expect("Failed to write PDF");
+        temp_file.write_all(&pdf_bytes).expect("Failed to write PDF");
         let path = temp_file.path().to_path_buf();
 
         let mut editor = DocumentEditor::open(&path).expect("Failed to open generated PDF");
@@ -374,19 +368,15 @@ mod dom_api_tests {
         let pdf_bytes = builder.build().expect("Failed to build PDF");
 
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-        temp_file
-            .write_all(&pdf_bytes)
-            .expect("Failed to write PDF");
+        temp_file.write_all(&pdf_bytes).expect("Failed to write PDF");
         let path = temp_file.path();
 
         let mut pdf = Pdf::open(path).expect("Failed to open PDF");
 
         pdf.set_title("Test Title").expect("Failed to set title");
         pdf.set_author("Test Author").expect("Failed to set author");
-        pdf.set_subject("Test Subject")
-            .expect("Failed to set subject");
-        pdf.set_keywords("test, pdf, metadata")
-            .expect("Failed to set keywords");
+        pdf.set_subject("Test Subject").expect("Failed to set subject");
+        pdf.set_keywords("test, pdf, metadata").expect("Failed to set keywords");
 
         assert!(pdf.is_modified(), "Document should be modified after setting metadata");
     }
@@ -408,9 +398,7 @@ mod dom_api_tests {
         let pdf_bytes = builder.build().expect("Failed to build PDF");
 
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-        temp_file
-            .write_all(&pdf_bytes)
-            .expect("Failed to write PDF");
+        temp_file.write_all(&pdf_bytes).expect("Failed to write PDF");
         let path = temp_file.path();
 
         let mut pdf = Pdf::open(path).expect("Failed to open PDF");
@@ -442,9 +430,7 @@ mod dom_api_tests {
         let pdf_bytes = builder.build().expect("Failed to build PDF");
 
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-        temp_file
-            .write_all(&pdf_bytes)
-            .expect("Failed to write PDF");
+        temp_file.write_all(&pdf_bytes).expect("Failed to write PDF");
         let path = temp_file.path();
 
         let mut pdf = Pdf::open(path).expect("Failed to open PDF");
@@ -487,9 +473,7 @@ mod dom_api_tests {
         let pdf_bytes = builder.build().expect("Failed to build PDF");
 
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-        temp_file
-            .write_all(&pdf_bytes)
-            .expect("Failed to write PDF");
+        temp_file.write_all(&pdf_bytes).expect("Failed to write PDF");
         let path = temp_file.path();
 
         let mut pdf = Pdf::open(path).expect("Failed to open PDF");
@@ -497,12 +481,10 @@ mod dom_api_tests {
         {
             let mut page = pdf.page(0).expect("Failed to get page");
 
-            let link =
-                LinkAnnotation::uri(ApiRect::new(72.0, 700.0, 100.0, 20.0), "https://example.com");
+            let link = LinkAnnotation::uri(ApiRect::new(72.0, 700.0, 100.0, 20.0), "https://example.com");
             let _link_id = page.add_annotation(link);
 
-            let note =
-                TextAnnotation::new(ApiRect::new(200.0, 700.0, 20.0, 20.0), "This is a comment");
+            let note = TextAnnotation::new(ApiRect::new(200.0, 700.0, 20.0, 20.0), "This is a comment");
             let _note_id = page.add_annotation(note);
 
             let annotations = page.annotations();

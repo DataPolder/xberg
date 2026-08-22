@@ -159,11 +159,7 @@ pub fn should_split_on_script_transition(
 }
 
 /// Check if a transition between two CJK scripts should create a boundary.
-fn should_split_cjk_transition(
-    prev: CJKScript,
-    curr: CJKScript,
-    language: Option<DocumentLanguage>,
-) -> Option<bool> {
+fn should_split_cjk_transition(prev: CJKScript, curr: CJKScript, language: Option<DocumentLanguage>) -> Option<bool> {
     if prev == curr {
         return None;
     }
@@ -253,7 +249,7 @@ pub fn infer_document_language(scripts: &[(CJKScript, usize)]) -> Option<Documen
             CJKScript::Katakana | CJKScript::HalfwidthKatakana => has_katakana = true,
             CJKScript::Hangul => has_hangul = true,
             CJKScript::Han | CJKScript::HanExtensionA | CJKScript::HanExtensionBF => has_han = true,
-            _ => {},
+            _ => {}
         }
     }
 
@@ -317,18 +313,7 @@ pub fn is_small_hiragana(code: u32) -> bool {
 pub fn is_small_katakana(code: u32) -> bool {
     matches!(
         code,
-        0x30A1
-            | 0x30A3
-            | 0x30A5
-            | 0x30A7
-            | 0x30A9
-            | 0x30C3
-            | 0x30E3
-            | 0x30E5
-            | 0x30E7
-            | 0x30EE
-            | 0x30F5
-            | 0x30F6
+        0x30A1 | 0x30A3 | 0x30A5 | 0x30A7 | 0x30A9 | 0x30C3 | 0x30E3 | 0x30E5 | 0x30E7 | 0x30EE | 0x30F5 | 0x30F6
     )
 }
 
@@ -524,11 +509,7 @@ mod tests {
 
     #[test]
     fn test_cjk_to_latin_split() {
-        let result = should_split_on_script_transition(
-            Some(CJKScript::Han),
-            None,
-            Some(DocumentLanguage::Chinese),
-        );
+        let result = should_split_on_script_transition(Some(CJKScript::Han), None, Some(DocumentLanguage::Chinese));
         assert_eq!(result, Some(true));
     }
 

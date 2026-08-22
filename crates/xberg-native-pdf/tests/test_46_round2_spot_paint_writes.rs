@@ -277,14 +277,7 @@ fn round2_p1_separation_paint_writes_only_active_spot_lane() {
     let _img = renderer.render_page(&doc, 0).expect("render succeeds");
 
     let names = renderer.cmyk_sidecar_spot_names().expect("sidecar present");
-    assert_eq!(
-        names,
-        &[
-            "SpotA".to_string(),
-            "SpotB".to_string(),
-            "SpotC".to_string()
-        ]
-    );
+    assert_eq!(names, &["SpotA".to_string(), "SpotB".to_string(), "SpotC".to_string()]);
     let dims = renderer.cmyk_sidecar_dims().unwrap();
 
     let expected_spota = tint_to_u8(compose_normal(0.0, 1.0, 0.5));
@@ -614,9 +607,7 @@ fn round2_p7_mixed_shape_page_writes_only_targeted_lanes() {
     // paint stack is round 4's territory; this probe pins the
     // round-2-relevant invariant: CMYK paints continue to mirror to the
     // CMYK plane even on a page with spot inks discovered.) ~keep
-    let cmyk_bytes = renderer
-        .cmyk_sidecar_cmyk_bytes()
-        .expect("sidecar CMYK plane");
+    let cmyk_bytes = renderer.cmyk_sidecar_cmyk_bytes().expect("sidecar CMYK plane");
     let c_at_centre = cmyk_bytes[centre * 4];
     assert!(
         c_at_centre > 0,
@@ -802,9 +793,7 @@ fn round2_p10_smask_attenuates_spot_lane_under_normal_substitution() {
     let post_u8 = tint_to_u8(compose_normal(0.0, 0.6, 1.0));
     assert_eq!(post_u8, 153);
     let m = 0.5_f32;
-    let expected = (m * post_u8 as f32 + (1.0 - m) * 0.0)
-        .clamp(0.0, 255.0)
-        .round() as u8;
+    let expected = (m * post_u8 as f32 + (1.0 - m) * 0.0).clamp(0.0, 255.0).round() as u8;
     assert_eq!(expected, 77);
 
     let plane = renderer.cmyk_sidecar_spot_plane(0).expect("InkA plane");

@@ -238,7 +238,7 @@ impl Object {
                         Ok(data) => {
                             tracing::debug!(bytes = data.len(), "decryption successful");
                             data
-                        },
+                        }
                         Err(e) => {
                             tracing::error!(
                                 object_id = obj_num,
@@ -247,7 +247,7 @@ impl Object {
                                 "decryption failed"
                             );
                             return Err(e);
-                        },
+                        }
                     }
                 } else {
                     // `parse_stream_data` in the parser already consumes
@@ -262,10 +262,7 @@ impl Object {
 
                 // Step 2: Apply filters (decompression)
                 // PDF Spec: ISO 32000-1:2008, Section 7.3.8.2 - Stream Objects ~keep
-                let filters = dict
-                    .get("Filter")
-                    .map(extract_filter_names)
-                    .unwrap_or_default();
+                let filters = dict.get("Filter").map(extract_filter_names).unwrap_or_default();
 
                 if filters.is_empty() {
                     Ok(decrypted_data)
@@ -274,33 +271,22 @@ impl Object {
                     // PDF Spec: ISO 32000-1:2008, Section 7.4.2 - DecodeParms ~keep
                     let decode_params = extract_decode_params(dict.get("DecodeParms"));
 
-                    crate::decoders::decode_stream_with_params(
-                        &decrypted_data,
-                        &filters,
-                        decode_params.as_ref(),
-                    )
+                    crate::decoders::decode_stream_with_params(&decrypted_data, &filters, decode_params.as_ref())
                 }
-            },
+            }
             Object::Dictionary(dict) => {
                 // Per ISO 32000, every stream is a dictionary. Some PDFs (e.g.,
                 // SafeDocs Dialect-StreamIsDict.pdf) store objects as plain
                 // dictionaries where a stream is expected. Treat as empty stream. ~keep
                 tracing::warn!("dictionary used where stream expected; treating as empty stream");
-                let filters = dict
-                    .get("Filter")
-                    .map(extract_filter_names)
-                    .unwrap_or_default();
+                let filters = dict.get("Filter").map(extract_filter_names).unwrap_or_default();
                 if filters.is_empty() {
                     Ok(Vec::new())
                 } else {
                     let decode_params = extract_decode_params(dict.get("DecodeParms"));
-                    crate::decoders::decode_stream_with_params(
-                        &[],
-                        &filters,
-                        decode_params.as_ref(),
-                    )
+                    crate::decoders::decode_stream_with_params(&[], &filters, decode_params.as_ref())
                 }
-            },
+            }
             _ => Err(Error::InvalidObjectType {
                 expected: "Stream".to_string(),
                 found: self.type_name().to_string(),
@@ -343,20 +329,11 @@ fn extract_decode_params(params_obj: Option<&Object>) -> Option<crate::decoders:
     };
 
     // Extract predictor parameters per PDF Spec Table 3.7 ~keep
-    let predictor = dict
-        .get("Predictor")
-        .and_then(|obj| obj.as_integer())
-        .unwrap_or(1); // Default: no prediction ~keep
+    let predictor = dict.get("Predictor").and_then(|obj| obj.as_integer()).unwrap_or(1); // Default: no prediction ~keep
 
-    let columns = dict
-        .get("Columns")
-        .and_then(|obj| obj.as_integer())
-        .unwrap_or(1) as usize;
+    let columns = dict.get("Columns").and_then(|obj| obj.as_integer()).unwrap_or(1) as usize;
 
-    let colors = dict
-        .get("Colors")
-        .and_then(|obj| obj.as_integer())
-        .unwrap_or(1) as usize;
+    let colors = dict.get("Colors").and_then(|obj| obj.as_integer()).unwrap_or(1) as usize;
 
     let bits_per_component = dict
         .get("BitsPerComponent")
@@ -423,30 +400,18 @@ pub fn extract_ccitt_params_with_width(
         .or(image_width)
         .unwrap_or(1);
 
-    let rows = dict
-        .get("Rows")
-        .and_then(|obj| obj.as_integer())
-        .map(|v| v as u32);
+    let rows = dict.get("Rows").and_then(|obj| obj.as_integer()).map(|v| v as u32);
 
-    let black_is_1 = dict
-        .get("BlackIs1")
-        .and_then(|obj| obj.as_bool())
-        .unwrap_or(false);
+    let black_is_1 = dict.get("BlackIs1").and_then(|obj| obj.as_bool()).unwrap_or(false);
 
-    let end_of_line = dict
-        .get("EndOfLine")
-        .and_then(|obj| obj.as_bool())
-        .unwrap_or(false);
+    let end_of_line = dict.get("EndOfLine").and_then(|obj| obj.as_bool()).unwrap_or(false);
 
     let encoded_byte_align = dict
         .get("EncodedByteAlign")
         .and_then(|obj| obj.as_bool())
         .unwrap_or(false);
 
-    let end_of_block = dict
-        .get("EndOfBlock")
-        .and_then(|obj| obj.as_bool())
-        .unwrap_or(true);
+    let end_of_block = dict.get("EndOfBlock").and_then(|obj| obj.as_bool()).unwrap_or(true);
 
     Some(crate::decoders::CcittParams {
         k,
@@ -621,7 +586,7 @@ mod tests {
             Err(Error::InvalidObjectType { expected, found }) => {
                 assert_eq!(expected, "Stream");
                 assert_eq!(found, "Integer");
-            },
+            }
             _ => panic!("Expected InvalidObjectType error"),
         }
     }
@@ -700,11 +665,7 @@ mod tests {
         assert!(Object::Name("X".to_string()).as_integer().is_none());
         assert!(Object::Array(vec![]).as_integer().is_none());
         assert!(Object::Dictionary(HashMap::new()).as_integer().is_none());
-        assert!(
-            Object::Reference(ObjectRef::new(1, 0))
-                .as_integer()
-                .is_none()
-        );
+        assert!(Object::Reference(ObjectRef::new(1, 0)).as_integer().is_none());
     }
 
     #[test]
@@ -1018,9 +979,7 @@ mod tests {
             data: bytes::Bytes::from_static(b"Hello"),
         };
         let decrypt_fn = |data: &[u8]| -> Result<Vec<u8>> { Ok(data.to_vec()) };
-        let decoded = obj
-            .decode_stream_data_with_decryption(Some(&decrypt_fn), 1, 0)
-            .unwrap();
+        let decoded = obj.decode_stream_data_with_decryption(Some(&decrypt_fn), 1, 0).unwrap();
         assert_eq!(decoded, b"Hello");
     }
 
@@ -1032,11 +991,8 @@ mod tests {
             dict,
             data: bytes::Bytes::from_static(b"\x01\x02\x03"),
         };
-        let decrypt_fn =
-            |data: &[u8]| -> Result<Vec<u8>> { Ok(data.iter().map(|b| b ^ 0xFF).collect()) };
-        let decoded = obj
-            .decode_stream_data_with_decryption(Some(&decrypt_fn), 1, 0)
-            .unwrap();
+        let decrypt_fn = |data: &[u8]| -> Result<Vec<u8>> { Ok(data.iter().map(|b| b ^ 0xFF).collect()) };
+        let decoded = obj.decode_stream_data_with_decryption(Some(&decrypt_fn), 1, 0).unwrap();
         assert_eq!(decoded, vec![0xFE, 0xFD, 0xFC]);
     }
 
@@ -1048,8 +1004,7 @@ mod tests {
             dict,
             data: bytes::Bytes::from_static(b"Hello"),
         };
-        let decrypt_fn =
-            |_data: &[u8]| -> Result<Vec<u8>> { Err(Error::InvalidPdf("decrypt fail".into())) };
+        let decrypt_fn = |_data: &[u8]| -> Result<Vec<u8>> { Err(Error::InvalidPdf("decrypt fail".into())) };
         let result = obj.decode_stream_data_with_decryption(Some(&decrypt_fn), 1, 0);
         assert!(result.is_err());
     }
@@ -1209,7 +1164,7 @@ mod tests {
             Object::String(b) => {
                 // Å=0xC5  n=0x6E  g=0x67  s=0x73  t=0x74  r=0x72  ö=0xF6  m=0x6D ~keep
                 assert_eq!(b, vec![0xC5, 0x6E, 0x67, 0x73, 0x74, 0x72, 0xF6, 0x6D]);
-            },
+            }
             _ => panic!("expected String"),
         }
     }

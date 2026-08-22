@@ -30,9 +30,7 @@ fn build_minimal_pdf(text_content: Option<&str>) -> Vec<u8> {
 
         let off4 = pdf.len();
         let content = format!("BT /F1 12 Tf 72 720 Td ({}) Tj ET", text);
-        pdf.extend_from_slice(
-            format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes(),
-        );
+        pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes());
         pdf.extend_from_slice(content.as_bytes());
         pdf.extend_from_slice(b"\nendstream\nendobj\n");
 
@@ -43,9 +41,7 @@ fn build_minimal_pdf(text_content: Option<&str>) -> Vec<u8> {
 
         finalize_pdf(&mut pdf, &[0, off1, off2, off3, off4, off5]);
     } else {
-        pdf.extend_from_slice(
-            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
-        );
+        pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
         finalize_pdf(&mut pdf, &[0, off1, off2, off3]);
     }
 
@@ -96,9 +92,7 @@ fn build_multi_page_pdf(page_count: usize) -> Vec<u8> {
 
         let off = pdf.len();
         offsets.push(off);
-        pdf.extend_from_slice(
-            format!("{} 0 obj\n<< /Length {} >>\nstream\n", content_num, content.len()).as_bytes(),
-        );
+        pdf.extend_from_slice(format!("{} 0 obj\n<< /Length {} >>\nstream\n", content_num, content.len()).as_bytes());
         pdf.extend_from_slice(content.as_bytes());
         pdf.extend_from_slice(b"\nendstream\nendobj\n");
     }
@@ -514,8 +508,7 @@ fn test_content_stream_with_color_operators() {
         b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n",
     );
     let off4 = pdf.len();
-    let content =
-        b"BT /F1 12 Tf 1 0 0 rg 0 0 0 RG 0.5 g 0.3 G 0 1 0 1 k 1 0 1 0 K 72 720 Td (Colored) Tj ET";
+    let content = b"BT /F1 12 Tf 1 0 0 rg 0 0 0 RG 0.5 g 0.3 G 0 1 0 1 k 1 0 1 0 K 72 720 Td (Colored) Tj ET";
     pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes());
     pdf.extend_from_slice(content);
     pdf.extend_from_slice(b"\nendstream\nendobj\n");

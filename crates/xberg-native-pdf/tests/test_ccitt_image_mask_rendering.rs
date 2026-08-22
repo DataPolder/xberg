@@ -11,13 +11,7 @@ fn append_object(pdf: &mut Vec<u8>, offsets: &mut Vec<usize>, number: usize, bod
     pdf.extend_from_slice(b"\nendobj\n");
 }
 
-fn build_pdf(
-    page_width: u32,
-    page_height: u32,
-    content: &[u8],
-    image: &[u8],
-    extra_objects: &[&[u8]],
-) -> Vec<u8> {
+fn build_pdf(page_width: u32, page_height: u32, content: &[u8], image: &[u8], extra_objects: &[&[u8]]) -> Vec<u8> {
     let mut pdf = b"%PDF-1.4\n".to_vec();
     let mut offsets = Vec::new();
 
@@ -56,24 +50,14 @@ fn build_pdf(
         pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
     }
     pdf.extend_from_slice(
-        format!("trailer\n<< /Size {object_count} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n")
-            .as_bytes(),
+        format!("trailer\n<< /Size {object_count} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
     );
     pdf
 }
 
-fn build_image_mask_pdf(
-    black_is_one: bool,
-    inverted_decode: bool,
-    ascii_hex_wrapper: bool,
-    k: Option<i64>,
-) -> Vec<u8> {
+fn build_image_mask_pdf(black_is_one: bool, inverted_decode: bool, ascii_hex_wrapper: bool, k: Option<i64>) -> Vec<u8> {
     let content = b"q 8 0 0 1 0 0 cm /Im0 Do Q";
-    let decode = if inverted_decode {
-        " /Decode [1 0]"
-    } else {
-        ""
-    };
+    let decode = if inverted_decode { " /Decode [1 0]" } else { "" };
     let black = if black_is_one { " /BlackIs1 true" } else { "" };
     let k_parameter = k.map_or_else(String::new, |value| format!(" /K {value}"));
     let ccitt_stream = if k.is_none() {
@@ -157,8 +141,7 @@ fn repeated_black_run_group4(rows: u32) -> Vec<u8> {
 
 fn rendered_is_black(pdf: Vec<u8>) -> Vec<bool> {
     let doc = PdfDocument::from_bytes(pdf).expect("open generated PDF");
-    let rendered =
-        render_page(&doc, 0, &RenderOptions::with_dpi(72).as_raw()).expect("render generated PDF");
+    let rendered = render_page(&doc, 0, &RenderOptions::with_dpi(72).as_raw()).expect("render generated PDF");
     assert_eq!((rendered.width, rendered.height), (8, 1));
     rendered
         .data
@@ -180,8 +163,14 @@ fn ccitt_image_mask_renders_black_run_with_default_polarity() {
 #[test]
 fn black_is_one_and_decode_are_independent_polarity_controls() {
     let inverse = [true, true, true, false, false, true, true, true];
-    assert_eq!(rendered_is_black(build_image_mask_pdf(true, false, false, Some(-1))), inverse);
-    assert_eq!(rendered_is_black(build_image_mask_pdf(false, true, false, Some(-1))), inverse);
+    assert_eq!(
+        rendered_is_black(build_image_mask_pdf(true, false, false, Some(-1))),
+        inverse
+    );
+    assert_eq!(
+        rendered_is_black(build_image_mask_pdf(false, true, false, Some(-1))),
+        inverse
+    );
     assert_eq!(
         rendered_is_black(build_image_mask_pdf(true, true, false, Some(-1))),
         [false, false, false, true, true, false, false, false]
@@ -216,14 +205,26 @@ fn all_negative_k_values_use_group4() {
 fn indirect_decode_params_and_array_entries_are_resolved() {
     const PARAMS: &[u8] = b"<< /K -1 /Columns 8 /Rows 1 >>";
     let expected = [false, false, false, true, true, false, false, false];
-    assert_eq!(rendered_is_black(build_indirect_decode_params_pdf(false, PARAMS)), expected);
-    assert_eq!(rendered_is_black(build_indirect_decode_params_pdf(true, PARAMS)), expected);
+    assert_eq!(
+        rendered_is_black(build_indirect_decode_params_pdf(false, PARAMS)),
+        expected
+    );
+    assert_eq!(
+        rendered_is_black(build_indirect_decode_params_pdf(true, PARAMS)),
+        expected
+    );
 }
 
 #[test]
 fn malformed_indirect_decode_params_are_skipped_without_panicking() {
-    assert_eq!(rendered_is_black(build_indirect_decode_params_pdf(false, b"42")), [false; 8]);
-    assert_eq!(rendered_is_black(build_indirect_decode_params_pdf(true, b"42")), [false; 8]);
+    assert_eq!(
+        rendered_is_black(build_indirect_decode_params_pdf(false, b"42")),
+        [false; 8]
+    );
+    assert_eq!(
+        rendered_is_black(build_indirect_decode_params_pdf(true, b"42")),
+        [false; 8]
+    );
 }
 
 #[test]
@@ -248,8 +249,7 @@ fn german_sized_group4_mask_expands_and_paints_pixels() {
     image.extend_from_slice(&compressed);
     image.extend_from_slice(b"\nendstream");
     let content = format!("q 0 1 0 rg {WIDTH} 0 0 {HEIGHT} 0 0 cm /Im0 Do Q");
-    let doc = PdfDocument::from_bytes(build_pdf(WIDTH, HEIGHT, content.as_bytes(), &image, &[]))
-        .expect("open PDF");
+    let doc = PdfDocument::from_bytes(build_pdf(WIDTH, HEIGHT, content.as_bytes(), &image, &[])).expect("open PDF");
     let mut options = RenderOptions::with_dpi(72);
     options.background = Some([1.0, 0.0, 0.0, 1.0]);
     let rendered = render_page(&doc, 0, &options.as_raw()).expect("render large mask");

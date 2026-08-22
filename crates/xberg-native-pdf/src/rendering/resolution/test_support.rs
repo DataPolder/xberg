@@ -31,8 +31,6 @@ pub(crate) fn fixture_doc() -> PdfDocument {
     buf.extend_from_slice(b"xref\n0 3\n0000000000 65535 f \n");
     buf.extend_from_slice(format!("{:010} 00000 n \n", cat_off).as_bytes());
     buf.extend_from_slice(format!("{:010} 00000 n \n", pages_off).as_bytes());
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_off).as_bytes());
     PdfDocument::from_bytes(buf).expect("fixture PDF parses")
 }

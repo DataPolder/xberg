@@ -215,22 +215,22 @@ fn decode_png_predictor(data: &[u8], params: &DecodeParams) -> Result<Vec<u8>> {
         match predictor_tag {
             0 => {
                 output.extend_from_slice(encoded_pixels);
-            },
+            }
             1 => {
                 decode_png_sub(encoded_pixels, &mut output, bpp);
-            },
+            }
             2 => {
                 decode_png_up(encoded_pixels, &mut output, row_idx, pixel_bytes);
-            },
+            }
             3 => {
                 decode_png_average(encoded_pixels, &mut output, row_idx, pixel_bytes, bpp);
-            },
+            }
             4 => {
                 decode_png_paeth(encoded_pixels, &mut output, row_idx, pixel_bytes, bpp);
-            },
+            }
             _ => {
                 return Err(Error::Decode(format!("Invalid PNG predictor tag: {}", predictor_tag)));
-            },
+            }
         }
     }
 
@@ -242,11 +242,7 @@ fn decode_png_sub(encoded: &[u8], output: &mut Vec<u8>, bpp: usize) {
     let start_pos = output.len();
 
     for (i, &byte) in encoded.iter().enumerate() {
-        let left = if i >= bpp {
-            output[start_pos + i - bpp]
-        } else {
-            0
-        };
+        let left = if i >= bpp { output[start_pos + i - bpp] } else { 0 };
         output.push(byte.wrapping_add(left));
     }
 }
@@ -264,13 +260,7 @@ fn decode_png_up(encoded: &[u8], output: &mut Vec<u8>, row_idx: usize, pixel_byt
 }
 
 /// PNG Average predictor: each byte is the difference from the average of left and above.
-fn decode_png_average(
-    encoded: &[u8],
-    output: &mut Vec<u8>,
-    row_idx: usize,
-    pixel_bytes: usize,
-    bpp: usize,
-) {
+fn decode_png_average(encoded: &[u8], output: &mut Vec<u8>, row_idx: usize, pixel_bytes: usize, bpp: usize) {
     let start_pos = output.len();
 
     for (i, &byte) in encoded.iter().enumerate() {
@@ -292,13 +282,7 @@ fn decode_png_average(
 }
 
 /// PNG Paeth predictor: uses the Paeth filter function.
-fn decode_png_paeth(
-    encoded: &[u8],
-    output: &mut Vec<u8>,
-    row_idx: usize,
-    pixel_bytes: usize,
-    bpp: usize,
-) {
+fn decode_png_paeth(encoded: &[u8], output: &mut Vec<u8>, row_idx: usize, pixel_bytes: usize, bpp: usize) {
     let start_pos = output.len();
 
     for (i, &byte) in encoded.iter().enumerate() {

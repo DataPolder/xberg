@@ -312,7 +312,10 @@ impl FormFieldWidget for TextFieldWidget {
             dict.insert("Ff".to_string(), Object::Integer(self.flags.bits() as i64));
         }
 
-        dict.insert("DA".to_string(), Object::String(self.build_default_appearance().into_bytes()));
+        dict.insert(
+            "DA".to_string(),
+            Object::String(self.build_default_appearance().into_bytes()),
+        );
 
         if self.alignment != TextAlignment::Left {
             dict.insert("Q".to_string(), Object::Integer(self.alignment.q_value()));
@@ -417,24 +420,21 @@ mod tests {
 
     #[test]
     fn test_text_field_with_value() {
-        let field = TextFieldWidget::new("name", Rect::new(72.0, 700.0, 200.0, 20.0))
-            .with_value("John Doe");
+        let field = TextFieldWidget::new("name", Rect::new(72.0, 700.0, 200.0, 20.0)).with_value("John Doe");
 
         assert_eq!(field.value, Some("John Doe".to_string()));
     }
 
     #[test]
     fn test_text_field_multiline() {
-        let field =
-            TextFieldWidget::new("comments", Rect::new(72.0, 600.0, 300.0, 100.0)).multiline();
+        let field = TextFieldWidget::new("comments", Rect::new(72.0, 600.0, 300.0, 100.0)).multiline();
 
         assert!(field.flags.contains(TextFieldFlags::MULTILINE));
     }
 
     #[test]
     fn test_text_field_password() {
-        let field =
-            TextFieldWidget::new("password", Rect::new(72.0, 700.0, 200.0, 20.0)).password();
+        let field = TextFieldWidget::new("password", Rect::new(72.0, 700.0, 200.0, 20.0)).password();
 
         assert!(field.flags.contains(TextFieldFlags::PASSWORD));
     }

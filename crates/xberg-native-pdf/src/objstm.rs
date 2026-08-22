@@ -98,7 +98,10 @@ pub fn parse_object_stream_with_decryption(
         && let Some(type_name) = type_obj.as_name()
         && type_name != "ObjStm"
     {
-        return Err(Error::InvalidPdf(format!("expected /Type /ObjStm, got /Type /{}", type_name)));
+        return Err(Error::InvalidPdf(format!(
+            "expected /Type /ObjStm, got /Type /{}",
+            type_name
+        )));
     }
 
     let n = dict
@@ -116,14 +119,16 @@ pub fn parse_object_stream_with_decryption(
     }
 
     if !(0..=10_000_000).contains(&first) {
-        return Err(Error::InvalidPdf(format!("invalid object stream /First value: {}", first)));
+        return Err(Error::InvalidPdf(format!(
+            "invalid object stream /First value: {}",
+            first
+        )));
     }
 
     let n = n as usize;
     let first = first as usize;
 
-    let decoded_data =
-        stream_obj.decode_stream_data_with_decryption(decryption_fn, obj_num, gen_num)?;
+    let decoded_data = stream_obj.decode_stream_data_with_decryption(decryption_fn, obj_num, gen_num)?;
 
     if decoded_data.len() < first {
         return Err(Error::InvalidPdf(format!(
@@ -155,7 +160,7 @@ pub fn parse_object_stream_with_decryption(
         match parse_object(obj_data) {
             Ok((_remaining, obj)) => {
                 result.insert(obj_num, obj);
-            },
+            }
             Err(e) => {
                 tracing::warn!(
                     object_id = obj_num,
@@ -165,7 +170,7 @@ pub fn parse_object_stream_with_decryption(
                 );
                 // Continue parsing other objects even if one fails ~keep
                 continue;
-            },
+            }
         }
     }
 
@@ -192,11 +197,10 @@ fn parse_object_number_pairs(data: &[u8], count: usize) -> Result<Vec<(u32, usiz
     for i in 0..count {
         remaining = skip_whitespace(remaining);
 
-        let (rest, obj_num_str) =
-            read_integer_string(remaining).ok_or_else(|| Error::ParseError {
-                offset: 0,
-                reason: format!("failed to parse object number for pair {}", i),
-            })?;
+        let (rest, obj_num_str) = read_integer_string(remaining).ok_or_else(|| Error::ParseError {
+            offset: 0,
+            reason: format!("failed to parse object number for pair {}", i),
+        })?;
 
         let obj_num: u32 = obj_num_str.parse().map_err(|_| Error::ParseError {
             offset: 0,
@@ -205,11 +209,10 @@ fn parse_object_number_pairs(data: &[u8], count: usize) -> Result<Vec<(u32, usiz
 
         remaining = skip_whitespace(rest);
 
-        let (rest, offset_str) =
-            read_integer_string(remaining).ok_or_else(|| Error::ParseError {
-                offset: 0,
-                reason: format!("failed to parse offset for pair {}", i),
-            })?;
+        let (rest, offset_str) = read_integer_string(remaining).ok_or_else(|| Error::ParseError {
+            offset: 0,
+            reason: format!("failed to parse offset for pair {}", i),
+        })?;
 
         let offset: usize = offset_str.parse().map_err(|_| Error::ParseError {
             offset: 0,
@@ -281,8 +284,14 @@ mod tests {
 
     #[test]
     fn test_read_integer_string() {
-        assert_eq!(read_integer_string(b"123 rest"), Some((&b" rest"[..], "123".to_string())));
-        assert_eq!(read_integer_string(b"-456 rest"), Some((&b" rest"[..], "-456".to_string())));
+        assert_eq!(
+            read_integer_string(b"123 rest"),
+            Some((&b" rest"[..], "123".to_string()))
+        );
+        assert_eq!(
+            read_integer_string(b"-456 rest"),
+            Some((&b" rest"[..], "-456".to_string()))
+        );
         assert_eq!(read_integer_string(b"+789"), Some((&b""[..], "+789".to_string())));
         assert_eq!(read_integer_string(b"notanumber"), None);
         assert_eq!(read_integer_string(b""), None);

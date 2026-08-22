@@ -13,9 +13,7 @@ use xberg_native_pdf::writer::form_fields::TextFieldWidget;
 fn test_create_parent_child_manual() {
     let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
 
-    let parent_name = editor
-        .add_parent_field(ParentFieldConfig::new("address"))
-        .unwrap();
+    let parent_name = editor.add_parent_field(ParentFieldConfig::new("address")).unwrap();
     assert_eq!(parent_name, "address");
 
     let child1_name = editor
@@ -161,16 +159,14 @@ fn test_save_and_reload_hierarchy() {
         editor
             .add_form_field_hierarchical(
                 0,
-                TextFieldWidget::new("user.first_name", Rect::new(100.0, 700.0, 150.0, 20.0))
-                    .with_value("John"),
+                TextFieldWidget::new("user.first_name", Rect::new(100.0, 700.0, 150.0, 20.0)).with_value("John"),
             )
             .unwrap();
 
         editor
             .add_form_field_hierarchical(
                 0,
-                TextFieldWidget::new("user.last_name", Rect::new(100.0, 670.0, 150.0, 20.0))
-                    .with_value("Doe"),
+                TextFieldWidget::new("user.last_name", Rect::new(100.0, 670.0, 150.0, 20.0)).with_value("Doe"),
             )
             .unwrap();
 
@@ -237,9 +233,7 @@ fn test_add_child_nonexistent_parent() {
 fn test_duplicate_parent_name_error() {
     let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
 
-    let name1 = editor
-        .add_parent_field(ParentFieldConfig::new("parent"))
-        .unwrap();
+    let name1 = editor.add_parent_field(ParentFieldConfig::new("parent")).unwrap();
     assert_eq!(name1, "parent");
 
     let result = editor.add_parent_field(ParentFieldConfig::new("parent"));
@@ -253,9 +247,7 @@ fn test_duplicate_parent_name_error() {
 fn test_mixed_hierarchy_creation() {
     let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
 
-    editor
-        .add_parent_field(ParentFieldConfig::new("billing"))
-        .unwrap();
+    editor.add_parent_field(ParentFieldConfig::new("billing")).unwrap();
 
     let name1 = editor
         .add_form_field_hierarchical(

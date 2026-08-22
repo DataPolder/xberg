@@ -77,8 +77,8 @@ fn garbage_prefix_with_sparse_rootless_trailer() {
     let offset = bytes.len();
     bytes.extend_from_slice(&build_logical_pdf(false));
 
-    let doc = PdfDocument::from_bytes(bytes)
-        .unwrap_or_else(|e| panic!("from_bytes failed for garbage-prefixed PDF: {e}"));
+    let doc =
+        PdfDocument::from_bytes(bytes).unwrap_or_else(|e| panic!("from_bytes failed for garbage-prefixed PDF: {e}"));
 
     let (major, minor) = doc.version();
     assert_eq!((major, minor), (1, 4), "header parsed from offset {offset}");
@@ -100,8 +100,7 @@ fn garbage_prefix_with_sparse_rootless_trailer() {
 /// `/Type /Catalog`, which is what Poppler / PDFium do.
 #[test]
 fn catalog_fallback_when_trailer_omits_root() {
-    let doc = PdfDocument::from_bytes(build_logical_pdf(false))
-        .expect("from_bytes failed for /Root-less trailer PDF");
+    let doc = PdfDocument::from_bytes(build_logical_pdf(false)).expect("from_bytes failed for /Root-less trailer PDF");
 
     let pages = doc
         .page_count()
@@ -143,17 +142,12 @@ fn build_two_trailer_linearized() -> Vec<u8> {
     pdf.extend_from_slice(format!("{off2:010} 00000 n \n").as_bytes());
     pdf.extend_from_slice(format!("{off3:010} 00000 n \n").as_bytes());
 
-    pdf.extend_from_slice(
-        format!("trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n").as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n").as_bytes());
 
     let xref2_off = pdf.len();
     pdf.extend_from_slice(b"xref\n0 1\n0000000000 65535 f \n");
     pdf.extend_from_slice(
-        format!(
-            "trailer\n<< /Size 4 /ID[<AAAAAAAA><BBBBBBBB>] >>\nstartxref\n{xref2_off}\n%%EOF\n"
-        )
-        .as_bytes(),
+        format!("trailer\n<< /Size 4 /ID[<AAAAAAAA><BBBBBBBB>] >>\nstartxref\n{xref2_off}\n%%EOF\n").as_bytes(),
     );
     pdf
 }
@@ -171,12 +165,10 @@ fn linearized_two_trailers_keeps_root_bearing_trailer() {
     let mut bytes = html_redirect_garbage();
     bytes.extend_from_slice(&build_two_trailer_linearized());
 
-    let doc = PdfDocument::from_bytes(bytes)
-        .unwrap_or_else(|e| panic!("two-trailer Linearized PDF must load: {e}"));
+    let doc = PdfDocument::from_bytes(bytes).unwrap_or_else(|e| panic!("two-trailer Linearized PDF must load: {e}"));
     assert_eq!(
-        doc.page_count().unwrap_or_else(|e| panic!(
-            "page_count failed — later /Root-less trailer wrongly won: {e}"
-        )),
+        doc.page_count()
+            .unwrap_or_else(|e| panic!("page_count failed — later /Root-less trailer wrongly won: {e}")),
         1
     );
 

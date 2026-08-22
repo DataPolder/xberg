@@ -9,11 +9,7 @@ use xberg_native_pdf::writer::{DocumentBuilder, DocumentMetadata, PageSize};
 /// Helper to create a simple test PDF
 fn create_test_pdf() -> Vec<u8> {
     let mut builder = DocumentBuilder::new();
-    builder = builder.metadata(
-        DocumentMetadata::new()
-            .title("Test Document")
-            .author("Test Author"),
-    );
+    builder = builder.metadata(DocumentMetadata::new().title("Test Document").author("Test Author"));
 
     {
         let page1 = builder.page(PageSize::Letter);
@@ -178,8 +174,7 @@ mod cropping_tests {
 
         let mut pdf = Pdf::open(&path).unwrap();
 
-        pdf.set_page_crop_box(0, [72.0, 72.0, 540.0, 720.0])
-            .unwrap();
+        pdf.set_page_crop_box(0, [72.0, 72.0, 540.0, 720.0]).unwrap();
 
         let crop_box = pdf.page_crop_box(0).unwrap();
         assert!(crop_box.is_some());
@@ -240,8 +235,7 @@ mod cropping_tests {
 
         {
             let mut pdf = Pdf::open(&input_path).unwrap();
-            pdf.set_page_crop_box(0, [72.0, 72.0, 540.0, 720.0])
-                .unwrap();
+            pdf.set_page_crop_box(0, [72.0, 72.0, 540.0, 720.0]).unwrap();
             pdf.save(&output_path).unwrap();
         }
 
@@ -292,9 +286,7 @@ mod document_editor_tests {
         let crop_box = editor.get_page_crop_box(0).unwrap();
         assert!(crop_box.is_none());
 
-        editor
-            .set_page_crop_box(0, [72.0, 72.0, 540.0, 720.0])
-            .unwrap();
+        editor.set_page_crop_box(0, [72.0, 72.0, 540.0, 720.0]).unwrap();
         let crop_box = editor.get_page_crop_box(0).unwrap();
         assert!(crop_box.is_some());
     }
@@ -307,9 +299,7 @@ mod document_editor_tests {
 
         let mut editor = DocumentEditor::open(&path).unwrap();
 
-        editor
-            .erase_region(0, [100.0, 100.0, 200.0, 200.0])
-            .unwrap();
+        editor.erase_region(0, [100.0, 100.0, 200.0, 200.0]).unwrap();
         assert!(editor.is_modified());
 
         editor

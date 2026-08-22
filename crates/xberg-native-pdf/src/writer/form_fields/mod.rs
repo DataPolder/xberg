@@ -39,9 +39,7 @@ mod text_field;
 
 pub use checkbox::CheckboxWidget;
 pub use choice_fields::{ChoiceOption, ComboBoxWidget, ListBoxWidget};
-pub use field_flags::{
-    ButtonFieldFlags, ChoiceFieldFlags, FieldFlags, TextAlignment, TextFieldFlags,
-};
+pub use field_flags::{ButtonFieldFlags, ChoiceFieldFlags, FieldFlags, TextAlignment, TextFieldFlags};
 pub use form_appearance::FormAppearanceGenerator;
 pub use push_button::{FormAction, PushButtonWidget, SubmitFormFlags};
 pub use radio_button::{RadioButtonGroup, RadioButtonWidget};

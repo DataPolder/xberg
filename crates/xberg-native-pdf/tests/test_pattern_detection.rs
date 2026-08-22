@@ -34,19 +34,28 @@ fn string_to_chars(s: &str) -> Vec<CharacterInfo> {
 #[test]
 fn test_email_pattern_detection() {
     let chars = string_to_chars("user@example.com");
-    assert!(PatternDetector::has_email_pattern(&chars), "Should detect email pattern");
+    assert!(
+        PatternDetector::has_email_pattern(&chars),
+        "Should detect email pattern"
+    );
 }
 
 #[test]
 fn test_email_pattern_with_subdomain() {
     let chars = string_to_chars("user@mail.example.com");
-    assert!(PatternDetector::has_email_pattern(&chars), "Should detect email with subdomain");
+    assert!(
+        PatternDetector::has_email_pattern(&chars),
+        "Should detect email with subdomain"
+    );
 }
 
 #[test]
 fn test_email_pattern_with_plus() {
     let chars = string_to_chars("user+tag@example.com");
-    assert!(PatternDetector::has_email_pattern(&chars), "Should detect email with plus sign");
+    assert!(
+        PatternDetector::has_email_pattern(&chars),
+        "Should detect email with plus sign"
+    );
 }
 
 #[test]
@@ -118,7 +127,10 @@ fn test_boundary_skip_in_email() {
     let detector = WordBoundaryDetector::new();
     let boundaries = detector.detect_word_boundaries(&chars, &context);
 
-    assert!(boundaries.is_empty(), "No boundaries should be created within protected email");
+    assert!(
+        boundaries.is_empty(),
+        "No boundaries should be created within protected email"
+    );
 }
 
 #[test]
@@ -133,7 +145,10 @@ fn test_boundary_skip_in_url() {
     let detector = WordBoundaryDetector::new();
     let boundaries = detector.detect_word_boundaries(&chars, &context);
 
-    assert!(boundaries.is_empty(), "No boundaries should be created within protected URL");
+    assert!(
+        boundaries.is_empty(),
+        "No boundaries should be created within protected URL"
+    );
 }
 
 #[test]
@@ -159,7 +174,11 @@ fn test_multiple_patterns_in_text() {
     let url_end = url_start + "http://example.com".len();
 
     for i in email_start..email_end {
-        assert!(chars[i].protected_from_split, "Email character {} should be protected", i);
+        assert!(
+            chars[i].protected_from_split,
+            "Email character {} should be protected",
+            i
+        );
     }
 
     for i in url_start..url_end {
@@ -244,7 +263,11 @@ fn test_mixed_content_partial_protection() {
     let email_end = email_start + "user@example.com".len();
 
     for i in email_start..email_end {
-        assert!(chars[i].protected_from_split, "Email character {} should be protected", i);
+        assert!(
+            chars[i].protected_from_split,
+            "Email character {} should be protected",
+            i
+        );
     }
 
     for i in 0..email_start {

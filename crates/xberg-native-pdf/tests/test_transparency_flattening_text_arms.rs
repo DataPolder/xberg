@@ -109,13 +109,7 @@ fn min_r_in_region(rgba: &[u8], x_min: u32, x_max: u32, y_min: u32, y_max: u32) 
 /// region. Painted = at least one channel below 240. If no pixel is
 /// painted, returns (255, 255, 255, 0) — caller decides what that
 /// means for the assertion.
-fn mean_painted_rgb(
-    rgba: &[u8],
-    x_min: u32,
-    x_max: u32,
-    y_min: u32,
-    y_max: u32,
-) -> (f32, f32, f32, u32) {
+fn mean_painted_rgb(rgba: &[u8], x_min: u32, x_max: u32, y_min: u32, y_max: u32) -> (f32, f32, f32, u32) {
     let mut r_sum = 0u32;
     let mut g_sum = 0u32;
     let mut b_sum = 0u32;
@@ -214,15 +208,15 @@ fn qa_round3_smask_modulates_apostrophe_text() {
     // ' (apostrophe / NextLineShowText) — moves to next line and shows.
     // Requires a Tw / Tc set explicitly per PDF spec. Provide a leading
     // initial Tj so the apostrophe-line is the second visible band. ~keep
-    let rgba =
-        render_rgba_200(fixture_smask_text("BT /F1 48 Tf 12 TL 30 80 Td (TOP) Tj (BTM) ' ET"));
+    let rgba = render_rgba_200(fixture_smask_text("BT /F1 48 Tf 12 TL 30 80 Td (TOP) Tj (BTM) ' ET"));
     assert_smask_modulates(&rgba, "'");
 }
 
 #[test]
 fn qa_round3_smask_modulates_quote_text() {
-    let rgba =
-        render_rgba_200(fixture_smask_text("BT /F1 48 Tf 12 TL 30 80 Td (TOP) Tj 0 0 (BTM) \" ET"));
+    let rgba = render_rgba_200(fixture_smask_text(
+        "BT /F1 48 Tf 12 TL 30 80 Td (TOP) Tj 0 0 (BTM) \" ET",
+    ));
     assert_smask_modulates(&rgba, "\"");
 }
 
@@ -280,17 +274,18 @@ fn qa_round3_overprint_modulates_tj_text() {
 
 #[test]
 fn qa_round3_overprint_modulates_tj_array_text() {
-    let rgba_op =
-        render_rgba_200(fixture_overprint_text("BT /F1 48 Tf 30 80 Td [(HE) -50 (LLO)] TJ ET"));
-    let rgba_no =
-        render_rgba_200(fixture_no_overprint_text("BT /F1 48 Tf 30 80 Td [(HE) -50 (LLO)] TJ ET"));
+    let rgba_op = render_rgba_200(fixture_overprint_text("BT /F1 48 Tf 30 80 Td [(HE) -50 (LLO)] TJ ET"));
+    let rgba_no = render_rgba_200(fixture_no_overprint_text(
+        "BT /F1 48 Tf 30 80 Td [(HE) -50 (LLO)] TJ ET",
+    ));
     assert_overprint_modulates(&rgba_op, &rgba_no, "TJ");
 }
 
 #[test]
 fn qa_round3_overprint_modulates_apostrophe_text() {
-    let rgba_op =
-        render_rgba_200(fixture_overprint_text("BT /F1 48 Tf 12 TL 30 80 Td (TOP) Tj (BTM) ' ET"));
+    let rgba_op = render_rgba_200(fixture_overprint_text(
+        "BT /F1 48 Tf 12 TL 30 80 Td (TOP) Tj (BTM) ' ET",
+    ));
     let rgba_no = render_rgba_200(fixture_no_overprint_text(
         "BT /F1 48 Tf 12 TL 30 80 Td (TOP) Tj (BTM) ' ET",
     ));

@@ -49,10 +49,7 @@ pub fn page_reading_order(doc: &PdfDocument, page_index: usize) -> Result<Vec<Or
 /// Variant of [`page_reading_order`] that drops spans flagged as
 /// `/Artifact` (running headers, footers, page numbers, watermarks;
 /// ISO 32000-1:2008 §14.8.2.2.1).
-pub fn page_reading_order_no_artifacts(
-    doc: &PdfDocument,
-    page_index: usize,
-) -> Result<Vec<OrderedTextSpan>> {
+pub fn page_reading_order_no_artifacts(doc: &PdfDocument, page_index: usize) -> Result<Vec<OrderedTextSpan>> {
     page_reading_order_inner(doc, page_index, false)
 }
 
@@ -92,8 +89,7 @@ fn page_reading_order_inner(
     if doc.get_page_rotation(page_index).unwrap_or(0) == 0 {
         // A dominant rotation (a landscape table typeset on a portrait
         // page) reorders the WHOLE page in the rotated reading frame. ~keep
-        if let Some(rot) = crate::utils::dominant_rotation(&spans).and_then(reading_frame_quadrant)
-        {
+        if let Some(rot) = crate::utils::dominant_rotation(&spans).and_then(reading_frame_quadrant) {
             tracing::debug!(
                 page_index,
                 rotation_degrees = rot,
@@ -107,8 +103,7 @@ fn page_reading_order_inner(
         // them out, order each rotation group in its upright frame, and
         // append after the horizontal flow. ~keep
         if spans.iter().any(|s| s.rotation_degrees != 0.0) {
-            let (rotated, upright): (Vec<_>, Vec<_>) =
-                spans.into_iter().partition(|s| s.rotation_degrees != 0.0);
+            let (rotated, upright): (Vec<_>, Vec<_>) = spans.into_iter().partition(|s| s.rotation_degrees != 0.0);
             tracing::debug!(
                 page_index,
                 count = rotated.len(),
@@ -159,9 +154,7 @@ fn order_in_rotated_frame(
     pipeline: &TextPipeline,
     rot: i32,
 ) -> Result<Vec<OrderedTextSpan>> {
-    let (llx, lly, urx, ury) = doc
-        .get_page_media_box(page_index)
-        .unwrap_or((0.0, 0.0, 612.0, 792.0));
+    let (llx, lly, urx, ury) = doc.get_page_media_box(page_index).unwrap_or((0.0, 0.0, 612.0, 792.0));
     let (w, h) = (urx - llx, ury - lly);
 
     // Rotated spans store TEXT-LOCAL extents (origin + advance-along-the-
@@ -238,14 +231,11 @@ fn page_article_bead_rects(
         return None;
     }
 
-    let body: Vec<&crate::layout::TextSpan> =
-        spans.iter().filter(|s| !s.text.trim().is_empty()).collect();
+    let body: Vec<&crate::layout::TextSpan> = spans.iter().filter(|s| !s.text.trim().is_empty()).collect();
     if body.is_empty() {
         return None;
     }
-    let inside = |r: &Rect, x: f32, y: f32| {
-        x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height
-    };
+    let inside = |r: &Rect, x: f32, y: f32| x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height;
     let covered = body
         .iter()
         .filter(|s| {
@@ -280,10 +270,7 @@ fn page_article_bead_rects(
         }
         crate::utils::safe_float_cmp(a.x, b.x)
     });
-    let same_order = beads
-        .iter()
-        .zip(geom.iter())
-        .all(|(a, b)| a.x == b.x && a.y == b.y);
+    let same_order = beads.iter().zip(geom.iter()).all(|(a, b)| a.x == b.x && a.y == b.y);
     if same_order {
         return None;
     }
@@ -297,16 +284,12 @@ fn page_article_bead_rects(
 /// Best-effort: any errors reading structure metadata produce a context
 /// without MCID order, which means the pipeline takes the geometric path.
 pub(crate) fn build_context(doc: &PdfDocument, page_index: usize) -> ReadingOrderContext {
-    let media_box = doc
-        .get_page_media_box(page_index)
-        .unwrap_or((0.0, 0.0, 612.0, 792.0));
+    let media_box = doc.get_page_media_box(page_index).unwrap_or((0.0, 0.0, 612.0, 792.0));
     // MediaBox is `(llx, lly, urx, ury)` per PDF 32000-1:2008 §7.7.3.3.
     // `Rect::new` expects `(x, y, width, height)`, so use `from_points`. ~keep
     let bbox = Rect::from_points(media_box.0, media_box.1, media_box.2, media_box.3);
 
-    let mut ctx = ReadingOrderContext::new()
-        .with_page(page_index as u32)
-        .with_bbox(bbox);
+    let mut ctx = ReadingOrderContext::new().with_page(page_index as u32).with_bbox(bbox);
 
     // Use logical structure order only when the tree is trustworthy
     // (§14.8.2.3.1 / §14.7.1): the document is /Marked or the catalog references

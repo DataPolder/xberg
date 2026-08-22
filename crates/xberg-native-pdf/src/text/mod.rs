@@ -19,10 +19,6 @@ pub use complex_script_detector::{ComplexScript, detect_complex_script, is_compl
 pub use document_classifier::{DocumentClassifier, DocumentStats};
 pub use hyphenation::HyphenationHandler;
 pub use justification::{JustificationDetector, JustificationMode};
-pub use rtl_detector::{
-    RTLScript, detect_rtl_script, is_arabic_diacritic, is_hebrew_diacritic, is_rtl_text,
-};
+pub use rtl_detector::{RTLScript, detect_rtl_script, is_arabic_diacritic, is_hebrew_diacritic, is_rtl_text};
 pub use script_detector::{CJKScript, DocumentLanguage};
-pub use word_boundary::{
-    BoundaryContext, CharacterInfo, DocumentScript, WordBoundaryDetector, detect_word_boundaries,
-};
+pub use word_boundary::{BoundaryContext, CharacterInfo, DocumentScript, WordBoundaryDetector, detect_word_boundaries};

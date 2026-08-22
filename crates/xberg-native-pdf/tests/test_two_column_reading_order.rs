@@ -49,7 +49,11 @@ fn two_column_pdf() -> Vec<u8> {
         &mut offsets,
         &format!("<< /Length {} >>\nstream\n{stream}\nendstream", stream.len() + 1),
     );
-    push(&mut out, &mut offsets, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
 
     let xref_offset = out.len();
     out.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
@@ -77,12 +81,8 @@ fn two_column_reading_order_respects_columns() {
     let doc = PdfDocument::open(tmp.path()).expect("open");
     let text = doc.extract_text(0).expect("extract");
 
-    let left_idx: Vec<_> = (1..=20)
-        .filter_map(|i| text.find(&format!("Left{i:02}")))
-        .collect();
-    let right_idx: Vec<_> = (1..=20)
-        .filter_map(|i| text.find(&format!("Right{i:02}")))
-        .collect();
+    let left_idx: Vec<_> = (1..=20).filter_map(|i| text.find(&format!("Left{i:02}"))).collect();
+    let right_idx: Vec<_> = (1..=20).filter_map(|i| text.find(&format!("Right{i:02}"))).collect();
 
     assert_eq!(
         left_idx.len(),

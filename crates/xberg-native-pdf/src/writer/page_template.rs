@@ -526,9 +526,7 @@ mod tests {
 
     #[test]
     fn test_artifact_creation() {
-        let hf = Artifact::new()
-            .with_left("Document Title")
-            .with_right("{page}");
+        let hf = Artifact::new().with_left("Document Title").with_right("{page}");
 
         assert!(hf.left.is_some());
         assert!(hf.center.is_none());
@@ -548,9 +546,7 @@ mod tests {
 
     #[test]
     fn test_skip_first_page() {
-        let template = PageTemplate::new()
-            .header(Artifact::center("Header"))
-            .skip_first_page();
+        let template = PageTemplate::new().header(Artifact::center("Header")).skip_first_page();
 
         assert!(template.get_header(1).is_none());
         assert!(template.get_header(2).is_some());

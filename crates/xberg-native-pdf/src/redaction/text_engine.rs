@@ -279,38 +279,38 @@ pub fn redact_text_stream(
             Operator::SaveState | Operator::RestoreState | Operator::Cm { .. } => {
                 super::classify::apply_ctm(&mut stack, op);
                 out.push(op.clone());
-            },
+            }
             Operator::BeginText => {
                 ts.tm = Matrix::identity();
                 ts.tlm = Matrix::identity();
                 out.push(op.clone());
-            },
+            }
             Operator::EndText => out.push(op.clone()),
             Operator::Tf { font, size } => {
                 ts.font = font.clone();
                 ts.tfs = *size;
                 out.push(op.clone());
-            },
+            }
             Operator::Tc { char_space } => {
                 ts.tc = *char_space;
                 out.push(op.clone());
-            },
+            }
             Operator::Tw { word_space } => {
                 ts.tw = *word_space;
                 out.push(op.clone());
-            },
+            }
             Operator::Tz { scale } => {
                 ts.th = *scale / 100.0;
                 out.push(op.clone());
-            },
+            }
             Operator::TL { leading } => {
                 ts.leading = *leading;
                 out.push(op.clone());
-            },
+            }
             Operator::Ts { rise } => {
                 ts.trise = *rise;
                 out.push(op.clone());
-            },
+            }
             Operator::Td { tx, ty } => {
                 ts.tlm = Matrix {
                     a: 1.0,
@@ -323,7 +323,7 @@ pub fn redact_text_stream(
                 .multiply(&ts.tlm);
                 ts.tm = ts.tlm;
                 out.push(op.clone());
-            },
+            }
             Operator::TD { tx, ty } => {
                 ts.leading = -*ty;
                 ts.tlm = Matrix {
@@ -337,7 +337,7 @@ pub fn redact_text_stream(
                 .multiply(&ts.tlm);
                 ts.tm = ts.tlm;
                 out.push(op.clone());
-            },
+            }
             Operator::Tm { a, b, c, d, e, f } => {
                 let m = Matrix {
                     a: *a,
@@ -350,7 +350,7 @@ pub fn redact_text_stream(
                 ts.tm = m;
                 ts.tlm = m;
                 out.push(op.clone());
-            },
+            }
             Operator::TStar => {
                 ts.tlm = Matrix {
                     a: 1.0,
@@ -363,7 +363,7 @@ pub fn redact_text_stream(
                 .multiply(&ts.tlm);
                 ts.tm = ts.tlm;
                 out.push(op.clone());
-            },
+            }
             Operator::Tj { text } => {
                 if refuse_unsupported(fonts, &ts.font, regions, &mut result, &mut out, op) {
                     continue;
@@ -372,7 +372,7 @@ pub fn redact_text_stream(
                 let res = show_string(text, &mut ts, &ctm, fonts, regions, min_padding);
                 account(&mut result, text.len(), &res);
                 emit_runs(&mut out, &res);
-            },
+            }
             Operator::Quote { text } => {
                 if refuse_unsupported(fonts, &ts.font, regions, &mut result, &mut out, op) {
                     continue;
@@ -392,7 +392,7 @@ pub fn redact_text_stream(
                 let res = show_string(text, &mut ts, &ctm, fonts, regions, min_padding);
                 account(&mut result, text.len(), &res);
                 emit_runs(&mut out, &res);
-            },
+            }
             Operator::DoubleQuote {
                 word_space,
                 char_space,
@@ -417,7 +417,7 @@ pub fn redact_text_stream(
                 let res = show_string(text, &mut ts, &ctm, fonts, regions, min_padding);
                 account(&mut result, text.len(), &res);
                 emit_runs(&mut out, &res);
-            },
+            }
             Operator::TJ { array } => {
                 if refuse_unsupported(fonts, &ts.font, regions, &mut result, &mut out, op) {
                     continue;
@@ -444,7 +444,7 @@ pub fn redact_text_stream(
                             }
                             survived_runs.glyphs_removed += r.glyphs_removed;
                             survived_runs.runs.extend(r.runs);
-                        },
+                        }
                         TextElement::Offset(off) => {
                             let dx = (-*off / 1000.0) * ts.tfs * ts.th;
                             ts.tm = Matrix {
@@ -456,7 +456,7 @@ pub fn redact_text_stream(
                                 f: 0.0,
                             }
                             .multiply(&ts.tm);
-                        },
+                        }
                     }
                 }
                 account(&mut result, tj_orig, &survived_runs);
@@ -468,7 +468,7 @@ pub fn redact_text_stream(
                     // was removed). ~keep
                     out.push(op.clone());
                 }
-            },
+            }
             other => out.push(other.clone()),
         }
     }
@@ -498,9 +498,7 @@ fn refuse_unsupported(
     // bytes do not align to the font's code length (a malformed multi-byte
     // string we must not risk mis-decoding). Either way emit the show
     // unchanged and flag the hard refusal. ~keep
-    let aligned = show_strings(op)
-        .iter()
-        .all(|s| fonts.redaction_safe_show(font, s));
+    let aligned = show_strings(op).iter().all(|s| fonts.redaction_safe_show(font, s));
     if !fonts.can_prune(font) || !aligned {
         result.unsupported_font = true;
         out.push(op.clone());
@@ -617,9 +615,7 @@ mod tests {
                 e: tm[4],
                 f: tm[5],
             },
-            Operator::Tj {
-                text: text.to_vec(),
-            },
+            Operator::Tj { text: text.to_vec() },
             Operator::EndText,
         ]
     }
@@ -642,11 +638,7 @@ mod tests {
         assert_eq!(out.glyphs_removed, 6);
         // No Tj survives, no compensating offset/TJ emitted. ~keep
         assert!(tj_text(&out.operators).is_empty());
-        assert!(
-            !out.operators
-                .iter()
-                .any(|o| matches!(o, Operator::TJ { .. }))
-        );
+        assert!(!out.operators.iter().any(|o| matches!(o, Operator::TJ { .. })));
         assert!(matches!(out.operators.first(), Some(Operator::BeginText)));
         assert!(matches!(out.operators.last(), Some(Operator::EndText)));
     }
@@ -778,11 +770,7 @@ mod tests {
         assert_eq!(out.glyphs_removed, 4);
         // No TJ survives → no residual offset array that could encode
         // removed-glyph advances. ~keep
-        assert!(
-            !out.operators
-                .iter()
-                .any(|o| matches!(o, Operator::TJ { .. }))
-        );
+        assert!(!out.operators.iter().any(|o| matches!(o, Operator::TJ { .. })));
         assert!(tj_text(&out.operators).is_empty());
     }
 
@@ -839,8 +827,7 @@ mod tests {
     fn composite_font_without_regions_is_not_a_refusal() {
         // No regions ⇒ nothing to redact ⇒ no refusal even for Type0. ~keep
         let ops = doc([1.0, 0.0, 0.0, 1.0, 100.0, 100.0], b"hello");
-        let out =
-            redact_text_stream(&ops, &RegionSet::new(0), DEFAULT_EDGE_PADDING, &CompositeStub);
+        let out = redact_text_stream(&ops, &RegionSet::new(0), DEFAULT_EDGE_PADDING, &CompositeStub);
         assert!(!out.unsupported_font);
         assert_eq!(tj_text(&out.operators), vec![b"hello".to_vec()]);
     }
@@ -885,9 +872,7 @@ mod tests {
         // Adversarial: stray Q, Tj before BT, no font set. ~keep
         let ops = vec![
             Operator::RestoreState,
-            Operator::Tj {
-                text: b"x".to_vec(),
-            },
+            Operator::Tj { text: b"x".to_vec() },
             Operator::RestoreState,
         ];
         let r = regions(0.0, 0.0, 1000.0, 1000.0);

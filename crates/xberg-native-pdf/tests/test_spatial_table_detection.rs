@@ -1,7 +1,5 @@
 use xberg_native_pdf::document::PdfDocument;
-use xberg_native_pdf::structure::spatial_table_detector::{
-    SpatialTableDetector, TableDetectionConfig,
-};
+use xberg_native_pdf::structure::spatial_table_detector::{SpatialTableDetector, TableDetectionConfig};
 
 #[test]
 fn test_table_detection_on_fixtures() {
@@ -32,6 +30,11 @@ fn test_table_detection_deterministic() {
         let tables1 = detector.detect_tables(&spans1);
         let tables2 = detector.detect_tables(&spans2);
 
-        assert_eq!(tables1.len(), tables2.len(), "Page {}: table count should be deterministic", p);
+        assert_eq!(
+            tables1.len(),
+            tables2.len(),
+            "Page {}: table count should be deterministic",
+            p
+        );
     }
 }

@@ -288,11 +288,7 @@ impl PathExtractor {
     }
 
     /// Resolve an XObject name to its ObjectRef, caching the XObject dict on first call.
-    pub(crate) fn resolve_xobject_ref<F>(
-        &mut self,
-        name: &str,
-        mut load_object: F,
-    ) -> Option<crate::object::ObjectRef>
+    pub(crate) fn resolve_xobject_ref<F>(&mut self, name: &str, mut load_object: F) -> Option<crate::object::ObjectRef>
     where
         F: FnMut(crate::object::ObjectRef) -> crate::error::Result<crate::object::Object>,
     {
@@ -457,8 +453,7 @@ impl PathExtractor {
     /// Begins a new subpath at the specified point.
     pub fn move_to(&mut self, x: f32, y: f32) {
         let point = self.transform_point(x, y);
-        self.current_operations
-            .push(PathOperation::MoveTo(point.x, point.y));
+        self.current_operations.push(PathOperation::MoveTo(point.x, point.y));
         self.current_point = Some(point);
         self.subpath_start = Some(point);
     }
@@ -468,8 +463,7 @@ impl PathExtractor {
     /// Adds a line segment from the current point to the specified point.
     pub fn line_to(&mut self, x: f32, y: f32) {
         let point = self.transform_point(x, y);
-        self.current_operations
-            .push(PathOperation::LineTo(point.x, point.y));
+        self.current_operations.push(PathOperation::LineTo(point.x, point.y));
         self.current_point = Some(point);
     }
 
@@ -652,7 +646,7 @@ impl PathExtractor {
                     min_y = min_y.min(*y);
                     max_x = max_x.max(*x);
                     max_y = max_y.max(*y);
-                },
+                }
                 PathOperation::CurveTo(x1, y1, x2, y2, x3, y3) => {
                     for (x, y) in [(*x1, *y1), (*x2, *y2), (*x3, *y3)] {
                         min_x = min_x.min(x);
@@ -660,14 +654,14 @@ impl PathExtractor {
                         max_x = max_x.max(x);
                         max_y = max_y.max(y);
                     }
-                },
+                }
                 PathOperation::Rectangle(x, y, w, h) => {
                     min_x = min_x.min(*x);
                     min_y = min_y.min(*y);
                     max_x = max_x.max(*x + *w);
                     max_y = max_y.max(*y + *h);
-                },
-                PathOperation::ClosePath => {},
+                }
+                PathOperation::ClosePath => {}
             }
         }
 
@@ -776,7 +770,10 @@ mod tests {
         let paths = extractor.finish();
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].operations.len(), 2);
-        assert!(matches!(paths[0].operations[1], PathOperation::CurveTo(_, _, _, _, _, _)));
+        assert!(matches!(
+            paths[0].operations[1],
+            PathOperation::CurveTo(_, _, _, _, _, _)
+        ));
     }
 
     #[test]

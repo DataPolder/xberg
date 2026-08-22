@@ -134,11 +134,9 @@ impl From<&FormFieldValue> for Object {
                 } else {
                     Object::Name("Off".to_string())
                 }
-            },
+            }
             FormFieldValue::Choice(s) => Object::text_string(s),
-            FormFieldValue::MultiChoice(v) => {
-                Object::Array(v.iter().map(Object::text_string).collect())
-            },
+            FormFieldValue::MultiChoice(v) => Object::Array(v.iter().map(Object::text_string).collect()),
             FormFieldValue::None => Object::Null,
         }
     }
@@ -488,11 +486,7 @@ impl FormFieldWrapper {
     }
 
     /// Create a wrapper for a child field with parent reference.
-    pub fn from_widget_with_parent<W: FormFieldWidget>(
-        widget: &W,
-        page_index: usize,
-        parent_name: &str,
-    ) -> Self {
+    pub fn from_widget_with_parent<W: FormFieldWidget>(widget: &W, page_index: usize, parent_name: &str) -> Self {
         let mut wrapper = Self::from_widget(widget, page_index);
         wrapper.parent_name = Some(parent_name.to_string());
         wrapper.name = format!("{}.{}", parent_name, wrapper.partial_name);
@@ -648,9 +642,7 @@ impl FormFieldWrapper {
             if let Some(ref ft) = self.field_type {
                 let ft_name = match ft {
                     FormFieldType::Text => "Tx",
-                    FormFieldType::Checkbox
-                    | FormFieldType::RadioGroup
-                    | FormFieldType::PushButton => "Btn",
+                    FormFieldType::Checkbox | FormFieldType::RadioGroup | FormFieldType::PushButton => "Btn",
                     FormFieldType::ComboBox | FormFieldType::ListBox => "Ch",
                 };
                 dict.insert("FT".to_string(), Object::Name(ft_name.to_string()));
@@ -715,9 +707,7 @@ impl FormFieldWrapper {
         if let Some(ref ft) = self.field_type {
             let ft_name = match ft {
                 FormFieldType::Text => "Tx",
-                FormFieldType::Checkbox | FormFieldType::RadioGroup | FormFieldType::PushButton => {
-                    "Btn"
-                },
+                FormFieldType::Checkbox | FormFieldType::RadioGroup | FormFieldType::PushButton => "Btn",
                 FormFieldType::ComboBox | FormFieldType::ListBox => "Ch",
             };
             dict.insert("FT".to_string(), Object::Name(ft_name.to_string()));
@@ -731,11 +721,7 @@ impl FormFieldWrapper {
         }
 
         if !self.children_refs.is_empty() {
-            let kids: Vec<Object> = self
-                .children_refs
-                .iter()
-                .map(|r| Object::Reference(*r))
-                .collect();
+            let kids: Vec<Object> = self.children_refs.iter().map(|r| Object::Reference(*r)).collect();
             dict.insert("Kids".to_string(), Object::Array(kids));
         }
 
@@ -778,11 +764,7 @@ impl FormFieldWrapper {
     /// Set field as read-only.
     pub fn set_readonly(&mut self, readonly: bool) {
         let current = self.flags().unwrap_or(0);
-        let new_flags = if readonly {
-            current | 0x01
-        } else {
-            current & !0x01
-        };
+        let new_flags = if readonly { current | 0x01 } else { current & !0x01 };
         self.set_flags(new_flags);
     }
 
@@ -794,11 +776,7 @@ impl FormFieldWrapper {
     /// Set field as required.
     pub fn set_required(&mut self, required: bool) {
         let current = self.flags().unwrap_or(0);
-        let new_flags = if required {
-            current | 0x02
-        } else {
-            current & !0x02
-        };
+        let new_flags = if required { current | 0x02 } else { current & !0x02 };
         self.set_flags(new_flags);
     }
 
@@ -810,11 +788,7 @@ impl FormFieldWrapper {
     /// Set field as no-export.
     pub fn set_no_export(&mut self, no_export: bool) {
         let current = self.flags().unwrap_or(0);
-        let new_flags = if no_export {
-            current | 0x04
-        } else {
-            current & !0x04
-        };
+        let new_flags = if no_export { current | 0x04 } else { current & !0x04 };
         self.set_flags(new_flags);
     }
 
@@ -862,14 +836,11 @@ impl FormFieldWrapper {
         if self.modified_default_value.is_some() {
             return self.modified_default_value.as_ref();
         }
-        self.original
-            .as_ref()
-            .and_then(|f| f.default_value.as_ref())
-            .map(|v| {
-                // Can't return reference to temporary, use modified field if available ~keep
-                &FormFieldValue::None
-                // ~keep
-            })
+        self.original.as_ref().and_then(|f| f.default_value.as_ref()).map(|v| {
+            // Can't return reference to temporary, use modified field if available ~keep
+            &FormFieldValue::None
+            // ~keep
+        })
     }
 
     /// Set the maximum text length (for text fields only).
@@ -918,9 +889,7 @@ impl FormFieldWrapper {
         if let Some(ref da) = self.modified_default_appearance {
             return Some(da);
         }
-        self.original
-            .as_ref()
-            .and_then(|f| f.default_appearance.as_deref())
+        self.original.as_ref().and_then(|f| f.default_appearance.as_deref())
     }
 
     /// Set the background color (RGB, values 0.0-1.0).
@@ -1014,12 +983,9 @@ mod tests {
         ] {
             match Object::from(&v) {
                 Object::String(bytes) => {
-                    assert!(
-                        bytes.iter().all(|&b| b < 0x80),
-                        "ASCII must stay 1-byte: {bytes:02X?}"
-                    );
+                    assert!(bytes.iter().all(|&b| b < 0x80), "ASCII must stay 1-byte: {bytes:02X?}");
                     assert_ne!(&bytes[..2.min(bytes.len())], &[0xFE, 0xFF], "no BOM for ASCII");
-                },
+                }
                 other => panic!("expected Object::String, got {other:?}"),
             }
         }
@@ -1041,7 +1007,10 @@ mod tests {
 
         let array_value = FieldValue::Array(vec!["a".to_string(), "b".to_string()]);
         let converted: FormFieldValue = array_value.into();
-        assert_eq!(converted, FormFieldValue::MultiChoice(vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(
+            converted,
+            FormFieldValue::MultiChoice(vec!["a".to_string(), "b".to_string()])
+        );
 
         let none_value = FieldValue::None;
         let converted: FormFieldValue = none_value.into();
@@ -1244,7 +1213,7 @@ mod tests {
                 assert_eq!(arr.len(), 2);
                 assert!(matches!(&arr[0], Object::String(b) if b == b"a"));
                 assert!(matches!(&arr[1], Object::String(b) if b == b"b"));
-            },
+            }
             _ => panic!("Expected Array"),
         }
     }
@@ -1701,8 +1670,7 @@ mod tests {
 
     #[test]
     fn test_build_parent_dict_with_default_value() {
-        let config = ParentFieldConfig::new("group")
-            .with_default_value(FormFieldValue::Text("default".to_string()));
+        let config = ParentFieldConfig::new("group").with_default_value(FormFieldValue::Text("default".to_string()));
         let wrapper = FormFieldWrapper::from_parent_config(&config);
         let dict = wrapper.build_parent_dict();
         assert!(dict.contains_key("DV"));

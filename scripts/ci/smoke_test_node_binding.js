@@ -16,9 +16,9 @@
 // Usage: smoke_test_node_binding.js <path-to-index.js> <fixture-path> <expected-substring>
 // Exit code is non-zero, with a message on stderr, on any failure: require()
 // failure, extract() rejecting, an empty result, or a content mismatch.
-'use strict';
+"use strict";
 
-const path = require('node:path');
+const path = require("node:path");
 
 function fail(message) {
   console.error(`SMOKE TEST FAILED: ${message}`);
@@ -34,14 +34,14 @@ async function run(indexPath, fixturePath, expectedSubstring) {
     return;
   }
 
-  if (typeof extract !== 'function') {
+  if (typeof extract !== "function") {
     fail(`${indexPath} loaded but does not export an "extract" function`);
     return;
   }
 
   let result;
   try {
-    result = await extract({ kind: 'uri', uri: path.resolve(fixturePath) }, undefined);
+    result = await extract({ kind: "uri", uri: path.resolve(fixturePath) }, undefined);
   } catch (err) {
     fail(`extract() rejected for fixture ${fixturePath}: ${err}`);
     return;
@@ -53,7 +53,7 @@ async function run(indexPath, fixturePath, expectedSubstring) {
   }
 
   const content = result.results[0].content;
-  if (typeof content !== 'string' || !content.includes(expectedSubstring)) {
+  if (typeof content !== "string" || !content.includes(expectedSubstring)) {
     fail(
       `expected substring ${JSON.stringify(expectedSubstring)} not found in extracted ` +
         `content for fixture ${fixturePath}; got ${JSON.stringify(content)}`,

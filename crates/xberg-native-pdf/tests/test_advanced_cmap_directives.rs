@@ -46,16 +46,23 @@ end
 end
 "#;
 
-    let result =
-        xberg_native_pdf::fonts::cmap::parse_tounicode_cmap(cmap_with_notdefrange.as_bytes());
+    let result = xberg_native_pdf::fonts::cmap::parse_tounicode_cmap(cmap_with_notdefrange.as_bytes());
 
     assert!(result.is_ok(), "Should parse CMap with beginnotdefrange");
 
     let cmap = result.unwrap();
 
-    assert_eq!(cmap.get(&0x0041).as_deref(), Some("A"), "Mapped character should be 'A'");
+    assert_eq!(
+        cmap.get(&0x0041).as_deref(),
+        Some("A"),
+        "Mapped character should be 'A'"
+    );
 
-    assert_eq!(cmap.get(&0x0000).as_deref(), Some("\u{FFFD}"), "Notdef should map to U+FFFD");
+    assert_eq!(
+        cmap.get(&0x0000).as_deref(),
+        Some("\u{FFFD}"),
+        "Notdef should map to U+FFFD"
+    );
     assert_eq!(
         cmap.get(&0x0020).as_deref(),
         Some("\u{FFFD}"),
@@ -105,11 +112,19 @@ end
 
     let cmap = result.unwrap();
 
-    assert_eq!(cmap.get(&0x0001).as_deref(), Some(" "), "space escape should map to space");
+    assert_eq!(
+        cmap.get(&0x0001).as_deref(),
+        Some(" "),
+        "space escape should map to space"
+    );
 
     assert_eq!(cmap.get(&0x0002).as_deref(), Some("\t"), "tab escape should map to tab");
 
-    assert_eq!(cmap.get(&0x0003).as_deref(), Some("\n"), "newline escape should map to newline");
+    assert_eq!(
+        cmap.get(&0x0003).as_deref(),
+        Some("\n"),
+        "newline escape should map to newline"
+    );
 
     assert_eq!(cmap.get(&0x0020).as_deref(), Some(" "), "hex 0020 should map to space");
 }
@@ -148,8 +163,7 @@ end
 end
 "#;
 
-    let result =
-        xberg_native_pdf::fonts::cmap::parse_tounicode_cmap(cmap_flexible_whitespace.as_bytes());
+    let result = xberg_native_pdf::fonts::cmap::parse_tounicode_cmap(cmap_flexible_whitespace.as_bytes());
 
     assert!(result.is_ok(), "Should parse CMap with flexible whitespace");
 
@@ -201,7 +215,11 @@ end
 
     let cmap = result.unwrap();
 
-    assert_eq!(cmap.get(&0x0001).as_deref(), Some("\n"), "Hex 000A should map to newline");
+    assert_eq!(
+        cmap.get(&0x0001).as_deref(),
+        Some("\n"),
+        "Hex 000A should map to newline"
+    );
 
     assert_eq!(cmap.get(&0x0002).as_deref(), Some("\t"), "Hex 0009 should map to tab");
 }
@@ -253,8 +271,16 @@ end
 
     assert_eq!(cmap.get(&0x0041).as_deref(), Some("A"), "bfchar mapping should work");
 
-    assert_eq!(cmap.get(&0x0050).as_deref(), Some("P"), "bfrange sequential should work");
-    assert_eq!(cmap.get(&0x0061).as_deref(), Some("a"), "bfrange sequential should work");
+    assert_eq!(
+        cmap.get(&0x0050).as_deref(),
+        Some("P"),
+        "bfrange sequential should work"
+    );
+    assert_eq!(
+        cmap.get(&0x0061).as_deref(),
+        Some("a"),
+        "bfrange sequential should work"
+    );
 
     assert_eq!(
         cmap.get(&0x0001).as_deref(),

@@ -42,9 +42,7 @@ mod tests {
         buf.extend_from_slice(cs.as_bytes());
 
         offsets.push(buf.len());
-        buf.extend_from_slice(
-            b"6 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0] /C1 [1] >>\nendobj\n",
-        );
+        buf.extend_from_slice(b"6 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0] /C1 [1] >>\nendobj\n");
 
         let xref_offset = buf.len();
         buf.extend_from_slice(b"xref\n");
@@ -150,9 +148,7 @@ mod tests {
         buf.extend_from_slice(cs.as_bytes());
 
         offsets.push(buf.len());
-        buf.extend_from_slice(
-            b"6 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0] /C1 [1] >>\nendobj\n",
-        );
+        buf.extend_from_slice(b"6 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0] /C1 [1] >>\nendobj\n");
 
         let xref_offset = buf.len();
         buf.extend_from_slice(b"xref\n");
@@ -194,10 +190,18 @@ mod tests {
         let center_val = plate.data[center_y * plate.width as usize + center_x];
 
         // Tint 0.8 should give ~204 (0.8 * 255) ~keep
-        assert!(center_val > 180, "Expected tint ~204 at rectangle center, got {}", center_val);
+        assert!(
+            center_val > 180,
+            "Expected tint ~204 at rectangle center, got {}",
+            center_val
+        );
 
         let outside_val = plate.data[5 * plate.width as usize + 5];
-        assert_eq!(outside_val, 0, "Expected zero tint outside rectangle, got {}", outside_val);
+        assert_eq!(
+            outside_val, 0,
+            "Expected zero tint outside rectangle, got {}",
+            outside_val
+        );
     }
 
     #[test]
@@ -209,9 +213,21 @@ mod tests {
 
         let ink_names: Vec<&str> = plates.iter().map(|p| p.ink_name.as_str()).collect();
         assert!(ink_names.contains(&"Cyan"), "Expected Cyan plate, got {:?}", ink_names);
-        assert!(ink_names.contains(&"Magenta"), "Expected Magenta plate, got {:?}", ink_names);
-        assert!(ink_names.contains(&"Yellow"), "Expected Yellow plate, got {:?}", ink_names);
-        assert!(ink_names.contains(&"Black"), "Expected Black plate, got {:?}", ink_names);
+        assert!(
+            ink_names.contains(&"Magenta"),
+            "Expected Magenta plate, got {:?}",
+            ink_names
+        );
+        assert!(
+            ink_names.contains(&"Yellow"),
+            "Expected Yellow plate, got {:?}",
+            ink_names
+        );
+        assert!(
+            ink_names.contains(&"Black"),
+            "Expected Black plate, got {:?}",
+            ink_names
+        );
 
         let cyan_plate = plates.iter().find(|p| p.ink_name == "Cyan").unwrap();
         let center_val = cyan_plate.data[50 * cyan_plate.width as usize + 50];
@@ -421,8 +437,7 @@ mod tests {
     /// overlapping region.
     fn build_overlapping_separation_pdf() -> Vec<u8> {
         let content = "/CS1 cs\n0.3 scn\n10 10 50 50 re f\n0.9 scn\n40 40 50 50 re f\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
@@ -467,8 +482,7 @@ mod tests {
     #[test]
     fn antialiased_edge_produces_intermediate_values() {
         let content = "/CS1 cs\n1.0 scn\nq\n0.978 0.208 -0.208 0.978 30 30 cm\n0 0 40 40 re f\nQ\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         let pdf_bytes = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
@@ -487,15 +501,17 @@ mod tests {
                 break;
             }
         }
-        assert!(has_partial, "Expected at least one anti-aliased pixel value between 10 and 245");
+        assert!(
+            has_partial,
+            "Expected at least one anti-aliased pixel value between 10 and 245"
+        );
     }
 
     /// DeviceRGB content must NOT be converted into CMYK plates —
     /// the renderer intentionally skips RGB/Gray paths.
     fn build_rgb_only_pdf() -> Vec<u8> {
         let content = "0.5 0.5 0.5 rg\n25 25 50 50 re f\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
@@ -523,8 +539,7 @@ mod tests {
     /// chosen colour space and ink components.
     fn build_save_restore_color_pdf() -> Vec<u8> {
         let content = "/CS1 cs\n0.9 scn\n10 10 20 20 re f\nq\n0.1 scn\n40 40 20 20 re f\nQ\n70 70 20 20 re f\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
@@ -544,7 +559,11 @@ mod tests {
         let outer1 = plate.data[80 * plate.width as usize + 20];
         let outer2 = plate.data[20 * plate.width as usize + 80];
         assert!(outer1 > 220, "First rect tint 0.9 expected, got {}", outer1);
-        assert!(outer2 > 220, "After Q the color must restore to outer 0.9 tint, got {}", outer2);
+        assert!(
+            outer2 > 220,
+            "After Q the color must restore to outer 0.9 tint, got {}",
+            outer2
+        );
     }
 
     /// Build a Form XObject whose initial colour state inherits from
@@ -593,8 +612,7 @@ mod tests {
     /// land somewhere inside the rotated page.
     fn build_rotated_separation_pdf(rotation: u16) -> Vec<u8> {
         let content = "/CS1 cs\n1.0 scn\n25 25 50 50 re f\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         let page_obj = format!(
             "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Rotate {} /Contents 4 0 R /Resources << /ColorSpace << /CS1 5 0 R >> >> >>",
             rotation
@@ -614,8 +632,7 @@ mod tests {
         for rotation in [90u16, 180, 270] {
             let pdf_bytes = build_rotated_separation_pdf(rotation);
             let doc = PdfDocument::from_bytes(pdf_bytes).expect("parse PDF");
-            let plate =
-                render_separation(&doc, 0, "RotInk", 72).expect("render rotated separation plate");
+            let plate = render_separation(&doc, 0, "RotInk", 72).expect("render rotated separation plate");
             let nonzero = plate.data.iter().filter(|&&v| v > 200).count();
             assert!(
                 nonzero > 1000,
@@ -634,8 +651,7 @@ mod tests {
         // `/CS1 cs` then directly fill — no scn between them. Per
         // ISO 32000-1 §8.6.4.2 the initial Separation value is 1.0. ~keep
         let content = "/CS1 cs\n25 25 50 50 re f\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
@@ -666,8 +682,7 @@ mod tests {
     #[test]
     fn cmyk_cs_initial_is_full_black() {
         let content = "/DeviceCMYK cs\n25 25 50 50 re f\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         let pdf_bytes = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
@@ -694,8 +709,7 @@ mod tests {
     /// region would be all-zero.
     fn build_text_in_separation_pdf() -> Vec<u8> {
         let content = "BT\n/F1 24 Tf\n20 50 Td\n/CS1 cs\n0.9 scn\n(SPOT) Tj\nET\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
@@ -734,8 +748,7 @@ mod tests {
         // Pure cyan text via `k` operator. The Cyan plate must show
         // ink in the text region; Black plate must remain empty. ~keep
         let content = "BT\n/F1 24 Tf\n20 50 Td\n0.8 0.0 0.0 0.0 k\n(CYAN) Tj\nET\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         let pdf_bytes = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
@@ -819,9 +832,7 @@ mod tests {
         buf.extend_from_slice(cs2.as_bytes());
 
         offsets.push(buf.len());
-        buf.extend_from_slice(
-            b"7 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0] /C1 [1] >>\nendobj\n",
-        );
+        buf.extend_from_slice(b"7 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0] /C1 [1] >>\nendobj\n");
 
         let xref_offset = buf.len();
         buf.extend_from_slice(b"xref\n");
@@ -845,11 +856,7 @@ mod tests {
     /// Page is 100x100 pt -> 200x200 px. Rect at (10,10)-(40,40) pt ->
     /// (20,20)-(80,80) px, center ~ (50,50). PDF y-axis is bottom-up so we
     /// sample at (height - py) on the buffer.
-    fn sample_plate_at(
-        plate: &xberg_native_pdf::rendering::SeparationPlate,
-        x_pt: f32,
-        y_pt: f32,
-    ) -> u8 {
+    fn sample_plate_at(plate: &xberg_native_pdf::rendering::SeparationPlate, x_pt: f32, y_pt: f32) -> u8 {
         let scale = plate.width as f32 / 100.0;
         let px = (x_pt * scale) as u32;
         let py = (y_pt * scale) as u32;
@@ -907,7 +914,12 @@ mod tests {
         // The /None rect must not appear on any plate. ~keep
         for plate in &plates {
             let v = sample_plate_at(plate, 25.0, 25.0);
-            assert!(v < 50, "/None content leaked onto {} plate (got value {})", plate.ink_name, v);
+            assert!(
+                v < 50,
+                "/None content leaked onto {} plate (got value {})",
+                plate.ink_name,
+                v
+            );
         }
 
         let pantone = plates.iter().find(|p| p.ink_name == "PANTONE").unwrap();
@@ -936,8 +948,7 @@ mod tests {
         // Current: spot paint knocks out K (last-writer-wins per pixel). ~keep
         let content = "0 0 0 0.5 k\n20 20 60 60 re f\n\
                        /GS1 gs /CS1 cs 1.0 scn\n30 30 40 40 re f\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         let pdf = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
@@ -977,8 +988,7 @@ mod tests {
     fn test_render_mode_3_invisible_text_no_plate_pixels() {
         let content = "/CS1 cs 1.0 scn\n\
                        BT /F1 24 Tf 3 Tr 20 50 Td (HIDDEN) Tj ET\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         let pdf = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
@@ -1008,8 +1018,7 @@ mod tests {
     fn test_stroke_mode_text_uses_stroke_color() {
         let content = "/CS1 cs 1.0 scn\n/CS2 CS 1.0 SCN\n\
                        BT /F1 24 Tf 1 Tr 20 50 Td (X) Tj ET\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         let pdf = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
@@ -1044,8 +1053,7 @@ mod tests {
     #[test]
     fn test_default_rgb_remap() {
         let content = "1.0 0.0 0.0 rg\n25 25 50 50 re f\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         let pdf = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
@@ -1058,8 +1066,7 @@ mod tests {
         ]);
         let doc = PdfDocument::from_bytes(pdf).unwrap();
         let plate = render_separation(&doc, 0, "SpotR", 144).unwrap();
-        let center = plate.data
-            [(plate.height as usize / 2) * plate.width as usize + (plate.width as usize / 2)];
+        let center = plate.data[(plate.height as usize / 2) * plate.width as usize + (plate.width as usize / 2)];
         assert!(
             center > 200,
             "DefaultRGB should remap `rg` -> Separation; SpotR plate center got {}",
@@ -1072,8 +1079,7 @@ mod tests {
     #[test]
     fn test_default_gray_remap() {
         let content = "0.5 g\n25 25 50 50 re f\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         let pdf = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
@@ -1086,8 +1092,7 @@ mod tests {
         ]);
         let doc = PdfDocument::from_bytes(pdf).unwrap();
         let plate = render_separation(&doc, 0, "GraySpot", 144).unwrap();
-        let center = plate.data
-            [(plate.height as usize / 2) * plate.width as usize + (plate.width as usize / 2)];
+        let center = plate.data[(plate.height as usize / 2) * plate.width as usize + (plate.width as usize / 2)];
         assert!(
             center > 100 && center < 160,
             "DefaultGray should remap `g 0.5` -> Separation; GraySpot center got {}",
@@ -1114,8 +1119,11 @@ mod tests {
             form_content
         );
         let page_content = "/CS1 cs 1.0 scn /CS1 CS 1.0 SCN 10 w\n/Fm1 Do\n";
-        let page_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", page_content.len(), page_content);
+        let page_obj = format!(
+            "<< /Length {} >>\nstream\n{}\nendstream",
+            page_content.len(),
+            page_content
+        );
         let pdf = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
@@ -1154,8 +1162,7 @@ mod tests {
         // NChannel space should ALSO add tint to the named process plates.
         // Currently the renderer routes only to the named components. ~keep
         let content = "/CS1 cs 1.0 scn\n25 25 50 50 re f\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         let pdf = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
@@ -1199,8 +1206,7 @@ mod tests {
         // expectation: 1.5 tint produces > 1.0 ink coverage — currently
         // capped at 255, indistinguishable from 1.0. ~keep
         let content = "/CS1 cs 1.5 scn\n25 25 50 50 re f\n";
-        let content_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
+        let content_obj = format!("<< /Length {} >>\nstream\n{}\nendstream", content.len(), content);
         let pdf = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
@@ -1213,8 +1219,7 @@ mod tests {
         ]);
         let doc = PdfDocument::from_bytes(pdf).unwrap();
         let plate = render_separation(&doc, 0, "OverInk", 144).unwrap();
-        let center = plate.data
-            [(plate.height as usize / 2) * plate.width as usize + (plate.width as usize / 2)];
+        let center = plate.data[(plate.height as usize / 2) * plate.width as usize + (plate.width as usize / 2)];
         assert_ne!(
             center, 255,
             "tint value 1.5 should be detectable as out-of-range (currently clamped to 255)"
@@ -1277,8 +1282,11 @@ mod tests {
             pattern
         );
         let page_content = "/Pattern cs /P1 scn\n25 25 50 50 re f\n";
-        let page_obj =
-            format!("<< /Length {} >>\nstream\n{}\nendstream", page_content.len(), page_content);
+        let page_obj = format!(
+            "<< /Length {} >>\nstream\n{}\nendstream",
+            page_content.len(),
+            page_content
+        );
         let pdf = assemble_pdf(vec![
             "<< /Type /Catalog /Pages 2 0 R >>".into(),
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
@@ -1331,9 +1339,7 @@ mod tests {
         offsets.push(buf.len());
         buf.extend_from_slice(b"5 0 obj\n[/Separation /InlineInk /DeviceGray 6 0 R]\nendobj\n");
         offsets.push(buf.len());
-        buf.extend_from_slice(
-            b"6 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0] /C1 [1] >>\nendobj\n",
-        );
+        buf.extend_from_slice(b"6 0 obj\n<< /FunctionType 2 /Domain [0 1] /N 1 /C0 [0] /C1 [1] >>\nendobj\n");
 
         let xref = buf.len();
         let n = offsets.len() + 1;
@@ -1342,8 +1348,7 @@ mod tests {
             buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
         }
         buf.extend_from_slice(
-            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", n, xref)
-                .as_bytes(),
+            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", n, xref).as_bytes(),
         );
 
         let doc = PdfDocument::from_bytes(buf).unwrap();

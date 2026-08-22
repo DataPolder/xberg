@@ -59,9 +59,7 @@
 #![allow(dead_code)]
 
 use xberg_native_pdf::document::PdfDocument;
-use xberg_native_pdf::rendering::sidecar::{
-    BlendModeClass, ProcessBlendDispatch, SpotBlendDispatch,
-};
+use xberg_native_pdf::rendering::sidecar::{BlendModeClass, ProcessBlendDispatch, SpotBlendDispatch};
 use xberg_native_pdf::rendering::{PageRenderer, RenderOptions};
 
 // ===========================================================================
@@ -533,11 +531,7 @@ fn round1_c1_blend_mode_classification_matches_spec() {
 #[test]
 fn round1_c2_process_lane_dispatch_identity() {
     use BlendModeClass::*;
-    for class in &[
-        SeparableWhitePreserving,
-        SeparableNonWhitePreserving,
-        NonSeparable,
-    ] {
+    for class in &[SeparableWhitePreserving, SeparableNonWhitePreserving, NonSeparable] {
         assert_eq!(
             class.process_dispatch(),
             ProcessBlendDispatch::UseRequested,

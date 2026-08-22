@@ -147,8 +147,7 @@ impl CrossRefTable {
         if max == 0 {
             return Vec::new();
         }
-        let mut heap: std::collections::BinaryHeap<u32> =
-            std::collections::BinaryHeap::with_capacity(max + 1);
+        let mut heap: std::collections::BinaryHeap<u32> = std::collections::BinaryHeap::with_capacity(max + 1);
         // Only live objects are scan candidates. Traditional xref tables
         // store free entries (the free list); a file with more than `max`
         // low-numbered *free* objects would otherwise exhaust the bounded
@@ -297,10 +296,7 @@ fn find_stream_length(data: &[u8]) -> Option<usize> {
     let after = &after[start..];
 
     if after.first()?.is_ascii_digit() {
-        let end = after
-            .iter()
-            .position(|b| !b.is_ascii_digit())
-            .unwrap_or(after.len());
+        let end = after.iter().position(|b| !b.is_ascii_digit()).unwrap_or(after.len());
         let num_str = std::str::from_utf8(&after[..end]).ok()?;
         num_str.parse::<usize>().ok()
     } else {
@@ -390,10 +386,7 @@ fn find_actual_xref_offset<R: Read + Seek>(reader: &mut R, offset: u64) -> Resul
 /// Uses a `HashSet` of visited offsets to detect circular /Prev chains instead of
 /// an arbitrary depth limit. This supports PDFs with hundreds of incremental saves
 /// (e.g., 177+ /Prev links) without falling back to expensive full-file reconstruction.
-fn parse_xref_iterative<R: Read + Seek>(
-    reader: &mut R,
-    start_offset: u64,
-) -> Result<CrossRefTable> {
+fn parse_xref_iterative<R: Read + Seek>(reader: &mut R, start_offset: u64) -> Result<CrossRefTable> {
     let mut visited = HashSet::new();
     let mut offset = start_offset;
     let mut result_xref: Option<CrossRefTable> = None;
@@ -440,9 +433,9 @@ fn parse_xref_iterative<R: Read + Seek>(
                                 "failed to parse xref (stream attempt: {}, traditional attempt: {})",
                                 e, trad_err
                             )));
-                        },
+                        }
                     }
-                },
+                }
             }
         } else {
             tracing::warn!(
@@ -484,19 +477,17 @@ fn parse_xref_iterative<R: Read + Seek>(
         if let Some(stm_off) = xrefstm_offset
             && visited.insert(stm_off)
         {
-            match find_actual_xref_offset(reader, stm_off)
-                .and_then(|actual| parse_xref_stream(reader, actual))
-            {
+            match find_actual_xref_offset(reader, stm_off).and_then(|actual| parse_xref_stream(reader, actual)) {
                 Ok(stm_xref) => {
                     tracing::debug!(offset = stm_off, "merged /XRefStm supplement");
                     match &mut result_xref {
                         Some(result) => result.merge_from(stm_xref),
                         None => result_xref = Some(stm_xref),
                     }
-                },
+                }
                 Err(e) => {
                     tracing::warn!(offset = stm_off, error = %e, "skipping unparseable /XRefStm");
-                },
+                }
             }
         }
 
@@ -504,7 +495,7 @@ fn parse_xref_iterative<R: Read + Seek>(
             Some(prev) => {
                 tracing::debug!(offset, prev_offset = prev, "following /Prev pointer");
                 offset = prev;
-            },
+            }
             None => break,
         }
     }
@@ -637,7 +628,7 @@ fn parse_traditional_xref<R: Read + Seek>(reader: &mut R, offset: u64) -> Result
                     xref.add_entry(start_obj + i, entry);
                     i += 1;
                     continue;
-                },
+                }
             };
 
             let generation: u16 = match parts[1].parse() {
@@ -648,7 +639,7 @@ fn parse_traditional_xref<R: Read + Seek>(reader: &mut R, offset: u64) -> Result
                     xref.add_entry(start_obj + i, entry);
                     i += 1;
                     continue;
-                },
+                }
             };
 
             let type_flag = parts[2];
@@ -663,7 +654,7 @@ fn parse_traditional_xref<R: Read + Seek>(reader: &mut R, offset: u64) -> Result
                 _ => {
                     tracing::warn!(index = i, type_flag = ?type_flag, "invalid type flag, treating as free");
                     false
-                },
+                }
             };
 
             let entry = XRefEntry::new(offset, generation, in_use);
@@ -730,11 +721,7 @@ fn parse_xref_stream<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<Cros
     let needs_more = if let Some(length_val) = find_stream_length(&content) {
         let stream_kw_pos = content.windows(6).position(|w| w == b"stream").unwrap_or(0);
         let needed = stream_kw_pos + 20 + length_val + 30;
-        if needed > bytes_read {
-            Some(needed)
-        } else {
-            None
-        }
+        if needed > bytes_read { Some(needed) } else { None }
     } else if content.windows(6).any(|w| w == b"endobj") {
         None
     } else {
@@ -759,21 +746,21 @@ fn parse_xref_stream<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<Cros
 
     let input = &content[..];
 
-    let (rest, _obj_num_token) = token(input)
-        .map_err(|e| Error::InvalidPdf(format!("failed to parse xref object number: {}", e)))?;
+    let (rest, _obj_num_token) =
+        token(input).map_err(|e| Error::InvalidPdf(format!("failed to parse xref object number: {}", e)))?;
 
-    let (rest, _gen_token) = token(rest)
-        .map_err(|e| Error::InvalidPdf(format!("failed to parse xref generation: {}", e)))?;
+    let (rest, _gen_token) =
+        token(rest).map_err(|e| Error::InvalidPdf(format!("failed to parse xref generation: {}", e)))?;
 
-    let (rest, obj_keyword_token) = token(rest)
-        .map_err(|e| Error::InvalidPdf(format!("failed to parse 'obj' keyword: {}", e)))?;
+    let (rest, obj_keyword_token) =
+        token(rest).map_err(|e| Error::InvalidPdf(format!("failed to parse 'obj' keyword: {}", e)))?;
 
     if !matches!(obj_keyword_token, crate::lexer::Token::ObjStart) {
         return Err(Error::InvalidPdf("expected 'obj' keyword in xref stream".to_string()));
     }
 
-    let parse_result = parse_object(rest)
-        .map_err(|e| Error::InvalidPdf(format!("failed to parse xref stream object: {}", e)))?;
+    let parse_result =
+        parse_object(rest).map_err(|e| Error::InvalidPdf(format!("failed to parse xref stream object: {}", e)))?;
 
     let (_remaining, obj) = parse_result;
 
@@ -786,7 +773,10 @@ fn parse_xref_stream<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<Cros
         && let Some(type_name) = type_obj.as_name()
         && type_name != "XRef"
     {
-        return Err(Error::InvalidPdf(format!("expected /Type /XRef, got /Type /{}", type_name)));
+        return Err(Error::InvalidPdf(format!(
+            "expected /Type /XRef, got /Type /{}",
+            type_name
+        )));
     }
 
     let w_array = stream_dict
@@ -816,8 +806,7 @@ fn parse_xref_stream<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<Cros
     let size = stream_dict
         .get("Size")
         .and_then(|o| o.as_integer())
-        .ok_or_else(|| Error::InvalidPdf("missing /Size in xref stream".to_string()))?
-        as u32;
+        .ok_or_else(|| Error::InvalidPdf("missing /Size in xref stream".to_string()))? as u32;
 
     // Get index array (or default to [0 Size]) ~keep
     let index_ranges = if let Some(index_obj) = stream_dict.get("Index") {
@@ -832,12 +821,10 @@ fn parse_xref_stream<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<Cros
         for i in (0..index_array.len()).step_by(2) {
             let start = index_array[i]
                 .as_integer()
-                .ok_or_else(|| Error::InvalidPdf("invalid index start".to_string()))?
-                as u32;
+                .ok_or_else(|| Error::InvalidPdf("invalid index start".to_string()))? as u32;
             let count = index_array[i + 1]
                 .as_integer()
-                .ok_or_else(|| Error::InvalidPdf("invalid index count".to_string()))?
-                as u32;
+                .ok_or_else(|| Error::InvalidPdf("invalid index count".to_string()))? as u32;
             ranges.push((start, count));
         }
         ranges
@@ -861,15 +848,11 @@ fn parse_xref_stream<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<Cros
                 } else {
                     return Err(Error::InvalidPdf("invalid filter array".to_string()));
                 }
-            },
+            }
             _ => return Err(Error::InvalidPdf("invalid /Filter in xref stream".to_string())),
         };
 
-        crate::decoders::decode_stream_with_params(
-            &stream_data,
-            &[filter_name],
-            decode_params.as_ref(),
-        )?
+        crate::decoders::decode_stream_with_params(&stream_data, &[filter_name], decode_params.as_ref())?
     } else {
         stream_data.to_vec()
     };
@@ -900,21 +883,18 @@ fn parse_xref_stream<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<Cros
                 0 => {
                     // Type 0: Free object ~keep
                     XRefEntry::free(field2, field3 as u16)
-                },
+                }
                 1 => {
                     // Type 1: Uncompressed object at byte offset ~keep
                     XRefEntry::uncompressed(field2, field3 as u16)
-                },
+                }
                 2 => {
                     // Type 2: Compressed object in object stream ~keep
                     XRefEntry::compressed(field2, field3 as u16)
-                },
+                }
                 _ => {
-                    return Err(Error::InvalidPdf(format!(
-                        "invalid xref entry type: {}",
-                        entry_type
-                    )));
-                },
+                    return Err(Error::InvalidPdf(format!("invalid xref entry type: {}", entry_type)));
+                }
             };
 
             xref.add_entry(start_obj + i, entry);
@@ -931,9 +911,7 @@ fn parse_xref_stream<R: Read + Seek>(reader: &mut R, offset: u64) -> Result<Cros
 ///
 /// DecodeParms can be either a dictionary or an array of dictionaries.
 /// For simplicity, we only extract from the first dictionary if it's an array.
-fn extract_decode_params(
-    decode_params_obj: &Object,
-) -> Result<Option<crate::decoders::DecodeParams>> {
+fn extract_decode_params(decode_params_obj: &Object) -> Result<Option<crate::decoders::DecodeParams>> {
     let dict = match decode_params_obj {
         Object::Dictionary(d) => d,
         Object::Array(arr) => {
@@ -943,26 +921,17 @@ fn extract_decode_params(
             } else {
                 return Ok(None);
             }
-        },
+        }
         _ => return Ok(None),
     };
 
-    let predictor = dict
-        .get("Predictor")
-        .and_then(|o| o.as_integer())
-        .unwrap_or(1);
+    let predictor = dict.get("Predictor").and_then(|o| o.as_integer()).unwrap_or(1);
 
-    let columns = dict
-        .get("Columns")
-        .and_then(|o| o.as_integer())
-        .unwrap_or(1) as usize;
+    let columns = dict.get("Columns").and_then(|o| o.as_integer()).unwrap_or(1) as usize;
 
     let colors = dict.get("Colors").and_then(|o| o.as_integer()).unwrap_or(1) as usize;
 
-    let bits_per_component = dict
-        .get("BitsPerComponent")
-        .and_then(|o| o.as_integer())
-        .unwrap_or(8) as usize;
+    let bits_per_component = dict.get("BitsPerComponent").and_then(|o| o.as_integer()).unwrap_or(8) as usize;
 
     Ok(Some(crate::decoders::DecodeParams {
         predictor,
@@ -1004,16 +973,16 @@ fn split_lines(text: &str) -> Vec<String> {
                     current_line.clear();
                     i += 1;
                 }
-            },
+            }
             '\n' => {
                 lines.push(current_line.clone());
                 current_line.clear();
                 i += 1;
-            },
+            }
             ch => {
                 current_line.push(ch);
                 i += 1;
-            },
+            }
         }
     }
 
@@ -1171,8 +1140,7 @@ mod tests {
     /// found and the ENTIRE DOCUMENT is rejected. Not a degradation: a total loss.
     #[test]
     fn find_xref_offset_survives_trailing_nul_padding() {
-        let mut pdf: Vec<u8> =
-            b"%PDF-1.6\n1 0 obj\n<< >>\nendobj\nstartxref\n189089\n%%EOF".to_vec();
+        let mut pdf: Vec<u8> = b"%PDF-1.6\n1 0 obj\n<< >>\nendobj\nstartxref\n189089\n%%EOF".to_vec();
         // Pad well past the old 2 KB window. ~keep
         pdf.extend(std::iter::repeat_n(0u8, 5245));
 
@@ -1188,7 +1156,10 @@ mod tests {
         let mut pdf: Vec<u8> = b"%PDF-1.6\nstartxref\n4242".to_vec();
         pdf.extend(std::iter::repeat_n(0u8, 64));
         let mut cur = std::io::Cursor::new(pdf);
-        assert_eq!(find_xref_offset(&mut cur).expect("trailing NULs on the offset line"), 4242);
+        assert_eq!(
+            find_xref_offset(&mut cur).expect("trailing NULs on the offset line"),
+            4242
+        );
     }
 
     #[test]

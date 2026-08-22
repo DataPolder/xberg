@@ -47,10 +47,7 @@ impl EncodingNormalizer {
     /// let normalizer = EncodingNormalizer::new(encoding, "Helvetica".to_string());
     /// ```
     pub fn new(encoding: Encoding, font_name: String) -> Self {
-        Self {
-            encoding,
-            font_name,
-        }
+        Self { encoding, font_name }
     }
 
     /// Normalize a raw character code through the font's encoding.
@@ -76,10 +73,8 @@ impl EncodingNormalizer {
                 } else {
                     char_code as u32
                 }
-            },
-            Encoding::Standard(encoding_name) => {
-                self.normalize_standard_encoding(char_code, encoding_name)
-            },
+            }
+            Encoding::Standard(encoding_name) => self.normalize_standard_encoding(char_code, encoding_name),
             Encoding::Identity => char_code as u32,
         }
     }

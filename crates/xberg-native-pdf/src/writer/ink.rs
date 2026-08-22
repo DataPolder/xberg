@@ -81,10 +81,7 @@ impl InkAnnotation {
 
     /// Create an ink annotation from multiple strokes.
     pub fn with_strokes(strokes: Vec<Vec<(f64, f64)>>) -> Self {
-        Self {
-            strokes,
-            ..Self::new()
-        }
+        Self { strokes, ..Self::new() }
     }
 
     /// Add a stroke to the annotation.
@@ -228,12 +225,7 @@ impl InkAnnotation {
         {
             dict.insert(
                 "C".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 

@@ -32,26 +32,23 @@ fn black_jpeg() -> Vec<u8> {
     let gray = vec![0u8; (IMAGE_WIDTH * IMAGE_HEIGHT) as usize];
     let mut out = Vec::new();
     jpeg_encoder::Encoder::new(&mut out, 90)
-        .encode(&gray, IMAGE_WIDTH as u16, IMAGE_HEIGHT as u16, jpeg_encoder::ColorType::Luma)
+        .encode(
+            &gray,
+            IMAGE_WIDTH as u16,
+            IMAGE_HEIGHT as u16,
+            jpeg_encoder::ColorType::Luma,
+        )
         .expect("encode the fixture JPEG");
     out
 }
 
-fn pdf_painting_an_image_with_filter(
-    indirect_height: bool,
-    indirect_length: bool,
-    dct_decode: bool,
-) -> Vec<u8> {
+fn pdf_painting_an_image_with_filter(indirect_height: bool, indirect_length: bool, dct_decode: bool) -> Vec<u8> {
     let img = if dct_decode {
         black_jpeg()
     } else {
         vec![0u8; (IMAGE_WIDTH * IMAGE_HEIGHT) as usize]
     };
-    let filter_entry = if dct_decode {
-        " /Filter /DCTDecode"
-    } else {
-        ""
-    };
+    let filter_entry = if dct_decode { " /Filter /DCTDecode" } else { "" };
 
     let mut buf: Vec<u8> = Vec::new();
     let mut off = [0usize; 8];
@@ -116,8 +113,7 @@ fn pdf_painting_an_image_with_filter(
 /// Number of pixels on the rendered page that are not the white background.
 fn painted_pixels(pdf: Vec<u8>) -> usize {
     let doc = PdfDocument::from_bytes(pdf).expect("fixture parses");
-    let rendered =
-        render_page(&doc, 0, &RenderOptions::with_dpi(72).as_raw()).expect("render page 0");
+    let rendered = render_page(&doc, 0, &RenderOptions::with_dpi(72).as_raw()).expect("render page 0");
     rendered
         .data
         .chunks(4)

@@ -64,9 +64,7 @@ static ACTIVE: OnceLock<Arc<dyn CryptoProvider>> = OnceLock::new();
 /// invoked via `cargo test --test <name>`) or a custom test harness so
 /// each test gets its own process and a fresh `ACTIVE` cell.
 pub fn set_provider(provider: Arc<dyn CryptoProvider>) -> Result<(), SetProviderError> {
-    ACTIVE
-        .set(provider)
-        .map_err(|_| SetProviderError::AlreadySet)
+    ACTIVE.set(provider).map_err(|_| SetProviderError::AlreadySet)
 }
 
 /// Returns the active provider, lazily initializing
@@ -117,9 +115,7 @@ static ACTIVE_POLICY: OnceLock<SecurityPolicy> = OnceLock::new();
 /// The same test-isolation rule as [`set_provider`] applies — registry
 /// tests must run in their own integration-test binary.
 pub fn set_policy(policy: SecurityPolicy) -> Result<(), SetPolicyError> {
-    ACTIVE_POLICY
-        .set(policy)
-        .map_err(|_| SetPolicyError::AlreadySet)
+    ACTIVE_POLICY.set(policy).map_err(|_| SetPolicyError::AlreadySet)
 }
 
 /// Returns the active [`SecurityPolicy`], lazily initialising

@@ -60,11 +60,7 @@ fn sort_reading_within_region(indices: &mut [usize], spans: &[TextSpan]) {
 }
 
 impl ReadingOrderStrategy for ArticleThreadStrategy {
-    fn apply(
-        &self,
-        spans: Vec<TextSpan>,
-        context: &ReadingOrderContext,
-    ) -> Result<Vec<OrderedTextSpan>> {
+    fn apply(&self, spans: Vec<TextSpan>, context: &ReadingOrderContext) -> Result<Vec<OrderedTextSpan>> {
         let beads: &[Rect] = match &context.bead_rects {
             Some(b) if !b.is_empty() => b,
             _ => return self.fallback.apply(spans, context),
@@ -104,9 +100,7 @@ impl ReadingOrderStrategy for ArticleThreadStrategy {
 
         let mut result: Vec<OrderedTextSpan> = captured
             .into_iter()
-            .map(|(order, span)| {
-                OrderedTextSpan::with_info(span, order, ReadingOrderInfo::article_thread())
-            })
+            .map(|(order, span)| OrderedTextSpan::with_info(span, order, ReadingOrderInfo::article_thread()))
             .collect();
 
         if !leftover_spans.is_empty() {
@@ -171,8 +165,7 @@ mod tests {
     #[test]
     fn spans_outside_all_beads_are_appended_not_dropped() {
         let spans = vec![span("in-bead", 10.0, 500.0), span("orphan", 400.0, 100.0)];
-        let ctx = ReadingOrderContext::new()
-            .with_bead_rects(vec![Rect::from_points(0.0, 480.0, 100.0, 520.0)]);
+        let ctx = ReadingOrderContext::new().with_bead_rects(vec![Rect::from_points(0.0, 480.0, 100.0, 520.0)]);
 
         let ordered = ArticleThreadStrategy::new().apply(spans, &ctx).unwrap();
         let t = texts(&ordered);

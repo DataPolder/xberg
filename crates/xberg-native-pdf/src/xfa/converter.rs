@@ -7,8 +7,8 @@ use super::parser::{XfaField, XfaFieldType, XfaForm, XfaPage};
 use crate::error::Result;
 use crate::geometry::Rect;
 use crate::writer::form_fields::{
-    CheckboxWidget, ChoiceOption, ComboBoxWidget, FormFieldWidget, ListBoxWidget, PushButtonWidget,
-    RadioButtonGroup, TextFieldWidget,
+    CheckboxWidget, ChoiceOption, ComboBoxWidget, FormFieldWidget, ListBoxWidget, PushButtonWidget, RadioButtonGroup,
+    TextFieldWidget,
 };
 
 /// Options for XFA to AcroForm conversion.
@@ -97,7 +97,7 @@ impl ConvertedField {
                 } else {
                     Rect::new(0.0, 0.0, 0.0, 0.0)
                 }
-            },
+            }
             ConvertedField::ComboBox(f) => f.rect(),
             ConvertedField::ListBox(f) => f.rect(),
             ConvertedField::Button(f) => f.rect(),
@@ -180,12 +180,7 @@ impl XfaConverter {
     }
 
     /// Convert a single XFA page.
-    fn convert_page(
-        &self,
-        xfa_page: &XfaPage,
-        index: usize,
-        skipped: &mut Vec<(String, String)>,
-    ) -> ConvertedPage {
+    fn convert_page(&self, xfa_page: &XfaPage, index: usize, skipped: &mut Vec<(String, String)>) -> ConvertedPage {
         let width = if xfa_page.width > 0.0 {
             xfa_page.width
         } else {
@@ -225,10 +220,10 @@ impl XfaConverter {
             match self.convert_field(field, rect) {
                 Ok(converted) => {
                     page.fields.push(converted);
-                },
+                }
                 Err(reason) => {
                     skipped.push((field.name.clone(), reason));
-                },
+                }
             }
 
             if field.y.is_none() {
@@ -257,8 +252,7 @@ impl XfaConverter {
             captions: Vec::new(),
         };
 
-        let mut y_position =
-            self.options.page_height - self.options.margin_top - self.options.default_field_height;
+        let mut y_position = self.options.page_height - self.options.margin_top - self.options.default_field_height;
 
         for field in fields {
             let x = field.x.unwrap_or(self.options.margin_left);
@@ -278,10 +272,10 @@ impl XfaConverter {
             match self.convert_field(field, rect) {
                 Ok(converted) => {
                     page.fields.push(converted);
-                },
+                }
                 Err(reason) => {
                     skipped.push((field.name.clone(), reason));
-                },
+                }
             }
 
             if field.y.is_none() {
@@ -293,9 +287,7 @@ impl XfaConverter {
                 if y_position < self.options.margin_bottom {
                     // In a real implementation, we'd create a new page
                     // For simplicity, we just wrap around ~keep
-                    y_position = self.options.page_height
-                        - self.options.margin_top
-                        - self.options.default_field_height;
+                    y_position = self.options.page_height - self.options.margin_top - self.options.default_field_height;
                 }
             }
         }
@@ -304,11 +296,7 @@ impl XfaConverter {
     }
 
     /// Convert a single XFA field to an AcroForm field.
-    fn convert_field(
-        &self,
-        field: &XfaField,
-        rect: Rect,
-    ) -> std::result::Result<ConvertedField, String> {
+    fn convert_field(&self, field: &XfaField, rect: Rect) -> std::result::Result<ConvertedField, String> {
         let name = &field.name;
         let value = field.value.as_deref().or(field.default_value.as_deref());
 
@@ -337,15 +325,13 @@ impl XfaConverter {
                 }
 
                 Ok(ConvertedField::Text(widget))
-            },
+            }
 
             XfaFieldType::Checkbox => {
                 let mut widget = CheckboxWidget::new(name.clone(), rect);
 
                 let is_checked = value
-                    .map(|v| {
-                        v == "1" || v.eq_ignore_ascii_case("yes") || v.eq_ignore_ascii_case("true")
-                    })
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("yes") || v.eq_ignore_ascii_case("true"))
                     .unwrap_or(false);
 
                 if is_checked {
@@ -357,7 +343,7 @@ impl XfaConverter {
                 }
 
                 Ok(ConvertedField::Checkbox(widget))
-            },
+            }
 
             XfaFieldType::RadioGroup => {
                 let mut group = RadioButtonGroup::new(name.clone());
@@ -378,7 +364,7 @@ impl XfaConverter {
                 }
 
                 Ok(ConvertedField::RadioGroup(group))
-            },
+            }
 
             XfaFieldType::DropDown => {
                 let options: Vec<ChoiceOption> = field
@@ -387,8 +373,7 @@ impl XfaConverter {
                     .map(|o| ChoiceOption::new_with_export(&o.text, &o.value))
                     .collect();
 
-                let mut widget =
-                    ComboBoxWidget::new(name.clone(), rect).with_choice_options(options);
+                let mut widget = ComboBoxWidget::new(name.clone(), rect).with_choice_options(options);
 
                 if let Some(v) = value {
                     widget = widget.with_value(v);
@@ -399,7 +384,7 @@ impl XfaConverter {
                 }
 
                 Ok(ConvertedField::ComboBox(widget))
-            },
+            }
 
             XfaFieldType::ListBox => {
                 let options: Vec<ChoiceOption> = field
@@ -408,8 +393,7 @@ impl XfaConverter {
                     .map(|o| ChoiceOption::new_with_export(&o.text, &o.value))
                     .collect();
 
-                let mut widget =
-                    ListBoxWidget::new(name.clone(), rect).with_choice_options(options);
+                let mut widget = ListBoxWidget::new(name.clone(), rect).with_choice_options(options);
 
                 if let Some(v) = value {
                     widget = widget.with_value(v);
@@ -420,14 +404,14 @@ impl XfaConverter {
                 }
 
                 Ok(ConvertedField::ListBox(widget))
-            },
+            }
 
             XfaFieldType::Button => {
                 let label = field.caption.as_deref().unwrap_or(name);
                 let widget = PushButtonWidget::new(name.clone(), rect).with_caption(label);
 
                 Ok(ConvertedField::Button(widget))
-            },
+            }
 
             XfaFieldType::Signature => {
                 // Convert signature to a text field with special handling
@@ -435,11 +419,12 @@ impl XfaConverter {
                 let widget = TextFieldWidget::new(name.clone(), rect).read_only();
 
                 Ok(ConvertedField::Text(widget))
-            },
+            }
 
-            XfaFieldType::Image | XfaFieldType::Barcode => {
-                Err(format!("Field type {:?} cannot be converted to AcroForm", field.field_type))
-            },
+            XfaFieldType::Image | XfaFieldType::Barcode => Err(format!(
+                "Field type {:?} cannot be converted to AcroForm",
+                field.field_type
+            )),
 
             XfaFieldType::Unknown(ref typ) => {
                 let widget = TextFieldWidget::new(name.clone(), rect);
@@ -448,7 +433,7 @@ impl XfaConverter {
                 } else {
                     Err(format!("Unknown field type: {}", typ))
                 }
-            },
+            }
         }
     }
 }

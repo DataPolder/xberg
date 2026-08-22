@@ -29,7 +29,7 @@ fn test_create_pdf_image_rgb() {
         ImageData::Raw { pixels: p, format } => {
             assert_eq!(p, &pixels);
             assert_eq!(*format, PixelFormat::RGB);
-        },
+        }
         _ => panic!("Expected raw RGB data"),
     }
 }
@@ -57,7 +57,7 @@ fn test_create_pdf_image_grayscale() {
         ImageData::Raw { pixels: p, format } => {
             assert_eq!(p, &pixels);
             assert_eq!(*format, PixelFormat::Grayscale);
-        },
+        }
         _ => panic!("Expected raw grayscale data"),
     }
 }
@@ -83,7 +83,7 @@ fn test_create_pdf_image_cmyk() {
         ImageData::Raw { pixels: p, format } => {
             assert_eq!(p, &pixels);
             assert_eq!(*format, PixelFormat::CMYK);
-        },
+        }
         _ => panic!("Expected raw CMYK data"),
     }
 }
@@ -236,7 +236,7 @@ fn test_extract_jpeg_image_from_xobject() {
     match image.data() {
         ImageData::Jpeg(data) => {
             assert_eq!(data, &jpeg_data);
-        },
+        }
         _ => panic!("Expected JPEG data"),
     }
 }
@@ -266,7 +266,7 @@ fn test_extract_raw_rgb_image_from_xobject() {
         ImageData::Raw { pixels, format } => {
             assert_eq!(pixels, &pixel_data);
             assert_eq!(*format, PixelFormat::RGB);
-        },
+        }
         _ => panic!("Expected raw RGB data"),
     }
 }
@@ -295,7 +295,7 @@ fn test_extract_raw_grayscale_image_from_xobject() {
         ImageData::Raw { pixels, format } => {
             assert_eq!(pixels, &pixel_data);
             assert_eq!(*format, PixelFormat::Grayscale);
-        },
+        }
         _ => panic!("Expected raw grayscale data"),
     }
 }
@@ -323,7 +323,7 @@ fn test_extract_raw_cmyk_image_from_xobject() {
         ImageData::Raw { pixels, format } => {
             assert_eq!(pixels, &pixel_data);
             assert_eq!(*format, PixelFormat::CMYK);
-        },
+        }
         _ => panic!("Expected raw CMYK data"),
     }
 }
@@ -395,7 +395,10 @@ fn test_jpeg_filter_array_detection() {
     dict.insert("Height".to_string(), Object::Integer(100));
     dict.insert("BitsPerComponent".to_string(), Object::Integer(8));
     dict.insert("ColorSpace".to_string(), Object::Name("DeviceRGB".to_string()));
-    dict.insert("Filter".to_string(), Object::Array(vec![Object::Name("DCTDecode".to_string())]));
+    dict.insert(
+        "Filter".to_string(),
+        Object::Array(vec![Object::Name("DCTDecode".to_string())]),
+    );
 
     let jpeg_data = vec![0xFF, 0xD8, 0xFF, 0xE0];
     let xobject = Object::Stream {
@@ -408,7 +411,7 @@ fn test_jpeg_filter_array_detection() {
     match image.data() {
         ImageData::Jpeg(data) => {
             assert_eq!(data, &jpeg_data);
-        },
+        }
         _ => panic!("Expected JPEG data"),
     }
 }
@@ -515,10 +518,10 @@ fn test_jpeg_with_flatedecode_chain() {
             assert_eq!(data, &jpeg_data, "Decoded JPEG data should match original");
             assert_eq!(data[0], 0xFF, "JPEG data should start with FF");
             assert_eq!(data[1], 0xD8, "JPEG data should have D8 as second byte");
-        },
+        }
         ImageData::Raw { .. } => {
             panic!("Expected JPEG data, got Raw — DCTDecode filter chain not handled correctly")
-        },
+        }
     }
 }
 
@@ -545,7 +548,7 @@ fn test_jpeg_single_dctdecode_passthrough() {
     match image.data() {
         ImageData::Jpeg(data) => {
             assert_eq!(data, &jpeg_data, "Single DCTDecode should pass through raw bytes");
-        },
+        }
         _ => panic!("Expected JPEG data for single DCTDecode filter"),
     }
 }
@@ -561,7 +564,10 @@ fn test_jpeg_single_dctdecode_in_array_passthrough() {
     dict.insert("Height".to_string(), Object::Integer(50));
     dict.insert("BitsPerComponent".to_string(), Object::Integer(8));
     dict.insert("ColorSpace".to_string(), Object::Name("DeviceRGB".to_string()));
-    dict.insert("Filter".to_string(), Object::Array(vec![Object::Name("DCTDecode".to_string())]));
+    dict.insert(
+        "Filter".to_string(),
+        Object::Array(vec![Object::Name("DCTDecode".to_string())]),
+    );
 
     let xobject = Object::Stream {
         dict,
@@ -572,8 +578,11 @@ fn test_jpeg_single_dctdecode_in_array_passthrough() {
 
     match image.data() {
         ImageData::Jpeg(data) => {
-            assert_eq!(data, &jpeg_data, "Single DCTDecode in array should pass through raw bytes");
-        },
+            assert_eq!(
+                data, &jpeg_data,
+                "Single DCTDecode in array should pass through raw bytes"
+            );
+        }
         _ => panic!("Expected JPEG data for DCTDecode in single-element array"),
     }
 }

@@ -242,11 +242,8 @@ impl Transform {
     /// is the underlying builder the cache calls into on a miss.
     pub fn new_srgb_target(profile: Arc<IccProfile>, intent: RenderingIntent) -> Self {
         let n = profile.n_components();
-        let inner = <ActiveIccBackend as IccBackend>::build_srgb_transform(
-            &profile,
-            intent,
-            TransformFlags::press_default(),
-        );
+        let inner =
+            <ActiveIccBackend as IccBackend>::build_srgb_transform(&profile, intent, TransformFlags::press_default());
         Self {
             source_profile: profile,
             intent,
@@ -260,8 +257,7 @@ impl Transform {
     pub fn convert_cmyk_pixel(&self, c: u8, m: u8, y: u8, k: u8) -> [u8; 3] {
         if let Some(holder) = &self.inner
             && self.source_components == 4
-            && let Some(rgb) =
-                <ActiveIccBackend as IccBackend>::convert_cmyk_pixel(holder, [c, m, y, k])
+            && let Some(rgb) = <ActiveIccBackend as IccBackend>::convert_cmyk_pixel(holder, [c, m, y, k])
         {
             return rgb;
         }
@@ -378,11 +374,7 @@ impl CmykRetargetTransform {
     /// default — relative-colorimetric intent + BPC on — is applied;
     /// callers that need a different intent override via
     /// [`Self::new_with_flags`].
-    pub fn new(
-        src_profile: Arc<IccProfile>,
-        dst_profile: Arc<IccProfile>,
-        intent: RenderingIntent,
-    ) -> Option<Self> {
+    pub fn new(src_profile: Arc<IccProfile>, dst_profile: Arc<IccProfile>, intent: RenderingIntent) -> Option<Self> {
         Self::new_with_flags(src_profile, dst_profile, intent, TransformFlags::press_default())
     }
 
@@ -395,12 +387,7 @@ impl CmykRetargetTransform {
         intent: RenderingIntent,
         flags: TransformFlags,
     ) -> Option<Self> {
-        let inner = <ActiveIccBackend as IccBackend>::build_cmyk_retarget(
-            &src_profile,
-            &dst_profile,
-            intent,
-            flags,
-        )?;
+        let inner = <ActiveIccBackend as IccBackend>::build_cmyk_retarget(&src_profile, &dst_profile, intent, flags)?;
         Some(Self {
             src_profile,
             dst_profile,
@@ -487,8 +474,7 @@ impl SrgbToCmykTransform {
         intent: RenderingIntent,
         flags: TransformFlags,
     ) -> Option<Self> {
-        let inner =
-            <ActiveIccBackend as IccBackend>::build_srgb_to_cmyk(&dst_profile, intent, flags)?;
+        let inner = <ActiveIccBackend as IccBackend>::build_srgb_to_cmyk(&dst_profile, intent, flags)?;
         Some(Self {
             dst_profile,
             intent,
@@ -582,7 +568,12 @@ const CMYK_CORNERS: [[f32; 3]; 16] = [
 /// assert_eq!((r, g, b), (1.0, 1.0, 1.0));
 /// ```
 pub fn cmyk_to_rgb(c: f32, m: f32, y: f32, k: f32) -> (f32, f32, f32) {
-    let (c, m, y, k) = (c.clamp(0.0, 1.0), m.clamp(0.0, 1.0), y.clamp(0.0, 1.0), k.clamp(0.0, 1.0));
+    let (c, m, y, k) = (
+        c.clamp(0.0, 1.0),
+        m.clamp(0.0, 1.0),
+        y.clamp(0.0, 1.0),
+        k.clamp(0.0, 1.0),
+    );
     let mut acc = [0.0f32; 3];
     for (i, corner) in CMYK_CORNERS.iter().enumerate() {
         let w = if i & 8 != 0 { c } else { 1.0 - c }
@@ -603,8 +594,7 @@ pub fn cmyk_to_rgb(c: f32, m: f32, y: f32, k: f32) -> (f32, f32, f32) {
 /// matrix is (near-)singular.
 fn solve3(a: [[f32; 3]; 3], b: [f32; 3]) -> Option<[f32; 3]> {
     let det3 = |m: [[f32; 3]; 3]| {
-        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
-            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
             + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
     };
     let det = det3(a);
@@ -803,8 +793,14 @@ mod tests {
             RenderingIntent::from_pdf_name("WhateverNotReal"),
             RenderingIntent::RelativeColorimetric,
         );
-        assert_eq!(RenderingIntent::from_pdf_name("Perceptual"), RenderingIntent::Perceptual,);
-        assert_eq!(RenderingIntent::from_pdf_name("Saturation"), RenderingIntent::Saturation,);
+        assert_eq!(
+            RenderingIntent::from_pdf_name("Perceptual"),
+            RenderingIntent::Perceptual,
+        );
+        assert_eq!(
+            RenderingIntent::from_pdf_name("Saturation"),
+            RenderingIntent::Saturation,
+        );
         assert_eq!(
             RenderingIntent::from_pdf_name("AbsoluteColorimetric"),
             RenderingIntent::AbsoluteColorimetric,

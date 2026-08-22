@@ -126,7 +126,10 @@ fn test_set_field_background_color() {
     let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
 
     editor
-        .add_form_field(0, TextFieldWidget::new("highlight", Rect::new(100.0, 700.0, 200.0, 20.0)))
+        .add_form_field(
+            0,
+            TextFieldWidget::new("highlight", Rect::new(100.0, 700.0, 200.0, 20.0)),
+        )
         .unwrap();
 
     editor
@@ -146,7 +149,10 @@ fn test_set_field_border_color() {
     let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
 
     editor
-        .add_form_field(0, TextFieldWidget::new("important", Rect::new(100.0, 700.0, 200.0, 20.0)))
+        .add_form_field(
+            0,
+            TextFieldWidget::new("important", Rect::new(100.0, 700.0, 200.0, 20.0)),
+        )
         .unwrap();
 
     editor
@@ -204,8 +210,7 @@ fn test_modify_multiple_properties() {
     editor
         .add_form_field(
             0,
-            TextFieldWidget::new("complete", Rect::new(100.0, 700.0, 200.0, 20.0))
-                .with_value("initial value"),
+            TextFieldWidget::new("complete", Rect::new(100.0, 700.0, 200.0, 20.0)).with_value("initial value"),
         )
         .unwrap();
 
@@ -241,7 +246,10 @@ fn test_modify_deleted_field() {
     let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
 
     editor
-        .add_form_field(0, TextFieldWidget::new("to_delete", Rect::new(100.0, 700.0, 200.0, 20.0)))
+        .add_form_field(
+            0,
+            TextFieldWidget::new("to_delete", Rect::new(100.0, 700.0, 200.0, 20.0)),
+        )
         .unwrap();
     editor.remove_form_field("to_delete").unwrap();
 
@@ -256,7 +264,10 @@ fn test_modify_value_and_properties() {
     let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
 
     editor
-        .add_form_field(0, TextFieldWidget::new("combined", Rect::new(100.0, 700.0, 200.0, 20.0)))
+        .add_form_field(
+            0,
+            TextFieldWidget::new("combined", Rect::new(100.0, 700.0, 200.0, 20.0)),
+        )
         .unwrap();
 
     editor
@@ -285,10 +296,7 @@ fn test_modification_persists_on_save() {
         let mut editor = DocumentEditor::open("tests/fixtures/simple.pdf").unwrap();
 
         editor
-            .add_form_field(
-                0,
-                TextFieldWidget::new("persist", Rect::new(100.0, 700.0, 200.0, 20.0)),
-            )
+            .add_form_field(0, TextFieldWidget::new("persist", Rect::new(100.0, 700.0, 200.0, 20.0)))
             .unwrap();
 
         editor

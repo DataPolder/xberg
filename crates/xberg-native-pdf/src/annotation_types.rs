@@ -158,7 +158,10 @@ impl AnnotationSubtype {
 
     /// Check if this is a text markup annotation.
     pub fn is_text_markup(&self) -> bool {
-        matches!(self, Self::Highlight | Self::Underline | Self::Squiggly | Self::StrikeOut)
+        matches!(
+            self,
+            Self::Highlight | Self::Underline | Self::Squiggly | Self::StrikeOut
+        )
     }
 }
 
@@ -1098,7 +1101,12 @@ mod tests {
         ];
 
         for (subtype, expected_name) in &all_subtypes {
-            assert_eq!(subtype.pdf_name(), *expected_name, "pdf_name mismatch for {:?}", subtype);
+            assert_eq!(
+                subtype.pdf_name(),
+                *expected_name,
+                "pdf_name mismatch for {:?}",
+                subtype
+            );
             let parsed = AnnotationSubtype::from_pdf_name(expected_name);
             assert_eq!(*subtype, parsed, "roundtrip mismatch for {}", expected_name);
         }
@@ -1399,7 +1407,10 @@ mod tests {
             AnnotationColor::Cmyk(0.1, 0.2, 0.3, 0.4)
         );
         assert_eq!(AnnotationColor::from_array(&[1.0, 2.0]), AnnotationColor::None);
-        assert_eq!(AnnotationColor::from_array(&[1.0, 2.0, 3.0, 4.0, 5.0]), AnnotationColor::None);
+        assert_eq!(
+            AnnotationColor::from_array(&[1.0, 2.0, 3.0, 4.0, 5.0]),
+            AnnotationColor::None
+        );
     }
 
     #[test]
@@ -1669,7 +1680,7 @@ mod tests {
         match radio {
             WidgetFieldType::Radio { selected } => {
                 assert_eq!(selected, Some("Option1".to_string()));
-            },
+            }
             _ => panic!("Expected Radio"),
         }
     }
@@ -1684,7 +1695,7 @@ mod tests {
             WidgetFieldType::Choice { options, selected } => {
                 assert_eq!(options.len(), 3);
                 assert_eq!(selected, Some("B".to_string()));
-            },
+            }
             _ => panic!("Expected Choice"),
         }
     }
@@ -1700,8 +1711,7 @@ mod tests {
     #[test]
     fn test_quad_points_parse() {
         let flat: Vec<f64> = vec![
-            0.0, 0.0, 100.0, 0.0, 100.0, 50.0, 0.0, 50.0, 200.0, 200.0, 300.0, 200.0, 300.0, 250.0,
-            200.0, 250.0,
+            0.0, 0.0, 100.0, 0.0, 100.0, 50.0, 0.0, 50.0, 200.0, 200.0, 300.0, 200.0, 300.0, 250.0, 200.0, 250.0,
         ];
         let quads = quad_points::parse(&flat);
         assert_eq!(quads.len(), 2);

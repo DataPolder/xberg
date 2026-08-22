@@ -1,7 +1,5 @@
 use xberg_native_pdf::document::PdfDocument;
-use xberg_native_pdf::{
-    clear_global_font_cache, global_font_cache_stats, set_global_font_cache_capacity,
-};
+use xberg_native_pdf::{clear_global_font_cache, global_font_cache_stats, set_global_font_cache_capacity};
 
 mod common;
 
@@ -55,8 +53,10 @@ fn test_large_stream_with_no_text_extracts_empty() {
     pdf.extend_from_slice(format!("{:010} 00000 n \r\n", obj3_offset).as_bytes());
     pdf.extend_from_slice(format!("{:010} 00000 n \r\n", obj4_offset).as_bytes());
 
-    let trailer =
-        format!("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_offset);
+    let trailer = format!(
+        "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+        xref_offset
+    );
     pdf.extend_from_slice(trailer.as_bytes());
 
     let (_path_dir, path) = common::write_temp_pdf(&pdf, "large_no_text.pdf");
@@ -136,8 +136,10 @@ fn test_text_page_not_skipped() {
     pdf.extend_from_slice(format!("{:010} 00000 n \r\n", obj4_offset).as_bytes());
     pdf.extend_from_slice(format!("{:010} 00000 n \r\n", obj5_offset).as_bytes());
 
-    let trailer =
-        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_offset);
+    let trailer = format!(
+        "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+        xref_offset
+    );
     pdf.extend_from_slice(trailer.as_bytes());
 
     let (_path_dir, path) = common::write_temp_pdf(&pdf, "text_not_skipped.pdf");

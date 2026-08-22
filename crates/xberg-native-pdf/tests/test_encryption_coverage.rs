@@ -4,8 +4,7 @@
 
 use xberg_native_pdf::document::PdfDocument;
 use xberg_native_pdf::editor::{
-    DocumentEditor, EditableDocument, EncryptionAlgorithm, EncryptionConfig, Permissions,
-    SaveOptions,
+    DocumentEditor, EditableDocument, EncryptionAlgorithm, EncryptionConfig, Permissions, SaveOptions,
 };
 
 mod common;
@@ -144,7 +143,11 @@ fn test_permissions_individual_bits() {
 
     for (perms, expected_bit) in &test_cases {
         let bits = perms.to_bits();
-        assert!(bits & expected_bit != 0, "Permission bit {} should be set", expected_bit);
+        assert!(
+            bits & expected_bit != 0,
+            "Permission bit {} should be set",
+            expected_bit
+        );
     }
 }
 

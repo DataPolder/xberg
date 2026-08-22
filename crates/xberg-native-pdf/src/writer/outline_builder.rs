@@ -313,8 +313,7 @@ impl OutlineBuilder {
 
         let mut item_ids: Vec<u32> = Vec::new();
         for item in &self.items {
-            let (item_id, new_next_id) =
-                self.build_item(item, root_id, page_refs, next_id, &mut objects);
+            let (item_id, new_next_id) = self.build_item(item, root_id, page_refs, next_id, &mut objects);
             item_ids.push(item_id);
             next_id = new_next_id;
         }
@@ -337,11 +336,7 @@ impl OutlineBuilder {
             }
         }
 
-        let total_count: i64 = self
-            .items
-            .iter()
-            .map(|i| 1 + i.visible_descendant_count())
-            .sum();
+        let total_count: i64 = self.items.iter().map(|i| 1 + i.visible_descendant_count()).sum();
 
         let mut root_dict = HashMap::new();
         root_dict.insert("Type".to_string(), Object::Name("Outlines".to_string()));
@@ -380,28 +375,25 @@ impl OutlineBuilder {
         match &item.destination {
             OutlineDestination::Page(page_idx) => {
                 if let Some(page_ref) = page_refs.get(*page_idx) {
-                    let dest = Object::Array(vec![
-                        Object::Reference(*page_ref),
-                        Object::Name("Fit".to_string()),
-                    ]);
+                    let dest = Object::Array(vec![Object::Reference(*page_ref), Object::Name("Fit".to_string())]);
                     dict.insert("Dest".to_string(), dest);
                 }
-            },
+            }
             OutlineDestination::PageFit { page, fit } => {
                 if let Some(page_ref) = page_refs.get(*page) {
                     let dest = self.build_destination(*page_ref, fit);
                     dict.insert("Dest".to_string(), dest);
                 }
-            },
+            }
             OutlineDestination::Named(name) => {
                 dict.insert("Dest".to_string(), Object::text_string(name));
-            },
+            }
             OutlineDestination::Uri(uri) => {
                 let mut action = HashMap::new();
                 action.insert("S".to_string(), Object::Name("URI".to_string()));
                 action.insert("URI".to_string(), Object::text_string(uri));
                 dict.insert("A".to_string(), Object::Dictionary(action));
-            },
+            }
         }
 
         let flags = item.style.flags();
@@ -421,8 +413,7 @@ impl OutlineBuilder {
 
         let mut child_ids: Vec<u32> = Vec::new();
         for child in &item.children {
-            let (child_id, new_next_id) =
-                self.build_item(child, item_id, page_refs, next_id, objects);
+            let (child_id, new_next_id) = self.build_item(child, item_id, page_refs, next_id, objects);
             child_ids.push(child_id);
             next_id = new_next_id;
         }
@@ -469,15 +460,15 @@ impl OutlineBuilder {
         match fit {
             FitMode::Fit => {
                 arr.push(Object::Name("Fit".to_string()));
-            },
+            }
             FitMode::FitH(top) => {
                 arr.push(Object::Name("FitH".to_string()));
                 arr.push(top.map(|t| Object::Real(t as f64)).unwrap_or(Object::Null));
-            },
+            }
             FitMode::FitV(left) => {
                 arr.push(Object::Name("FitV".to_string()));
                 arr.push(left.map(|l| Object::Real(l as f64)).unwrap_or(Object::Null));
-            },
+            }
             FitMode::FitR {
                 left,
                 bottom,
@@ -489,24 +480,24 @@ impl OutlineBuilder {
                 arr.push(Object::Real(*bottom as f64));
                 arr.push(Object::Real(*right as f64));
                 arr.push(Object::Real(*top as f64));
-            },
+            }
             FitMode::FitB => {
                 arr.push(Object::Name("FitB".to_string()));
-            },
+            }
             FitMode::FitBH(top) => {
                 arr.push(Object::Name("FitBH".to_string()));
                 arr.push(top.map(|t| Object::Real(t as f64)).unwrap_or(Object::Null));
-            },
+            }
             FitMode::FitBV(left) => {
                 arr.push(Object::Name("FitBV".to_string()));
                 arr.push(left.map(|l| Object::Real(l as f64)).unwrap_or(Object::Null));
-            },
+            }
             FitMode::XYZ { left, top, zoom } => {
                 arr.push(Object::Name("XYZ".to_string()));
                 arr.push(left.map(|l| Object::Real(l as f64)).unwrap_or(Object::Null));
                 arr.push(top.map(|t| Object::Real(t as f64)).unwrap_or(Object::Null));
                 arr.push(zoom.map(|z| Object::Real(z as f64)).unwrap_or(Object::Null));
-            },
+            }
         }
 
         Object::Array(arr)

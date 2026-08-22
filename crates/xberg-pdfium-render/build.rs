@@ -57,7 +57,10 @@ fn main() -> Result<(), BuildError> {
     } else if let Ok(path) = std::env::var("PDFIUM_DYNAMIC_LIB_PATH") {
         println!("cargo:rustc-link-lib=dylib=pdfium");
         println!("cargo:rustc-link-search=native={}", path);
-    } else if std::env::var("TARGET").map(|t| t != "wasm32-unknown-unknown").unwrap_or(true) {
+    } else if std::env::var("TARGET")
+        .map(|t| t != "wasm32-unknown-unknown")
+        .unwrap_or(true)
+    {
         // Neither env var is set, so this build links nothing: the crate falls back to its
         // `dynamic_bindings` module, which resolves `FPDF_*` symbols via `libloading::Library`
         // at first Pdfium use, not at link time. That call dlopen()s the platform library name

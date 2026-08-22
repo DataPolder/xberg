@@ -322,8 +322,7 @@ fn a1_devicen_process_iccbased_n4_overprint_byte_exact() {
     process_icc_obj_bytes.extend_from_slice(&process_icc);
     process_icc_obj_bytes.extend_from_slice(b"\nendstream\nendobj\n");
     let process_icc_obj_str = unsafe { String::from_utf8_unchecked(process_icc_obj_bytes) };
-    let pdf =
-        build_pdf_with_output_intent(content, &resources, &icc, &[process_icc_obj_str.as_str()]);
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[process_icc_obj_str.as_str()]);
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
 

@@ -156,10 +156,8 @@ impl DocumentClassifier {
         }
 
         if stats.line_count > 0 {
-            stats.justified_lines_percentage =
-                (justified_count as f32 / stats.line_count as f32) * 100.0;
-            stats.form_field_percentage =
-                (form_field_count as f32 / stats.line_count as f32) * 100.0;
+            stats.justified_lines_percentage = (justified_count as f32 / stats.line_count as f32) * 100.0;
+            stats.form_field_percentage = (form_field_count as f32 / stats.line_count as f32) * 100.0;
             stats.citation_percentage = (citation_count as f32 / stats.line_count as f32) * 100.0;
         }
 
@@ -182,8 +180,7 @@ impl DocumentClassifier {
 
             // Determine spacing tightness: percentage of gaps below threshold
             // < 0.15em = tight (academic), > 0.3em = loose (OCR) ~keep
-            stats.spacing_tightness =
-                word_gaps.iter().filter(|&&g| g < 0.15).count() as f32 / word_gaps.len() as f32;
+            stats.spacing_tightness = word_gaps.iter().filter(|&&g| g < 0.15).count() as f32 / word_gaps.len() as f32;
         }
 
         if !line_spacing_values.is_empty() {
@@ -215,9 +212,7 @@ impl DocumentClassifier {
         // Justified documents typically have:
         // - 30%+ justified lines
         // - Moderate to high word gap variance ~keep
-        if stats.justified_lines_percentage > 30.0
-            && stats.word_gap_variance > 1.0
-            && stats.form_field_percentage < 5.0
+        if stats.justified_lines_percentage > 30.0 && stats.word_gap_variance > 1.0 && stats.form_field_percentage < 5.0
         {
             return DocumentType::Policy;
         }
@@ -452,10 +447,7 @@ mod tests {
         // May be Policy, Government, Academic, or Mixed depending on other metrics ~keep
         assert!(matches!(
             doc_type,
-            DocumentType::Policy
-                | DocumentType::Government
-                | DocumentType::Academic
-                | DocumentType::Mixed
+            DocumentType::Policy | DocumentType::Government | DocumentType::Academic | DocumentType::Mixed
         ));
     }
 

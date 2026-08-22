@@ -70,18 +70,17 @@ end
     for id in 1..=8 {
         out.extend_from_slice(format!("{:010} 00000 n \n", offsets[id]).as_bytes());
     }
-    out.extend_from_slice(
-        format!("trailer\n<< /Size 9 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
-    );
+    out.extend_from_slice(format!("trailer\n<< /Size 9 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     out
 }
 
 fn span_right_edge(content: &[u8]) -> f32 {
     let doc = PdfDocument::from_bytes(build(content)).expect("parse pdf");
     let spans = doc.extract_spans(0).expect("spans");
-    let s = spans.iter().find(|s| s.text == "AB").unwrap_or_else(|| {
-        panic!("no AB span in {:?}", spans.iter().map(|s| &s.text).collect::<Vec<_>>())
-    });
+    let s = spans
+        .iter()
+        .find(|s| s.text == "AB")
+        .unwrap_or_else(|| panic!("no AB span in {:?}", spans.iter().map(|s| &s.text).collect::<Vec<_>>()));
     s.bbox.x + s.bbox.width
 }
 
@@ -124,9 +123,7 @@ fn build_rksj(content_stream: &[u8]) -> Vec<u8> {
     for id in 1..=7 {
         out.extend_from_slice(format!("{:010} 00000 n \n", offsets[id]).as_bytes());
     }
-    out.extend_from_slice(
-        format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
-    );
+    out.extend_from_slice(format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     out
 }
 
@@ -138,10 +135,7 @@ fn word_spacing_still_applied_to_single_byte_code_32_in_composite_font() {
     let right_edge = |content: &[u8]| -> f32 {
         let doc = PdfDocument::from_bytes(build_rksj(content)).expect("parse pdf");
         let spans = doc.extract_spans(0).expect("spans");
-        spans
-            .iter()
-            .map(|s| s.bbox.x + s.bbox.width)
-            .fold(f32::MIN, f32::max)
+        spans.iter().map(|s| s.bbox.x + s.bbox.width).fold(f32::MIN, f32::max)
     };
     let with_tw = right_edge(b"BT /F1 24 Tf 50 700 Td 50 Tw <412042> Tj ET");
     let without_tw = right_edge(b"BT /F1 24 Tf 50 700 Td 0 Tw <412042> Tj ET");

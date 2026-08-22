@@ -25,7 +25,10 @@ fn identity_h_pdf(runs: &[Run]) -> Vec<u8> {
     let mut content = String::new();
     for r in runs {
         let hex: String = r.codes.iter().map(|c| format!("{c:04X}")).collect();
-        content.push_str(&format!("BT /F1 12 Tf 1 0 0 1 {:.1} {:.1} Tm <{hex}> Tj ET\n", r.x, r.y));
+        content.push_str(&format!(
+            "BT /F1 12 Tf 1 0 0 1 {:.1} {:.1} Tm <{hex}> Tj ET\n",
+            r.x, r.y
+        ));
     }
     let mut pairs: Vec<(u16, char)> = Vec::new();
     for r in runs {
@@ -130,10 +133,7 @@ fn identity_h_destructive_redaction_targets_only_the_region() {
     ];
     let src = identity_h_pdf(&runs);
 
-    let before = PdfDocument::from_bytes(src.clone())
-        .unwrap()
-        .extract_text(0)
-        .unwrap();
+    let before = PdfDocument::from_bytes(src.clone()).unwrap().extract_text(0).unwrap();
     assert!(
         before.contains("SECRET") && before.contains("PUBLIC"),
         "fixture text: {before:?}"
@@ -150,10 +150,7 @@ fn identity_h_destructive_redaction_targets_only_the_region() {
     let out = ed
         .save_to_bytes_with_options(xberg_native_pdf::editor::SaveOptions::full_rewrite())
         .expect("save redacted pdf");
-    let after = PdfDocument::from_bytes(out)
-        .unwrap()
-        .extract_text(0)
-        .unwrap();
+    let after = PdfDocument::from_bytes(out).unwrap().extract_text(0).unwrap();
     assert!(!after.contains("SECRET"), "target run must be gone, got: {after:?}");
     assert!(after.contains("PUBLIC"), "non-target run must survive, got: {after:?}");
 }

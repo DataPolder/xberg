@@ -40,20 +40,14 @@ pub mod reading_order;
 pub mod text_processing;
 
 pub use config::{
-    BoldMarkerBehavior, LogLevel, OutputConfig, ReadingOrderConfig, ReadingOrderStrategyType,
-    SpacingConfig, TextPipelineConfig, TjThresholdConfig, WordBoundaryMode,
+    BoldMarkerBehavior, LogLevel, OutputConfig, ReadingOrderConfig, ReadingOrderStrategyType, SpacingConfig,
+    TextPipelineConfig, TjThresholdConfig, WordBoundaryMode,
 };
-pub use logging::{
-    extract_log_debug, extract_log_error, extract_log_info, extract_log_trace, extract_log_warn,
-};
+pub use logging::{extract_log_debug, extract_log_error, extract_log_info, extract_log_trace, extract_log_warn};
 pub use metrics::{BatchMetrics, ExtractionMetrics};
-pub use ordered_span::{
-    OrderedSpans, OrderedTextSpan, ReadingOrderInfo, ReadingOrderSource, StructRole,
-};
+pub use ordered_span::{OrderedSpans, OrderedTextSpan, ReadingOrderInfo, ReadingOrderSource, StructRole};
 pub use page_order::{page_reading_order, page_reading_order_no_artifacts};
-pub use reading_order::{
-    ReadingOrderContext, ReadingOrderStrategy, TategakiStrategy, XYCutStrategy,
-};
+pub use reading_order::{ReadingOrderContext, ReadingOrderStrategy, TategakiStrategy, XYCutStrategy};
 pub use text_processing::WhitespaceNormalizer;
 
 use crate::error::Result;
@@ -95,11 +89,7 @@ impl TextPipeline {
     ///    produce right-to-left column ordering correctly.
     /// 2. Otherwise apply the configured reading-order strategy.
     /// 3. Reverse RTL word runs and return ordered spans.
-    pub fn process(
-        &self,
-        spans: Vec<TextSpan>,
-        context: ReadingOrderContext,
-    ) -> Result<Vec<OrderedTextSpan>> {
+    pub fn process(&self, spans: Vec<TextSpan>, context: ReadingOrderContext) -> Result<Vec<OrderedTextSpan>> {
         let mut ordered = if context.preserve_input_order && context.mcid_order.is_none() {
             // The caller already established a non-geometric reading order the
             // strategies cannot reproduce (two-column-prose column-major order):
@@ -113,9 +103,7 @@ impl TextPipeline {
             spans
                 .into_iter()
                 .enumerate()
-                .map(|(order, span)| {
-                    OrderedTextSpan::with_info(span, order, ReadingOrderInfo::simple())
-                })
+                .map(|(order, span)| OrderedTextSpan::with_info(span, order, ReadingOrderInfo::simple()))
                 .collect()
         } else if is_vertical_majority(&spans) {
             tracing::debug!(

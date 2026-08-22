@@ -12,7 +12,10 @@ fn test_hyphenation_reconstruction_simple() {
     let input = "The Govern-\nment of the United States";
     let output = handler.process_text(input);
 
-    assert!(output.contains("Government"), "Word should be reconstructed as 'Government'");
+    assert!(
+        output.contains("Government"),
+        "Word should be reconstructed as 'Government'"
+    );
 }
 
 #[test]
@@ -50,7 +53,10 @@ fn test_hyphenation_multiple_continuations() {
     let input = "Govern-\nment issued a reorgan-\nization";
     let output = handler.process_text(input);
 
-    assert!(output.contains("Government"), "First continuation should be reconstructed");
+    assert!(
+        output.contains("Government"),
+        "First continuation should be reconstructed"
+    );
 }
 
 #[test]
@@ -60,7 +66,10 @@ fn test_hyphenation_preserves_compound_words() {
     let input = "content-type is a technical term";
     let output = handler.process_text(input);
 
-    assert!(output.contains("content-type"), "Compound words should preserve hyphens");
+    assert!(
+        output.contains("content-type"),
+        "Compound words should preserve hyphens"
+    );
 }
 
 #[test]
@@ -121,7 +130,10 @@ fn test_hyphenation_compound_prefix_self() {
     let input = "self-regulation is important";
     let output = handler.process_text(input);
 
-    assert!(output.contains("self-regulation"), "Compound prefix 'self' should be preserved");
+    assert!(
+        output.contains("self-regulation"),
+        "Compound prefix 'self' should be preserved"
+    );
 }
 
 #[test]
@@ -131,7 +143,10 @@ fn test_hyphenation_compound_prefix_non() {
     let input = "non-linear systems";
     let output = handler.process_text(input);
 
-    assert!(output.contains("non-linear"), "Compound prefix 'non' should be preserved");
+    assert!(
+        output.contains("non-linear"),
+        "Compound prefix 'non' should be preserved"
+    );
 }
 
 #[test]
@@ -154,7 +169,10 @@ fn test_hyphenation_builder_pattern() {
     let output = handler.process_text(input);
 
     // With min length 3, "ab" (2 chars) shouldn't be joined ~keep
-    assert!(!output.contains("textab"), "Minimum length threshold should be respected");
+    assert!(
+        !output.contains("textab"),
+        "Minimum length threshold should be respected"
+    );
 }
 
 #[test]

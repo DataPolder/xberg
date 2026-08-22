@@ -40,11 +40,7 @@ impl core::fmt::Display for LoadError {
 /// `font` must already be resolved to the specific face (via
 /// `FontRef::from_index`/`FontRef::fonts`) — this only reads tables off it,
 /// it does not resolve collection indices itself.
-pub(super) fn parse_face_info(
-    font: &FontRef,
-    source: Source,
-    index: u32,
-) -> Result<FaceInfo, LoadError> {
+pub(super) fn parse_face_info(font: &FontRef, source: Source, index: u32) -> Result<FaceInfo, LoadError> {
     let families = parse_families(font).ok_or(LoadError::Unnamed)?;
 
     let attrs = font.attributes();

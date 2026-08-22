@@ -26,11 +26,7 @@ use super::{ReadingOrderContext, ReadingOrderStrategy};
 pub struct TategakiStrategy;
 
 impl ReadingOrderStrategy for TategakiStrategy {
-    fn apply(
-        &self,
-        spans: Vec<TextSpan>,
-        _context: &ReadingOrderContext,
-    ) -> Result<Vec<OrderedTextSpan>> {
+    fn apply(&self, spans: Vec<TextSpan>, _context: &ReadingOrderContext) -> Result<Vec<OrderedTextSpan>> {
         if spans.is_empty() {
             return Ok(Vec::new());
         }
@@ -40,9 +36,7 @@ impl ReadingOrderStrategy for TategakiStrategy {
         Ok(sorted
             .into_iter()
             .enumerate()
-            .map(|(order, span)| {
-                OrderedTextSpan::with_info(span, order, ReadingOrderInfo::simple())
-            })
+            .map(|(order, span)| OrderedTextSpan::with_info(span, order, ReadingOrderInfo::simple()))
             .collect())
     }
 
@@ -89,11 +83,7 @@ mod tests {
     /// A single column produces a top-down sequence.
     #[test]
     fn tategaki_single_column_top_to_bottom() {
-        let spans = vec![
-            mk("C", 300.0, 676.0),
-            mk("A", 300.0, 700.0),
-            mk("B", 300.0, 688.0),
-        ];
+        let spans = vec![mk("C", 300.0, 676.0), mk("A", 300.0, 700.0), mk("B", 300.0, 688.0)];
         let strategy = TategakiStrategy;
         let context = ReadingOrderContext::new();
         let ordered = strategy.apply(spans, &context).unwrap();

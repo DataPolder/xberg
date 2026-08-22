@@ -34,9 +34,7 @@ endcmap CMapName currentdict /CMap defineresource pop end end";
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, dict: &str, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
@@ -77,5 +75,9 @@ fn cjk_prose_is_not_detected_as_table() {
     let text = doc.extract_text(0).unwrap();
     assert!(text.contains('\u{4E00}'), "CJK not decoded: {text:?}");
     let tables = doc.extract_tables(0).unwrap();
-    assert!(tables.is_empty(), "CJK prose was wrongly detected as {} table(s)", tables.len());
+    assert!(
+        tables.is_empty(),
+        "CJK prose was wrongly detected as {} table(s)",
+        tables.len()
+    );
 }

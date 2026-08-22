@@ -6,8 +6,7 @@
 //! is an attack vector — set-once like `set_provider`).
 
 use xberg_native_pdf::crypto::{
-    AlgorithmId, AlgorithmUse, Decision, PolicyMode, SecurityPolicy, SetPolicyError, active_policy,
-    set_policy,
+    AlgorithmId, AlgorithmUse, Decision, PolicyMode, SecurityPolicy, SetPolicyError, active_policy, set_policy,
 };
 
 #[test]
@@ -20,7 +19,10 @@ fn set_policy_is_reflected_and_set_once() {
     assert_eq!(p.evaluate(AlgorithmId::HashMd5, AlgorithmUse::Read), Decision::Allow);
     assert_eq!(p.evaluate(AlgorithmId::HashMd5, AlgorithmUse::Write), Decision::Deny);
     assert_eq!(p.evaluate(AlgorithmId::CipherRc4, AlgorithmUse::Write), Decision::Deny);
-    assert_eq!(p.evaluate(AlgorithmId::CipherAes256Cbc, AlgorithmUse::Write), Decision::Allow);
+    assert_eq!(
+        p.evaluate(AlgorithmId::CipherAes256Cbc, AlgorithmUse::Write),
+        Decision::Allow
+    );
 
     // Set-once: a second attempt is rejected (no mid-flight downgrade). ~keep
     let again = set_policy(SecurityPolicy::compat());

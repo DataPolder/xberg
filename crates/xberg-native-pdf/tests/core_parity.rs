@@ -49,13 +49,7 @@ fn create_pdf() {
 
 #[test]
 fn from_bytes_page_count() {
-    assert_eq!(
-        PdfDocument::from_bytes(build_bytes())
-            .unwrap()
-            .page_count()
-            .unwrap(),
-        1
-    );
+    assert_eq!(PdfDocument::from_bytes(build_bytes()).unwrap().page_count().unwrap(), 1);
 }
 
 #[test]

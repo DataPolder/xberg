@@ -17,9 +17,7 @@
 //! [`super::AwsLcProvider`]: super::AwsLcProvider
 
 use super::error::{Error, Result};
-use super::provider::{
-    CryptoProvider, Hasher, SignatureVerifier, Signer, SigningKeyMaterial, SymmetricCipher,
-};
+use super::provider::{CryptoProvider, Hasher, SignatureVerifier, Signer, SigningKeyMaterial, SymmetricCipher};
 use super::types::{AesKeySize, EcCurve, HashAlgorithm, Padding, RsaPublicKey};
 
 /// The default Rust-only crypto provider.
@@ -52,7 +50,7 @@ impl CryptoProvider for RustCryptoProvider {
             HashAlgorithm::Md5 => Box::new(Md5Hasher::new()),
             HashAlgorithm::Sha1 => {
                 return Err(Error::Backend("SHA-1 requires the 'signatures' cargo feature"));
-            },
+            }
             HashAlgorithm::Sha256 => Box::new(Sha256Hasher::new()),
             HashAlgorithm::Sha384 => Box::new(Sha384Hasher::new()),
             HashAlgorithm::Sha512 => Box::new(Sha512Hasher::new()),
@@ -150,18 +148,10 @@ impl SymmetricCipher for RustSymmetric {
             ));
         }
         match (key_size, padding) {
-            (AesKeySize::Aes128, Padding::Pkcs7) => {
-                aes_cbc_encrypt_pkcs7::<aes::Aes128>(key, iv, data)
-            },
-            (AesKeySize::Aes128, Padding::None) => {
-                aes_cbc_encrypt_no_pad::<aes::Aes128>(key, iv, data)
-            },
-            (AesKeySize::Aes256, Padding::Pkcs7) => {
-                aes_cbc_encrypt_pkcs7::<aes::Aes256>(key, iv, data)
-            },
-            (AesKeySize::Aes256, Padding::None) => {
-                aes_cbc_encrypt_no_pad::<aes::Aes256>(key, iv, data)
-            },
+            (AesKeySize::Aes128, Padding::Pkcs7) => aes_cbc_encrypt_pkcs7::<aes::Aes128>(key, iv, data),
+            (AesKeySize::Aes128, Padding::None) => aes_cbc_encrypt_no_pad::<aes::Aes128>(key, iv, data),
+            (AesKeySize::Aes256, Padding::Pkcs7) => aes_cbc_encrypt_pkcs7::<aes::Aes256>(key, iv, data),
+            (AesKeySize::Aes256, Padding::None) => aes_cbc_encrypt_no_pad::<aes::Aes256>(key, iv, data),
         }
     }
 
@@ -178,18 +168,10 @@ impl SymmetricCipher for RustSymmetric {
             return Err(Error::InvalidInput("AES-CBC ciphertext must be a 16-byte multiple"));
         }
         match (key_size, padding) {
-            (AesKeySize::Aes128, Padding::Pkcs7) => {
-                aes_cbc_decrypt_pkcs7::<aes::Aes128>(key, iv, data)
-            },
-            (AesKeySize::Aes128, Padding::None) => {
-                aes_cbc_decrypt_no_pad::<aes::Aes128>(key, iv, data)
-            },
-            (AesKeySize::Aes256, Padding::Pkcs7) => {
-                aes_cbc_decrypt_pkcs7::<aes::Aes256>(key, iv, data)
-            },
-            (AesKeySize::Aes256, Padding::None) => {
-                aes_cbc_decrypt_no_pad::<aes::Aes256>(key, iv, data)
-            },
+            (AesKeySize::Aes128, Padding::Pkcs7) => aes_cbc_decrypt_pkcs7::<aes::Aes128>(key, iv, data),
+            (AesKeySize::Aes128, Padding::None) => aes_cbc_decrypt_no_pad::<aes::Aes128>(key, iv, data),
+            (AesKeySize::Aes256, Padding::Pkcs7) => aes_cbc_decrypt_pkcs7::<aes::Aes256>(key, iv, data),
+            (AesKeySize::Aes256, Padding::None) => aes_cbc_decrypt_no_pad::<aes::Aes256>(key, iv, data),
         }
     }
 
@@ -301,7 +283,9 @@ impl SignatureVerifier for RustVerifier {
         _message: &[u8],
         _signature: &[u8],
     ) -> Result<()> {
-        Err(Error::Backend("RSA verification requires the 'signatures' cargo feature"))
+        Err(Error::Backend(
+            "RSA verification requires the 'signatures' cargo feature",
+        ))
     }
     fn verify_rsa_pss(
         &self,
@@ -310,16 +294,14 @@ impl SignatureVerifier for RustVerifier {
         _message: &[u8],
         _signature: &[u8],
     ) -> Result<()> {
-        Err(Error::Backend("RSA-PSS verification requires the 'signatures' cargo feature"))
+        Err(Error::Backend(
+            "RSA-PSS verification requires the 'signatures' cargo feature",
+        ))
     }
-    fn verify_ecdsa(
-        &self,
-        _curve: EcCurve,
-        _pubkey_sec1: &[u8],
-        _digest: &[u8],
-        _signature_der: &[u8],
-    ) -> Result<()> {
-        Err(Error::Backend("ECDSA verification requires the 'signatures' cargo feature"))
+    fn verify_ecdsa(&self, _curve: EcCurve, _pubkey_sec1: &[u8], _digest: &[u8], _signature_der: &[u8]) -> Result<()> {
+        Err(Error::Backend(
+            "ECDSA verification requires the 'signatures' cargo feature",
+        ))
     }
 }
 
@@ -442,13 +424,9 @@ mod tests {
         let p = provider();
         let key = [0u8; 16];
         let iv = [0u8; 16];
-        let result = p.symmetric().aes_cbc_encrypt(
-            AesKeySize::Aes128,
-            &key,
-            &iv,
-            b"15 bytes only..",
-            Padding::None,
-        );
+        let result = p
+            .symmetric()
+            .aes_cbc_encrypt(AesKeySize::Aes128, &key, &iv, b"15 bytes only..", Padding::None);
         assert!(matches!(result, Err(Error::InvalidInput(_))));
     }
 

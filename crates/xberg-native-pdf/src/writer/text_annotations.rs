@@ -212,12 +212,7 @@ impl TextAnnotation {
         {
             dict.insert(
                 "C".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -282,7 +277,10 @@ mod tests {
         assert!(matches!(TextAnnotation::note(rect, "").icon, TextAnnotationIcon::Note));
         assert!(matches!(TextAnnotation::help(rect, "").icon, TextAnnotationIcon::Help));
         assert!(matches!(TextAnnotation::key(rect, "").icon, TextAnnotationIcon::Key));
-        assert!(matches!(TextAnnotation::insert(rect, "").icon, TextAnnotationIcon::Insert));
+        assert!(matches!(
+            TextAnnotation::insert(rect, "").icon,
+            TextAnnotationIcon::Insert
+        ));
         assert!(matches!(
             TextAnnotation::paragraph(rect, "").icon,
             TextAnnotationIcon::Paragraph

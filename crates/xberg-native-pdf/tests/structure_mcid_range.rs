@@ -27,9 +27,7 @@ fn finish(buf: &mut Vec<u8>, off: &[usize], max_id: usize) {
     for id in 1..=max_id {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
     }
-    buf.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n", max_id + 1).as_bytes(),
-    );
+    buf.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n", max_id + 1).as_bytes());
     buf.extend_from_slice(format!("{xref}\n%%EOF\n").as_bytes());
 }
 
@@ -58,7 +56,12 @@ fn tagged_pdf_with_k(k_body: &str) -> Vec<u8> {
     );
     stream(&mut buf, &mut off, 4, content);
     obj(&mut buf, &mut off, 5, "<< >>");
-    obj(&mut buf, &mut off, 6, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    obj(
+        &mut buf,
+        &mut off,
+        6,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
     obj(&mut buf, &mut off, 7, "<< /Type /StructTreeRoot /K [8 0 R] >>");
     obj(
         &mut buf,
@@ -134,7 +137,12 @@ fn pdf_with_content(content: &str) -> Vec<u8> {
          /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
     );
     stream(&mut buf, &mut off, 4, content.as_bytes());
-    obj(&mut buf, &mut off, 5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    obj(
+        &mut buf,
+        &mut off,
+        5,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
     finish(&mut buf, &off, 5);
     buf
 }
@@ -162,7 +170,11 @@ fn mcid_of(spans: &[(String, Option<u32>)], needle: &str) -> Option<u32> {
 #[test]
 fn bdc_mcid_above_u32_max_is_dropped_not_wrapped() {
     let spans = span_mcids("4294967301");
-    assert_eq!(mcid_of(&spans, "Aliased"), None, "out-of-range BDC /MCID aliased a real id");
+    assert_eq!(
+        mcid_of(&spans, "Aliased"),
+        None,
+        "out-of-range BDC /MCID aliased a real id"
+    );
     assert_eq!(mcid_of(&spans, "Real"), Some(5));
 }
 

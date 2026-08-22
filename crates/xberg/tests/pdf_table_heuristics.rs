@@ -16,9 +16,9 @@
 mod helpers;
 use helpers::extract_bytes_document_blocking;
 
+use xberg::core::config::ExtractionConfig;
 use xberg_native_pdf::geometry::Rect;
 use xberg_native_pdf::writer::{DocumentBuilder, TextAlign};
-use xberg::core::config::ExtractionConfig;
 
 fn text_pdf(rows: &[Vec<(f32, f32, String)>]) -> Vec<u8> {
     let mut doc = DocumentBuilder::new();

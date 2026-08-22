@@ -36,13 +36,13 @@ fn test_open_all_pdfs() {
                             Ok(count) => println!("  ✓ Page count: {}", count),
                             Err(e) => eprintln!("  ✗ Page count failed: {}", e),
                         }
-                    },
+                    }
                     Err(e) => eprintln!("  ✗ Catalog failed: {}", e),
                 }
-            },
+            }
             Err(e) => {
                 eprintln!("  ✗ Open failed: {}", e);
-            },
+            }
         }
     }
 }

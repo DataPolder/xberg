@@ -484,7 +484,10 @@ mod tests {
 
     #[test]
     fn test_reading_order_info_convenience_constructors() {
-        assert_eq!(ReadingOrderInfo::structure_tree().source, ReadingOrderSource::StructureTree);
+        assert_eq!(
+            ReadingOrderInfo::structure_tree().source,
+            ReadingOrderSource::StructureTree
+        );
         assert_eq!(ReadingOrderInfo::xycut().source, ReadingOrderSource::XYCut);
         assert_eq!(ReadingOrderInfo::geometric().source, ReadingOrderSource::Geometric);
         assert_eq!(ReadingOrderInfo::simple().source, ReadingOrderSource::Simple);

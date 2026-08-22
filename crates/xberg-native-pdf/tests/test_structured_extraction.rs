@@ -82,17 +82,11 @@ fn extract_structured_returns_body_regions() {
         .map(|r| r.text.clone())
         .collect::<Vec<_>>()
         .join(" ");
-    for frag in [
-        "Left line one",
-        "Left line two",
-        "Right line one",
-        "Right line two",
-    ] {
+    for frag in ["Left line one", "Left line two", "Right line one", "Right line two"] {
         assert!(all.contains(frag), "missing {frag:?} in {all:?}");
     }
 
-    let cols: std::collections::BTreeSet<Option<usize>> =
-        page.regions.iter().map(|r| r.column_index).collect();
+    let cols: std::collections::BTreeSet<Option<usize>> = page.regions.iter().map(|r| r.column_index).collect();
     assert!(
         cols.contains(&Some(0)) && cols.contains(&Some(1)),
         "both columns must be detected; got {cols:?}"

@@ -22,9 +22,7 @@ const SECRET: &str = "TOPSECRETPASSWORDXYZZY";
 
 fn build_secret_pdf() -> Vec<u8> {
     let body = format!("PUBLIC HEADER LINE\n{SECRET}\nPUBLIC FOOTER LINE");
-    let mut pdf = PdfBuilder::new()
-        .from_text(&body)
-        .expect("build text PDF fixture");
+    let mut pdf = PdfBuilder::new().from_text(&body).expect("build text PDF fixture");
     pdf.to_bytes().expect("fixture to bytes")
 }
 
@@ -49,9 +47,7 @@ fn destructive_redaction_removes_secret_text_and_bytes() {
             .save_to_bytes_with_options(raw_opts.clone())
             .expect("save control pdf");
         assert!(
-            ctrl_bytes
-                .windows(SECRET.len())
-                .any(|w| w == SECRET.as_bytes()),
+            ctrl_bytes.windows(SECRET.len()).any(|w| w == SECRET.as_bytes()),
             "control: uncompressed save must preserve the literal secret \
              (otherwise the G6 byte scan below is not a valid oracle)"
         );
@@ -69,18 +65,17 @@ fn destructive_redaction_removes_secret_text_and_bytes() {
     );
     assert!(report.bytes_removed > 0, "expected non-zero bytes removed");
 
-    let out = ed
-        .save_to_bytes_with_options(raw_opts)
-        .expect("save redacted pdf");
+    let out = ed.save_to_bytes_with_options(raw_opts).expect("save redacted pdf");
 
-    if let Some(pos) = out
-        .windows(SECRET.len())
-        .position(|w| w == SECRET.as_bytes())
-    {
+    if let Some(pos) = out.windows(SECRET.len()).position(|w| w == SECRET.as_bytes()) {
         let lo = pos.saturating_sub(120);
         let hi = (pos + SECRET.len() + 120).min(out.len());
         let ctx = String::from_utf8_lossy(&out[lo..hi]);
-        panic!("G6 VIOLATION: secret at byte {pos}/{}. Context:\n>>>{}<<<", out.len(), ctx);
+        panic!(
+            "G6 VIOLATION: secret at byte {pos}/{}. Context:\n>>>{}<<<",
+            out.len(),
+            ctx
+        );
     }
 
     let text = page0_text(&out);
@@ -96,21 +91,22 @@ fn destructive_redaction_removes_secret_text_and_bytes() {
 fn destructive_redaction_is_idempotent() {
     let src = build_secret_pdf();
     let mut ed = DocumentEditor::from_bytes(src).expect("open editor");
-    ed.add_redaction(0, [0.0, 0.0, 5000.0, 5000.0], None)
-        .unwrap();
+    ed.add_redaction(0, [0.0, 0.0, 5000.0, 5000.0], None).unwrap();
     ed.apply_redactions_destructive(RedactionOptions::default())
         .expect("first pass");
     let once = ed.save_to_bytes().expect("save once");
 
     let mut ed2 = DocumentEditor::from_bytes(once).expect("reopen");
-    ed2.add_redaction(0, [0.0, 0.0, 5000.0, 5000.0], None)
-        .unwrap();
+    ed2.add_redaction(0, [0.0, 0.0, 5000.0, 5000.0], None).unwrap();
     let _ = ed2
         .apply_redactions_destructive(RedactionOptions::default())
         .expect("second pass is safe");
     let twice = ed2.save_to_bytes().expect("save twice");
 
-    assert!(!page0_text(&twice).contains(SECRET), "secret reappeared after re-redaction");
+    assert!(
+        !page0_text(&twice).contains(SECRET),
+        "secret reappeared after re-redaction"
+    );
 }
 
 /// `redaction_count` reflects queued programmatic regions.

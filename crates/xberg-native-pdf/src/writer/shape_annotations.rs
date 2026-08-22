@@ -25,9 +25,7 @@
 //! let polygon = PolygonAnnotation::polygon(vec![(100.0, 100.0), (150.0, 150.0), (100.0, 150.0)]);
 //! ```
 
-use crate::annotation_types::{
-    AnnotationColor, AnnotationFlags, BorderEffect, BorderStyleType, LineEndingStyle,
-};
+use crate::annotation_types::{AnnotationColor, AnnotationFlags, BorderEffect, BorderStyleType, LineEndingStyle};
 use crate::geometry::Rect;
 use crate::object::{Object, ObjectRef};
 use std::collections::HashMap;
@@ -124,8 +122,7 @@ impl LineAnnotation {
 
     /// Create a double-headed arrow line.
     pub fn double_arrow(start: (f64, f64), end: (f64, f64)) -> Self {
-        Self::new(start, end)
-            .with_line_endings(LineEndingStyle::OpenArrow, LineEndingStyle::OpenArrow)
+        Self::new(start, end).with_line_endings(LineEndingStyle::OpenArrow, LineEndingStyle::OpenArrow)
     }
 
     /// Create a dimension line (with leader lines).
@@ -282,12 +279,7 @@ impl LineAnnotation {
         {
             dict.insert(
                 "C".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -297,12 +289,7 @@ impl LineAnnotation {
         {
             dict.insert(
                 "IC".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -515,7 +502,10 @@ impl ShapeAnnotation {
         let mut dict = HashMap::new();
 
         dict.insert("Type".to_string(), Object::Name("Annot".to_string()));
-        dict.insert("Subtype".to_string(), Object::Name(self.shape_type.pdf_name().to_string()));
+        dict.insert(
+            "Subtype".to_string(),
+            Object::Name(self.shape_type.pdf_name().to_string()),
+        );
 
         dict.insert(
             "Rect".to_string(),
@@ -541,12 +531,7 @@ impl ShapeAnnotation {
         {
             dict.insert(
                 "C".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -556,12 +541,7 @@ impl ShapeAnnotation {
         {
             dict.insert(
                 "IC".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -814,7 +794,10 @@ impl PolygonAnnotation {
         let mut dict = HashMap::new();
 
         dict.insert("Type".to_string(), Object::Name("Annot".to_string()));
-        dict.insert("Subtype".to_string(), Object::Name(self.polygon_type.pdf_name().to_string()));
+        dict.insert(
+            "Subtype".to_string(),
+            Object::Name(self.polygon_type.pdf_name().to_string()),
+        );
 
         let rect = self.calculate_rect();
         dict.insert(
@@ -860,12 +843,7 @@ impl PolygonAnnotation {
         {
             dict.insert(
                 "C".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -875,12 +853,7 @@ impl PolygonAnnotation {
         {
             dict.insert(
                 "IC".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -1124,7 +1097,7 @@ mod tests {
                 assert!((r - 1.0).abs() < 0.001);
                 assert!((g - 0.0).abs() < 0.001);
                 assert!((b - 0.0).abs() < 0.001);
-            },
+            }
             _ => panic!("Expected RGB color"),
         }
     }
@@ -1143,8 +1116,7 @@ mod tests {
 
     #[test]
     fn test_line_annotation_with_border_style() {
-        let line = LineAnnotation::new((0.0, 0.0), (100.0, 100.0))
-            .with_border_style(BorderStyleType::Dashed);
+        let line = LineAnnotation::new((0.0, 0.0), (100.0, 100.0)).with_border_style(BorderStyleType::Dashed);
         assert_eq!(line.border_style, Some(BorderStyleType::Dashed));
     }
 
@@ -1250,8 +1222,7 @@ mod tests {
 
     #[test]
     fn test_line_annotation_build_no_caption_cp() {
-        let line = LineAnnotation::new((0.0, 0.0), (100.0, 100.0))
-            .with_caption_position(CaptionPosition::Top);
+        let line = LineAnnotation::new((0.0, 0.0), (100.0, 100.0)).with_caption_position(CaptionPosition::Top);
         let dict = line.build(&[]);
         assert!(!dict.contains_key("Cap"));
         assert!(!dict.contains_key("CP"));
@@ -1280,7 +1251,7 @@ mod tests {
             match dict.get("BS") {
                 Some(Object::Dictionary(bs)) => {
                     assert!(bs.contains_key("S"));
-                },
+                }
                 _ => panic!("Expected BS dictionary"),
             }
         }
@@ -1303,15 +1274,14 @@ mod tests {
 
     #[test]
     fn test_shape_annotation_with_border_width() {
-        let shape =
-            ShapeAnnotation::square(Rect::new(0.0, 0.0, 100.0, 100.0)).with_border_width(3.0);
+        let shape = ShapeAnnotation::square(Rect::new(0.0, 0.0, 100.0, 100.0)).with_border_width(3.0);
         assert_eq!(shape.border_width, Some(3.0));
     }
 
     #[test]
     fn test_shape_annotation_with_border_style() {
-        let shape = ShapeAnnotation::circle(Rect::new(0.0, 0.0, 100.0, 100.0))
-            .with_border_style(BorderStyleType::Dashed);
+        let shape =
+            ShapeAnnotation::circle(Rect::new(0.0, 0.0, 100.0, 100.0)).with_border_style(BorderStyleType::Dashed);
         assert_eq!(shape.border_style, Some(BorderStyleType::Dashed));
     }
 
@@ -1321,8 +1291,7 @@ mod tests {
             style: BorderEffectStyle::Cloudy,
             intensity: 1.5,
         };
-        let shape =
-            ShapeAnnotation::square(Rect::new(0.0, 0.0, 100.0, 100.0)).with_border_effect(effect);
+        let shape = ShapeAnnotation::square(Rect::new(0.0, 0.0, 100.0, 100.0)).with_border_effect(effect);
         assert!(shape.border_effect.is_some());
     }
 
@@ -1340,8 +1309,7 @@ mod tests {
 
     #[test]
     fn test_shape_annotation_with_contents() {
-        let shape =
-            ShapeAnnotation::square(Rect::new(0.0, 0.0, 100.0, 100.0)).with_contents("A note");
+        let shape = ShapeAnnotation::square(Rect::new(0.0, 0.0, 100.0, 100.0)).with_contents("A note");
         assert_eq!(shape.contents, Some("A note".to_string()));
     }
 
@@ -1353,8 +1321,7 @@ mod tests {
 
     #[test]
     fn test_shape_annotation_with_subject() {
-        let shape =
-            ShapeAnnotation::circle(Rect::new(0.0, 0.0, 100.0, 100.0)).with_subject("Review");
+        let shape = ShapeAnnotation::circle(Rect::new(0.0, 0.0, 100.0, 100.0)).with_subject("Review");
         assert_eq!(shape.subject, Some("Review".to_string()));
     }
 
@@ -1404,14 +1371,13 @@ mod tests {
             style: BorderEffectStyle::None,
             intensity: 0.0,
         };
-        let shape =
-            ShapeAnnotation::square(Rect::new(0.0, 0.0, 100.0, 100.0)).with_border_effect(effect);
+        let shape = ShapeAnnotation::square(Rect::new(0.0, 0.0, 100.0, 100.0)).with_border_effect(effect);
 
         let dict = shape.build(&[]);
         match dict.get("BE") {
             Some(Object::Dictionary(be)) => {
                 assert!(!be.contains_key("I"));
-            },
+            }
             _ => panic!("Expected BE dictionary"),
         }
     }
@@ -1438,8 +1404,7 @@ mod tests {
             BorderStyleType::Inset,
             BorderStyleType::Underline,
         ] {
-            let shape = ShapeAnnotation::circle(Rect::new(0.0, 0.0, 100.0, 100.0))
-                .with_border_style(*style);
+            let shape = ShapeAnnotation::circle(Rect::new(0.0, 0.0, 100.0, 100.0)).with_border_style(*style);
             let dict = shape.build(&[]);
             assert!(dict.contains_key("BS"));
         }
@@ -1447,15 +1412,15 @@ mod tests {
 
     #[test]
     fn test_polygon_with_stroke_color() {
-        let polygon = PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 0.0), (50.0, 100.0)])
-            .with_stroke_color(1.0, 0.0, 0.0);
+        let polygon =
+            PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 0.0), (50.0, 100.0)]).with_stroke_color(1.0, 0.0, 0.0);
         assert!(polygon.color.is_some());
     }
 
     #[test]
     fn test_polygon_with_fill_color() {
-        let polygon = PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 0.0), (50.0, 100.0)])
-            .with_fill_color(0.0, 1.0, 0.0);
+        let polygon =
+            PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 0.0), (50.0, 100.0)]).with_fill_color(0.0, 1.0, 0.0);
         assert!(polygon.interior_color.is_some());
     }
 
@@ -1469,15 +1434,14 @@ mod tests {
 
     #[test]
     fn test_polygon_with_border_width() {
-        let polygon =
-            PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 0.0)]).with_border_width(3.0);
+        let polygon = PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 0.0)]).with_border_width(3.0);
         assert_eq!(polygon.border_width, Some(3.0));
     }
 
     #[test]
     fn test_polygon_with_border_style() {
-        let polygon = PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 0.0)])
-            .with_border_style(BorderStyleType::Beveled);
+        let polygon =
+            PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 0.0)]).with_border_style(BorderStyleType::Beveled);
         assert_eq!(polygon.border_style, Some(BorderStyleType::Beveled));
     }
 
@@ -1487,8 +1451,7 @@ mod tests {
             style: BorderEffectStyle::Cloudy,
             intensity: 2.0,
         };
-        let polygon =
-            PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 0.0)]).with_border_effect(effect);
+        let polygon = PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 0.0)]).with_border_effect(effect);
         assert!(polygon.border_effect.is_some());
     }
 
@@ -1545,17 +1508,16 @@ mod tests {
             style: BorderEffectStyle::Cloudy,
             intensity: 1.5,
         };
-        let polygon =
-            PolygonAnnotation::polygon(vec![(100.0, 100.0), (200.0, 100.0), (150.0, 200.0)])
-                .with_stroke_color(0.0, 0.0, 1.0)
-                .with_fill_color(0.8, 0.8, 1.0)
-                .with_border_width(2.0)
-                .with_border_style(BorderStyleType::Dashed)
-                .with_border_effect(effect)
-                .with_opacity(0.9)
-                .with_contents("Comment")
-                .with_author("Author")
-                .with_subject("Subject");
+        let polygon = PolygonAnnotation::polygon(vec![(100.0, 100.0), (200.0, 100.0), (150.0, 200.0)])
+            .with_stroke_color(0.0, 0.0, 1.0)
+            .with_fill_color(0.8, 0.8, 1.0)
+            .with_border_width(2.0)
+            .with_border_style(BorderStyleType::Dashed)
+            .with_border_effect(effect)
+            .with_opacity(0.9)
+            .with_contents("Comment")
+            .with_author("Author")
+            .with_subject("Subject");
 
         let dict = polygon.build(&[]);
 
@@ -1604,8 +1566,7 @@ mod tests {
             BorderStyleType::Inset,
             BorderStyleType::Underline,
         ] {
-            let polygon = PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 100.0)])
-                .with_border_style(*style);
+            let polygon = PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 100.0)]).with_border_style(*style);
             let dict = polygon.build(&[]);
             assert!(dict.contains_key("BS"));
         }
@@ -1617,13 +1578,12 @@ mod tests {
             style: BorderEffectStyle::None,
             intensity: 0.0,
         };
-        let polygon =
-            PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 100.0)]).with_border_effect(effect);
+        let polygon = PolygonAnnotation::polygon(vec![(0.0, 0.0), (100.0, 100.0)]).with_border_effect(effect);
         let dict = polygon.build(&[]);
         match dict.get("BE") {
             Some(Object::Dictionary(be)) => {
                 assert!(!be.contains_key("I"));
-            },
+            }
             _ => panic!("Expected BE dictionary"),
         }
     }
@@ -1640,7 +1600,7 @@ mod tests {
                 assert_eq!(arr[1], Object::Real(20.0));
                 assert_eq!(arr[4], Object::Real(50.0));
                 assert_eq!(arr[5], Object::Real(60.0));
-            },
+            }
             _ => panic!("Expected Vertices array"),
         }
     }
@@ -1656,7 +1616,7 @@ mod tests {
                 assert_eq!(arr[1], Object::Real(20.0));
                 assert_eq!(arr[2], Object::Real(30.0));
                 assert_eq!(arr[3], Object::Real(40.0));
-            },
+            }
             _ => panic!("Expected L array"),
         }
     }
@@ -1673,7 +1633,7 @@ mod tests {
                 assert_eq!(arr[1], Object::Real(200.0));
                 assert_eq!(arr[2], Object::Real(150.0)); // x + width ~keep
                 assert_eq!(arr[3], Object::Real(250.0)); // y + height ~keep
-            },
+            }
             _ => panic!("Expected Rect array"),
         }
     }

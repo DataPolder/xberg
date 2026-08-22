@@ -11,9 +11,7 @@ use xberg_native_pdf::object::Object;
 use xberg_native_pdf::xref_reconstruction::reconstruct_xref;
 
 /// The object number the recovered Catalog points its `/Pages` at.
-fn synthesized_pages_target(
-    synthetic: &[(xberg_native_pdf::object::ObjectRef, Object)],
-) -> Option<u32> {
+fn synthesized_pages_target(synthetic: &[(xberg_native_pdf::object::ObjectRef, Object)]) -> Option<u32> {
     synthetic.iter().find_map(|(_, obj)| {
         let dict = obj.as_dict()?;
         if dict.get("Type").and_then(|t| t.as_name()) != Some("Catalog") {
@@ -59,8 +57,7 @@ fn recovery_picks_the_same_page_tree_every_run() {
     let mut seen = Vec::new();
     for _ in 0..64 {
         let mut cursor = Cursor::new(pdf.clone());
-        let (_xref, _trailer, synthetic) =
-            reconstruct_xref(&mut cursor).expect("recovery finds the packed page trees");
+        let (_xref, _trailer, synthetic) = reconstruct_xref(&mut cursor).expect("recovery finds the packed page trees");
         seen.push(synthesized_pages_target(&synthetic));
     }
 

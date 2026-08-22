@@ -103,8 +103,7 @@ mod embed_file_api {
             .with_mime_type("text/csv")
             .with_af_relationship(AFRelationship::Data);
 
-        pdf.embed_file_with_options(file)
-            .expect("Failed to embed file");
+        pdf.embed_file_with_options(file).expect("Failed to embed file");
 
         let pending = pdf.pending_embedded_files();
         assert_eq!(pending.len(), 1);
@@ -179,11 +178,9 @@ mod embed_file_api {
         let mut pdf = Pdf::open(&input_path).expect("Failed to open PDF");
 
         let binary_data: Vec<u8> = (0..256).map(|i| i as u8).collect();
-        let file = EmbeddedFile::new("image.bin", binary_data.clone())
-            .with_mime_type("application/octet-stream");
+        let file = EmbeddedFile::new("image.bin", binary_data.clone()).with_mime_type("application/octet-stream");
 
-        pdf.embed_file_with_options(file)
-            .expect("Failed to embed binary file");
+        pdf.embed_file_with_options(file).expect("Failed to embed binary file");
 
         pdf.save(&output_path).expect("Failed to save PDF");
 

@@ -46,7 +46,7 @@ fn test_cidtogidmap_explicit_stream_basic() {
             assert_eq!(vec[0], 10);
             assert_eq!(vec[1], 20);
             assert_eq!(vec[2], 30);
-        },
+        }
         _ => panic!("Expected Explicit mapping"),
     }
 }
@@ -76,7 +76,7 @@ fn test_char_to_unicode_with_explicit_cidtogidmap() {
             assert_eq!(gids[0], 10);
             assert_eq!(gids[1], 20);
             assert_eq!(gids[2], 0);
-        },
+        }
         _ => panic!("Expected Explicit mapping"),
     }
 }
@@ -109,7 +109,7 @@ fn test_char_to_unicode_cid_out_of_range() {
             for cid in out_of_range_cids {
                 assert!(cid >= gids.len(), "CID {} should be out of range", cid);
             }
-        },
+        }
         _ => panic!("Expected Explicit mapping"),
     }
 
@@ -132,7 +132,7 @@ fn test_char_to_unicode_cid_out_of_range() {
                     cid, should_be_in_range, is_in_range
                 );
             }
-        },
+        }
         _ => panic!("Expected Explicit mapping"),
     }
 }
@@ -163,16 +163,11 @@ fn test_char_to_unicode_gid_zero_notdef() {
 
             assert_eq!(gids[1], 10, "CID 1 should map to GID 10");
             assert_eq!(gids[3], 20, "CID 3 should map to GID 20");
-        },
+        }
         _ => panic!("Expected Explicit mapping"),
     }
 
-    let gid_mappings = vec![
-        (0u16, true),
-        (1u16, false),
-        (10u16, false),
-        (65535u16, false),
-    ];
+    let gid_mappings = vec![(0u16, true), (1u16, false), (10u16, false), (65535u16, false)];
 
     for (gid, should_be_notdef) in gid_mappings {
         let is_notdef = gid == 0;
@@ -294,11 +289,17 @@ fn test_simple_fonts_unaffected() {
 
     let font_subtype = "Type1";
     let should_have_descendant_fonts = font_subtype == "Type0";
-    assert!(!should_have_descendant_fonts, "Type1 fonts should not have DescendantFonts");
+    assert!(
+        !should_have_descendant_fonts,
+        "Type1 fonts should not have DescendantFonts"
+    );
 
     let font_subtype = "TrueType";
     let should_have_cid_to_gid_map = font_subtype == "Type0";
-    assert!(!should_have_cid_to_gid_map, "TrueType fonts should not have CIDToGIDMap");
+    assert!(
+        !should_have_cid_to_gid_map,
+        "TrueType fonts should not have CIDToGIDMap"
+    );
 
     let simple_font_types = vec!["Type1", "TrueType", "Type3", "MMType1"];
     for font_type in simple_font_types {
@@ -313,7 +314,11 @@ fn test_simple_fonts_unaffected() {
     ];
 
     for (feature, required_type) in type0_only_features {
-        assert_eq!(required_type, "Type0", "Feature '{}' only applies to Type0 fonts", feature);
+        assert_eq!(
+            required_type, "Type0",
+            "Feature '{}' only applies to Type0 fonts",
+            feature
+        );
     }
 }
 
@@ -366,7 +371,7 @@ fn test_cid_65535_max_boundary() {
                 out_of_range_cid as usize >= gids.len(),
                 "CID 65535 is out of range for small map"
             );
-        },
+        }
         _ => panic!("Expected Explicit mapping"),
     }
 }
@@ -389,7 +394,7 @@ fn test_gid_maps_to_zero_returns_none() {
             assert_eq!(gids[1], 10);
 
             assert_eq!(gids[2], 20);
-        },
+        }
         _ => panic!("Expected Explicit mapping"),
     }
 
@@ -413,7 +418,10 @@ fn test_cidtogidmap_invalid_name_returns_error() {
     assert!(matches!(identity_map, CIDToGIDMap::Identity));
 
     let identity_str = "Identity";
-    assert_eq!(identity_str, "Identity", "Test setup: 'Identity' is the only valid name");
+    assert_eq!(
+        identity_str, "Identity",
+        "Test setup: 'Identity' is the only valid name"
+    );
 
     // Note: Full integration testing with invalid names would require
     // mocking PdfDocument and calling parse_cidtogidmap() which is tested
@@ -438,6 +446,9 @@ fn test_cidtogidmap_on_non_embedded_font_warns() {
     let embedded_font_present = false;
 
     if map_present && !embedded_font_present {
-        assert_eq!(true, true, "Warning condition detected: CIDToGIDMap without embedded font");
+        assert_eq!(
+            true, true,
+            "Warning condition detected: CIDToGIDMap without embedded font"
+        );
     }
 }

@@ -94,6 +94,10 @@ fn rotate_270_is_not_a_mirror_of_rotate_90() {
     // Pinning both guards the specific reflection that was shipping. ~keep
     let (l90, t90) = marker_quadrant(90);
     let (l270, t270) = marker_quadrant(270);
-    assert_ne!((l90, t90), (l270, t270), "90 and 270 must not land in the same quadrant");
+    assert_ne!(
+        (l90, t90),
+        (l270, t270),
+        "90 and 270 must not land in the same quadrant"
+    );
     assert!(t90 && !t270, "90 is top, 270 is bottom");
 }

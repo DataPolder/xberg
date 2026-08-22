@@ -329,9 +329,7 @@ impl DocumentType {
             || text.contains("said ")
             || text.contains("went ");
 
-        lower_count > upper_count * 5
-            && digit_count < text.len() / 20
-            && (has_narrative_words || period_count > 2)
+        lower_count > upper_count * 5 && digit_count < text.len() / 20 && (has_narrative_words || period_count > 2)
     }
 
     fn looks_like_business(text: &str) -> bool {
@@ -500,9 +498,7 @@ impl TextPipelineConfig {
         let strategy = match &opts.reading_order_mode {
             ReadingOrderMode::TopToBottomLeftToRight => ReadingOrderStrategyType::Simple,
             ReadingOrderMode::ColumnAware => ReadingOrderStrategyType::XYCut,
-            ReadingOrderMode::StructureTreeFirst { .. } => {
-                ReadingOrderStrategyType::StructureTreeFirst
-            },
+            ReadingOrderMode::StructureTreeFirst { .. } => ReadingOrderStrategyType::StructureTreeFirst,
         };
 
         // Map BoldMarkerBehavior enum (both have same variants) ~keep
@@ -759,8 +755,7 @@ mod tests {
     #[test]
     fn test_detect_academic_sample() {
         // Sample has enough special chars for academic detection (>= 0.08 ratio) ~keep
-        let sample =
-            "The ∫∞√∑ equations © research shows ± evidence × mathematical ÷ concepts ® article";
+        let sample = "The ∫∞√∑ equations © research shows ± evidence × mathematical ÷ concepts ® article";
         let doc_type = DocumentType::detect_from_sample(sample);
         assert_eq!(doc_type, DocumentType::Academic);
     }

@@ -428,11 +428,7 @@ impl CertificateEncryptionHandler {
     pub fn encrypt_string(&self, data: &[u8], obj_num: u32, gen_num: u16) -> Vec<u8> {
         use super::write_handler::EncryptionWriteHandler;
 
-        let handler = EncryptionWriteHandler::from_key(
-            self.file_key.clone(),
-            self.algorithm,
-            self.encrypt_metadata,
-        );
+        let handler = EncryptionWriteHandler::from_key(self.file_key.clone(), self.algorithm, self.encrypt_metadata);
         handler.encrypt_string(data, obj_num, gen_num)
     }
 
@@ -440,11 +436,7 @@ impl CertificateEncryptionHandler {
     pub fn encrypt_stream(&self, data: &[u8], obj_num: u32, gen_num: u16) -> Vec<u8> {
         use super::write_handler::EncryptionWriteHandler;
 
-        let handler = EncryptionWriteHandler::from_key(
-            self.file_key.clone(),
-            self.algorithm,
-            self.encrypt_metadata,
-        );
+        let handler = EncryptionWriteHandler::from_key(self.file_key.clone(), self.algorithm, self.encrypt_metadata);
         handler.encrypt_stream(data, obj_num, gen_num)
     }
 }
@@ -483,11 +475,7 @@ impl CertEncryptDict {
             dict.insert("EncryptMetadata".to_string(), Object::Boolean(false));
         }
 
-        let recipients_array: Vec<Object> = self
-            .recipients
-            .iter()
-            .map(|r| Object::String(r.clone()))
-            .collect();
+        let recipients_array: Vec<Object> = self.recipients.iter().map(|r| Object::String(r.clone())).collect();
         dict.insert("Recipients".to_string(), Object::Array(recipients_array));
 
         // Add crypt filter for V=4/5 ~keep
@@ -534,8 +522,14 @@ mod tests {
         assert_eq!(CertSubFilter::Pkcs7S4.as_pdf_name(), "adbe.pkcs7.s4");
         assert_eq!(CertSubFilter::Pkcs7S5.as_pdf_name(), "adbe.pkcs7.s5");
 
-        assert_eq!(CertSubFilter::from_pdf_name("adbe.pkcs7.s4"), Some(CertSubFilter::Pkcs7S4));
-        assert_eq!(CertSubFilter::from_pdf_name("adbe.pkcs7.s5"), Some(CertSubFilter::Pkcs7S5));
+        assert_eq!(
+            CertSubFilter::from_pdf_name("adbe.pkcs7.s4"),
+            Some(CertSubFilter::Pkcs7S4)
+        );
+        assert_eq!(
+            CertSubFilter::from_pdf_name("adbe.pkcs7.s5"),
+            Some(CertSubFilter::Pkcs7S5)
+        );
         assert_eq!(CertSubFilter::from_pdf_name("unknown"), None);
     }
 

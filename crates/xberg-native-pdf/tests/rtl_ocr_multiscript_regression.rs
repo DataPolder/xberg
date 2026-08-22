@@ -153,7 +153,14 @@ const WORDS: &[(&str, bool, &str, f32, f32, &str)] = &[
     ("eng", false, "010203030405", 36.00, 708.00, "Hello!"),
     ("spa", false, "060104030705", 336.00, 708.00, "\u{a1}Hola!"),
     ("fra", false, "0804090A040B0C05", 36.00, 636.00, "Bonjour!"),
-    ("deu", false, "0D0C0E0F100D04111105", 336.00, 636.00, "Gr\u{fc}\u{df} Gott!"),
+    (
+        "deu",
+        false,
+        "0D0C0E0F100D04111105",
+        336.00,
+        636.00,
+        "Gr\u{fc}\u{df} Gott!",
+    ),
     (
         "rus",
         false,
@@ -246,10 +253,7 @@ fn build_ocr_sandwich_pdf() -> Vec<u8> {
         "/CIDInit /ProcSet findresource begin\n12 dict begin begincmap\n\
          1 begincodespacerange <00> <FF> endcodespacerange\n\
          {} beginbfchar\n{}endbfchar\nendcmap CMapName currentdict /CMap defineresource pop end end",
-        TOUNICODE_BFCHARS
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .count(),
+        TOUNICODE_BFCHARS.lines().filter(|l| !l.trim().is_empty()).count(),
         TOUNICODE_BFCHARS,
     );
 
@@ -267,9 +271,7 @@ fn build_ocr_sandwich_pdf() -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, dict: &str, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< {dict} /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };

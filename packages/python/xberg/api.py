@@ -2190,9 +2190,9 @@ def install_pdf_render_diagnostics() -> bool:
     return _rust.install_pdf_render_diagnostics()
 
 
-def take_pdf_oxide_render_warnings() -> list[ProcessingWarning]:
+def take_engine_render_warnings() -> list[ProcessingWarning]:
     """Drain the glyph-drop [`ProcessingWarning`]s accumulated on this thread by render calls si."""
-    return _rust.take_pdf_oxide_render_warnings()
+    return _rust.take_engine_render_warnings()
 
 
 def build_decoder_prompt_tokens(

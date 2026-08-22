@@ -131,8 +131,7 @@ pub trait IccBackend {
     /// unit-interval f32 (C, M, Y, K). Round-trips through 8-bit at
     /// the lcms2 boundary for the same reason as `retarget_cmyk_pixel`
     /// — the press pipeline serialises plate values as 8-bit.
-    fn convert_srgb_to_cmyk_pixel(transform: &Self::SrgbToCmykTransform, rgb: [f32; 3])
-    -> [f32; 4];
+    fn convert_srgb_to_cmyk_pixel(transform: &Self::SrgbToCmykTransform, rgb: [f32; 3]) -> [f32; 4];
 }
 
 // ============================================================================
@@ -193,11 +192,12 @@ mod qcms_impl {
                 4 => qcms::DataType::CMYK,
                 _ => return None,
             };
-            qcms::Transform::new_to(&src, &dst, src_ty, qcms::DataType::RGB8, qcms_intent(intent))
-                .map(|inner| SrgbTransform {
+            qcms::Transform::new_to(&src, &dst, src_ty, qcms::DataType::RGB8, qcms_intent(intent)).map(|inner| {
+                SrgbTransform {
                     inner,
                     source_components: profile.n_components(),
-                })
+                }
+            })
         }
 
         fn convert_cmyk_pixel(transform: &Self::SrgbTransform, cmyk: [u8; 4]) -> Option<[u8; 3]> {
@@ -269,10 +269,7 @@ mod qcms_impl {
             None
         }
 
-        fn convert_srgb_to_cmyk_pixel(
-            transform: &Self::SrgbToCmykTransform,
-            _rgb: [f32; 3],
-        ) -> [f32; 4] {
+        fn convert_srgb_to_cmyk_pixel(transform: &Self::SrgbToCmykTransform, _rgb: [f32; 3]) -> [f32; 4] {
             // Uninhabited under qcms — `build_srgb_to_cmyk` always
             // returns None. ~keep
             match transform.0 {}

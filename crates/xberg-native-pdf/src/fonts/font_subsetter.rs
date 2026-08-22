@@ -84,8 +84,7 @@ pub fn subset_font_bytes(
     }
 
     let remapper = GlyphRemapper::new_from_glyphs(&all);
-    let subset = subsetter::subset(face_bytes, index, &remapper)
-        .map_err(|e| SubsetError::Subsetter(e.to_string()))?;
+    let subset = subsetter::subset(face_bytes, index, &remapper).map_err(|e| SubsetError::Subsetter(e.to_string()))?;
 
     Ok((subset, remapper))
 }
@@ -176,9 +175,7 @@ impl FontSubsetter {
             self.subset_tag = Some(tag);
         }
         // Safety: subset_tag is set to Some on the line above ~keep
-        self.subset_tag
-            .as_ref()
-            .expect("subset_tag set on prior line")
+        self.subset_tag.as_ref().expect("subset_tag set on prior line")
     }
 
     /// Get the subset tag if already generated.
@@ -431,8 +428,10 @@ mod tests {
     /// correct PDF objects (FontFile3 / CIDFontType0, not FontFile2 / CIDFontType2).
     #[test]
     fn test_subset_cff_otf_preserves_magic() {
-        let font_path =
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/fonts/StandardSymbolsPS.otf");
+        let font_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/fonts/StandardSymbolsPS.otf"
+        );
         let font_bytes = std::fs::read(font_path).expect("StandardSymbolsPS.otf fixture missing");
 
         assert_eq!(&font_bytes[..4], b"OTTO", "fixture is not a CFF/OTF font");
@@ -442,8 +441,7 @@ mod tests {
         used.insert(2u16);
         used.insert(3u16);
 
-        let (subset_bytes, remapper) =
-            subset_font_bytes(&font_bytes, 0, &used).expect("subsetting should succeed");
+        let (subset_bytes, remapper) = subset_font_bytes(&font_bytes, 0, &used).expect("subsetting should succeed");
 
         assert!(
             subset_bytes.starts_with(b"OTTO"),

@@ -124,7 +124,7 @@ impl ImageData {
             image::ColorType::L8 | image::ColorType::L16 => {
                 let gray = img.to_luma8();
                 (ColorSpace::DeviceGray, gray.into_raw(), None)
-            },
+            }
             image::ColorType::La8 | image::ColorType::La16 => {
                 let rgba = img.to_luma_alpha8();
                 let mut gray = Vec::with_capacity((width * height) as usize);
@@ -134,11 +134,11 @@ impl ImageData {
                     alpha_channel.push(pixel.0[1]);
                 }
                 (ColorSpace::DeviceGray, gray, Some(alpha_channel))
-            },
+            }
             image::ColorType::Rgb8 | image::ColorType::Rgb16 => {
                 let rgb = img.to_rgb8();
                 (ColorSpace::DeviceRGB, rgb.into_raw(), None)
-            },
+            }
             image::ColorType::Rgba8 | image::ColorType::Rgba16 => {
                 let rgba = img.to_rgba8();
                 let mut rgb = Vec::with_capacity((width * height * 3) as usize);
@@ -150,11 +150,11 @@ impl ImageData {
                     alpha_channel.push(pixel.0[3]);
                 }
                 (ColorSpace::DeviceRGB, rgb, Some(alpha_channel))
-            },
+            }
             _ => {
                 let rgb = img.to_rgb8();
                 (ColorSpace::DeviceRGB, rgb.into_raw(), None)
-            },
+            }
         };
 
         // Compress pixel data: add PNG None-filter byte (0x00) per scanline
@@ -170,9 +170,7 @@ impl ImageData {
             format: ImageFormat::Png,
             data: compressed,
             // Alpha is 1 component (gray) per pixel. ~keep
-            soft_mask: alpha
-                .map(|a| compress_image_data(&a, width, 1))
-                .transpose()?,
+            soft_mask: alpha.map(|a| compress_image_data(&a, width, 1)).transpose()?,
         })
     }
 
@@ -215,7 +213,7 @@ impl ImageData {
         match self.format {
             ImageFormat::Jpeg => {
                 dict.insert("Filter".to_string(), Object::Name("DCTDecode".to_string()));
-            },
+            }
             ImageFormat::Png => {
                 dict.insert("Filter".to_string(), Object::Name("FlateDecode".to_string()));
                 let mut decode_parms = HashMap::new();
@@ -230,8 +228,8 @@ impl ImageData {
                 );
                 decode_parms.insert("Columns".to_string(), Object::Integer(self.width as i64));
                 dict.insert("DecodeParms".to_string(), Object::Dictionary(decode_parms));
-            },
-            ImageFormat::Raw => {},
+            }
+            ImageFormat::Raw => {}
         }
 
         dict.insert("Length".to_string(), Object::Integer(self.data.len() as i64));
@@ -331,18 +329,7 @@ fn parse_jpeg_header(data: &[u8]) -> Result<(u32, u32, ColorSpace), ImageError> 
         // SOF markers (Start of Frame) ~keep
         if matches!(
             marker,
-            0xC0 | 0xC1
-                | 0xC2
-                | 0xC3
-                | 0xC5
-                | 0xC6
-                | 0xC7
-                | 0xC9
-                | 0xCA
-                | 0xCB
-                | 0xCD
-                | 0xCE
-                | 0xCF
+            0xC0 | 0xC1 | 0xC2 | 0xC3 | 0xC5 | 0xC6 | 0xC7 | 0xC9 | 0xCA | 0xCB | 0xCD | 0xCE | 0xCF
         ) {
             if pos + 7 > data.len() {
                 return Err(ImageError::InvalidData("Truncated JPEG header".to_string()));
@@ -428,12 +415,7 @@ pub struct ImagePlacement {
 impl ImagePlacement {
     /// Create a new image placement.
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
+        Self { x, y, width, height }
     }
 
     /// Create placement at origin with given dimensions.
@@ -627,8 +609,7 @@ mod tests {
     /// trip through `from_png()` without touching the filesystem.
     fn make_png_bytes(width: u32, height: u32, pixels_rgb: &[u8]) -> Vec<u8> {
         use image::RgbImage;
-        let img = RgbImage::from_raw(width, height, pixels_rgb.to_vec())
-            .expect("pixel buffer size mismatch");
+        let img = RgbImage::from_raw(width, height, pixels_rgb.to_vec()).expect("pixel buffer size mismatch");
         let mut buf = Vec::new();
         img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
             .expect("failed to encode PNG");

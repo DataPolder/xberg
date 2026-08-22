@@ -235,7 +235,7 @@ impl ExtGStateBuilder {
             match mask {
                 SoftMask::None => {
                     dict.insert(key("SMask"), Object::Name("None".to_string()));
-                },
+                }
                 SoftMask::Group {
                     group_ref: _,
                     subtype,
@@ -260,7 +260,7 @@ impl ExtGStateBuilder {
                         );
                     }
                     dict.insert(key("SMask"), Object::Dictionary(smask_dict));
-                },
+                }
             }
         }
 
@@ -302,10 +302,7 @@ mod tests {
 
     #[test]
     fn test_ext_gstate_builder_alpha() {
-        let gs = ExtGStateBuilder::new()
-            .fill_alpha(0.5)
-            .stroke_alpha(0.8)
-            .build();
+        let gs = ExtGStateBuilder::new().fill_alpha(0.5).stroke_alpha(0.8).build();
 
         if let Object::Dictionary(dict) = gs {
             assert!(dict.contains_key("ca"));
@@ -318,9 +315,7 @@ mod tests {
 
     #[test]
     fn test_ext_gstate_builder_blend_mode() {
-        let gs = ExtGStateBuilder::new()
-            .blend_mode(BlendMode::Multiply)
-            .build();
+        let gs = ExtGStateBuilder::new().blend_mode(BlendMode::Multiply).build();
 
         if let Object::Dictionary(dict) = gs {
             assert!(dict.contains_key("BM"));
@@ -375,7 +370,10 @@ mod tests {
         let gs = ExtGStateBuilder::new().stroke_alpha(1.5).build();
         if let Object::Dictionary(dict) = gs {
             if let Some(Object::Real(val)) = dict.get("CA") {
-                assert!((*val - 1.0).abs() < f64::EPSILON, "stroke_alpha should be clamped to 1.0");
+                assert!(
+                    (*val - 1.0).abs() < f64::EPSILON,
+                    "stroke_alpha should be clamped to 1.0"
+                );
             } else {
                 panic!("Expected Real for CA");
             }
@@ -388,9 +386,7 @@ mod tests {
         if let Object::Dictionary(dict) = gs {
             assert!(dict.contains_key("ca"));
             assert!(dict.contains_key("CA"));
-            if let (Some(Object::Real(fill)), Some(Object::Real(stroke))) =
-                (dict.get("ca"), dict.get("CA"))
-            {
+            if let (Some(Object::Real(fill)), Some(Object::Real(stroke))) = (dict.get("ca"), dict.get("CA")) {
                 assert!((*fill - 0.3).abs() < 0.01);
                 assert!((*stroke - 0.3).abs() < 0.01);
             }

@@ -143,8 +143,7 @@ impl CMap {
     fn compress_sequential_ranges(&mut self) {
         const MIN_RUN: usize = 256;
 
-        let notdef_targets: std::collections::HashSet<u32> =
-            self.notdef_ranges.iter().map(|r| r.target).collect();
+        let notdef_targets: std::collections::HashSet<u32> = self.notdef_ranges.iter().map(|r| r.target).collect();
 
         let mut singles: Vec<(u32, u32)> = self
             .chars
@@ -166,9 +165,7 @@ impl CMap {
         let mut i = 0;
         while i < singles.len() {
             let mut j = i;
-            while j + 1 < singles.len()
-                && singles[j + 1].0 == singles[j].0 + 1
-                && singles[j + 1].1 == singles[j].1 + 1
+            while j + 1 < singles.len() && singles[j + 1].0 == singles[j].0 + 1 && singles[j + 1].1 == singles[j].1 + 1
             {
                 j += 1;
             }
@@ -262,9 +259,7 @@ fn compute_stream_hash(data: &[u8]) -> CMapKey {
 const MAX_CMAP_CACHE_ENTRIES: usize = 1024;
 
 static CMAP_CACHE: std::sync::LazyLock<Mutex<crate::cache::BoundedEntryCache<CMapKey, Arc<CMap>>>> =
-    std::sync::LazyLock::new(|| {
-        Mutex::new(crate::cache::BoundedEntryCache::new(MAX_CMAP_CACHE_ENTRIES))
-    });
+    std::sync::LazyLock::new(|| Mutex::new(crate::cache::BoundedEntryCache::new(MAX_CMAP_CACHE_ENTRIES)));
 
 /// Clear the global CMap cache.
 ///
@@ -437,7 +432,7 @@ impl LazyCMap {
 
                 tracing::debug!("CMap parsed and cached (stream hash {:?})", self.cache_key);
                 Some(cmap_arc)
-            },
+            }
             Err(e) => {
                 // Memoized as `Some(None)` above so this fires at most once
                 // per LazyCMap even though `get()` sits on the per-character
@@ -458,7 +453,7 @@ impl LazyCMap {
                     ),
                 }
                 None
-            },
+            }
         }
     }
 }
@@ -544,9 +539,7 @@ const CMAP_STRUCTURAL_KEYWORDS: [&str; 5] = [
 
 /// Returns `true` if `content` contains at least one CMap structural keyword.
 fn has_any_cmap_structural_keyword(content: &str) -> bool {
-    CMAP_STRUCTURAL_KEYWORDS
-        .iter()
-        .any(|keyword| content.contains(keyword))
+    CMAP_STRUCTURAL_KEYWORDS.iter().any(|keyword| content.contains(keyword))
 }
 
 /// Parse a ToUnicode CMap stream with optimized state machine parser.
@@ -688,7 +681,7 @@ pub fn parse_tounicode_cmap(data: &[u8]) -> Result<CMap> {
                     }
                 }
                 warn_on_malformed_lines("bfchar", attempted, malformed);
-            },
+            }
             BfSectionKind::Range => {
                 let mut attempted = 0usize;
                 let mut malformed = 0usize;
@@ -696,19 +689,16 @@ pub fn parse_tounicode_cmap(data: &[u8]) -> Result<CMap> {
                     attempted += 1;
                     match parse_bfrange_line(line) {
                         Some(mappings) => {
-                            tracing::trace!(
-                                "ToUnicode bfrange: {} mappings parsed",
-                                mappings.len()
-                            );
+                            tracing::trace!("ToUnicode bfrange: {} mappings parsed", mappings.len());
                             for (src, dst) in mappings {
                                 cmap.insert(src, dst);
                             }
-                        },
+                        }
                         None => malformed += 1,
                     }
                 }
                 warn_on_malformed_lines("bfrange", attempted, malformed);
-            },
+            }
         }
     }
 
@@ -727,7 +717,7 @@ pub fn parse_tounicode_cmap(data: &[u8]) -> Result<CMap> {
                             cmap.insert(src, dst);
                         }
                     }
-                },
+                }
                 None => malformed += 1,
             }
         }
@@ -885,7 +875,7 @@ fn parse_wmode_directive(content: &str) -> Option<u8> {
                 other
             );
             None
-        },
+        }
     }
 }
 
@@ -899,8 +889,7 @@ fn parse_wmode_directive(content: &str) -> Option<u8> {
 /// Returns 1 if the line does not contain a valid codespace pair, or 2 if at
 /// least one 2-byte (4-hex-digit) entry is found.
 fn parse_codespacerange_line_width(line: &str) -> u8 {
-    static RE: std::sync::LazyLock<Regex> =
-        std::sync::LazyLock::new(|| Regex::new(r"<([^>]*)>\s*<([^>]*)>").unwrap());
+    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"<([^>]*)>\s*<([^>]*)>").unwrap());
 
     let mut max_width: u8 = 1;
     for caps in RE.captures_iter(line) {
@@ -922,8 +911,7 @@ fn parse_codespacerange_line_width(line: &str) -> u8 {
 /// Supports multiple pairs per line, hex code points, ligatures, escape sequences,
 /// and flexible whitespace inside angle brackets.
 fn parse_bfchar_line(line: &str) -> Vec<(u32, String)> {
-    static RE: std::sync::LazyLock<Regex> =
-        std::sync::LazyLock::new(|| Regex::new(r"<([^>]*)>\s*<([^>]*)>").unwrap());
+    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"<([^>]*)>\s*<([^>]*)>").unwrap());
 
     let mut results = Vec::new();
 
@@ -1008,9 +996,8 @@ fn parse_bfchar_line(line: &str) -> Vec<(u32, String)> {
 fn parse_bfrange_line(line: &str) -> Option<Vec<(u32, String)>> {
     static RE_SEQ: std::sync::LazyLock<Regex> =
         std::sync::LazyLock::new(|| Regex::new(r"<([^>]*)>\s*<([^>]*)>\s*<([^>]*)>").unwrap());
-    static RE_ARRAY: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-        Regex::new(r"<([^>]*)>\s*<([^>]*)>\s*\[((?:\s*<[^>]+>\s*)+)\]").unwrap()
-    });
+    static RE_ARRAY: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"<([^>]*)>\s*<([^>]*)>\s*\[((?:\s*<[^>]+>\s*)+)\]").unwrap());
 
     if let Some(caps) = RE_ARRAY.captures(line) {
         let start_str = caps[1].trim().replace(char::is_whitespace, "");
@@ -1019,17 +1006,11 @@ fn parse_bfrange_line(line: &str) -> Option<Vec<(u32, String)>> {
         let end = u32::from_str_radix(&end_str, 16).ok()?;
         let array_str = &caps[3];
 
-        static RE_HEX: std::sync::LazyLock<Regex> =
-            std::sync::LazyLock::new(|| Regex::new(r"<([^>]*)>").unwrap());
+        static RE_HEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"<([^>]*)>").unwrap());
         let dst_hexes: Vec<String> = RE_HEX
             .captures_iter(array_str)
             .filter_map(|cap| {
-                let s = cap
-                    .get(1)
-                    .unwrap()
-                    .as_str()
-                    .trim()
-                    .replace(char::is_whitespace, "");
+                let s = cap.get(1).unwrap().as_str().trim().replace(char::is_whitespace, "");
                 if !s.is_empty() { Some(s) } else { None }
             })
             .collect();
@@ -1172,8 +1153,7 @@ fn parse_notdefrange_line(line: &str) -> Option<Vec<(u32, String)>> {
             let dst_hex = dst_str.replace(char::is_whitespace, "");
             let dst_code = u32::from_str_radix(&dst_hex, 16).ok()?;
             if dst_code > 0xFFFF {
-                decode_utf16_surrogate_pair(dst_code)
-                    .or_else(|| char::from_u32(dst_code).map(|ch| ch.to_string()))?
+                decode_utf16_surrogate_pair(dst_code).or_else(|| char::from_u32(dst_code).map(|ch| ch.to_string()))?
             } else {
                 char::from_u32(dst_code)?.to_string()
             }
@@ -1337,8 +1317,7 @@ mod tests {
 
     #[test]
     fn test_extract_sections() {
-        let content =
-            "before\nbeginbfchar\ndata1\nendbfchar\nmiddle\nbeginbfchar\ndata2\nendbfchar\nafter";
+        let content = "before\nbeginbfchar\ndata1\nendbfchar\nmiddle\nbeginbfchar\ndata2\nendbfchar\nafter";
         let sections = extract_sections(content, "beginbfchar", "endbfchar");
         assert_eq!(sections.len(), 2);
         assert!(sections[0].contains("data1"));
@@ -1384,8 +1363,7 @@ mod tests {
 
     #[test]
     fn test_parse_bfchar_multiple_ligatures() {
-        let data =
-            b"beginbfchar\n<000B> <00660066>\n<000C> <00660069>\n<000D> <0066006C>\nendbfchar";
+        let data = b"beginbfchar\n<000B> <00660066>\n<000C> <00660069>\n<000D> <0066006C>\nendbfchar";
         let cmap = parse_tounicode_cmap(data).unwrap();
         assert_eq!(cmap.get(&0x0B).as_deref(), Some("ff"));
         assert_eq!(cmap.get(&0x0C).as_deref(), Some("fi"));
@@ -1394,8 +1372,7 @@ mod tests {
 
     #[test]
     fn test_parse_bfrange_array_ligatures() {
-        let data =
-            b"beginbfrange\n<005F> <0061> [<00660066> <00660069> <00660066006C>]\nendbfrange";
+        let data = b"beginbfrange\n<005F> <0061> [<00660066> <00660069> <00660066006C>]\nendbfrange";
         let cmap = parse_tounicode_cmap(data).unwrap();
         assert_eq!(cmap.get(&0x5F).as_deref(), Some("ff"));
         assert_eq!(cmap.get(&0x60).as_deref(), Some("fi"));
@@ -1565,7 +1542,10 @@ endbfchar
 endcmap
 ";
         let cmap = parse_tounicode_cmap(data).unwrap();
-        assert_eq!(cmap.wmode, 0, "/WMode 1 def inside a PostScript comment must be ignored");
+        assert_eq!(
+            cmap.wmode, 0,
+            "/WMode 1 def inside a PostScript comment must be ignored"
+        );
     }
 
     /// M5 corollary: a legitimate `/WMode 1 def` on a later line is
@@ -1679,9 +1659,8 @@ endcmap
     #[test]
     fn garbage_stream_without_cmap_syntax_is_rejected() {
         let data = b"RANDOM BINARY GARBAGE, NOT A CMAP STREAM AT ALL 0xDEADBEEF 1234567890";
-        let err = parse_tounicode_cmap(data).expect_err(
-            "a stream with no CMap keywords at all must be rejected, not silently empty",
-        );
+        let err = parse_tounicode_cmap(data)
+            .expect_err("a stream with no CMap keywords at all must be rejected, not silently empty");
         let message = err.to_string();
         assert!(
             message.to_lowercase().contains("cmap"),

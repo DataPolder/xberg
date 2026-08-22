@@ -67,8 +67,7 @@ fn component(alg: AlgorithmId) -> serde_json::Value {
 /// `cryptographic-asset` component per exercised [`AlgorithmId`]. An
 /// empty inventory yields a valid BOM with no components.
 pub fn cbom_json() -> String {
-    let components: Vec<serde_json::Value> =
-        super::inventory().into_iter().map(component).collect();
+    let components: Vec<serde_json::Value> = super::inventory().into_iter().map(component).collect();
     let doc = serde_json::json!({
         "bomFormat": "CycloneDX",
         "specVersion": "1.6",
@@ -123,16 +122,14 @@ mod tests {
         );
 
         let md5 = by_name("md5");
-        assert_eq!(md5["cryptoProperties"]["algorithmProperties"]["certificationLevel"][0], "none");
+        assert_eq!(
+            md5["cryptoProperties"]["algorithmProperties"]["certificationLevel"][0],
+            "none"
+        );
 
         for c in comps {
             assert_eq!(c["cryptoProperties"]["assetType"], "algorithm");
-            assert!(
-                c["bom-ref"]
-                    .as_str()
-                    .unwrap()
-                    .starts_with("crypto/algorithm/")
-            );
+            assert!(c["bom-ref"].as_str().unwrap().starts_with("crypto/algorithm/"));
         }
     }
 }

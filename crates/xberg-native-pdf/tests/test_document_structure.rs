@@ -5,9 +5,9 @@
 use xberg_native_pdf::geometry::Rect;
 use xberg_native_pdf::object::ObjectRef;
 use xberg_native_pdf::writer::{
-    AnnotationBuilder, Artifact, ArtifactAlignment, ArtifactElement, ArtifactStyle, BorderStyle,
-    FitMode, HighlightMode, LinkAction, LinkAnnotation, OutlineBuilder, OutlineDestination,
-    OutlineItem, OutlineStyle, PageNumberFormat, PageTemplate, Placeholder, PlaceholderContext,
+    AnnotationBuilder, Artifact, ArtifactAlignment, ArtifactElement, ArtifactStyle, BorderStyle, FitMode,
+    HighlightMode, LinkAction, LinkAnnotation, OutlineBuilder, OutlineDestination, OutlineItem, OutlineStyle,
+    PageNumberFormat, PageTemplate, Placeholder, PlaceholderContext,
 };
 
 mod outline_tests {
@@ -99,7 +99,7 @@ mod outline_tests {
             OutlineDestination::PageFit { page, fit } => {
                 assert_eq!(*page, 3);
                 assert!(matches!(fit, FitMode::FitH(Some(500.0))));
-            },
+            }
             _ => panic!("Expected PageFit destination"),
         }
     }
@@ -159,8 +159,7 @@ mod annotation_tests {
 
     #[test]
     fn test_link_annotation_uri() {
-        let link =
-            LinkAnnotation::uri(Rect::new(72.0, 720.0, 100.0, 12.0), "https://rust-lang.org");
+        let link = LinkAnnotation::uri(Rect::new(72.0, 720.0, 100.0, 12.0), "https://rust-lang.org");
 
         assert!(matches!(link.action, LinkAction::Uri(_)));
         assert_eq!(link.rect.x, 72.0);
@@ -175,7 +174,7 @@ mod annotation_tests {
             LinkAction::GoTo { page, fit } => {
                 assert_eq!(page, 5);
                 assert!(fit.is_none());
-            },
+            }
             _ => panic!("Expected GoTo action"),
         }
     }
@@ -198,8 +197,8 @@ mod annotation_tests {
 
     #[test]
     fn test_link_with_color() {
-        let link = LinkAnnotation::uri(Rect::new(0.0, 0.0, 100.0, 20.0), "https://example.com")
-            .with_color(0.0, 0.0, 1.0);
+        let link =
+            LinkAnnotation::uri(Rect::new(0.0, 0.0, 100.0, 20.0), "https://example.com").with_color(0.0, 0.0, 1.0);
 
         assert_eq!(link.color, Some((0.0, 0.0, 1.0)));
     }
@@ -390,9 +389,7 @@ mod template_tests {
 
     #[test]
     fn test_page_template_skip_first() {
-        let template = PageTemplate::new()
-            .header(Artifact::center("Header"))
-            .skip_first_page();
+        let template = PageTemplate::new().header(Artifact::center("Header")).skip_first_page();
 
         assert!(template.get_header(1).is_none());
         assert!(template.get_header(2).is_some());
@@ -545,15 +542,11 @@ mod integration_tests {
 
         builder.add_item(OutlineItem::new("Normal", 0));
 
-        builder
-            .add_item(OutlineItem::new("Bold Section", 1).with_style(OutlineStyle::new().bold()));
+        builder.add_item(OutlineItem::new("Bold Section", 1).with_style(OutlineStyle::new().bold()));
 
         builder.add_item(OutlineItem::new("Note", 2).with_style(OutlineStyle::new().italic()));
 
-        builder.add_item(
-            OutlineItem::new("Important", 3)
-                .with_style(OutlineStyle::new().bold().color(1.0, 0.0, 0.0)),
-        );
+        builder.add_item(OutlineItem::new("Important", 3).with_style(OutlineStyle::new().bold().color(1.0, 0.0, 0.0)));
 
         builder.add_item(OutlineItem::new("Collapsed", 4).with_open(false));
 
@@ -570,13 +563,11 @@ mod integration_tests {
         );
 
         builder.add_link(
-            LinkAnnotation::goto_page(Rect::new(0.0, 30.0, 100.0, 20.0), 5)
-                .with_border(BorderStyle::solid(1.0)),
+            LinkAnnotation::goto_page(Rect::new(0.0, 30.0, 100.0, 20.0), 5).with_border(BorderStyle::solid(1.0)),
         );
 
         builder.add_link(
-            LinkAnnotation::goto_named(Rect::new(0.0, 60.0, 100.0, 20.0), "appendix")
-                .with_color(0.0, 0.5, 0.0),
+            LinkAnnotation::goto_named(Rect::new(0.0, 60.0, 100.0, 20.0), "appendix").with_color(0.0, 0.5, 0.0),
         );
 
         assert_eq!(builder.len(), 3);

@@ -158,9 +158,7 @@ fn pdf_with_broken_font(page_count: usize) -> Vec<u8> {
         buf.extend_from_slice(format!("{id} 0 obj\n{body}\nendobj\n").as_bytes());
     };
 
-    let kids: Vec<String> = (0..page_count)
-        .map(|p| format!("{} 0 R", 6 + 2 * p))
-        .collect();
+    let kids: Vec<String> = (0..page_count).map(|p| format!("{} 0 R", 6 + 2 * p)).collect();
     obj(&mut buf, &mut off, 1, "<< /Type /Catalog /Pages 2 0 R >>".to_string());
     obj(
         &mut buf,
@@ -186,8 +184,12 @@ fn pdf_with_broken_font(page_count: usize) -> Vec<u8> {
     );
     off[5] = buf.len();
     buf.extend_from_slice(
-        format!("5 0 obj\n<< /Length {} /Length1 {} >>\nstream\n", font.len(), font.len())
-            .as_bytes(),
+        format!(
+            "5 0 obj\n<< /Length {} /Length1 {} >>\nstream\n",
+            font.len(),
+            font.len()
+        )
+        .as_bytes(),
     );
     buf.extend_from_slice(&font);
     buf.extend_from_slice(b"\nendstream\nendobj\n");
@@ -205,9 +207,7 @@ fn pdf_with_broken_font(page_count: usize) -> Vec<u8> {
             ),
         );
         off[contents_id] = buf.len();
-        buf.extend_from_slice(
-            format!("{contents_id} 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{contents_id} 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes());
         buf.extend_from_slice(content);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     }
@@ -218,8 +218,11 @@ fn pdf_with_broken_font(page_count: usize) -> Vec<u8> {
         buf.extend_from_slice(format!("{:010} 00000 n \n", off[id]).as_bytes());
     }
     buf.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", n_objs + 1)
-            .as_bytes(),
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            n_objs + 1
+        )
+        .as_bytes(),
     );
     buf
 }
@@ -242,7 +245,11 @@ fn a_dropped_glyph_warns_on_every_page_it_paints() {
 
     renderer.render_page(&doc, 0).expect("render page 0");
     let first = drain_broken_subset_warnings();
-    assert_eq!(first.len(), 1, "page 0 must warn exactly once for the broken font: {first:?}");
+    assert_eq!(
+        first.len(),
+        1,
+        "page 0 must warn exactly once for the broken font: {first:?}"
+    );
     assert!(
         first[0].contains("0x42"),
         "the warning must name the dropped code 0x42: {}",

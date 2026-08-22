@@ -11,9 +11,7 @@
 //! - Korean-specific rules (Hangul-Hanja mixing)
 //! - Integration with word boundary detector
 
-use xberg_native_pdf::text::{
-    BoundaryContext, CharacterInfo, DocumentLanguage, WordBoundaryDetector, cjk_punctuation,
-};
+use xberg_native_pdf::text::{BoundaryContext, CharacterInfo, DocumentLanguage, WordBoundaryDetector, cjk_punctuation};
 
 /// Helper to create a test character
 fn make_char(code: u32, x_pos: f32, tj_offset: Option<i32>) -> CharacterInfo {
@@ -239,11 +237,7 @@ mod script_detection_tests {
     #[test]
     fn test_cjk_to_latin_split() {
         use xberg_native_pdf::text::script_detector::should_split_on_script_transition;
-        let result = should_split_on_script_transition(
-            Some(CJKScript::Han),
-            None,
-            Some(DocumentLanguage::Chinese),
-        );
+        let result = should_split_on_script_transition(Some(CJKScript::Han), None, Some(DocumentLanguage::Chinese));
         assert_eq!(result, Some(true));
     }
 }
@@ -313,12 +307,14 @@ mod japanese_rules_tests {
         let chars = vec![make_char(0x304B, 0.0, None), make_char(0x3083, 12.0, None)];
 
         let context = BoundaryContext::new(12.0);
-        let detector =
-            WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
+        let detector = WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // Should not create boundary before small ya ~keep
-        assert!(boundaries.is_empty(), "Should not create boundary before small Hiragana");
+        assert!(
+            boundaries.is_empty(),
+            "Should not create boundary before small Hiragana"
+        );
     }
 
     #[test]
@@ -326,12 +322,14 @@ mod japanese_rules_tests {
         let chars = vec![make_char(0x30AB, 0.0, None), make_char(0x30E3, 12.0, None)];
 
         let context = BoundaryContext::new(12.0);
-        let detector =
-            WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
+        let detector = WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // Should not create boundary before small ya ~keep
-        assert!(boundaries.is_empty(), "Should not create boundary before small Katakana");
+        assert!(
+            boundaries.is_empty(),
+            "Should not create boundary before small Katakana"
+        );
     }
 
     #[test]
@@ -339,8 +337,7 @@ mod japanese_rules_tests {
         let chars = vec![make_char(0x3042, 0.0, None), make_char(0x30A2, 12.0, None)];
 
         let context = BoundaryContext::new(12.0);
-        let detector =
-            WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
+        let detector = WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // Should not create boundary between Hiragana and Katakana in Japanese ~keep
@@ -352,8 +349,7 @@ mod japanese_rules_tests {
         let chars = vec![make_char(0x6587, 0.0, None), make_char(0x3042, 12.0, None)];
 
         let context = BoundaryContext::new(12.0);
-        let detector =
-            WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
+        let detector = WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // Should not create boundary between Han and Hiragana in Japanese ~keep
@@ -435,7 +431,10 @@ mod korean_rules_tests {
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // TJ offset should create boundary ~keep
-        assert!(boundaries.contains(&2), "Should create boundary at TJ offset in Korean text");
+        assert!(
+            boundaries.contains(&2),
+            "Should create boundary at TJ offset in Korean text"
+        );
     }
 
     #[test]
@@ -476,7 +475,10 @@ mod korean_rules_tests {
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // Should not create boundaries within mixed Hangul-Hanja word ~keep
-        assert!(boundaries.is_empty(), "Should not split Hangul-Hanja transitions in Korean");
+        assert!(
+            boundaries.is_empty(),
+            "Should not split Hangul-Hanja transitions in Korean"
+        );
     }
 }
 
@@ -494,8 +496,7 @@ mod integration_tests {
         ];
 
         let context = BoundaryContext::new(12.0);
-        let detector =
-            WordBoundaryDetector::new().with_document_language(DocumentLanguage::Chinese);
+        let detector = WordBoundaryDetector::new().with_document_language(DocumentLanguage::Chinese);
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // Should create boundary after fullstop ~keep
@@ -512,8 +513,7 @@ mod integration_tests {
         ];
 
         let context = BoundaryContext::new(12.0);
-        let detector =
-            WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
+        let detector = WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // Should not create boundaries in Japanese mixed script ~keep
@@ -530,8 +530,7 @@ mod integration_tests {
         ];
 
         let context = BoundaryContext::new(12.0);
-        let detector =
-            WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
+        let detector = WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // Should not create boundary before or after small tsu ~keep
@@ -550,8 +549,7 @@ mod integration_tests {
         ];
 
         let context = BoundaryContext::new(12.0);
-        let detector =
-            WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
+        let detector = WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // Should not create boundaries within Katakana word ~keep
@@ -569,8 +567,7 @@ mod integration_tests {
         ];
 
         let context = BoundaryContext::new(12.0);
-        let detector =
-            WordBoundaryDetector::new().with_document_language(DocumentLanguage::Chinese);
+        let detector = WordBoundaryDetector::new().with_document_language(DocumentLanguage::Chinese);
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // Should create boundary between Latin and CJK ~keep
@@ -586,8 +583,7 @@ mod integration_tests {
         ];
 
         let context = BoundaryContext::new(12.0);
-        let detector =
-            WordBoundaryDetector::new().with_document_language(DocumentLanguage::Chinese);
+        let detector = WordBoundaryDetector::new().with_document_language(DocumentLanguage::Chinese);
         let boundaries = detector.detect_word_boundaries(&chars, &context);
 
         // Space should create boundary ~keep
@@ -610,8 +606,7 @@ mod integration_tests {
         let inferred_lang = infer_document_language(&scripts);
         assert_eq!(inferred_lang, Some(DocumentLanguage::Japanese));
 
-        let detector =
-            WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
+        let detector = WordBoundaryDetector::new().with_document_language(DocumentLanguage::Japanese);
 
         let chars = vec![make_char(0x6771, 0.0, None), make_char(0x3067, 12.0, None)];
 

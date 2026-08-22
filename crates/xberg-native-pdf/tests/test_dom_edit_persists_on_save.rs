@@ -57,9 +57,7 @@ fn build_multi_stream_contents_pdf() -> Vec<u8> {
     );
     let off4 = pdf.len();
     let content1 = b"BT /F1 12 Tf 72 720 Td (STREAM_ONE_MARKER) Tj ET";
-    pdf.extend_from_slice(
-        format!("4 0 obj\n<< /Length {} >>\nstream\n", content1.len()).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", content1.len()).as_bytes());
     pdf.extend_from_slice(content1);
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
     let off5 = pdf.len();
@@ -68,9 +66,7 @@ fn build_multi_stream_contents_pdf() -> Vec<u8> {
     );
     let off6 = pdf.len();
     let content2 = b"BT /F1 12 Tf 72 700 Td (STREAM_TWO_MARKER) Tj ET";
-    pdf.extend_from_slice(
-        format!("6 0 obj\n<< /Length {} >>\nstream\n", content2.len()).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("6 0 obj\n<< /Length {} >>\nstream\n", content2.len()).as_bytes());
     pdf.extend_from_slice(content2);
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
     finalize_pdf(&mut pdf, &[0, off1, off2, off3, off4, off5, off6]);
@@ -129,7 +125,10 @@ fn set_text_erasure_is_persisted_to_saved_bytes() {
         !contains(&out, "UNIQUE_MARKER_TOKEN_12345"),
         "erased text must not survive in the saved bytes"
     );
-    assert!(contains(&out, "Second line stays"), "unrelated content must be unaffected");
+    assert!(
+        contains(&out, "Second line stays"),
+        "unrelated content must be unaffected"
+    );
 
     let (_dir, path) = common::write_temp_pdf(&out, "dom_edit_erase.pdf");
     let doc = PdfDocument::open(&path).unwrap();

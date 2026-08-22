@@ -126,9 +126,7 @@ impl Table {
             let dense_rows = self
                 .rows
                 .iter()
-                .filter(|r| {
-                    r.cells.iter().filter(|c| !c.text.trim().is_empty()).count() >= min_dense
-                })
+                .filter(|r| r.cells.iter().filter(|c| !c.text.trim().is_empty()).count() >= min_dense)
                 .count();
             let dense_row_ratio = dense_rows as f32 / self.rows.len() as f32;
             if self.rows.len() >= 3 && ratio >= 0.7 && dense_row_ratio >= 0.70 {
@@ -210,18 +208,7 @@ impl Table {
                                 let stripped: String = t
                                     .chars()
                                     .filter(|ch| {
-                                        !matches!(
-                                            ch,
-                                            '$' | '€'
-                                                | '£'
-                                                | ','
-                                                | ' '
-                                                | '%'
-                                                | '+'
-                                                | '-'
-                                                | '('
-                                                | ')'
-                                        )
+                                        !matches!(ch, '$' | '€' | '£' | ',' | ' ' | '%' | '+' | '-' | '(' | ')')
                                     })
                                     .collect();
                                 if stripped.is_empty() || stripped.parse::<f64>().is_err() {
@@ -347,10 +334,7 @@ impl TableCell {
 ///
 /// # Returns
 /// * `Vec<&StructElem>` - Table elements found for the page
-pub fn find_table_elements(
-    struct_tree: &crate::structure::types::StructTreeRoot,
-    page_num: u32,
-) -> Vec<&StructElem> {
+pub fn find_table_elements(struct_tree: &crate::structure::types::StructTreeRoot, page_num: u32) -> Vec<&StructElem> {
     let mut tables = Vec::new();
     for elem in &struct_tree.root_elements {
         collect_table_elements(elem, page_num, &mut tables);
@@ -359,11 +343,7 @@ pub fn find_table_elements(
 }
 
 /// Recursively collect Table elements that have content on the given page.
-fn collect_table_elements<'a>(
-    elem: &'a StructElem,
-    page_num: u32,
-    tables: &mut Vec<&'a StructElem>,
-) {
+fn collect_table_elements<'a>(elem: &'a StructElem, page_num: u32, tables: &mut Vec<&'a StructElem>) {
     if elem.struct_type == StructType::Table {
         if element_has_page_content(elem, page_num) {
             tables.push(elem);
@@ -387,18 +367,14 @@ fn collect_table_elements<'a>(
 pub fn find_table_elements_all_pages(
     struct_tree: &crate::structure::types::StructTreeRoot,
 ) -> std::collections::HashMap<u32, Vec<StructElem>> {
-    let mut by_page: std::collections::HashMap<u32, Vec<StructElem>> =
-        std::collections::HashMap::new();
+    let mut by_page: std::collections::HashMap<u32, Vec<StructElem>> = std::collections::HashMap::new();
     for elem in &struct_tree.root_elements {
         collect_table_elements_all_pages(elem, &mut by_page);
     }
     by_page
 }
 
-fn collect_table_elements_all_pages(
-    elem: &StructElem,
-    by_page: &mut std::collections::HashMap<u32, Vec<StructElem>>,
-) {
+fn collect_table_elements_all_pages(elem: &StructElem, by_page: &mut std::collections::HashMap<u32, Vec<StructElem>>) {
     if elem.struct_type == StructType::Table {
         // Pages this table (or any descendant) has content on — the exact set
         // for which `element_has_page_content(elem, page)` is true. ~keep
@@ -427,11 +403,11 @@ fn collect_content_pages(elem: &StructElem, pages: &mut std::collections::BTreeS
         match child {
             StructChild::MarkedContentRef { page, .. } => {
                 pages.insert(*page);
-            },
+            }
             StructChild::StructElem(child_elem) => {
                 collect_content_pages(child_elem, pages);
-            },
-            StructChild::ObjectRef(_, _) => {},
+            }
+            StructChild::ObjectRef(_, _) => {}
         }
     }
 }
@@ -448,13 +424,13 @@ fn element_has_page_content(elem: &StructElem, page_num: u32) -> bool {
                 if *page == page_num {
                     return true;
                 }
-            },
+            }
             StructChild::StructElem(child_elem) => {
                 if element_has_page_content(child_elem, page_num) {
                     return true;
                 }
-            },
-            StructChild::ObjectRef(_, _) => {},
+            }
+            StructChild::ObjectRef(_, _) => {}
         }
     }
 
@@ -472,10 +448,7 @@ fn element_has_page_content(elem: &StructElem, page_num: u32) -> bool {
 ///
 /// # Returns
 /// * `Table` containing all rows and cells
-pub fn extract_table_from_spans(
-    table_elem: &StructElem,
-    spans: &[crate::layout::TextSpan],
-) -> Result<Table, Error> {
+pub fn extract_table_from_spans(table_elem: &StructElem, spans: &[crate::layout::TextSpan]) -> Result<Table, Error> {
     // Convert spans to TextBlocks for MCID matching, applying column-spanning
     // decimal split so that "12.11" (sailing score columns) becomes "12 11". ~keep
     let text_blocks: Vec<TextBlock> = spans
@@ -578,20 +551,20 @@ pub fn extract_table(table_elem: &StructElem, text_blocks: &[TextBlock]) -> Resu
                 StructType::TR => {
                     let row = extract_row(elem, text_blocks, false)?;
                     table.add_row(row);
-                },
+                }
                 StructType::THead => {
                     extract_row_group(elem, text_blocks, true, &mut table)?;
-                },
+                }
                 StructType::TBody => {
                     extract_row_group(elem, text_blocks, false, &mut table)?;
-                },
+                }
                 StructType::TFoot => {
                     extract_row_group(elem, text_blocks, false, &mut table)?;
-                },
-                _ => {},
+                }
+                _ => {}
             },
-            StructChild::MarkedContentRef { .. } => {},
-            StructChild::ObjectRef(_, _) => {},
+            StructChild::MarkedContentRef { .. } => {}
+            StructChild::ObjectRef(_, _) => {}
         }
     }
 
@@ -610,19 +583,15 @@ fn extract_row_group(
             StructChild::StructElem(elem) if elem.struct_type == StructType::TR => {
                 let row = extract_row(elem, text_blocks, is_header)?;
                 table.add_row(row);
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
     Ok(())
 }
 
 /// Extract a single row (TR element).
-fn extract_row(
-    tr_elem: &StructElem,
-    text_blocks: &[TextBlock],
-    force_header: bool,
-) -> Result<TableRow, Error> {
+fn extract_row(tr_elem: &StructElem, text_blocks: &[TextBlock], force_header: bool) -> Result<TableRow, Error> {
     let mut row = TableRow::new(force_header);
 
     for child in &tr_elem.children {
@@ -631,15 +600,15 @@ fn extract_row(
                 StructType::TH => {
                     let cell = extract_cell(elem, text_blocks, true)?;
                     row.add_cell(cell);
-                },
+                }
                 StructType::TD => {
                     let cell = extract_cell(elem, text_blocks, false)?;
                     row.add_cell(cell);
-                },
-                _ => {},
+                }
+                _ => {}
             },
-            StructChild::MarkedContentRef { .. } => {},
-            StructChild::ObjectRef(_, _) => {},
+            StructChild::MarkedContentRef { .. } => {}
+            StructChild::ObjectRef(_, _) => {}
         }
     }
 
@@ -647,11 +616,7 @@ fn extract_row(
 }
 
 /// Extract a single cell (TH or TD element).
-fn extract_cell(
-    cell_elem: &StructElem,
-    text_blocks: &[TextBlock],
-    is_header: bool,
-) -> Result<TableCell, Error> {
+fn extract_cell(cell_elem: &StructElem, text_blocks: &[TextBlock], is_header: bool) -> Result<TableCell, Error> {
     let mut mcids = Vec::new();
     collect_mcids(cell_elem, &mut mcids);
     let mut scoped_mcids = Vec::new();
@@ -676,10 +641,7 @@ fn extract_cell(
     // while advancing toward decreasing x. Projecting onto those axes
     // recovers reading order for upright, rotated and RTL cells alike, where
     // a fixed y-then-x sort reverses the last two. ~keep
-    let mut blocks: Vec<&TextBlock> = text_blocks
-        .iter()
-        .filter(|b| block_belongs(b, &scoped_mcids))
-        .collect();
+    let mut blocks: Vec<&TextBlock> = text_blocks.iter().filter(|b| block_belongs(b, &scoped_mcids)).collect();
 
     let (sin, cos) = cell_rotation_degrees(&blocks).to_radians().sin_cos();
     let direction = if blocks.iter().any(|b| crate::text::bidi::looks_rtl(&b.text)) {
@@ -959,11 +921,11 @@ fn collect_scoped_mcids(elem: &StructElem, out: &mut Vec<(McidScope, u32)>) {
         match child {
             StructChild::MarkedContentRef { mcid, scope, .. } => {
                 out.push((scope.clone(), *mcid));
-            },
+            }
             StructChild::StructElem(child_elem) => {
                 collect_scoped_mcids(child_elem, out);
-            },
-            StructChild::ObjectRef(_, _) => {},
+            }
+            StructChild::ObjectRef(_, _) => {}
         }
     }
 }
@@ -977,11 +939,7 @@ fn collect_scoped_mcids(elem: &StructElem, out: &mut Vec<(McidScope, u32)>) {
 /// instead of emptying.
 fn block_belongs(block: &TextBlock, scoped: &[(McidScope, u32)]) -> bool {
     let Some(mcid) = block.mcid else { return false };
-    let named: Vec<&McidScope> = scoped
-        .iter()
-        .filter(|(_, m)| *m == mcid)
-        .map(|(s, _)| s)
-        .collect();
+    let named: Vec<&McidScope> = scoped.iter().filter(|(_, m)| *m == mcid).map(|(s, _)| s).collect();
     if named.is_empty() {
         return false;
     }
@@ -1456,10 +1414,7 @@ mod tests {
         tr.add_child(StructChild::StructElem(Box::new(td)));
         table_elem.add_child(StructChild::StructElem(Box::new(tr)));
 
-        let spans = vec![
-            make_text_span("No MCID", None),
-            make_text_span("Has MCID", Some(5)),
-        ];
+        let spans = vec![make_text_span("No MCID", None), make_text_span("Has MCID", Some(5))];
 
         let result = extract_table_from_spans(&table_elem, &spans).unwrap();
         assert_eq!(result.rows[0].cells[0].text, "Has MCID");
@@ -1493,10 +1448,7 @@ mod tests {
         tbody.add_child(StructChild::StructElem(Box::new(body_tr)));
         table_elem.add_child(StructChild::StructElem(Box::new(tbody)));
 
-        let spans = vec![
-            make_text_span("Header", Some(1)),
-            make_text_span("Data", Some(2)),
-        ];
+        let spans = vec![make_text_span("Header", Some(1)), make_text_span("Data", Some(2))];
 
         let result = extract_table_from_spans(&table_elem, &spans).unwrap();
         assert!(result.has_header);
@@ -1824,7 +1776,10 @@ mod tests {
     #[test]
     fn rtl_table_cell_without_numerals_is_unchanged() {
         let cell = rtl_cell_from(&[("تن", 5.0, 20.0), ("حداقل", 75.0, 35.0)]);
-        assert_eq!(cell.text, "حداقل تن", "a cell with no numerals must read purely right to left");
+        assert_eq!(
+            cell.text, "حداقل تن",
+            "a cell with no numerals must read purely right to left"
+        );
     }
 
     /// Build a single-cell tagged table from `(text, x, width)` runs laid out

@@ -25,7 +25,10 @@ fn type0_pdf(runs: &[Run]) -> Vec<u8> {
     let mut content = String::new();
     for r in runs {
         let hex: String = r.codes.iter().map(|c| format!("{c:04X}")).collect();
-        content.push_str(&format!("BT /F1 12 Tf 1 0 0 1 {:.1} {:.1} Tm <{hex}> Tj ET\n", r.x, r.y));
+        content.push_str(&format!(
+            "BT /F1 12 Tf 1 0 0 1 {:.1} {:.1} Tm <{hex}> Tj ET\n",
+            r.x, r.y
+        ));
     }
 
     let mut pairs: Vec<(u16, char)> = Vec::new();
@@ -60,7 +63,12 @@ fn type0_pdf(runs: &[Run]) -> Vec<u8> {
         buf.extend_from_slice(format!("{id} 0 obj\n{body}\nendobj\n").as_bytes());
     };
     obj(&mut buf, &mut off, 1, "<< /Type /Catalog /Pages 2 0 R >>".into());
-    obj(&mut buf, &mut off, 2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into());
+    obj(
+        &mut buf,
+        &mut off,
+        2,
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+    );
     obj(
         &mut buf,
         &mut off,
@@ -141,8 +149,14 @@ fn korean_numeral_hugs_counter_no_spurious_space() {
             codes: &[0x0002, 0x0003],
         },
     ]);
-    assert!(t.contains("1만년"), "Hangul↔digit forced space not suppressed — got: {t:?}");
-    assert!(!t.contains("1 만년"), "spurious space between numeral and counter — got: {t:?}");
+    assert!(
+        t.contains("1만년"),
+        "Hangul↔digit forced space not suppressed — got: {t:?}"
+    );
+    assert!(
+        !t.contains("1 만년"),
+        "spurious space between numeral and counter — got: {t:?}"
+    );
 }
 
 // NB: the ideograph↔digit split is guarded by the lib unit test

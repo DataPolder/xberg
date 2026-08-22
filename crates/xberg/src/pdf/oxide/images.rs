@@ -72,7 +72,12 @@ fn extract_n_images_from_page_handles(
 ///
 /// Returns `Err` if the pixel buffer length does not match `w × h × bpp` or if
 /// PNG encoding fails.
-fn raw_pixels_to_png(w: u32, h: u32, format: &xberg_native_pdf::extractors::PixelFormat, pixels: &[u8]) -> Result<Bytes> {
+fn raw_pixels_to_png(
+    w: u32,
+    h: u32,
+    format: &xberg_native_pdf::extractors::PixelFormat,
+    pixels: &[u8],
+) -> Result<Bytes> {
     let dynamic = match *format {
         xberg_native_pdf::extractors::PixelFormat::Grayscale => {
             let buf = image::GrayImage::from_raw(w, h, pixels.to_vec()).ok_or_else(|| {
@@ -197,7 +202,10 @@ pub(crate) struct PageFallbackImage {
 // `crate::extractors::pdf::ocr` are gated `any(ocr, ocr-pipeline)`, and the `binstall`
 // CLI profile pulls `ocr-pipeline` (via `liter-llm`) without `ocr`. ~keep
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-pub(crate) fn page_ocr_fallback_image_bytes(doc: &xberg_native_pdf::PdfDocument, page_idx: usize) -> Vec<PageFallbackImage> {
+pub(crate) fn page_ocr_fallback_image_bytes(
+    doc: &xberg_native_pdf::PdfDocument,
+    page_idx: usize,
+) -> Vec<PageFallbackImage> {
     let handles = match doc.page_image_handles(page_idx) {
         Ok(h) => h,
         Err(error) => {
@@ -339,7 +347,10 @@ pub(crate) fn extract_images_with_data(
                     match doc.doc.extract_images(page_idx) {
                         Ok(imgs) => imgs.into_iter().take(limit).collect(),
                         Err(e) => {
-                            tracing::debug!(page = page_idx, "xberg_native_pdf: failed to extract images (fallback): {e}");
+                            tracing::debug!(
+                                page = page_idx,
+                                "xberg_native_pdf: failed to extract images (fallback): {e}"
+                            );
                             continue;
                         }
                     }

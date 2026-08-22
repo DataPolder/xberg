@@ -100,7 +100,10 @@ fn test_left_justified_text_constant_spacing() {
         avg_char_spacing: 0.0,
     };
 
-    assert_eq!(line.avg_word_spacing, 0.0, "Left-justified should have constant spacing");
+    assert_eq!(
+        line.avg_word_spacing, 0.0,
+        "Left-justified should have constant spacing"
+    );
     assert!(line.start_x < 150.0, "Should start near left margin");
 }
 
@@ -302,8 +305,14 @@ fn test_justification_detection_by_spacing_variance() {
     let left_just_var = calc_variance(&left_justified_spacings);
     let center_just_var = calc_variance(&center_justified_spacings);
 
-    assert!(fully_just_var > left_just_var, "Fully-justified variance > left-justified");
-    assert!(fully_just_var > center_just_var, "Fully-justified variance > center-justified");
+    assert!(
+        fully_just_var > left_just_var,
+        "Fully-justified variance > left-justified"
+    );
+    assert!(
+        fully_just_var > center_just_var,
+        "Fully-justified variance > center-justified"
+    );
 
     assert_eq!(left_just_var, 0.0, "Left-justified has zero variance");
 }
@@ -386,8 +395,7 @@ fn test_horizontal_scaling_affects_spacing() {
         avg_char_spacing: 0.0,
     };
 
-    let scale_factor = line_scaled_up.segments[0].horizontal_scaling
-        / line_normal_scale.segments[0].horizontal_scaling;
+    let scale_factor = line_scaled_up.segments[0].horizontal_scaling / line_normal_scale.segments[0].horizontal_scaling;
     assert_eq!(
         line_scaled_up.line_width / line_normal_scale.line_width,
         scale_factor,

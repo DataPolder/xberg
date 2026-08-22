@@ -46,12 +46,10 @@ pub mod permissions;
 pub(crate) mod rc4;
 mod write_handler;
 
-pub use algorithms::{
-    compute_encryption_key, compute_owner_password_hash, compute_user_password_hash,
-};
+pub use algorithms::{compute_encryption_key, compute_owner_password_hash, compute_user_password_hash};
 pub use certificate::{
-    CertEncryptDict, CertSubFilter, CertificateEncryption, CertificateEncryptionHandler,
-    KeyTransportAlgorithm, RecipientInfo, RecipientPermissions,
+    CertEncryptDict, CertSubFilter, CertificateEncryption, CertificateEncryptionHandler, KeyTransportAlgorithm,
+    RecipientInfo, RecipientPermissions,
 };
 pub use handler::EncryptionHandler;
 pub use permissions::PdfPermissions;
@@ -219,10 +217,7 @@ impl EncryptDict {
             })
             .ok_or_else(|| Error::InvalidPdf("Encrypt dictionary missing /P".to_string()))?;
 
-        let sub_filter = dict
-            .get("SubFilter")
-            .and_then(|o| o.as_name())
-            .map(|s| s.to_string());
+        let sub_filter = dict.get("SubFilter").and_then(|o| o.as_name()).map(|s| s.to_string());
 
         let length = dict.get("Length").and_then(|o| match o {
             Object::Integer(i) => Some(*i as u32),
@@ -237,29 +232,17 @@ impl EncryptDict {
             })
             .unwrap_or(true);
 
-        let owner_encryption = dict
-            .get("OE")
-            .and_then(|o| o.as_string())
-            .map(|s| s.to_vec());
+        let owner_encryption = dict.get("OE").and_then(|o| o.as_string()).map(|s| s.to_vec());
 
-        let user_encryption = dict
-            .get("UE")
-            .and_then(|o| o.as_string())
-            .map(|s| s.to_vec());
+        let user_encryption = dict.get("UE").and_then(|o| o.as_string()).map(|s| s.to_vec());
 
-        let perms = dict
-            .get("Perms")
-            .and_then(|o| o.as_string())
-            .map(|s| s.to_vec());
+        let perms = dict.get("Perms").and_then(|o| o.as_string()).map(|s| s.to_vec());
 
         // V=4: Parse /CF crypt filter dictionary to determine the actual algorithm.
         // /StmF names the crypt filter for streams; look up its /CFM entry.
         // CFM "V2" = RC4-128, "AESV2" = AES-128 (PDF Spec Table 25). ~keep
         let stream_crypt_method = if version == 4 {
-            let stm_filter_name = dict
-                .get("StmF")
-                .and_then(|o| o.as_name())
-                .unwrap_or("Identity");
+            let stm_filter_name = dict.get("StmF").and_then(|o| o.as_name()).unwrap_or("Identity");
             dict.get("CF")
                 .and_then(|cf| cf.as_dict())
                 .and_then(|cf_dict| cf_dict.get(stm_filter_name))
@@ -308,12 +291,12 @@ impl EncryptDict {
                             "resolved crypt filter method: RC4-128"
                         );
                         Ok(Algorithm::Rc4_128)
-                    },
+                    }
                     Some("AESV2") | None => {
                         // None: /CF missing or unparseable — default to AES-128
                         // for backward compatibility. ~keep
                         Ok(Algorithm::Aes128)
-                    },
+                    }
                     Some(other) => {
                         tracing::warn!(
                             revision = self.revision,
@@ -321,19 +304,19 @@ impl EncryptDict {
                             "unknown crypt filter method; falling back to AES-128"
                         );
                         Ok(Algorithm::Aes128)
-                    },
+                    }
                 }
-            },
+            }
             (5, 5) | (5, 6) => Ok(Algorithm::Aes256),
             // Lenient: V determines algorithm, R may be non-standard ~keep
             (1, r) => {
                 tracing::warn!(revision = r, "non-standard encryption V=1; using RC4-40");
                 Ok(Algorithm::RC4_40)
-            },
+            }
             (2, r) => {
                 tracing::warn!(revision = r, "non-standard encryption V=2; using RC4-128");
                 Ok(Algorithm::Rc4_128)
-            },
+            }
             _ => Err(Error::Unsupported(format!(
                 "Unsupported encryption version V={}, R={}",
                 self.version, self.revision
@@ -397,11 +380,7 @@ impl EncryptDict {
 
         // For V=4 (crypt-filter-based), add crypt filter entries ~keep
         if self.version == 4 {
-            let cfm = self
-                .stream_crypt_method
-                .as_deref()
-                .unwrap_or("AESV2")
-                .to_string();
+            let cfm = self.stream_crypt_method.as_deref().unwrap_or("AESV2").to_string();
             let mut cf_dict: HashMap<String, Object> = HashMap::new();
             let mut std_cf: HashMap<String, Object> = HashMap::new();
             std_cf.insert("CFM".to_string(), Object::Name(cfm));
@@ -544,13 +523,8 @@ impl EncryptDictBuilder {
             // PDF 2.0 Algorithm 8 and 9 using the actual passwords. ~keep
             let (user_hash, user_encryption, file_key) =
                 algorithms::compute_u_and_ue(&self.user_password, key_length, revision)?;
-            let (owner_hash, owner_encryption) = algorithms::compute_o_and_oe(
-                &owner_pass,
-                &self.user_password,
-                &file_key,
-                &user_hash,
-                revision,
-            )?;
+            let (owner_hash, owner_encryption) =
+                algorithms::compute_o_and_oe(&owner_pass, &self.user_password, &file_key, &user_hash, revision)?;
             return Ok(EncryptDict {
                 filter: "Standard".to_string(),
                 sub_filter: None,
@@ -568,12 +542,8 @@ impl EncryptDictBuilder {
             });
         }
 
-        let owner_hash = algorithms::compute_owner_password_hash(
-            &owner_pass,
-            &self.user_password,
-            revision,
-            key_length,
-        )?;
+        let owner_hash =
+            algorithms::compute_owner_password_hash(&owner_pass, &self.user_password, revision, key_length)?;
 
         let encryption_key = algorithms::compute_encryption_key(
             &self.user_password,
@@ -792,14 +762,7 @@ mod tests {
         assert_eq!(a, c);
     }
 
-    fn make_encrypt_dict_obj(
-        filter: &str,
-        v: i64,
-        r: i64,
-        owner: &[u8],
-        user: &[u8],
-        p: i64,
-    ) -> Object {
+    fn make_encrypt_dict_obj(filter: &str, v: i64, r: i64, owner: &[u8], user: &[u8], p: i64) -> Object {
         let mut dict = HashMap::new();
         dict.insert("Filter".to_string(), Object::Name(filter.to_string()));
         dict.insert("V".to_string(), Object::Integer(v));

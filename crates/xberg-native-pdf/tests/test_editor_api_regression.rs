@@ -37,8 +37,7 @@ fn single_page_pdf_with_content() -> Vec<u8> {
         endobj\n",
     );
 
-    let content =
-        b"0.8 g\n100 600 200 100 re f\n0 g\nBT /F1 14 Tf 110 640 Td (Original text) Tj ET";
+    let content = b"0.8 g\n100 600 200 100 re f\n0 g\nBT /F1 14 Tf 110 640 Td (Original text) Tj ET";
     let off_content = pdf.len();
     pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes());
     pdf.extend_from_slice(content);
@@ -53,14 +52,7 @@ fn single_page_pdf_with_content() -> Vec<u8> {
     );
 
     let xref_pos = pdf.len();
-    let offsets = [
-        0usize,
-        off_catalog,
-        off_pages,
-        off_page,
-        off_content,
-        off_font,
-    ];
+    let offsets = [0usize, off_catalog, off_pages, off_page, off_content, off_font];
     pdf.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
     pdf.extend_from_slice(format!("{:010} 65535 f\r\n", 0).as_bytes());
     for &off in &offsets[1..] {
@@ -98,7 +90,14 @@ fn form_pdf(page_labels: &[&str]) -> Vec<u8> {
             .page(PageSize::Letter)
             .at(72.0, 720.0)
             .text(label)
-            .text_field(format!("field_{i}"), 72.0, 650.0, 200.0, 20.0, Some(format!("value-{i}")))
+            .text_field(
+                format!("field_{i}"),
+                72.0,
+                650.0,
+                200.0,
+                20.0,
+                Some(format!("value-{i}")),
+            )
             .done();
     }
     builder.build().expect("build form PDF")
@@ -110,7 +109,12 @@ fn add_text_overlay(page: &mut xberg_native_pdf::editor::dom::PdfPage, text: &st
     let font_size = 18.0;
     let approx_width = text.len() as f32 * font_size * 0.5;
     let bbox = Rect::new(cx - approx_width / 2.0, cy - font_size / 2.0, approx_width, font_size);
-    page.add_text(TextContent::new(text, bbox, FontSpec::helvetica(font_size), TextStyle::new()));
+    page.add_text(TextContent::new(
+        text,
+        bbox,
+        FontSpec::helvetica(font_size),
+        TextStyle::new(),
+    ));
 }
 
 #[test]
@@ -130,14 +134,12 @@ fn overlay_add_text_preserves_original_text_and_graphics() {
 
     let doc = PdfDocument::from_bytes(bytes.clone()).expect("reopen");
     let spans = doc.extract_spans(0).expect("extract_spans");
-    let all: String = spans
-        .iter()
-        .map(|s| s.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(all.contains("Original text"), "original text lost after add_text; got: {all:?}");
-    let overlay_present =
-        all.contains("overlay text") || bytes.windows(12).any(|w| w == b"overlay text");
+    let all: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
+    assert!(
+        all.contains("Original text"),
+        "original text lost after add_text; got: {all:?}"
+    );
+    let overlay_present = all.contains("overlay text") || bytes.windows(12).any(|w| w == b"overlay text");
     assert!(overlay_present, "overlay text not found in output; got: {all:?}");
 }
 
@@ -165,12 +167,11 @@ fn overlay_add_path_preserves_original_content() {
 
     let doc = PdfDocument::from_bytes(bytes).expect("reopen");
     let spans = doc.extract_spans(0).expect("extract_spans");
-    let all: String = spans
-        .iter()
-        .map(|s| s.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(all.contains("Original text"), "original text lost after add_path; got: {all:?}");
+    let all: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
+    assert!(
+        all.contains("Original text"),
+        "original text lost after add_path; got: {all:?}"
+    );
 }
 
 /// add_text overlay correctly applied when select_pages is called BEFORE get_page/save_page.
@@ -189,13 +190,12 @@ fn overlay_add_text_after_select_pages() {
 
     let doc = PdfDocument::from_bytes(bytes.clone()).expect("reopen");
     let spans = doc.extract_spans(0).expect("extract_spans");
-    let all: String = spans
-        .iter()
-        .map(|s| s.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let all: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
 
-    assert!(all.contains("Page one"), "selected page original text lost; got: {all:?}");
+    assert!(
+        all.contains("Page one"),
+        "selected page original text lost; got: {all:?}"
+    );
     let overlay_present = all.contains("post-select overlay")
         || bytes
             .windows(20)
@@ -223,15 +223,13 @@ fn overlay_add_text_after_select_pages_last_page() {
 
     let doc = PdfDocument::from_bytes(bytes.clone()).expect("reopen");
     let spans = doc.extract_spans(0).expect("extract_spans");
-    let all: String = spans
-        .iter()
-        .map(|s| s.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let all: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
 
-    assert!(all.contains("Third"), "original text of selected page not found; got: {all:?}");
-    let has_overlay =
-        all.contains("third-page-overlay") || bytes.windows(18).any(|w| w == b"third-page-overlay");
+    assert!(
+        all.contains("Third"),
+        "original text of selected page not found; got: {all:?}"
+    );
+    let has_overlay = all.contains("third-page-overlay") || bytes.windows(18).any(|w| w == b"third-page-overlay");
     assert!(has_overlay, "overlay not found; got: {all:?}");
 }
 
@@ -242,9 +240,7 @@ fn erase_region_after_select_pages() {
     let mut editor = DocumentEditor::from_bytes(source).expect("open");
 
     editor.select_pages(&[1]).expect("select_pages");
-    editor
-        .erase_region(0, [0.0, 0.0, 612.0, 792.0])
-        .expect("erase_region");
+    editor.erase_region(0, [0.0, 0.0, 612.0, 792.0]).expect("erase_region");
 
     let bytes = editor.save_to_bytes().expect("save_to_bytes");
 
@@ -260,9 +256,7 @@ fn erase_region_before_select_pages() {
     let source = multi_page_pdf(&["Alpha", "Beta", "Gamma"]);
     let mut editor = DocumentEditor::from_bytes(source).expect("open");
 
-    editor
-        .erase_region(1, [0.0, 0.0, 612.0, 792.0])
-        .expect("erase_region");
+    editor.erase_region(1, [0.0, 0.0, 612.0, 792.0]).expect("erase_region");
     editor.select_pages(&[1]).expect("select_pages");
 
     let bytes = editor.save_to_bytes().expect("save_to_bytes");
@@ -341,7 +335,10 @@ fn set_page_media_box_after_select_pages() {
     );
 
     let bytes = editor.save_to_bytes().expect("save_to_bytes");
-    assert!(bytes.windows(8).any(|w| w == b"MediaBox"), "/MediaBox not written to output");
+    assert!(
+        bytes.windows(8).any(|w| w == b"MediaBox"),
+        "/MediaBox not written to output"
+    );
 }
 
 #[test]
@@ -379,13 +376,12 @@ fn multiple_pages_with_overlays() {
 
     for i in 0..3 {
         let spans = doc.extract_spans(i).expect("extract_spans");
-        let all: String = spans
-            .iter()
-            .map(|s| s.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let all: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
         let label = ["Alpha", "Beta", "Gamma"][i];
-        assert!(all.contains(label), "original text '{label}' lost on page {i}; got: {all:?}");
+        assert!(
+            all.contains(label),
+            "original text '{label}' lost on page {i}; got: {all:?}"
+        );
     }
 
     for i in 0..3 {
@@ -423,11 +419,7 @@ fn save_page_twice_second_wins() {
 
     let doc = PdfDocument::from_bytes(bytes.clone()).expect("reopen");
     let spans = doc.extract_spans(0).expect("extract_spans");
-    let all: String = spans
-        .iter()
-        .map(|s| s.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let all: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
     assert!(
         all.contains("Original text"),
         "original text lost after two save_page; got: {all:?}"
@@ -497,20 +489,22 @@ fn form_pdf_add_text_overlay_preserves_field_and_content() {
     let output = editor.save_to_bytes().expect("save form PDF with overlay");
 
     let has_annotation = output.windows(15).any(|w| w == b"test annotation");
-    assert!(has_annotation, "overlay text 'test annotation' not found in output bytes");
+    assert!(
+        has_annotation,
+        "overlay text 'test annotation' not found in output bytes"
+    );
     assert!(
         output.windows(8).any(|w| w == b"AcroForm"),
         "AcroForm dictionary lost after overlay"
     );
-    assert!(output.windows(8).any(|w| w == b"field_0)"), "field name lost after overlay");
+    assert!(
+        output.windows(8).any(|w| w == b"field_0)"),
+        "field name lost after overlay"
+    );
 
     let doc = PdfDocument::from_bytes(output).expect("re-open with overlay");
     let spans = doc.extract_spans(0).expect("extract_spans");
-    let all: String = spans
-        .iter()
-        .map(|s| s.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let all: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
     assert!(
         all.contains("Wage statement"),
         "original page text lost after overlay; got: {all:?}"
@@ -534,11 +528,7 @@ fn form_pdf_select_pages_preserves_content() {
         "expected exactly 1 page after select_pages"
     );
     let spans = doc.extract_spans(0).expect("extract_spans");
-    let all: String = spans
-        .iter()
-        .map(|s| s.text.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let all: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
     assert!(
         all.contains("Page one"),
         "selected page's text lost after select_pages; got: {all:?}"

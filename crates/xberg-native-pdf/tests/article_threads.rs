@@ -21,10 +21,25 @@ fn threaded_pdf() -> Vec<u8> {
     let mut off = vec![0usize; 9];
     buf.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
 
-    obj(&mut buf, &mut off, 1, "<< /Type /Catalog /Pages 2 0 R /Threads [5 0 R] >>");
+    obj(
+        &mut buf,
+        &mut off,
+        1,
+        "<< /Type /Catalog /Pages 2 0 R /Threads [5 0 R] >>",
+    );
     obj(&mut buf, &mut off, 2, "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>");
-    obj(&mut buf, &mut off, 3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
-    obj(&mut buf, &mut off, 4, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+    obj(
+        &mut buf,
+        &mut off,
+        3,
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+    );
+    obj(
+        &mut buf,
+        &mut off,
+        4,
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+    );
     obj(
         &mut buf,
         &mut off,
@@ -89,7 +104,12 @@ fn document_without_threads_yields_none() {
     buf.extend_from_slice(b"%PDF-1.7\n");
     obj(&mut buf, &mut off, 1, "<< /Type /Catalog /Pages 2 0 R >>");
     obj(&mut buf, &mut off, 2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
-    obj(&mut buf, &mut off, 3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>");
+    obj(
+        &mut buf,
+        &mut off,
+        3,
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>",
+    );
     let xref_off = buf.len();
     buf.extend_from_slice(b"xref\n0 4\n0000000000 65535 f \n");
     for id in 1..=3 {

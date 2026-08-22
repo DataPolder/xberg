@@ -58,7 +58,10 @@ fn full_bleed_image_with_real_headline_gets_honest_reason() {
     // The text is real and must remain fully extractable regardless of
     // how the page gets classified. ~keep
     let text = doc.extract_text(0).expect("extract_text");
-    assert!(text.contains("Quarterly"), "headline text must still extract, got: {text:?}");
+    assert!(
+        text.contains("Quarterly"),
+        "headline text must still extract, got: {text:?}"
+    );
 
     if matches!(cls.kind, PageKind::Scanned) {
         assert_ne!(
@@ -172,12 +175,9 @@ fn fragmented_span_words_pdf() -> Vec<u8> {
     let mut x = 50.0f32;
     let y = 700.0f32;
     for (a, b) in PIECES {
-        content
-            .extend_from_slice(format!("/F1 12 Tf 1 0 0 1 {x:.2} {y:.2} Tm ({a}) Tj\n").as_bytes());
+        content.extend_from_slice(format!("/F1 12 Tf 1 0 0 1 {x:.2} {y:.2} Tm ({a}) Tj\n").as_bytes());
         x += 1.0;
-        content.extend_from_slice(
-            format!("/F1 12.5 Tf 1 0 0 1 {x:.2} {y:.2} Tm ({b}) Tj\n").as_bytes(),
-        );
+        content.extend_from_slice(format!("/F1 12.5 Tf 1 0 0 1 {x:.2} {y:.2} Tm ({b}) Tj\n").as_bytes());
         x += 150.0;
     }
     content.extend_from_slice(b"ET");
@@ -192,7 +192,10 @@ fn write_xref_trailer(pdf: &mut Vec<u8>, off: &[usize]) {
         pdf.extend_from_slice(format!("{o:010} 00000 n\r\n").as_bytes());
     }
     pdf.extend_from_slice(
-        format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n", off.len())
-            .as_bytes(),
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n",
+            off.len()
+        )
+        .as_bytes(),
     );
 }

@@ -15,22 +15,16 @@ fn create_pdf_with_form_fields_on_two_pages() -> Vec<u8> {
     pdf.extend_from_slice(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n");
 
     let off1 = pdf.len();
-    pdf.extend_from_slice(
-        b"1 0 obj\n<</Type /Catalog /Pages 2 0 R /AcroForm <</Fields [5 0 R 6 0 R]>>>>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"1 0 obj\n<</Type /Catalog /Pages 2 0 R /AcroForm <</Fields [5 0 R 6 0 R]>>>>\nendobj\n");
 
     let off2 = pdf.len();
     pdf.extend_from_slice(b"2 0 obj\n<</Type /Pages /Kids [3 0 R 4 0 R] /Count 2>>\nendobj\n");
 
     let off3 = pdf.len();
-    pdf.extend_from_slice(
-        b"3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [5 0 R]>>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"3 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [5 0 R]>>\nendobj\n");
 
     let off4 = pdf.len();
-    pdf.extend_from_slice(
-        b"4 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [6 0 R]>>\nendobj\n",
-    );
+    pdf.extend_from_slice(b"4 0 obj\n<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [6 0 R]>>\nendobj\n");
 
     let off5 = pdf.len();
     pdf.extend_from_slice(
@@ -92,5 +86,8 @@ fn test_form_field_values_read_correctly() {
     let email_field = fields.iter().find(|f| f.name() == "email").unwrap();
 
     assert_eq!(name_field.value(), FormFieldValue::Text("Alice".to_string()));
-    assert_eq!(email_field.value(), FormFieldValue::Text("alice@example.com".to_string()));
+    assert_eq!(
+        email_field.value(),
+        FormFieldValue::Text("alice@example.com".to_string())
+    );
 }

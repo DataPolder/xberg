@@ -53,7 +53,12 @@ fn inline_acroform_form() -> Vec<u8> {
         "<< /FT /Tx /T (full_name) /Type /Annot /Subtype /Widget \
          /Rect [72 700 400 720] /DA (/Helv 0 Tf 0 g) /AP << /N 6 0 R >> >>",
     );
-    obj(&mut buf, &mut off, 5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    obj(
+        &mut buf,
+        &mut off,
+        5,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
     let content = "/Tx BMC\nEMC\n";
     off[6] = buf.len();
     buf.extend_from_slice(b"6 0 obj\n");

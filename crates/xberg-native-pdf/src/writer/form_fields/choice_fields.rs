@@ -324,7 +324,10 @@ impl FormFieldWidget for ComboBoxWidget {
 
         dict.insert("Ff".to_string(), Object::Integer(self.flags.bits() as i64));
 
-        dict.insert("DA".to_string(), Object::String(self.build_default_appearance().into_bytes()));
+        dict.insert(
+            "DA".to_string(),
+            Object::String(self.build_default_appearance().into_bytes()),
+        );
 
         // /AA — additional actions (K/V) ~keep
         let mut aa: HashMap<String, Object> = HashMap::new();
@@ -600,11 +603,7 @@ impl FormFieldWidget for ListBoxWidget {
             if self.default_values.len() == 1 {
                 dict.insert("DV".to_string(), Object::text_string(&self.default_values[0]));
             } else {
-                let dv_array: Vec<Object> = self
-                    .default_values
-                    .iter()
-                    .map(Object::text_string)
-                    .collect();
+                let dv_array: Vec<Object> = self.default_values.iter().map(Object::text_string).collect();
                 dict.insert("DV".to_string(), Object::Array(dv_array));
             }
         }
@@ -613,7 +612,10 @@ impl FormFieldWidget for ListBoxWidget {
             dict.insert("Ff".to_string(), Object::Integer(self.flags.bits() as i64));
         }
 
-        dict.insert("DA".to_string(), Object::String(self.build_default_appearance().into_bytes()));
+        dict.insert(
+            "DA".to_string(),
+            Object::String(self.build_default_appearance().into_bytes()),
+        );
 
         if let Some(ti) = self.top_index {
             dict.insert("TI".to_string(), Object::Integer(ti as i64));
@@ -815,11 +817,10 @@ mod tests {
 
     #[test]
     fn test_choice_option_pairs() {
-        let combo = ComboBoxWidget::new("status", Rect::new(72.0, 700.0, 150.0, 20.0))
-            .with_choice_options(vec![
-                ChoiceOption::new_with_export("Active", "1"),
-                ChoiceOption::new_with_export("Inactive", "0"),
-            ]);
+        let combo = ComboBoxWidget::new("status", Rect::new(72.0, 700.0, 150.0, 20.0)).with_choice_options(vec![
+            ChoiceOption::new_with_export("Active", "1"),
+            ChoiceOption::new_with_export("Inactive", "0"),
+        ]);
 
         let dict = combo.build_field_dict();
 

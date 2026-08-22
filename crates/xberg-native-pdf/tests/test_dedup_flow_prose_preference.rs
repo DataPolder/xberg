@@ -74,7 +74,11 @@ BT /F0 12 Tf 1 0 0 1 50 800 Tm (In) Tj \
         &mut offsets,
         &format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len() + 1),
     );
-    push(&mut out, &mut offsets, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
 
     let xref_offset = out.len();
     out.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());
@@ -101,14 +105,7 @@ fn dedup_prefers_flow_prose_copy_over_positioned_copy() {
     let doc = PdfDocument::open(tmp.path()).expect("open");
     let text = doc.extract_text(0).expect("extract");
 
-    for word in [
-        "In",
-        "1894",
-        "single-cylinder",
-        "gasoline",
-        "engine",
-        "installed",
-    ] {
+    for word in ["In", "1894", "single-cylinder", "gasoline", "engine", "installed"] {
         assert!(text.contains(word), "missing word {word:?}. Text: {text:?}");
     }
 

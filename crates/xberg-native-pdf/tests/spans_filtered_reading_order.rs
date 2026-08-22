@@ -63,8 +63,7 @@ fn pdf_with_default_off_duplicate_layer() -> Vec<u8> {
     }
     pdf.extend_from_slice(xref.as_bytes());
     pdf.extend_from_slice(
-        format!("trailer\n<< /Size {n_obj} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n")
-            .as_bytes(),
+        format!("trailer\n<< /Size {n_obj} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").as_bytes(),
     );
     pdf
 }
@@ -89,15 +88,13 @@ fn excluding_default_off_layer_drops_the_duplicate_copy() {
     );
 
     let hidden = optional_content::compute_default_off_ocgs(&doc);
-    assert!(hidden.contains("Hidden"), "/D/OFF must mark the OCG off; got {hidden:?}");
+    assert!(
+        hidden.contains("Hidden"),
+        "/D/OFF must mark the OCG off; got {hidden:?}"
+    );
 
     let filtered = doc
-        .extract_spans_filtered_with_reading_order(
-            0,
-            ReadingOrder::ColumnAware,
-            hidden,
-            HashSet::new(),
-        )
+        .extract_spans_filtered_with_reading_order(0, ReadingOrder::ColumnAware, hidden, HashSet::new())
         .expect("filtered");
     assert_eq!(
         count_report(&filtered),

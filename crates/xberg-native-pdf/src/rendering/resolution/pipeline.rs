@@ -140,11 +140,11 @@ fn apply_inks_selector_override(
         Some("All") => {
             overprint.selector = InkSelector::All;
             overprint.all_tint = components.first().copied().unwrap_or(0.0);
-        },
+        }
         Some("None") => {
             overprint.selector = InkSelector::None;
             overprint.all_tint = 0.0;
-        },
+        }
         Some(spot_name) => {
             // §8.6.6.3: a conforming device with the named colorant
             // paints that colorant directly; without it, the alternate
@@ -177,8 +177,8 @@ fn apply_inks_selector_override(
             if let Some(alt) = eval_separation_alt_cmyk(arr, components.first().copied(), ctx) {
                 overprint.alt_cmyk_fallback = Some(alt);
             }
-        },
-        None => {},
+        }
+        None => {}
     }
 }
 
@@ -236,7 +236,7 @@ fn eval_separation_alt_cmyk(
         Ok(resolved) => {
             func_obj_owned = resolved;
             &func_obj_owned
-        },
+        }
         Err(_) => func_obj_raw,
     };
     let func_dict = func_obj.as_dict()?;
@@ -264,7 +264,7 @@ fn eval_separation_alt_cmyk(
                 out[j] = (c0j + pow * (c1j - c0j)).clamp(0.0, 1.0);
             }
             Some(out)
-        },
+        }
         4 => {
             // Type 4 PostScript calculator: invoke the shared evaluator. ~keep
             let Object::Stream { dict, .. } = func_obj else {
@@ -314,8 +314,7 @@ fn eval_separation_alt_cmyk(
                 })
                 .unwrap_or_default();
             let inputs = vec![tint as f64];
-            let out =
-                crate::functions::evaluate_type4_clamped(&bytes, &inputs, &domain, &range).ok()?;
+            let out = crate::functions::evaluate_type4_clamped(&bytes, &inputs, &domain, &range).ok()?;
             if out.len() < 4 {
                 return None;
             }
@@ -325,7 +324,7 @@ fn eval_separation_alt_cmyk(
                 out[2].clamp(0.0, 1.0) as f32,
                 out[3].clamp(0.0, 1.0) as f32,
             ])
-        },
+        }
         _ => None,
     }
 }
@@ -382,7 +381,7 @@ mod tests {
                 assert!((g - 0.25).abs() < 1e-6);
                 assert!((b - 0.25).abs() < 1e-6);
                 assert!((a - 0.8).abs() < 1e-6);
-            },
+            }
             _ => panic!("expected Rgba"),
         }
 
@@ -390,12 +389,12 @@ mod tests {
         assert_eq!(cmd.overprint.mode, 0);
 
         match cmd.blend {
-            BlendPlan::Native(tiny_skia::BlendMode::SourceOver) => {},
+            BlendPlan::Native(tiny_skia::BlendMode::SourceOver) => {}
             other => panic!("expected SourceOver, got {other:?}"),
         }
 
         match cmd.clip {
-            ClipPlan::None => {},
+            ClipPlan::None => {}
             _ => panic!("expected ClipPlan::None"),
         }
     }
@@ -506,10 +505,9 @@ mod tests {
         let (r, g, b, a) = match cmd.color {
             ResolvedColor::Rgba { r, g, b, a } => (r, g, b, a),
             ResolvedColor::Cmyk { c, m, y, k, a } => {
-                let (rr, gg, bb) =
-                    crate::rendering::resolution::color::cmyk_to_rgb_via_intent(c, m, y, k, &ctx);
+                let (rr, gg, bb) = crate::rendering::resolution::color::cmyk_to_rgb_via_intent(c, m, y, k, &ctx);
                 (rr, gg, bb, a)
-            },
+            }
             other => panic!("expected Rgba or Cmyk; got {other:?}"),
         };
         assert!((r - 0.9255).abs() < 1e-3, "r={r}");

@@ -119,11 +119,7 @@ mod tests {
             bbox: Rect::new(0.0, 0.0, 10.0, 10.0),
             font_name: "Helvetica".to_string(),
             font_size: 12.0,
-            font_weight: if bold {
-                FontWeight::Bold
-            } else {
-                FontWeight::Normal
-            },
+            font_weight: if bold { FontWeight::Bold } else { FontWeight::Normal },
             is_italic: false,
             is_monospace: false,
             color: Color::black(),
@@ -185,11 +181,7 @@ mod tests {
         // A space span marked bold in the PDF is normalized to Normal weight
         // by `from_span`, so `validate_space_formatting` always passes after
         // normalization -- this is by design (defense-in-depth). ~keep
-        let spans = vec![
-            make_span("hello", true),
-            make_span(" ", true),
-            make_span("world", true),
-        ];
+        let spans = vec![make_span("hello", true), make_span(" ", true), make_span("world", true)];
 
         let normalized = FontWeightNormalizer::normalize_spans(&spans);
         assert_eq!(normalized[1].effective_font_weight, FontWeight::Normal);

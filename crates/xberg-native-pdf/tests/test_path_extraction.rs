@@ -72,7 +72,7 @@ mod path_extractor_tests {
                 assert_eq!(y2, &50.0);
                 assert_eq!(x3, &100.0);
                 assert_eq!(y3, &0.0);
-            },
+            }
             _ => panic!("Expected CurveTo operation"),
         }
     }
@@ -315,7 +315,7 @@ mod svg_conversion_tests {
                 PathOperation::MoveTo(x, y) => d.push_str(&format!("M {} {} ", x, y)),
                 PathOperation::LineTo(x, y) => d.push_str(&format!("L {} {} ", x, y)),
                 PathOperation::ClosePath => d.push_str("Z "),
-                _ => {},
+                _ => {}
             }
         }
 
@@ -373,8 +373,8 @@ mod svg_conversion_tests {
                 PathOperation::MoveTo(x, y) => d.push_str(&format!("M {} {} ", x, y)),
                 PathOperation::CurveTo(x1, y1, x2, y2, x3, y3) => {
                     d.push_str(&format!("C {} {} {} {} {} {} ", x1, y1, x2, y2, x3, y3))
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
 
@@ -409,10 +409,7 @@ mod svg_conversion_tests {
     #[test]
     fn test_svg_line_cap_conversion() {
         let round_cap = PathContent {
-            operations: vec![
-                PathOperation::MoveTo(0.0, 0.0),
-                PathOperation::LineTo(100.0, 0.0),
-            ],
+            operations: vec![PathOperation::MoveTo(0.0, 0.0), PathOperation::LineTo(100.0, 0.0)],
             bbox: Rect::new(0.0, 0.0, 100.0, 0.0),
             stroke_color: Some(Color::black()),
             fill_color: None,
@@ -556,8 +553,14 @@ mod integration_tests {
             assert!(!path.operations.is_empty());
             assert!(path.has_stroke() || path.has_fill());
         }
-        assert!(paths[0].has_stroke() && !paths[0].has_fill(), "first path is stroke-only");
-        assert!(paths[1].has_fill() && !paths[1].has_stroke(), "second path is fill-only");
+        assert!(
+            paths[0].has_stroke() && !paths[0].has_fill(),
+            "first path is stroke-only"
+        );
+        assert!(
+            paths[1].has_fill() && !paths[1].has_stroke(),
+            "second path is fill-only"
+        );
     }
 
     /// `extract_paths_in_rect` filters out paths whose bounding box does not
@@ -573,7 +576,11 @@ mod integration_tests {
             .extract_paths_in_rect(0, region)
             .expect("Failed to extract paths in rect");
 
-        assert_eq!(paths.len(), 1, "only the rectangle inside the region should be returned");
+        assert_eq!(
+            paths.len(),
+            1,
+            "only the rectangle inside the region should be returned"
+        );
 
         for path in &paths {
             let bbox = &path.bbox;

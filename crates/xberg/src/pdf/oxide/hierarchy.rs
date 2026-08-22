@@ -436,7 +436,10 @@ fn character_origins(span: &xberg_native_pdf::layout::TextSpan) -> Option<Vec<f3
     )
 }
 
-fn horizontal_attachment_distance(base: &xberg_native_pdf::layout::TextSpan, script: &xberg_native_pdf::layout::TextSpan) -> f32 {
+fn horizontal_attachment_distance(
+    base: &xberg_native_pdf::layout::TextSpan,
+    script: &xberg_native_pdf::layout::TextSpan,
+) -> f32 {
     let base_right = base.bbox.x + base.bbox.width;
     if script.bbox.x <= base_right {
         0.0
@@ -493,7 +496,11 @@ fn append_span_text(target: &mut xberg_native_pdf::layout::TextSpan, suffix: &xb
     target.char_widths.clear();
 }
 
-fn split_span(span: &xberg_native_pdf::layout::TextSpan, start: usize, end: usize) -> Option<xberg_native_pdf::layout::TextSpan> {
+fn split_span(
+    span: &xberg_native_pdf::layout::TextSpan,
+    start: usize,
+    end: usize,
+) -> Option<xberg_native_pdf::layout::TextSpan> {
     if start >= end {
         return None;
     }
@@ -1551,7 +1558,10 @@ mod tests {
         let repaired = super::rejoin_inline_scripts(vec![base, script]);
         let normalized = &repaired[1];
         assert_eq!(normalized.font_name, "BaseFont");
-        assert_eq!(normalized.font_weight, xberg_native_pdf::layout::text_block::FontWeight::Bold);
+        assert_eq!(
+            normalized.font_weight,
+            xberg_native_pdf::layout::text_block::FontWeight::Bold
+        );
         assert!(normalized.is_italic);
         assert!(normalized.is_monospace);
         assert_eq!(normalized.mcid, Some(7));

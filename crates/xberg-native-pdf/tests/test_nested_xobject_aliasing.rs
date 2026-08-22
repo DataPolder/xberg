@@ -139,7 +139,11 @@ fn test_nested_xobject_extraction_does_not_segfault() {
         .extract_text_with_options(0, &options)
         .expect("Extraction failed (possible segfault from aliased &mut)");
 
-    assert!(text.contains("Page level text"), "Missing page-level text, got: '{}'", text);
+    assert!(
+        text.contains("Page level text"),
+        "Missing page-level text, got: '{}'",
+        text
+    );
 }
 
 /// Stress test: run extraction repeatedly to increase the probability of
@@ -153,8 +157,7 @@ fn test_nested_xobject_stress() {
     };
 
     for iteration in 0..50 {
-        let doc =
-            PdfDocument::from_bytes(pdf_bytes.clone()).expect("Failed to parse nested XObject PDF");
+        let doc = PdfDocument::from_bytes(pdf_bytes.clone()).expect("Failed to parse nested XObject PDF");
 
         let result = doc.extract_text_with_options(0, &options);
         assert!(result.is_ok(), "Iteration {}: {:?}", iteration, result.err());
@@ -175,5 +178,9 @@ fn test_deeply_nested_xobject_extraction() {
         .extract_text_with_options(0, &options)
         .expect("Extraction failed on deeply nested XObject PDF");
 
-    assert!(text.contains("Page level text"), "Missing page-level text, got: '{}'", text);
+    assert!(
+        text.contains("Page level text"),
+        "Missing page-level text, got: '{}'",
+        text
+    );
 }

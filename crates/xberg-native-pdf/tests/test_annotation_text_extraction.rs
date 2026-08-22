@@ -25,6 +25,9 @@ fn test_outline_pdf_annotation_extraction() {
             !text.contains("WhitePoint"),
             "Page {i}: annotation text contains WhitePoint metadata"
         );
-        assert!(!text.contains("/CalRGB"), "Page {i}: annotation text contains /CalRGB metadata");
+        assert!(
+            !text.contains("/CalRGB"),
+            "Page {i}: annotation text contains /CalRGB metadata"
+        );
     }
 }

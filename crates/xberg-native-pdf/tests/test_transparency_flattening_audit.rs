@@ -261,7 +261,10 @@ fn ca_fill_alpha_half_paints_faded_red_over_white() {
     //   r_out = 255*0.5 + 255*(1-0.5) = 255
     //   g_out = 0*0.5 + 255*(1-0.5) = 127.5 → 127 or 128
     //   b_out = 0*0.5 + 255*(1-0.5) = 127.5 → 127 or 128 ~keep
-    assert_eq!(r, 255, "/ca 0.5 red over white: R must stay 255; got ({r}, {g}, {b}, {a})");
+    assert_eq!(
+        r, 255,
+        "/ca 0.5 red over white: R must stay 255; got ({r}, {g}, {b}, {a})"
+    );
     assert!(
         g == 127 || g == 128,
         "/ca 0.5 red over white: G must round to 127 or 128; got {g}"
@@ -1082,8 +1085,7 @@ fn fixture_smask_bc_devicen_5_components_iccbased_alternate() -> Vec<u8> {
     // additive-clamp CMYK → RGB at the /Alternate fallback, identical
     // to the round-trip of the same tint transform against a bare
     // /DeviceCMYK alternate. ~keep
-    let icc_obj =
-        "7 0 obj\n<< /N 4 /Alternate /DeviceCMYK /Length 0 >>\nstream\n\nendstream\nendobj\n";
+    let icc_obj = "7 0 obj\n<< /N 4 /Alternate /DeviceCMYK /Length 0 >>\nstream\n\nendstream\nendobj\n";
     let cs_arr = "[/DeviceN [/Ink1 /Ink2 /Ink3 /Ink4 /Ink5] \
                   [/ICCBased 7 0 R] \
                   5 0 R]";
@@ -1586,7 +1588,10 @@ fn blend_multiply_red_over_white_yields_red() {
     let rgba = render_rgba(fixture_blend_multiply_red_over_white());
     let (r, g, b, _) = pixel_at(&rgba, 50, 50);
     assert_eq!(r, 255, "Multiply red×white: R must be 255; got ({r}, {g}, {b})");
-    assert!(g < 10 && b < 10, "Multiply red×white: G/B must be ~0; got ({r}, {g}, {b})");
+    assert!(
+        g < 10 && b < 10,
+        "Multiply red×white: G/B must be ~0; got ({r}, {g}, {b})"
+    );
 }
 
 /// Multiply blend of red over a grey backdrop must darken: per-channel
@@ -1838,8 +1843,7 @@ fn blend_color_blue_source_over_red_yields_blue() {
          byte-exact (126, 126, 255); got ({r}, {g}, {b})"
     );
 
-    let rgba_sourceover =
-        render_rgba(fixture_blend_color_blue_source_over_red_sourceover_baseline());
+    let rgba_sourceover = render_rgba(fixture_blend_color_blue_source_over_red_sourceover_baseline());
     let (r_so, g_so, b_so, _) = pixel_at(&rgba_sourceover, 50, 50);
     assert_eq!(
         (r_so, g_so, b_so),

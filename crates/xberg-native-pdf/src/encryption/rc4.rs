@@ -90,26 +90,18 @@ pub fn rc4_crypt(key: &[u8], data: &[u8]) -> crate::Result<Vec<u8>> {
         .symmetric()
         .rc4(key, data)
         .map_err(|e| match &e {
-            crate::crypto::Error::AlgorithmNotPermitted { .. } => {
-                crate::Error::InvalidPdf(format!(
-                    "RC4 rejected by active CryptoProvider '{}': {}. \
+            crate::crypto::Error::AlgorithmNotPermitted { .. } => crate::Error::InvalidPdf(format!(
+                "RC4 rejected by active CryptoProvider '{}': {}. \
                      RC4 is required for PDF Standard Security R≤4. \
                      Re-encrypt at R=6 (AES-256), or do not install a \
                      legacy-rejecting CryptoProvider at process startup \
                      if opening R≤4 documents is required.",
-                    crate::crypto::active().name(),
-                    e
-                ))
-            },
-            crate::crypto::Error::InvalidInput(s) => {
-                crate::Error::InvalidPdf(format!("RC4 invalid input: {s}"))
-            },
-            crate::crypto::Error::Backend(s) => {
-                crate::Error::InvalidPdf(format!("RC4 backend error: {s}"))
-            },
-            crate::crypto::Error::Verification(s) => {
-                crate::Error::InvalidPdf(format!("RC4 verification error: {s}"))
-            },
+                crate::crypto::active().name(),
+                e
+            )),
+            crate::crypto::Error::InvalidInput(s) => crate::Error::InvalidPdf(format!("RC4 invalid input: {s}")),
+            crate::crypto::Error::Backend(s) => crate::Error::InvalidPdf(format!("RC4 backend error: {s}")),
+            crate::crypto::Error::Verification(s) => crate::Error::InvalidPdf(format!("RC4 verification error: {s}")),
         })
 }
 

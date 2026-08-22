@@ -40,9 +40,7 @@ impl BlendResolver {
             // implement these; the existing renderer silently degrades to
             // SourceOver. We surface the degradation explicitly so future
             // backends can opt into simulation. ~keep
-            "Hue" | "Saturation" | "Color" | "Luminosity" => {
-                BlendPlan::Native(tiny_skia::BlendMode::SourceOver)
-            },
+            "Hue" | "Saturation" | "Color" | "Luminosity" => BlendPlan::Native(tiny_skia::BlendMode::SourceOver),
             _ => BlendPlan::Native(tiny_skia::BlendMode::SourceOver),
         }
     }
@@ -62,7 +60,7 @@ mod tests {
     fn normal_maps_to_source_over() {
         let plan = BlendResolver::new().resolve(&gs_with("Normal"));
         match plan {
-            BlendPlan::Native(tiny_skia::BlendMode::SourceOver) => {},
+            BlendPlan::Native(tiny_skia::BlendMode::SourceOver) => {}
             other => panic!("expected SourceOver, got {other:?}"),
         }
     }
@@ -100,7 +98,7 @@ mod tests {
         for name in ["Hue", "Saturation", "Color", "Luminosity"] {
             let plan = BlendResolver::new().resolve(&gs_with(name));
             match plan {
-                BlendPlan::Native(tiny_skia::BlendMode::SourceOver) => {},
+                BlendPlan::Native(tiny_skia::BlendMode::SourceOver) => {}
                 other => panic!("{name} unexpectedly: {other:?}"),
             }
         }
@@ -112,7 +110,7 @@ mod tests {
         // shall be the default behavior of Normal." ~keep
         let plan = BlendResolver::new().resolve(&gs_with("WhateverNotReal"));
         match plan {
-            BlendPlan::Native(tiny_skia::BlendMode::SourceOver) => {},
+            BlendPlan::Native(tiny_skia::BlendMode::SourceOver) => {}
             other => panic!("expected SourceOver for unknown mode, got {other:?}"),
         }
     }

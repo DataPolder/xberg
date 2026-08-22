@@ -65,7 +65,9 @@ fn make_per_glyph_pdf(text: &str, x_step: f64, y_of: impl Fn(usize) -> f64) -> V
          {off4:010} 00000 n \r\n\
          {off5:010} 00000 n \r\n"
     ));
-    push!(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n"));
+    push!(format!(
+        "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n"
+    ));
     pdf
 }
 
@@ -175,6 +177,8 @@ fn build_two_line_pdf(stream: &str) -> Vec<u8> {
          {off4:010} 00000 n \r\n\
          {off5:010} 00000 n \r\n"
     ));
-    push!(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n"));
+    push!(format!(
+        "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n"
+    ));
     pdf
 }

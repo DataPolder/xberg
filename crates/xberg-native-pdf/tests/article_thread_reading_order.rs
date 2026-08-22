@@ -25,9 +25,7 @@ fn threaded_magazine_pdf() -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
@@ -35,7 +33,12 @@ fn threaded_magazine_pdf() -> Vec<u8> {
     buf.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
     // 1 Catalog (with /Threads), 2 Pages, 3/5 Pages, 4/6 contents, 7 Font,
     // 8 Thread dict, 9/10/11 Beads. ~keep
-    obj(&mut buf, &mut off, 1, "<< /Type /Catalog /Pages 2 0 R /Threads [8 0 R] >>");
+    obj(
+        &mut buf,
+        &mut off,
+        1,
+        "<< /Type /Catalog /Pages 2 0 R /Threads [8 0 R] >>",
+    );
     obj(&mut buf, &mut off, 2, "<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>");
     obj(
         &mut buf,
@@ -53,8 +56,18 @@ fn threaded_magazine_pdf() -> Vec<u8> {
          /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R /B [10 0 R 11 0 R] >>",
     );
     stream(&mut buf, &mut off, 6, page_content);
-    obj(&mut buf, &mut off, 7, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-    obj(&mut buf, &mut off, 8, "<< /Type /Thread /F 9 0 R /I << /Title (Feature) >> >>");
+    obj(
+        &mut buf,
+        &mut off,
+        7,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
+    obj(
+        &mut buf,
+        &mut off,
+        8,
+        "<< /Type /Thread /F 9 0 R /I << /Title (Feature) >> >>",
+    );
     obj(
         &mut buf,
         &mut off,
@@ -103,15 +116,18 @@ fn thread_right_before_left_pdf() -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
 
     buf.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
-    obj(&mut buf, &mut off, 1, "<< /Type /Catalog /Pages 2 0 R /Threads [6 0 R] >>");
+    obj(
+        &mut buf,
+        &mut off,
+        1,
+        "<< /Type /Catalog /Pages 2 0 R /Threads [6 0 R] >>",
+    );
     obj(&mut buf, &mut off, 2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
     obj(
         &mut buf,
@@ -121,7 +137,12 @@ fn thread_right_before_left_pdf() -> Vec<u8> {
          /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R /B [7 0 R 8 0 R] >>",
     );
     stream(&mut buf, &mut off, 4, content);
-    obj(&mut buf, &mut off, 5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    obj(
+        &mut buf,
+        &mut off,
+        5,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
     obj(&mut buf, &mut off, 6, "<< /Type /Thread /F 7 0 R >>");
     // Bead A — right column (read first per the thread). ~keep
     obj(

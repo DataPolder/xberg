@@ -8,8 +8,7 @@ mod common;
 
 /// Helper function to create a simple test PDF.
 fn create_test_pdf() -> Vec<u8> {
-    let pdf = Pdf::from_text("Test document for rendering.\n\nPage 1 content.")
-        .expect("Failed to create PDF");
+    let pdf = Pdf::from_text("Test document for rendering.\n\nPage 1 content.").expect("Failed to create PDF");
     pdf.into_bytes()
 }
 
@@ -272,9 +271,7 @@ mod raw_rgba {
         let (_dir, temp) = common::write_temp_pdf(&bytes, "test_raw_rgba_dims.pdf");
         let mut pdf = Pdf::open(&temp).unwrap();
 
-        let png_img = pdf
-            .render_page_with_options(0, &RenderOptions::with_dpi(72))
-            .unwrap();
+        let png_img = pdf.render_page_with_options(0, &RenderOptions::with_dpi(72)).unwrap();
         let raw_img = pdf
             .render_page_with_options(0, &RenderOptions::with_dpi(72).as_raw())
             .unwrap();

@@ -32,9 +32,7 @@ fn test_xobject_path_extraction_no_hang() {
     );
 
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        format!("4 0 obj\n<< /Length {} >>\nstream\n", page_content.len()).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", page_content.len()).as_bytes());
     pdf.extend_from_slice(page_content);
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
 
@@ -55,9 +53,7 @@ fn test_xobject_path_extraction_no_hang() {
 
     // If cycle detection is broken, this call hangs and the test times out
     // rather than failing cleanly — that in itself is the regression signal. ~keep
-    let paths = doc
-        .extract_paths(0)
-        .expect("extract_paths must not hang or error");
+    let paths = doc.extract_paths(0).expect("extract_paths must not hang or error");
 
     assert_eq!(
         paths.len(),
@@ -90,9 +86,7 @@ fn test_extract_paths_from_form_xobject() {
     );
 
     offsets.push(pdf.len());
-    pdf.extend_from_slice(
-        format!("4 0 obj\n<< /Length {} >>\nstream\n", page_content.len()).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", page_content.len()).as_bytes());
     pdf.extend_from_slice(page_content);
     pdf.extend_from_slice(b"\nendstream\nendobj\n");
 

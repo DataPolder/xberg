@@ -140,22 +140,16 @@ impl Layer {
         dict.insert("Type".to_string(), Object::Name("OCG".to_string()));
         dict.insert(
             "Name".to_string(),
-            Object::String(
-                self.display_name
-                    .as_ref()
-                    .unwrap_or(&self.name)
-                    .as_bytes()
-                    .to_vec(),
-            ),
+            Object::String(self.display_name.as_ref().unwrap_or(&self.name).as_bytes().to_vec()),
         );
 
         match self.intent {
             LayerIntent::View => {
                 dict.insert("Intent".to_string(), Object::Name("View".to_string()));
-            },
+            }
             LayerIntent::Design => {
                 dict.insert("Intent".to_string(), Object::Name("Design".to_string()));
-            },
+            }
             LayerIntent::Both => {
                 dict.insert(
                     "Intent".to_string(),
@@ -164,7 +158,7 @@ impl Layer {
                         Object::Name("Design".to_string()),
                     ]),
                 );
-            },
+            }
         }
 
         dict
@@ -651,10 +645,7 @@ mod tests {
     #[test]
     fn test_usage_dict_multiple_non_defaults() {
         let mut layer = Layer::new("Test");
-        layer
-            .visible_on_screen(false)
-            .visible_on_print(false)
-            .exportable(false);
+        layer.visible_on_screen(false).visible_on_print(false).exportable(false);
         let usage = layer.build_usage_dict().unwrap();
         assert!(usage.contains_key("View"));
         assert!(usage.contains_key("Print"));
@@ -804,8 +795,7 @@ mod tests {
 
     #[test]
     fn test_layer_membership_policy_method() {
-        let membership =
-            LayerMembership::new(ObjectRef::new(1, 0)).policy(VisibilityPolicy::AllOff);
+        let membership = LayerMembership::new(ObjectRef::new(1, 0)).policy(VisibilityPolicy::AllOff);
         assert_eq!(membership.policy, VisibilityPolicy::AllOff);
     }
 

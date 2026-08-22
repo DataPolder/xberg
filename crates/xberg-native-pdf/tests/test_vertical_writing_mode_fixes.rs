@@ -123,9 +123,7 @@ end"
     for off in [o1, o2, o3, o4, o5, o6, o7] {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    pdf.extend_from_slice(
-        format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes());
 
     pdf
 }
@@ -146,14 +144,8 @@ fn c1_c2_extractor_multi_tj_vertical_advances_along_y() {
     let doc = PdfDocument::from_bytes(pdf).expect("parse synthetic vertical PDF");
     let chars = doc.extract_chars(0).expect("extract chars");
 
-    let a = chars
-        .iter()
-        .find(|c| c.char == 'A')
-        .expect("expected an 'A' char");
-    let b = chars
-        .iter()
-        .find(|c| c.char == 'B')
-        .expect("expected a 'B' char");
+    let a = chars.iter().find(|c| c.char == 'A').expect("expected an 'A' char");
+    let b = chars.iter().find(|c| c.char == 'B').expect("expected a 'B' char");
 
     assert!(
         (a.bbox.x - b.bbox.x).abs() < 1.0,
@@ -196,7 +188,11 @@ fn c2_c4_extractor_tj_array_vertical_advances_along_y() {
     let xs: Vec<f32> = s.iter().map(|sp| sp.bbox.x).collect();
     let x_min = xs.iter().cloned().fold(f32::INFINITY, f32::min);
     let x_max = xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    assert!((x_max - x_min) < 1.0, "vertical TJ array must keep X stable; got xs={:?}", xs);
+    assert!(
+        (x_max - x_min) < 1.0,
+        "vertical TJ array must keep X stable; got xs={:?}",
+        xs
+    );
 
     let a = s.iter().find(|sp| sp.text.contains('A')).unwrap();
     let b = s.iter().find(|sp| sp.text.contains('B')).unwrap();
@@ -217,14 +213,8 @@ fn c4_extract_chars_vertical_tj_offset_advances_along_y() {
     let doc = PdfDocument::from_bytes(pdf).expect("parse synthetic vertical PDF");
     let chars = doc.extract_chars(0).expect("extract chars");
 
-    let a = chars
-        .iter()
-        .find(|c| c.char == 'A')
-        .expect("expected an 'A' char");
-    let b = chars
-        .iter()
-        .find(|c| c.char == 'B')
-        .expect("expected a 'B' char");
+    let a = chars.iter().find(|c| c.char == 'A').expect("expected an 'A' char");
+    let b = chars.iter().find(|c| c.char == 'B').expect("expected a 'B' char");
 
     assert!(
         (a.bbox.x - b.bbox.x).abs() < 1.0,
@@ -248,8 +238,15 @@ fn c4_extract_chars_vertical_tj_offset_advances_along_y() {
 fn c5_to_unicode_wmode_does_not_override_encoding_wmode() {
     // Stale /WMode 1 def inside the ToUnicode prologue. ~keep
     let content = b"BT /F1 12 Tf 100 700 Td <0001> Tj <0002> Tj ET";
-    let pdf =
-        build_pdf("Identity-H", content, 1000, (880, -1000), None, Some("/WMode 1 def"), None);
+    let pdf = build_pdf(
+        "Identity-H",
+        content,
+        1000,
+        (880, -1000),
+        None,
+        Some("/WMode 1 def"),
+        None,
+    );
     let doc = PdfDocument::from_bytes(pdf).expect("parse synthetic horizontal PDF");
     let spans = doc.extract_spans(0).expect("extract spans");
 
@@ -377,18 +374,14 @@ end";
     for off in [o1, o2, o3, o4, o5, o6, o7] {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    pdf.extend_from_slice(
-        format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes());
 
     let doc = PdfDocument::from_bytes(pdf).expect("parse tategaki PDF");
 
     use xberg_native_pdf::pipeline::{TextPipeline, TextPipelineConfig};
     let spans = doc.extract_spans(0).expect("extract_spans");
     let pipeline = TextPipeline::with_config(TextPipelineConfig::default());
-    let ordered = pipeline
-        .process(spans, Default::default())
-        .expect("pipeline process");
+    let ordered = pipeline.process(spans, Default::default()).expect("pipeline process");
 
     let letters: String = ordered
         .iter()
@@ -421,14 +414,8 @@ fn per_cid_w2_overrides_dw2_for_listed_cids() {
     let doc = PdfDocument::from_bytes(pdf).expect("parse per-CID /W2 PDF");
     let chars = doc.extract_chars(0).expect("extract chars");
 
-    let a = chars
-        .iter()
-        .find(|c| c.char == 'A')
-        .expect("expected an 'A' char");
-    let b = chars
-        .iter()
-        .find(|c| c.char == 'B')
-        .expect("expected a 'B' char");
+    let a = chars.iter().find(|c| c.char == 'A').expect("expected an 'A' char");
+    let b = chars.iter().find(|c| c.char == 'B').expect("expected a 'B' char");
 
     let dy = a.bbox.y - b.bbox.y;
     assert!(
@@ -519,9 +506,7 @@ end";
     for off in [o1, o2, o3, o4, o5, o6, o7, o8, o9] {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    pdf.extend_from_slice(
-        format!("trailer << /Size 10 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer << /Size 10 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes());
 
     let doc = PdfDocument::from_bytes(pdf).expect("parse mid-stream Tf PDF");
     let spans = doc.extract_spans(0).expect("extract spans");
@@ -591,9 +576,7 @@ end";
     for off in [o1, o2, o3, o4, o5, o6, o7] {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    pdf.extend_from_slice(
-        format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes());
 
     let doc = PdfDocument::from_bytes(pdf).expect("parse high-CID PDF");
     let chars = doc.extract_chars(0).expect("extract chars");
@@ -654,8 +637,7 @@ fn c1_page_renderer_multi_tj_vertical_paints_a_column() {
     let doc = PdfDocument::from_bytes(pdf).expect("parse synthetic vertical PDF");
 
     let opts = xberg_native_pdf::rendering::RenderOptions::with_dpi(72).as_raw();
-    let rendered = xberg_native_pdf::rendering::render_page(&doc, 0, &opts)
-        .expect("render page 0 of vertical PDF");
+    let rendered = xberg_native_pdf::rendering::render_page(&doc, 0, &opts).expect("render page 0 of vertical PDF");
 
     let w = rendered.width as usize;
     let h = rendered.height as usize;

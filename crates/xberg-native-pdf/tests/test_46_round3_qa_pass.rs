@@ -437,10 +437,7 @@ fn qa_b1_process_ink_name_dispatch_priority_over_spot_table() {
          {} plates named 'Cyan' → name collision in the composite \
          dispatch. Plate list: {:?}",
         cyan_plates.len(),
-        plates
-            .iter()
-            .map(|p| p.ink_name.as_str())
-            .collect::<Vec<_>>()
+        plates.iter().map(|p| p.ink_name.as_str()).collect::<Vec<_>>()
     );
     let c = cyan_plates[0];
     assert!(

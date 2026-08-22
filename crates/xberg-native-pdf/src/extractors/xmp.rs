@@ -197,7 +197,7 @@ impl XmpExtractor {
                 // Try to decode the stream ~keep
                 let decoded = metadata_resolved.decode_stream_data()?;
                 decoded.to_vec()
-            },
+            }
             _ => return Err(Error::InvalidPdf("Metadata is not a stream".to_string())),
         };
 
@@ -209,9 +209,7 @@ impl XmpExtractor {
     /// Parse XMP XML content.
     pub fn parse_xmp(xml: &str) -> Result<Option<XmpMetadata>> {
         let start = xml.find("<x:xmpmeta").or_else(|| xml.find("<rdf:RDF"));
-        let end = xml
-            .rfind("</x:xmpmeta>")
-            .or_else(|| xml.rfind("</rdf:RDF>"));
+        let end = xml.rfind("</x:xmpmeta>").or_else(|| xml.rfind("</rdf:RDF>"));
 
         let xmp_content = match (start, end) {
             (Some(s), Some(e)) => {
@@ -221,7 +219,7 @@ impl XmpExtractor {
                     e + "</rdf:RDF>".len()
                 };
                 &xml[s..end_adjusted]
-            },
+            }
             _ => return Ok(None),
         };
 
@@ -238,10 +236,10 @@ impl XmpExtractor {
                 Ok(Event::Start(e)) => {
                     let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
                     element_stack.push(name);
-                },
+                }
                 Ok(Event::Empty(_)) => {
                     // Empty elements don't have text content ~keep
-                },
+                }
                 Ok(Event::Text(e)) => {
                     let text = e.xml11_content().unwrap_or_default().trim().to_string();
                     if text.is_empty() {
@@ -262,24 +260,24 @@ impl XmpExtractor {
                                 if metadata.dc_title.is_none() {
                                     metadata.dc_title = Some(text);
                                 }
-                            },
+                            }
                             "dc:creator" => {
                                 metadata.dc_creator.push(text);
-                            },
+                            }
                             "dc:description" => {
                                 if metadata.dc_description.is_none() {
                                     metadata.dc_description = Some(text);
                                 }
-                            },
+                            }
                             "dc:subject" => {
                                 metadata.dc_subject.push(text);
-                            },
+                            }
                             "dc:language" => metadata.dc_language = Some(text),
                             "dc:rights" => {
                                 if metadata.dc_rights.is_none() {
                                     metadata.dc_rights = Some(text);
                                 }
-                            },
+                            }
                             "dc:format" => metadata.dc_format = Some(text),
 
                             "xmp:CreatorTool" => metadata.xmp_creator_tool = Some(text),
@@ -296,29 +294,27 @@ impl XmpExtractor {
                                 if metadata.xmp_rights_usage_terms.is_none() {
                                     metadata.xmp_rights_usage_terms = Some(text);
                                 }
-                            },
+                            }
                             "xmpRights:Marked" => {
                                 metadata.xmp_rights_marked = Some(text.to_lowercase() == "true");
-                            },
-                            "xmpRights:WebStatement" => {
-                                metadata.xmp_rights_web_statement = Some(text)
-                            },
+                            }
+                            "xmpRights:WebStatement" => metadata.xmp_rights_web_statement = Some(text),
 
                             _ => {
                                 metadata.custom.insert(prop.clone(), text);
-                            },
+                            }
                         }
                     }
-                },
+                }
                 Ok(Event::End(_)) => {
                     element_stack.pop();
-                },
+                }
                 Ok(Event::Eof) => break,
                 Err(e) => {
                     tracing::warn!("XMP parsing error: {:?}", e);
                     break;
-                },
-                _ => {},
+                }
+                _ => {}
             }
         }
 

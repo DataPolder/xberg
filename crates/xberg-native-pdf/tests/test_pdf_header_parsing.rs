@@ -13,7 +13,11 @@ fn test_pdf_header_parsing_basic() {
         .join("fixtures")
         .join("simple.pdf");
 
-    assert!(fixture_path.exists(), "Test fixture missing: {}", fixture_path.display());
+    assert!(
+        fixture_path.exists(),
+        "Test fixture missing: {}",
+        fixture_path.display()
+    );
 
     let pdf_path = fixture_path.to_str().unwrap();
 
@@ -41,7 +45,11 @@ fn test_pdf_header_parsing_multiple_pages() {
         .join("fixtures")
         .join("simple.pdf");
 
-    assert!(fixture_path.exists(), "Test fixture missing: {}", fixture_path.display());
+    assert!(
+        fixture_path.exists(),
+        "Test fixture missing: {}",
+        fixture_path.display()
+    );
 
     let pdf_path = fixture_path.to_str().unwrap();
 
@@ -129,7 +137,11 @@ fn test_authenticate_empty_password() {
         .join("fixtures")
         .join("simple.pdf");
 
-    assert!(fixture_path.exists(), "Test fixture missing: {}", fixture_path.display());
+    assert!(
+        fixture_path.exists(),
+        "Test fixture missing: {}",
+        fixture_path.display()
+    );
 
     let doc = PdfDocument::open(&fixture_path).unwrap();
     let result = doc.authenticate(b"").unwrap();

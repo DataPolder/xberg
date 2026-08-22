@@ -21,10 +21,7 @@ fn image_with_alt_writes_alt_into_structure_tree() {
 
     let mut builder = DocumentBuilder::new();
     builder = builder.metadata(DocumentMetadata::new().tagged_pdf_ua1().language("en-US"));
-    let page = builder
-        .letter_page()
-        .font("Helvetica", 12.0)
-        .at(72.0, 720.0);
+    let page = builder.letter_page().font("Helvetica", 12.0).at(72.0, 720.0);
     page.image_from_bytes_with_alt(
         &jpeg_data,
         Rect::new(72.0, 600.0, 100.0, 100.0),
@@ -68,7 +65,10 @@ fn image_artifact_marks_decorative_image_as_artifact() {
         content.contains("/Artifact"),
         "/Artifact not found — decorative image not marked as artifact"
     );
-    assert!(!content.contains("/Alt"), "decorative artifact image must not carry /Alt text");
+    assert!(
+        !content.contains("/Alt"),
+        "decorative artifact image must not carry /Alt text"
+    );
 }
 
 /// Sanity check that the assertions above are non-vacuous: without
@@ -87,7 +87,10 @@ fn untagged_document_has_no_accessibility_markers() {
     let bytes = builder.build().expect("build");
     let content = String::from_utf8_lossy(&bytes);
 
-    assert!(!content.contains("/MarkInfo"), "untagged PDF must not contain /MarkInfo");
+    assert!(
+        !content.contains("/MarkInfo"),
+        "untagged PDF must not contain /MarkInfo"
+    );
     assert!(
         !content.contains("/StructTreeRoot"),
         "untagged PDF must not contain /StructTreeRoot"

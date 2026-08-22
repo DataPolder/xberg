@@ -99,11 +99,7 @@ fn tight_kerning_neighbours_still_merge() {
     let pdf = build_minimal_pdf_raw(&content, b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]");
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let words = doc.extract_words(0).expect("words");
-    let joined: String = words
-        .iter()
-        .map(|w| w.text.as_str())
-        .collect::<Vec<_>>()
-        .join("|");
+    let joined: String = words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join("|");
     assert!(
         joined.contains("Qmark"),
         "ordinary tightly-kerned same-line neighbours must still merge, got words: {joined:?}"

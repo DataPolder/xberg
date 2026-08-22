@@ -134,10 +134,7 @@ pub fn drain_global_warnings() -> Vec<Warning> {
 
 /// Snapshot the global sink without draining (for tests / observability).
 pub fn snapshot_global_warnings() -> Vec<Warning> {
-    GLOBAL_WARNING_SINK
-        .lock()
-        .map(|v| v.clone())
-        .unwrap_or_default()
+    GLOBAL_WARNING_SINK.lock().map(|v| v.clone()).unwrap_or_default()
 }
 
 impl WarningSink {

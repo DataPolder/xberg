@@ -22,8 +22,7 @@ fn build_identity_h_pdf(word_space: f32) -> Vec<u8> {
     let size = 24.0f32;
     let w_units = 500u32;
 
-    let content =
-        format!("{word_space} Tw\nBT\n/F1 {size} Tf\n1 0 0 1 40 720 Tm\n<004100200042> Tj\nET\n");
+    let content = format!("{word_space} Tw\nBT\n/F1 {size} Tf\n1 0 0 1 40 720 Tm\n<004100200042> Tj\nET\n");
     let content_b = content.into_bytes();
 
     // /ToUnicode: CID 0x0041 -> 'A', CID 0x0020 -> U+0020 (space), CID 0x0042 -> 'B'. ~keep
@@ -130,8 +129,7 @@ fn word_spacing_shifts_glyph_after_single_byte_space() {
                 content_b.len(),
                 String::from_utf8_lossy(&content_b)
             ),
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
-                .to_string(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_string(),
         ];
         let mut out: Vec<u8> = b"%PDF-1.4\n".to_vec();
         let mut offsets = Vec::with_capacity(objs.len());
@@ -140,9 +138,7 @@ fn word_spacing_shifts_glyph_after_single_byte_space() {
             out.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
         }
         let xref_pos = out.len();
-        out.extend_from_slice(
-            format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes(),
-        );
+        out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
         for off in &offsets {
             out.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
         }

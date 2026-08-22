@@ -323,7 +323,10 @@ impl StructType {
 
     /// Check if this is a heading type (H, H1-H6)
     pub fn is_heading(&self) -> bool {
-        matches!(self, Self::H | Self::H1 | Self::H2 | Self::H3 | Self::H4 | Self::H5 | Self::H6)
+        matches!(
+            self,
+            Self::H | Self::H1 | Self::H2 | Self::H3 | Self::H4 | Self::H5 | Self::H6
+        )
     }
 
     /// Check if this is a block-level element
@@ -411,9 +414,7 @@ impl ParentTree {
 
     /// Get the structure element that owns the given MCID on the given page
     pub fn get_parent(&self, page: u32, mcid: u32) -> Option<&ParentTreeEntry> {
-        self.page_mappings
-            .get(&page)
-            .and_then(|page_map| page_map.get(&mcid))
+        self.page_mappings.get(&page).and_then(|page_map| page_map.get(&mcid))
     }
 }
 

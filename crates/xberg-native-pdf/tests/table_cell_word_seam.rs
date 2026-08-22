@@ -68,15 +68,12 @@ fn seam_is_wider_than_the_word_space_it_must_be_told_apart_from() {
     let doc = PdfDocument::from_bytes(fragmented_cell_pdf()).expect("open");
     let words = doc.extract_words(0).expect("words");
     let gap_after = |text: &str| -> f32 {
-        let i = words
-            .iter()
-            .position(|w| w.text == text)
-            .unwrap_or_else(|| {
-                panic!(
-                    "no word {text:?} in {:?}",
-                    words.iter().map(|w| &w.text).collect::<Vec<_>>()
-                )
-            });
+        let i = words.iter().position(|w| w.text == text).unwrap_or_else(|| {
+            panic!(
+                "no word {text:?} in {:?}",
+                words.iter().map(|w| &w.text).collect::<Vec<_>>()
+            )
+        });
         words[i + 1].bbox.x - (words[i].bbox.x + words[i].bbox.width)
     };
 
@@ -153,8 +150,14 @@ fn sub_em_fragment_seams_do_not_split_words_in_extracted_text() {
         "fixture no longer detects a table, so this test would not cover the table path"
     );
     let text = doc.extract_text(0).expect("text");
-    assert!(text.contains("Credit"), "extracted text lost the fragmented word: {text:?}");
-    assert!(!text.contains("Cre d it"), "extracted text shows the re-split word: {text:?}");
+    assert!(
+        text.contains("Credit"),
+        "extracted text lost the fragmented word: {text:?}"
+    );
+    assert!(
+        !text.contains("Cre d it"),
+        "extracted text shows the re-split word: {text:?}"
+    );
 }
 
 /// A word the merger drew consecutively but which then jumps BACKWARD is a

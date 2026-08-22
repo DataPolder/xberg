@@ -213,8 +213,7 @@ fn a1_qa2_devicen_process_iccbased_n3_overprint_byte_exact() {
                   /C0 [0 0 0 0] /C1 [1 1 1 1] /N 1 >>";
     let content = "0.4 0 0 0 k\n0 0 100 100 re\nf\n\
                    /CS_N cs\n/Ov gs\n0.2 0.6 0.8 scn\n0 0 100 100 re\nf\n";
-    let process_icc_dict =
-        "6 0 obj\n<< /N 3 /Length 4 >>\nstream\n\x00\x00\x00\x00\nendstream\nendobj\n";
+    let process_icc_dict = "6 0 obj\n<< /N 3 /Length 4 >>\nstream\n\x00\x00\x00\x00\nendstream\nendobj\n";
     let resources = format!(
         "/ExtGState << /Ov << /Type /ExtGState /OP true /ca 0.5 >> >> \
          /ColorSpace << /CS_N [/DeviceN [/R /G /B] \
@@ -293,8 +292,7 @@ fn a1_qa3_devicen_process_iccbased_n1_overprint_byte_exact() {
                   /C0 [0 0 0 0] /C1 [1 1 1 1] /N 1 >>";
     let content = "0 0 0 0.4 k\n0 0 100 100 re\nf\n\
                    /CS_N cs\n/Ov gs\n0.3 scn\n0 0 100 100 re\nf\n";
-    let process_icc_dict =
-        "6 0 obj\n<< /N 1 /Length 4 >>\nstream\n\x00\x00\x00\x00\nendstream\nendobj\n";
+    let process_icc_dict = "6 0 obj\n<< /N 1 /Length 4 >>\nstream\n\x00\x00\x00\x00\nendstream\nendobj\n";
     let resources = format!(
         "/ExtGState << /Ov << /Type /ExtGState /OP true /ca 0.5 >> >> \
          /ColorSpace << /CS_N [/DeviceN [/Grey] \
@@ -474,12 +472,7 @@ fn b1_qa1_imagemask_decode_inverted_no_paint_byte_exact() {
          /XObject << /K1 6 0 R >>",
         tint_func
     );
-    let pdf = build_pdf_with_output_intent(
-        content,
-        &resources,
-        &icc,
-        &[form_obj.as_str(), im_obj_str.as_str()],
-    );
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[form_obj.as_str(), im_obj_str.as_str()]);
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
 

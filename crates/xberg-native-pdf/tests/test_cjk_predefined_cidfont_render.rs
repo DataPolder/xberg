@@ -73,9 +73,7 @@ fn build_synthetic_japan1_pdf() -> Vec<u8> {
     for off in [o1, o2, o3, o4, o5, o6, o7] {
         pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
-    pdf.extend_from_slice(
-        format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes(),
-    );
+    pdf.extend_from_slice(format!("trailer << /Size 8 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref).as_bytes());
     pdf
 }
 
@@ -85,9 +83,7 @@ fn build_synthetic_japan1_pdf() -> Vec<u8> {
 fn count_non_white_pixels(png_bytes: &[u8]) -> usize {
     let img = image::load_from_memory(png_bytes).expect("decode rendered PNG");
     let rgba = img.to_rgba8();
-    rgba.pixels()
-        .filter(|p| p[0] < 250 || p[1] < 250 || p[2] < 250)
-        .count()
+    rgba.pixels().filter(|p| p[0] < 250 || p[1] < 250 || p[2] < 250).count()
 }
 
 #[test]
@@ -132,8 +128,7 @@ fn synthetic_adobe_japan1_pdf_renders_non_blank() {
 
 #[test]
 fn jo_pdf_vertical_japanese_renders_non_blank() {
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vertical_cjk/jo.pdf");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vertical_cjk/jo.pdf");
     let doc = PdfDocument::open(&path).expect("open jo.pdf fixture");
     let opts = RenderOptions::with_dpi(150);
     let img = render_page(&doc, 0, &opts).expect("render jo.pdf page 0");
@@ -156,8 +151,7 @@ fn jo_pdf_vertical_japanese_renders_non_blank() {
 
 #[test]
 fn kampo_pdf_japanese_pharmacopeia_renders_non_blank() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/vertical_cjk/kampo.pdf");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/vertical_cjk/kampo.pdf");
     let doc = PdfDocument::open(&path).expect("open kampo.pdf fixture");
     let opts = RenderOptions::with_dpi(150);
     let img = render_page(&doc, 0, &opts).expect("render kampo.pdf page 0");

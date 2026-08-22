@@ -64,7 +64,7 @@ fn stitching_function_with_empty_domain_renders() {
     ];
     let doc = PdfDocument::from_bytes(build_pdf(&objects)).expect("synthetic PDF parses");
 
-    let img = render_page(&doc, 0, &RenderOptions::default())
-        .expect("page with an empty-domain stitching function renders");
+    let img =
+        render_page(&doc, 0, &RenderOptions::default()).expect("page with an empty-domain stitching function renders");
     assert!(!img.data.is_empty(), "renderer produced an empty buffer");
 }

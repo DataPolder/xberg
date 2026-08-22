@@ -48,9 +48,7 @@ fn repeated_value_table_pdf() -> Vec<u8> {
         // repeated-value invariant on a grid the detector reshapes. ~keep
         (110, 646, "0.00"),
     ] {
-        content.extend_from_slice(
-            format!("BT /F1 10 Tf 1 0 0 1 {x} {y} Tm ({text}) Tj ET\n").as_bytes(),
-        );
+        content.extend_from_slice(format!("BT /F1 10 Tf 1 0 0 1 {x} {y} Tm ({text}) Tj ET\n").as_bytes());
     }
     build_minimal_pdf_raw(&content, b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]")
 }
@@ -113,9 +111,7 @@ fn merged_cell_table_pdf() -> Vec<u8> {
         (110, 620, "Delta"),
         (260, 620, "Epsilon"),
     ] {
-        content.extend_from_slice(
-            format!("BT /F1 10 Tf 1 0 0 1 {x} {y} Tm ({text}) Tj ET\n").as_bytes(),
-        );
+        content.extend_from_slice(format!("BT /F1 10 Tf 1 0 0 1 {x} {y} Tm ({text}) Tj ET\n").as_bytes());
     }
     build_minimal_pdf_raw(&content, b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]")
 }
@@ -201,9 +197,7 @@ fn unruled_value_column_table_pdf() -> Vec<u8> {
         (10, 260, 615, "20"),
         (6, 410, 646, "-1,004"),
     ] {
-        content.extend_from_slice(
-            format!("BT /F1 {fs} Tf 1 0 0 1 {x} {y} Tm ({text}) Tj ET\n").as_bytes(),
-        );
+        content.extend_from_slice(format!("BT /F1 {fs} Tf 1 0 0 1 {x} {y} Tm ({text}) Tj ET\n").as_bytes());
     }
     build_minimal_pdf_raw(&content, b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]")
 }
@@ -262,14 +256,8 @@ fn glued_cell_table_pdf() -> Vec<u8> {
     }
     content.extend_from_slice(b"BT /F1 10 Tf 1 0 0 1 110 670 Tm (12,3) Tj ET\n");
     content.extend_from_slice(b"BT /F2 10 Tf 1 0 0 1 130 670 Tm (45) Tj ET\n");
-    for (x, y, text) in [
-        (260, 670, "Gamma"),
-        (110, 620, "Delta"),
-        (260, 620, "Epsilon"),
-    ] {
-        content.extend_from_slice(
-            format!("BT /F1 10 Tf 1 0 0 1 {x} {y} Tm ({text}) Tj ET\n").as_bytes(),
-        );
+    for (x, y, text) in [(260, 670, "Gamma"), (110, 620, "Delta"), (260, 620, "Epsilon")] {
+        content.extend_from_slice(format!("BT /F1 10 Tf 1 0 0 1 {x} {y} Tm ({text}) Tj ET\n").as_bytes());
     }
     build_minimal_pdf_raw(&content, b"/Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]")
 }
@@ -336,9 +324,7 @@ fn build_minimal_pdf_raw(content: &[u8], page_extra: &[u8]) -> Vec<u8> {
     let off3 = pdf.len();
     pdf.extend_from_slice(b"3 0 obj\n<< ");
     pdf.extend_from_slice(page_extra);
-    pdf.extend_from_slice(
-        b" /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>\nendobj\n",
-    );
+    pdf.extend_from_slice(b" /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>\nendobj\n");
 
     let off4 = pdf.len();
     pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len()).as_bytes());

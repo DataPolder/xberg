@@ -127,17 +127,11 @@ impl TextSearcher {
     /// # Returns
     ///
     /// Vector of search results with positions.
-    pub fn search(
-        doc: &PdfDocument,
-        pattern: &str,
-        options: &SearchOptions,
-    ) -> Result<Vec<SearchResult>> {
+    pub fn search(doc: &PdfDocument, pattern: &str, options: &SearchOptions) -> Result<Vec<SearchResult>> {
         let regex = Self::build_regex(pattern, options)?;
 
         let page_count = doc.page_count()?;
-        let (start_page, end_page) = options
-            .page_range
-            .unwrap_or((0, page_count.saturating_sub(1)));
+        let (start_page, end_page) = options.page_range.unwrap_or((0, page_count.saturating_sub(1)));
 
         let end_page = end_page.min(page_count.saturating_sub(1));
 
@@ -174,8 +168,7 @@ impl TextSearcher {
             let end = mat.end();
             let matched_text = mat.as_str().to_string();
 
-            let (bbox, span_boxes) =
-                Self::compute_match_bbox(start, end, &index.span_boxes, &index.span_positions);
+            let (bbox, span_boxes) = Self::compute_match_bbox(start, end, &index.span_boxes, &index.span_positions);
 
             results.push(SearchResult {
                 page,
@@ -260,7 +253,10 @@ impl TextSearcher {
             }
         }
 
-        (combined_bbox.unwrap_or_else(|| Rect::new(0.0, 0.0, 0.0, 0.0)), matched_boxes)
+        (
+            combined_bbox.unwrap_or_else(|| Rect::new(0.0, 0.0, 0.0, 0.0)),
+            matched_boxes,
+        )
     }
 }
 
@@ -342,11 +338,7 @@ mod tests {
                 font_weight: crate::layout::FontWeight::Normal,
                 is_italic: false,
                 is_monospace: false,
-                color: crate::layout::Color {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 0.0,
-                },
+                color: crate::layout::Color { r: 0.0, g: 0.0, b: 0.0 },
                 mcid: None,
                 mcid_scope: None,
                 sequence: 0,
@@ -376,11 +368,7 @@ mod tests {
                 font_weight: crate::layout::FontWeight::Normal,
                 is_italic: false,
                 is_monospace: false,
-                color: crate::layout::Color {
-                    r: 0.0,
-                    g: 0.0,
-                    b: 0.0,
-                },
+                color: crate::layout::Color { r: 0.0, g: 0.0, b: 0.0 },
                 mcid: None,
                 mcid_scope: None,
                 sequence: 1,

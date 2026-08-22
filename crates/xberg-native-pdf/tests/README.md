@@ -33,7 +33,7 @@ a preference.
 
 **There is no external corpus.** The suite once carried tests that read
 real-world documents from the original author's private machine — a gitignored
-`tests/fixtures/real/`, `$HOME/projects/pdf_oxide_tests/`, a local veraPDF
+`tests/fixtures/real/`, `$HOME/projects/native_pdf_tests/`, a local veraPDF
 checkout, `/tmp`. Those documents were never published and cannot be obtained,
 so the tests were removed rather than left as permanently-skipped placeholders.
 Do not reintroduce a test that depends on a document this repository cannot

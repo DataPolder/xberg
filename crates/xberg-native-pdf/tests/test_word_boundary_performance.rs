@@ -84,12 +84,7 @@ impl TimingStats {
             / count as f64;
         let stddev = variance.sqrt();
 
-        Self {
-            min,
-            max,
-            avg,
-            stddev,
-        }
+        Self { min, max, avg, stddev }
     }
 
     /// Format statistics for display
@@ -449,11 +444,11 @@ fn test_baseline_full_pipeline_with_simple_pdf() {
             println!("  Tiebreaker: {:.2}ms", tiebreaker_stats.avg.as_millis());
             println!("  Primary:    {:.2}ms", primary_stats.avg.as_millis());
             println!("  Overhead:   {:.2}%", overhead_pct);
-        },
+        }
         _ => {
             println!("⚠ Skipping: PDF extraction failed (PDF may not have content)");
             println!("  Full pipeline profiling should be done with real content PDFs manually");
-        },
+        }
     }
 }
 
@@ -682,7 +677,11 @@ fn test_baseline_overhead_breakdown() {
 
     println!("Overhead breakdown (100 iterations, 600 chars):");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("Boundary detection: {:.2}µs ({:.2}%)", detection_time.as_micros(), 100.0);
+    println!(
+        "Boundary detection: {:.2}µs ({:.2}%)",
+        detection_time.as_micros(),
+        100.0
+    );
     println!(
         "Character cloning:  {:.2}µs ({:.2}%)",
         clone_time.as_micros(),

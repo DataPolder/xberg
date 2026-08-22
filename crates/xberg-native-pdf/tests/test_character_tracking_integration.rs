@@ -22,8 +22,7 @@ fn load_test_pdf(filename: &str) -> Result<PdfDocument, Box<dyn std::error::Erro
 
     for path in paths {
         if path.exists() {
-            return PdfDocument::open(&path)
-                .map_err(|e| format!("Failed to load {}: {}", path.display(), e).into());
+            return PdfDocument::open(&path).map_err(|e| format!("Failed to load {}: {}", path.display(), e).into());
         }
     }
 

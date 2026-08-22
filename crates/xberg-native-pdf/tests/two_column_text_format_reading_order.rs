@@ -40,9 +40,7 @@ fn kjf_two_column_pdf() -> Vec<u8> {
     };
     let stream = |buf: &mut Vec<u8>, off: &mut Vec<usize>, id: usize, data: &[u8]| {
         off[id] = buf.len();
-        buf.extend_from_slice(
-            format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes(),
-        );
+        buf.extend_from_slice(format!("{id} 0 obj\n<< /Length {} >>\nstream\n", data.len()).as_bytes());
         buf.extend_from_slice(data);
         buf.extend_from_slice(b"\nendstream\nendobj\n");
     };
@@ -130,7 +128,11 @@ fn kjf_structured_groups_one_region_per_column() {
     assert_eq!(col0.len(), 1, "left column must be one region: {col0:?}");
     assert_eq!(col1.len(), 1, "right column must be one region: {col1:?}");
 
-    assert!(col0[0].contains("1 Au") && col0[0].contains("6 Au"), "left text: {}", col0[0]);
+    assert!(
+        col0[0].contains("1 Au") && col0[0].contains("6 Au"),
+        "left text: {}",
+        col0[0]
+    );
     assert!(
         !col0[0].contains("14 Et"),
         "left region must not contain right text: {}",

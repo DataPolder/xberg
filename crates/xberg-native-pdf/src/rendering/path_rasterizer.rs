@@ -1,8 +1,8 @@
 //! Path rasterizer - renders PDF paths using tiny-skia.
 
 use super::{
-    create_fill_paint, create_stroke_paint, guarded_fill_path, guarded_stroke_path,
-    paint_with_nonsep_blend, pdf_blend_mode_is_nonseparable,
+    create_fill_paint, create_stroke_paint, guarded_fill_path, guarded_stroke_path, paint_with_nonsep_blend,
+    pdf_blend_mode_is_nonseparable,
 };
 use crate::content::GraphicsState;
 use tiny_skia::{FillRule, LineCap, LineJoin, Path, Pixmap, Stroke, Transform};
@@ -32,13 +32,7 @@ impl PathRasterizer {
 
     /// Stroke a path with the current stroke color and line style.
     #[allow(dead_code)]
-    pub fn stroke_path(
-        &self,
-        pixmap: &mut Pixmap,
-        path: &Path,
-        transform: Transform,
-        gs: &GraphicsState,
-    ) {
+    pub fn stroke_path(&self, pixmap: &mut Pixmap, path: &Path, transform: Transform, gs: &GraphicsState) {
         let paint = create_stroke_paint(gs, &gs.blend_mode);
 
         let dash = if !gs.dash_pattern.0.is_empty() {

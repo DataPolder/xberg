@@ -249,12 +249,7 @@ impl CaretAnnotation {
         if let Some((l, b, r, t)) = self.rd {
             dict.insert(
                 "RD".to_string(),
-                Object::Array(vec![
-                    Object::Real(l),
-                    Object::Real(b),
-                    Object::Real(r),
-                    Object::Real(t),
-                ]),
+                Object::Array(vec![Object::Real(l), Object::Real(b), Object::Real(r), Object::Real(t)]),
             );
         }
 
@@ -268,12 +263,7 @@ impl CaretAnnotation {
         {
             dict.insert(
                 "C".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -449,12 +439,7 @@ impl FileAttachmentAnnotation {
         {
             dict.insert(
                 "C".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -614,12 +599,7 @@ impl RedactAnnotation {
         {
             dict.insert(
                 "IC".to_string(),
-                Object::Array(
-                    color_array
-                        .into_iter()
-                        .map(|v| Object::Real(v as f64))
-                        .collect(),
-                ),
+                Object::Array(color_array.into_iter().map(|v| Object::Real(v as f64)).collect()),
             );
         }
 
@@ -723,8 +703,7 @@ mod tests {
 
     #[test]
     fn test_caret_build() {
-        let caret =
-            CaretAnnotation::new(Rect::new(100.0, 700.0, 10.0, 10.0)).with_contents("Insert here");
+        let caret = CaretAnnotation::new(Rect::new(100.0, 700.0, 10.0, 10.0)).with_contents("Insert here");
 
         let dict = caret.build(&[]);
 

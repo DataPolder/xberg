@@ -31,14 +31,11 @@ use xberg_native_pdf::writer::{DocumentBuilder, EmbeddedFont};
 const DEJAVU_PATH: &str = "src/fonts/assets/DejaVuSans.ttf";
 
 fn load_dejavu() -> EmbeddedFont {
-    EmbeddedFont::from_file(Path::new(DEJAVU_PATH))
-        .expect("src/fonts/assets/DejaVuSans.ttf should exist and parse")
+    EmbeddedFont::from_file(Path::new(DEJAVU_PATH)).expect("src/fonts/assets/DejaVuSans.ttf should exist and parse")
 }
 
 fn dejavu_byte_len() -> usize {
-    std::fs::metadata(DEJAVU_PATH)
-        .expect("DejaVuSans.ttf present")
-        .len() as usize
+    std::fs::metadata(DEJAVU_PATH).expect("DejaVuSans.ttf present").len() as usize
 }
 
 /// With full-font embedding, a PDF containing 10 ASCII characters from

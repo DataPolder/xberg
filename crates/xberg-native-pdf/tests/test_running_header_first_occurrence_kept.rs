@@ -32,7 +32,11 @@ fn running_header_pdf() -> Vec<u8> {
 
     // 1 Catalog, 2 Pages, 3/4/5 Page objects, 6/7/8 content streams, 9 Font ~keep
     push(&mut out, &mut offsets, "<< /Type /Catalog /Pages 2 0 R >>");
-    push(&mut out, &mut offsets, "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>",
+    );
     let page_common = "/Type /Page /Parent 2 0 R /MediaBox [0 0 600 900] \
                        /Resources << /Font << /F0 9 0 R >> >>";
     push(&mut out, &mut offsets, &format!("<< {page_common} /Contents 6 0 R >>"));
@@ -53,7 +57,11 @@ fn running_header_pdf() -> Vec<u8> {
         );
     }
 
-    push(&mut out, &mut offsets, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    push(
+        &mut out,
+        &mut offsets,
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
 
     let xref_offset = out.len();
     out.extend_from_slice(format!("xref\n0 {}\n", offsets.len()).as_bytes());

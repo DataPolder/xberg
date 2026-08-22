@@ -10,8 +10,8 @@ use crate::pdf::metadata::PdfExtractionMetadata;
 use crate::pdf::structure::constants::{COALESCE_THRESHOLD, MAX_GLYPH_JITTER_PT, MIN_DISORDER_COUNT};
 use crate::pdf::text::{contains_html_markup, fix_pdf_control_chars};
 use crate::types::{PageBoundary, PageContent};
-use xberg_native_pdf::document::ReadingOrder;
 use std::borrow::Cow;
+use xberg_native_pdf::document::ReadingOrder;
 
 /// Result type for PDF text extraction with optional page tracking.
 type PdfTextExtractionResult = (String, Option<Vec<PageBoundary>>, Option<Vec<PageContent>>);
@@ -429,7 +429,10 @@ struct OrderedSpan<'a> {
 /// whose shared baseline is a page-x column rather than a page-y row, is still
 /// recognised as one line. Identical to the previous page-y test for unrotated
 /// spans. Only meaningful for spans of equal rotation; callers check that.
-fn spans_overlap_on_cross_axis(first: &xberg_native_pdf::layout::TextSpan, second: &xberg_native_pdf::layout::TextSpan) -> bool {
+fn spans_overlap_on_cross_axis(
+    first: &xberg_native_pdf::layout::TextSpan,
+    second: &xberg_native_pdf::layout::TextSpan,
+) -> bool {
     let (first_low, first_high) = upright_cross_extent(first);
     let (second_low, second_high) = upright_cross_extent(second);
     first_high.min(second_high) > first_low.max(second_low)
@@ -672,7 +675,10 @@ fn is_sparse_column_prose(span: &xberg_native_pdf::layout::TextSpan) -> bool {
         && alpha_chars as f32 / non_whitespace_chars.max(1) as f32 >= MIN_SPARSE_COLUMN_ALPHA_RATIO
 }
 
-fn sparse_columns_overlap(left: &[&xberg_native_pdf::layout::TextSpan], right: &[&xberg_native_pdf::layout::TextSpan]) -> bool {
+fn sparse_columns_overlap(
+    left: &[&xberg_native_pdf::layout::TextSpan],
+    right: &[&xberg_native_pdf::layout::TextSpan],
+) -> bool {
     let extent = |side: &[&xberg_native_pdf::layout::TextSpan]| {
         side.iter()
             .map(|span| span.bbox.y)
@@ -768,7 +774,10 @@ fn sparse_column_split(spans: &[xberg_native_pdf::layout::TextSpan], page_width:
 /// Returns `true` only when the sparse prose classifier matched and reordered
 /// the spans. Callers use this signal to preserve the result across a broad
 /// single layout hint.
-pub(crate) fn reorder_sparse_two_column_page(spans: &mut [xberg_native_pdf::layout::TextSpan], page_width: f32) -> bool {
+pub(crate) fn reorder_sparse_two_column_page(
+    spans: &mut [xberg_native_pdf::layout::TextSpan],
+    page_width: f32,
+) -> bool {
     let Some(split_x) = sparse_column_split(spans, page_width) else {
         return false;
     };
@@ -906,7 +915,11 @@ fn widest_gap_midpoint(mut edges: impl Iterator<Item = (f32, f32)>, min_gutter: 
 
 /// True if any span on `line` is full-width furniture by
 /// `FULL_WIDTH_FURNITURE_FRACTION` (the pre-existing, width-only signal).
-fn line_has_width_furniture(spans: &[xberg_native_pdf::layout::TextSpan], line: &SpanLine, furniture_width: f32) -> bool {
+fn line_has_width_furniture(
+    spans: &[xberg_native_pdf::layout::TextSpan],
+    line: &SpanLine,
+    furniture_width: f32,
+) -> bool {
     line.iter().any(|&index| spans[index].bbox.width >= furniture_width)
 }
 
@@ -1017,7 +1030,11 @@ fn build_bands(
 /// too few spans on either side, or that fails the prose/reference
 /// classification, stays in its existing order — a table or form band is not
 /// corrupted by a prose band elsewhere on the same page.
-fn reorder_band_columns(spans: &[xberg_native_pdf::layout::TextSpan], band: &[usize], split_x: f32) -> Option<Vec<usize>> {
+fn reorder_band_columns(
+    spans: &[xberg_native_pdf::layout::TextSpan],
+    band: &[usize],
+    split_x: f32,
+) -> Option<Vec<usize>> {
     let (left, right): (Vec<usize>, Vec<usize>) =
         band.iter().copied().partition(|&index| spans[index].bbox.x < split_x);
     if left.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE || right.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE {

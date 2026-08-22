@@ -18,8 +18,7 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
-static RE_EXCESSIVE_SPACES: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"([^\s])\s{2,}([^\s])").unwrap());
+static RE_EXCESSIVE_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([^\s])\s{2,}([^\s])").unwrap());
 
 /// Text post-processor for improving extraction quality per PDF specification.
 pub struct TextPostProcessor;
@@ -155,9 +154,7 @@ impl TextPostProcessor {
                 result.push(' ');
             }
 
-            let normalized = RE_EXCESSIVE_SPACES
-                .replace_all(trimmed_start, "$1 $2")
-                .to_string();
+            let normalized = RE_EXCESSIVE_SPACES.replace_all(trimmed_start, "$1 $2").to_string();
             result.push_str(&normalized);
 
             if !result.ends_with('\n') {
@@ -215,11 +212,7 @@ impl TextPostProcessor {
         for i in 0..chars.len() {
             let current_char = chars[i];
             let prev_char = if i > 0 { Some(chars[i - 1]) } else { None };
-            let next_char = if i + 1 < chars.len() {
-                Some(chars[i + 1])
-            } else {
-                None
-            };
+            let next_char = if i + 1 < chars.len() { Some(chars[i + 1]) } else { None };
 
             let is_special = Self::is_special_character(current_char);
 
@@ -448,7 +441,7 @@ impl TextPostProcessor {
                 // EN QUAD … HAIR SPACE, NARROW NO-BREAK SPACE, MEDIUM MATH SPACE ~keep
                 '\u{2000}'..='\u{200A}' | '\u{202F}' | '\u{205F}' => result.push(' '),
                 // Zero-width space: not a visible character, omit ~keep
-                '\u{200B}' => {},
+                '\u{200B}' => {}
                 _ => result.push(ch),
             }
         }
@@ -640,12 +633,7 @@ impl TextPostProcessor {
                         // Look behind: was the char before that
                         // space also a letter (part of the same
                         // word)? Only then collapse. ~keep
-                        let trailing_letter = out
-                            .chars()
-                            .rev()
-                            .nth(1)
-                            .map(|p| p.is_alphabetic())
-                            .unwrap_or(false);
+                        let trailing_letter = out.chars().rev().nth(1).map(|p| p.is_alphabetic()).unwrap_or(false);
                         if trailing_letter {
                             out.pop();
                         }
@@ -732,10 +720,8 @@ impl TextPostProcessor {
     /// like `function`/`return`/`let`/`var`/`const`/`if`/`while`/`for`.
     ///
     pub fn repair_monospace_punctuation_spacing(text: &str) -> String {
-        static RE_SPACE_BEFORE_PUNCT: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r" ([,;.:)\]}])").unwrap());
-        static RE_SPACE_AFTER_OPEN: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r"([(\[{]) ").unwrap());
+        static RE_SPACE_BEFORE_PUNCT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" ([,;.:)\]}])").unwrap());
+        static RE_SPACE_AFTER_OPEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([(\[{]) ").unwrap());
         static RE_SPACE_BEFORE_OPEN_ON_IDENT: LazyLock<Regex> =
             LazyLock::new(|| Regex::new(r"\b([a-zA-Z_][a-zA-Z0-9_]*) ([(])").unwrap());
 
@@ -821,9 +807,15 @@ mod tests {
 
     #[test]
     fn test_rejoin_hard_hyphen_requires_lowercase_both_sides() {
-        assert_eq!(TextPostProcessor::rejoin_hyphenated_words("modali-\nties"), "modalities");
+        assert_eq!(
+            TextPostProcessor::rejoin_hyphenated_words("modali-\nties"),
+            "modalities"
+        );
         assert_eq!(TextPostProcessor::rejoin_hyphenated_words("COVID-\n19"), "COVID-\n19");
-        assert_eq!(TextPostProcessor::rejoin_hyphenated_words("well-\nKnown"), "well-\nKnown");
+        assert_eq!(
+            TextPostProcessor::rejoin_hyphenated_words("well-\nKnown"),
+            "well-\nKnown"
+        );
         assert_eq!(
             TextPostProcessor::rejoin_hyphenated_words("modali\u{00AD}\nties"),
             "modalities"
@@ -1023,7 +1015,10 @@ mod tests {
         // ! at start of word — not a ligature ~keep
         assert_eq!(TextPostProcessor::repair_ligatures("!important"), "!important");
         // " as quote at word boundary ~keep
-        assert_eq!(TextPostProcessor::repair_ligatures("He said \"hello\""), "He said \"hello\"");
+        assert_eq!(
+            TextPostProcessor::repair_ligatures("He said \"hello\""),
+            "He said \"hello\""
+        );
         // # at start ~keep
         assert_eq!(TextPostProcessor::repair_ligatures("#hashtag"), "#hashtag");
         // $ as currency ~keep
@@ -1108,7 +1103,10 @@ mod tests {
             TextPostProcessor::normalize_leader_dots("e.g. this is normal"),
             "e.g. this is normal"
         );
-        assert_eq!(TextPostProcessor::normalize_leader_dots("wait for it..."), "wait for it...");
+        assert_eq!(
+            TextPostProcessor::normalize_leader_dots("wait for it..."),
+            "wait for it..."
+        );
     }
 
     #[test]
@@ -1155,8 +1153,7 @@ mod tests {
     #[test]
     fn test_normalize_unicode_spaces_hair_space() {
         // U+200A (HAIR SPACE) used as word separator in justified PDFs — must become U+0020 ~keep
-        let input =
-            "The\u{200A}\u{200A}\u{200A}\u{200A}K2\u{200A}\u{200A}\u{200A}\u{200A}Australian";
+        let input = "The\u{200A}\u{200A}\u{200A}\u{200A}K2\u{200A}\u{200A}\u{200A}\u{200A}Australian";
         let output = TextPostProcessor::process(input);
         assert_eq!(output, "The K2 Australian");
     }
@@ -1202,8 +1199,14 @@ mod tests {
     /// `reflects` → `re fl ects`, `affixes` → `af fi xes`.
     #[test]
     fn ligature_three_token_split_concatenated() {
-        assert_eq!(TextPostProcessor::repair_ligature_intra_space("di ff er and"), "differ and",);
-        assert_eq!(TextPostProcessor::repair_ligature_intra_space("the a ff ects"), "the affects",);
+        assert_eq!(
+            TextPostProcessor::repair_ligature_intra_space("di ff er and"),
+            "differ and",
+        );
+        assert_eq!(
+            TextPostProcessor::repair_ligature_intra_space("the a ff ects"),
+            "the affects",
+        );
         assert_eq!(TextPostProcessor::repair_ligature_intra_space("re fl ects"), "reflects",);
         assert_eq!(TextPostProcessor::repair_ligature_intra_space("af fi xes"), "affixes",);
     }
@@ -1224,7 +1227,10 @@ mod tests {
         // embedded in surrounding text rather than space-isolated.
         // Honest limitation: regex post-processing requires the
         // space-isolated three-token shape. ~keep
-        assert_eq!(TextPostProcessor::repair_ligature_intra_space("Bara ffe and"), "Bara ffe and",);
+        assert_eq!(
+            TextPostProcessor::repair_ligature_intra_space("Bara ffe and"),
+            "Bara ffe and",
+        );
     }
 
     #[test]

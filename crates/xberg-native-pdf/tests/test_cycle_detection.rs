@@ -123,8 +123,7 @@ endobj
         pdf.extend_from_slice(trailer_b.as_bytes());
 
         let offset_b_str = format!("{:<10}", offset_b);
-        pdf[prev_placeholder_pos..prev_placeholder_pos + 10]
-            .copy_from_slice(offset_b_str.as_bytes());
+        pdf[prev_placeholder_pos..prev_placeholder_pos + 10].copy_from_slice(offset_b_str.as_bytes());
 
         pdf.extend_from_slice(format!("startxref\n{}\n%%EOF\n", offset_b).as_bytes());
         pdf
@@ -135,7 +134,11 @@ endobj
         let data = build_incremental_xref_chain(3);
         let (_path_dir, path) = common::write_temp_pdf(&data, "xref_3_sections.pdf");
         let result = PdfDocument::open(&path);
-        assert!(result.is_ok(), "3 incremental xref sections should open: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "3 incremental xref sections should open: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -143,7 +146,11 @@ endobj
         let data = build_incremental_xref_chain(5);
         let (_path_dir, path) = common::write_temp_pdf(&data, "xref_5_sections.pdf");
         let result = PdfDocument::open(&path);
-        assert!(result.is_ok(), "5 incremental xref sections should open: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "5 incremental xref sections should open: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -407,17 +414,13 @@ mod struct_tree_cycle {
         pdf.extend_from_slice(b"%PDF-1.7\n");
 
         let obj1 = pdf.len();
-        pdf.extend_from_slice(
-            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>\nendobj\n\n",
-        );
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>\nendobj\n\n");
 
         let obj2 = pdf.len();
         pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n\n");
 
         let obj3 = pdf.len();
-        pdf.extend_from_slice(
-            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n\n",
-        );
+        pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n\n");
 
         let obj4 = pdf.len();
         pdf.extend_from_slice(b"4 0 obj\n<< /Type /StructTreeRoot /K [5 0 R] >>\nendobj\n\n");
@@ -439,17 +442,13 @@ mod struct_tree_cycle {
         pdf.extend_from_slice(b"%PDF-1.7\n");
 
         let obj1 = pdf.len();
-        pdf.extend_from_slice(
-            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>\nendobj\n\n",
-        );
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>\nendobj\n\n");
 
         let obj2 = pdf.len();
         pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n\n");
 
         let obj3 = pdf.len();
-        pdf.extend_from_slice(
-            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n\n",
-        );
+        pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n\n");
 
         let obj4 = pdf.len();
         pdf.extend_from_slice(b"4 0 obj\n<< /Type /StructTreeRoot /K [5 0 R] >>\nendobj\n\n");
@@ -468,17 +467,13 @@ mod struct_tree_cycle {
         pdf.extend_from_slice(b"%PDF-1.7\n");
 
         let obj1 = pdf.len();
-        pdf.extend_from_slice(
-            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>\nendobj\n\n",
-        );
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 4 0 R >>\nendobj\n\n");
 
         let obj2 = pdf.len();
         pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n\n");
 
         let obj3 = pdf.len();
-        pdf.extend_from_slice(
-            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n\n",
-        );
+        pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n\n");
 
         let obj4 = pdf.len();
         pdf.extend_from_slice(b"4 0 obj\n<< /Type /StructTreeRoot /K [5 0 R] >>\nendobj\n\n");

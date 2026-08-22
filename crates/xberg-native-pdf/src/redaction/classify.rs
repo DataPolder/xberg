@@ -36,8 +36,8 @@ pub fn apply_ctm(stack: &mut GraphicsStateStack, op: &Operator) {
             // (mirrors src/content/parser.rs:687). ~keep
             let old = stack.current().ctm;
             stack.current_mut().ctm = m.multiply(&old);
-        },
-        _ => {},
+        }
+        _ => {}
     }
 }
 

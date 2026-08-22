@@ -297,7 +297,7 @@ impl PageLabelExtractor {
             Some(obj) => obj.clone(),
             None => {
                 return Ok(Vec::new());
-            },
+            }
         };
 
         Self::parse_number_tree(doc, &page_labels_obj)
@@ -336,9 +336,7 @@ impl PageLabelExtractor {
     ///
     /// A vector of page labels, one for each page.
     pub fn get_all_labels(ranges: &[PageLabelRange], page_count: usize) -> Vec<String> {
-        (0..page_count)
-            .map(|i| Self::get_label(ranges, i))
-            .collect()
+        (0..page_count).map(|i| Self::get_label(ranges, i)).collect()
     }
 }
 
@@ -373,11 +371,7 @@ fn to_roman(mut n: u32, uppercase: bool) -> String {
         }
     }
 
-    if uppercase {
-        result.to_uppercase()
-    } else {
-        result
-    }
+    if uppercase { result.to_uppercase() } else { result }
 }
 
 /// Convert a number to alphabetic representation.

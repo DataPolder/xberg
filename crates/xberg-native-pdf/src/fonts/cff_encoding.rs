@@ -516,14 +516,14 @@ fn parse_dict_operand(data: &[u8], pos: usize) -> Option<(i32, usize)> {
             }
             let b1 = data[pos + 1] as i32;
             Some(((b0 - 247) * 256 + b1 + 108, 2))
-        },
+        }
         251..=254 => {
             if pos + 1 >= data.len() {
                 return None;
             }
             let b1 = data[pos + 1] as i32;
             Some((-(b0 - 251) * 256 - b1 - 108, 2))
-        },
+        }
         // Integer: 3 bytes (16-bit) ~keep
         28 => {
             if pos + 2 >= data.len() {
@@ -531,16 +531,15 @@ fn parse_dict_operand(data: &[u8], pos: usize) -> Option<(i32, usize)> {
             }
             let val = i16::from_be_bytes([data[pos + 1], data[pos + 2]]) as i32;
             Some((val, 3))
-        },
+        }
         // Integer: 5 bytes (32-bit) ~keep
         29 => {
             if pos + 4 >= data.len() {
                 return None;
             }
-            let val =
-                i32::from_be_bytes([data[pos + 1], data[pos + 2], data[pos + 3], data[pos + 4]]);
+            let val = i32::from_be_bytes([data[pos + 1], data[pos + 2], data[pos + 3], data[pos + 4]]);
             Some((val, 5))
-        },
+        }
         // Real number (skip, we only need integers for encoding/charset offsets) ~keep
         30 => {
             let mut i = pos + 1;
@@ -553,7 +552,7 @@ fn parse_dict_operand(data: &[u8], pos: usize) -> Option<(i32, usize)> {
                 i += 1;
             }
             None
-        },
+        }
         _ => None,
     }
 }
@@ -584,13 +583,13 @@ fn parse_top_dict(dict_data: &[u8]) -> (i32, i32) {
                     if let Some(&val) = operand_stack.last() {
                         encoding_offset = val;
                     }
-                },
+                }
                 15 => {
                     if let Some(&val) = operand_stack.last() {
                         charset_offset = val;
                     }
-                },
-                _ => {},
+                }
+                _ => {}
             }
 
             operand_stack.clear();
@@ -638,18 +637,18 @@ fn parse_top_dict_with_charstrings(dict_data: &[u8]) -> (i32, i32, i32) {
                     if let Some(&val) = operand_stack.last() {
                         charset_offset = val;
                     }
-                },
+                }
                 16 => {
                     if let Some(&val) = operand_stack.last() {
                         encoding_offset = val;
                     }
-                },
+                }
                 17 => {
                     if let Some(&val) = operand_stack.last() {
                         charstrings_offset = val;
                     }
-                },
-                _ => {},
+                }
+                _ => {}
             }
 
             operand_stack.clear();
@@ -700,7 +699,7 @@ fn parse_charset(data: &[u8], offset: usize, num_glyphs: usize) -> Option<Vec<u1
                 sids.push(sid);
                 pos += 2;
             }
-        },
+        }
         1 => {
             // Format 1: ranges with 1-byte count ~keep
             while sids.len() < num_glyphs && pos + 2 < data.len() {
@@ -714,7 +713,7 @@ fn parse_charset(data: &[u8], offset: usize, num_glyphs: usize) -> Option<Vec<u1
                     sids.push(first_sid + i);
                 }
             }
-        },
+        }
         2 => {
             // Format 2: ranges with 2-byte count ~keep
             while sids.len() < num_glyphs && pos + 3 < data.len() {
@@ -728,7 +727,7 @@ fn parse_charset(data: &[u8], offset: usize, num_glyphs: usize) -> Option<Vec<u1
                     sids.push(first_sid + i);
                 }
             }
-        },
+        }
         _ => return None,
     }
 
@@ -763,7 +762,7 @@ fn parse_encoding_table(data: &[u8], offset: usize) -> Option<HashMap<u8, u16>> 
                 code_to_gid.insert(code, gid as u16);
                 pos += 1;
             }
-        },
+        }
         1 => {
             // Format 1: ranges ~keep
             if pos >= data.len() {
@@ -785,7 +784,7 @@ fn parse_encoding_table(data: &[u8], offset: usize) -> Option<HashMap<u8, u16>> 
                     gid += 1;
                 }
             }
-        },
+        }
         _ => return None,
     }
 
@@ -816,9 +815,7 @@ fn resolve_glyph_name<'a>(sid: u16, string_index: &'a [&'a [u8]]) -> Option<Stri
     } else {
         let idx = (sid - 391) as usize;
         if idx < string_index.len() {
-            std::str::from_utf8(string_index[idx])
-                .ok()
-                .map(|s| s.to_string())
+            std::str::from_utf8(string_index[idx]).ok().map(|s| s.to_string())
         } else {
             None
         }
@@ -844,15 +841,8 @@ fn extract_cff_from_opentype(data: &[u8]) -> Option<&[u8]> {
             return None;
         }
         let tag = u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
-        let offset =
-            u32::from_be_bytes([data[pos + 8], data[pos + 9], data[pos + 10], data[pos + 11]])
-                as usize;
-        let length = u32::from_be_bytes([
-            data[pos + 12],
-            data[pos + 13],
-            data[pos + 14],
-            data[pos + 15],
-        ]) as usize;
+        let offset = u32::from_be_bytes([data[pos + 8], data[pos + 9], data[pos + 10], data[pos + 11]]) as usize;
+        let length = u32::from_be_bytes([data[pos + 12], data[pos + 13], data[pos + 14], data[pos + 15]]) as usize;
         // CFF tag = 0x43464620 ("CFF ") ~keep
         if tag == 0x43464620 && offset + length <= data.len() {
             return Some(&data[offset..offset + length]);
@@ -931,10 +921,7 @@ pub fn parse_cff_encoding(font_data: &[u8]) -> Option<HashMap<u8, char>> {
                 }
             }
             if !encoding_map.is_empty() {
-                tracing::debug!(
-                    "CFF charset-based fallback: {} character mappings",
-                    encoding_map.len()
-                );
+                tracing::debug!("CFF charset-based fallback: {} character mappings", encoding_map.len());
                 return Some(encoding_map);
             }
         }
@@ -975,7 +962,10 @@ pub fn parse_cff_encoding(font_data: &[u8]) -> Option<HashMap<u8, char>> {
     if encoding_map.is_empty() {
         None
     } else {
-        tracing::debug!("CFF built-in encoding parsed: {} character mappings", encoding_map.len());
+        tracing::debug!(
+            "CFF built-in encoding parsed: {} character mappings",
+            encoding_map.len()
+        );
         Some(encoding_map)
     }
 }
@@ -1096,8 +1086,7 @@ pub fn parse_cff_gid_mapping_with_pdf_encoding(
         return None;
     }
     let (string_index, _after_string) = parse_index(cff_data, after_top_dict)?;
-    let (charstrings_offset, _encoding_offset, charset_offset) =
-        parse_top_dict_with_charstrings(top_dicts[0]);
+    let (charstrings_offset, _encoding_offset, charset_offset) = parse_top_dict_with_charstrings(top_dicts[0]);
 
     // §9.6.6 path: build name→GID from the Charset (which always enumerates
     // every subset glyph), then key bytes through the PDF /Encoding +
@@ -1125,8 +1114,7 @@ pub fn parse_cff_gid_mapping_with_pdf_encoding(
         return parse_cff_gid_mapping(font_data);
     };
 
-    let resolved =
-        resolve_bytes_via_pdf_encoding(&charset_sids, &string_index, pdf_encoding, differences);
+    let resolved = resolve_bytes_via_pdf_encoding(&charset_sids, &string_index, pdf_encoding, differences);
 
     if resolved.is_empty() {
         // PDF /Encoding yielded zero hits against the Charset. Fall back to
@@ -1894,9 +1882,7 @@ mod tests {
 
     #[test]
     fn test_extract_cff_from_opentype_otto_no_cff_table() {
-        let data = vec![
-            0x4F, 0x54, 0x54, 0x4F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ];
+        let data = vec![0x4F, 0x54, 0x54, 0x4F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         assert_eq!(extract_cff_from_opentype(&data), None);
     }
 
@@ -1906,9 +1892,7 @@ mod tests {
         let cff_offset: u32 = 28;
         let cff_length: u32 = cff_data.len() as u32;
 
-        let mut data = vec![
-            0x4F, 0x54, 0x54, 0x4F, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ];
+        let mut data = vec![0x4F, 0x54, 0x54, 0x4F, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         data.extend_from_slice(b"CFF ");
         data.extend_from_slice(&[0, 0, 0, 0]);
         data.extend_from_slice(&cff_offset.to_be_bytes());

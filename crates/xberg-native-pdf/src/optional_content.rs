@@ -70,10 +70,7 @@ pub fn compute_default_off_ocgs(doc: &PdfDocument) -> HashSet<String> {
         None => return off,
     };
 
-    let base_state = d_dict
-        .get("BaseState")
-        .and_then(|o| o.as_name())
-        .unwrap_or("ON");
+    let base_state = d_dict.get("BaseState").and_then(|o| o.as_name()).unwrap_or("ON");
     let on_set = collect_ocg_name_set(d_dict.get("ON"), doc);
     let off_set = collect_ocg_name_set(d_dict.get("OFF"), doc);
 
@@ -169,8 +166,7 @@ pub fn decode_pdf_text_string(bytes: &[u8]) -> String {
             .iter()
             .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
             .collect();
-        String::from_utf16(&utf16_pairs)
-            .unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
+        String::from_utf16(&utf16_pairs).unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
     } else if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
         let utf16_pairs: Vec<u16> = bytes[2..]
             .as_chunks::<2>()
@@ -178,8 +174,7 @@ pub fn decode_pdf_text_string(bytes: &[u8]) -> String {
             .iter()
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
             .collect();
-        String::from_utf16(&utf16_pairs)
-            .unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
+        String::from_utf16(&utf16_pairs).unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
     } else {
         String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| {
             bytes
@@ -287,11 +282,7 @@ fn collect_ocmd_ocg_names(ocgs_obj: &Object, doc: &PdfDocument) -> Vec<Object> {
 ///    visibility expression tree (`/And`, `/Or`, `/Not`); otherwise apply
 ///    the `/P` policy (`AnyOn` default) over the `/OCGs` membership where
 ///    `on = !excluded`. Content is excluded iff the result is "hidden".
-pub fn check_ocg_excluded(
-    props_dict: &HashMap<String, Object>,
-    doc: &PdfDocument,
-    excluded: &HashSet<String>,
-) -> bool {
+pub fn check_ocg_excluded(props_dict: &HashMap<String, Object>, doc: &PdfDocument, excluded: &HashSet<String>) -> bool {
     if let Some(ocg_name) = props_dict.get("Name") {
         return ocg_name_is_excluded(ocg_name, excluded);
     }
@@ -332,11 +323,7 @@ pub fn check_ocg_excluded(
 /// Returns `true` if the expression resolves to "visible", `false` to "hidden".
 /// For our exclusion model an OCG is on iff its `/Name` is NOT in `excluded`.
 /// Bounded recursion depth prevents stack overflow on hostile/malformed input.
-fn evaluate_visibility_expression(
-    expr: &Object,
-    doc: &PdfDocument,
-    excluded: &HashSet<String>,
-) -> bool {
+fn evaluate_visibility_expression(expr: &Object, doc: &PdfDocument, excluded: &HashSet<String>) -> bool {
     fn eval(expr: &Object, doc: &PdfDocument, excluded: &HashSet<String>, depth: u8) -> bool {
         if depth > 16 {
             return true; // permissive: don't suppress on malformed/circular input ~keep
@@ -364,10 +351,7 @@ fn evaluate_visibility_expression(
         };
 
         match op {
-            "Not" => !arr
-                .get(1)
-                .map(|o| eval(o, doc, excluded, depth + 1))
-                .unwrap_or(true),
+            "Not" => !arr.get(1).map(|o| eval(o, doc, excluded, depth + 1)).unwrap_or(true),
             "And" => arr[1..].iter().all(|o| eval(o, doc, excluded, depth + 1)),
             "Or" => arr[1..].iter().any(|o| eval(o, doc, excluded, depth + 1)),
             _ => true,
@@ -402,7 +386,7 @@ pub fn resolve_and_check_ocg_excluded(
                 return ocg_name_is_excluded(ocg_name, excluded);
             }
             false
-        },
+        }
     }
 }
 
@@ -412,11 +396,7 @@ pub fn resolve_and_check_ocg_excluded(
 /// Per ISO 32000-1 §12.5.2, annotation dictionaries can carry an `/OC` entry
 /// that references the OCG / OCMD the annotation belongs to. If that scope is
 /// excluded, the annotation should not be rendered.
-pub fn annotation_is_excluded(
-    oc_obj: &Object,
-    doc: &PdfDocument,
-    excluded: &HashSet<String>,
-) -> bool {
+pub fn annotation_is_excluded(oc_obj: &Object, doc: &PdfDocument, excluded: &HashSet<String>) -> bool {
     if excluded.is_empty() {
         return false;
     }

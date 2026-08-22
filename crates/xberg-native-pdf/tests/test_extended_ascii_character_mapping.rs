@@ -173,7 +173,12 @@ fn test_extended_ascii_common_special_chars() {
 
     for (code, expected_glyph) in test_cases {
         let result = mapper.code_to_glyph_name_extended(code);
-        assert_eq!(result, Some(expected_glyph.to_string()), "Failed for code 0x{:02X}", code);
+        assert_eq!(
+            result,
+            Some(expected_glyph.to_string()),
+            "Failed for code 0x{:02X}",
+            code
+        );
     }
 }
 

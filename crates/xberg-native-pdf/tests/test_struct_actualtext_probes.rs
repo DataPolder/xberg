@@ -171,7 +171,7 @@ impl PdfBuilder {
         let oc_props = match ocg {
             Some(o) => {
                 format!(" /OCProperties << /OCGs [{} 0 R] /D << /Order [{} 0 R] >> >>", o, o)
-            },
+            }
             None => String::new(),
         };
         objs.insert(
@@ -381,12 +381,7 @@ fn fixture_probe2_mid_run_inner_override() -> Vec<u8> {
             .k(K::Obj(9))
             .k(K::Mcid(2, 0)),
     );
-    let _inner = b.add_elem(
-        Elem::new(9, "Span", 8)
-            .page(4)
-            .actual_text("I")
-            .k(K::Mcid(1, 0)),
-    );
+    let _inner = b.add_elem(Elem::new(9, "Span", 8).page(4).actual_text("I").k(K::Mcid(1, 0)));
     b.register_mcid(0, 0, outer);
     b.register_mcid(0, 1, 9);
     b.register_mcid(0, 2, outer);
@@ -413,7 +408,12 @@ fn probe2_mid_run_inner_override_yields_o_i_o() {
         extracted
     );
     for raw in ['A', 'B', 'C'] {
-        assert!(!extracted.contains(raw), "raw {:?} must NOT appear, got {:?}", raw, extracted);
+        assert!(
+            !extracted.contains(raw),
+            "raw {:?} must NOT appear, got {:?}",
+            raw,
+            extracted
+        );
     }
 }
 
@@ -430,12 +430,8 @@ fn fixture_probe6_first_descendant_on_page1() -> Vec<u8> {
     // order children) and MCID 0 on page 0 second. Per the index
     // builder, `first_page = 1`, and the page-0 MCID gets suppress_only. ~keep
     let mut b = PdfBuilder::new();
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(A) Tj\nEMC\nET\n".to_vec(),
-    );
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(B) Tj\nEMC\nET\n".to_vec(),
-    );
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(A) Tj\nEMC\nET\n".to_vec());
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(B) Tj\nEMC\nET\n".to_vec());
     // Struct elem H1: /K [page-1 MCR, page-0 MCR] — pre-order picks
     // page 1 as first. ~keep
     let h1 = b.add_elem(
@@ -490,15 +486,9 @@ fn probe6_first_descendant_on_page1_emits_on_page1_suppresses_page0() {
 
 fn fixture_probe7_skip_middle_page() -> Vec<u8> {
     let mut b = PdfBuilder::new();
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(P0) Tj\nEMC\nET\n".to_vec(),
-    );
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(MIDDLE) Tj\nEMC\nET\n".to_vec(),
-    );
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(P2) Tj\nEMC\nET\n".to_vec(),
-    );
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(P0) Tj\nEMC\nET\n".to_vec());
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(MIDDLE) Tj\nEMC\nET\n".to_vec());
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(P2) Tj\nEMC\nET\n".to_vec());
     // For 3 pages: catalog=1, pages=2, font=3, page0=4, page1=5,
     // page2=6, content0=7, content1=8, content2=9, parent_tree=10,
     // struct_tree_root=11, first elem obj = 12. ~keep
@@ -528,7 +518,11 @@ fn probe7_skip_middle_page_keeps_middle_untouched() {
     assert!(p0.contains("Span across"), "page 0 must emit replacement, got {:?}", p0);
     assert!(!p0.contains("P0"), "page 0 raw glyphs must be suppressed, got {:?}", p0);
 
-    assert!(p1.contains("MIDDLE"), "page 1 raw text must survive untouched, got {:?}", p1);
+    assert!(
+        p1.contains("MIDDLE"),
+        "page 1 raw text must survive untouched, got {:?}",
+        p1
+    );
     assert!(
         !p1.contains("Span across"),
         "page 1 must NOT receive the unrelated H1 replacement, got {:?}",
@@ -710,7 +704,12 @@ fn probe13_mc_scope_two_tj_with_td_emits_once() {
         extracted
     );
     for raw in ['X', 'Y'] {
-        assert!(!extracted.contains(raw), "raw {:?} must NOT appear, got {:?}", raw, extracted);
+        assert!(
+            !extracted.contains(raw),
+            "raw {:?} must NOT appear, got {:?}",
+            raw,
+            extracted
+        );
     }
 }
 
@@ -727,11 +726,7 @@ fn probe14_two_mc_scope_actualtext_sequences_each_emit() {
                     ET\n";
     let mut b = PdfBuilder::new();
     b.add_page_content(content.to_vec());
-    let _doc = b.add_elem(
-        Elem::new(8, "Document", 7)
-            .k(K::Mcid(0, 0))
-            .k(K::Mcid(1, 0)),
-    );
+    let _doc = b.add_elem(Elem::new(8, "Document", 7).k(K::Mcid(0, 0)).k(K::Mcid(1, 0)));
     b.register_mcid(0, 0, 8);
     b.register_mcid(0, 1, 8);
     let pdf = b.build();
@@ -838,15 +833,8 @@ fn probe16_mc_scope_empty_actualtext_pin_behaviour() {
 #[test]
 fn probe17a_no_mark_info_still_resolves_actualtext_via_struct_tree_root() {
     let mut b = PdfBuilder::new().no_mark_info();
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec(),
-    );
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("replaced")
-            .k(K::Mcid(0, 0)),
-    );
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec());
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("replaced").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     let pdf = b.build();
     let doc = PdfDocument::from_bytes(pdf).expect("open");
@@ -864,15 +852,8 @@ fn probe17a_no_mark_info_still_resolves_actualtext_via_struct_tree_root() {
 #[test]
 fn probe17c_marked_false_with_struct_tree_root_still_resolves_actualtext() {
     let mut b = PdfBuilder::new().marked(false);
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec(),
-    );
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("replaced")
-            .k(K::Mcid(0, 0)),
-    );
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec());
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("replaced").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     let pdf = b.build();
     let doc = PdfDocument::from_bytes(pdf).expect("open");
@@ -910,9 +891,7 @@ fn probe19_first_page_hidden_via_ocg_drops_emission_entirely() {
           EMC\nET\n"
             .to_vec(),
     );
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(B) Tj\nEMC\nET\n".to_vec(),
-    );
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(B) Tj\nEMC\nET\n".to_vec());
     // For 2 pages + OCG: catalog=1, pages=2, font=3, page0=4,
     // page1=5, content0=6, content1=7, parent_tree=8,
     // struct_tree_root=9, ocg=10, first elem obj = 11. ~keep
@@ -981,8 +960,7 @@ fn probe29_actualtext_null_value_treated_as_absent() {
     let mut objs: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
     objs.insert(
         1,
-        b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 7 0 R >>"
-            .to_vec(),
+        b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 7 0 R >>".to_vec(),
     );
     objs.insert(2, b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>".to_vec());
     objs.insert(3, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec());
@@ -1059,8 +1037,7 @@ fn probe30_actualtext_indirect_string_reference_resolves() {
     let mut objs: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
     objs.insert(
         1,
-        b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 7 0 R >>"
-            .to_vec(),
+        b"<< /Type /Catalog /Pages 2 0 R /MarkInfo << /Marked true >> /StructTreeRoot 7 0 R >>".to_vec(),
     );
     objs.insert(2, b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>".to_vec());
     objs.insert(3, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec());
@@ -1084,7 +1061,10 @@ fn probe30_actualtext_indirect_string_reference_resolves() {
             .to_vec(),
     );
     // Obj 9: the actual string. UTF-16BE for "indirect". ~keep
-    objs.insert(9, b"<FEFF0069006E0064006900720065006300740020 0068006900740073>".to_vec());
+    objs.insert(
+        9,
+        b"<FEFF0069006E0064006900720065006300740020 0068006900740073>".to_vec(),
+    );
     objs.insert(9, b"<FEFF0069006E0064006900720065006300740068006900740073>".to_vec());
     // Recompute — we re-inserted the same key; last write wins; the
     // string above is for "indirecthits" (close enough — we check
@@ -1145,16 +1125,9 @@ fn probe30_actualtext_indirect_string_reference_resolves() {
 #[test]
 fn probe32_actualtext_with_line_breaks_pin_behaviour() {
     let mut b = PdfBuilder::new();
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec(),
-    );
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec());
     // /ActualText "L1\nL2" — embeds U+000A. ~keep
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("L1\nL2")
-            .k(K::Mcid(0, 0)),
-    );
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("L1\nL2").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     let pdf = b.build();
     let doc = PdfDocument::from_bytes(pdf).expect("open");
@@ -1329,15 +1302,8 @@ fn probe34b_vanilla_artifact_raw_glyph_pin_behaviour() {
 #[test]
 fn probe36_extract_structured_region_text_carries_replacement() {
     let mut b = PdfBuilder::new();
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec(),
-    );
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("fi")
-            .k(K::Mcid(0, 0)),
-    );
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec());
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("fi").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     let pdf = b.build();
     let doc = PdfDocument::from_bytes(pdf).expect("open");
@@ -1374,12 +1340,7 @@ fn probe38_two_sequential_extract_text_calls_idempotent() {
           /Span << /MCID 0 /ActualText <FEFF0061> >> BDC\n(X) Tj\nEMC\nET\n"
             .to_vec(),
     );
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("struct")
-            .k(K::Mcid(0, 0)),
-    );
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("struct").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     let pdf = b.build();
     let doc = PdfDocument::from_bytes(pdf).expect("open");
@@ -1403,27 +1364,15 @@ fn probe38_two_sequential_extract_text_calls_idempotent() {
 #[test]
 fn probe38b_repeated_extract_page_text_carries_replacement_each_time() {
     let mut b = PdfBuilder::new();
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec(),
-    );
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("fi")
-            .k(K::Mcid(0, 0)),
-    );
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec());
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("fi").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     let pdf = b.build();
     let doc = PdfDocument::from_bytes(pdf).expect("open");
 
     for round in 0..3 {
         let page = doc.extract_page_text(0).expect("extract_page_text");
-        let joined: String = page
-            .spans
-            .iter()
-            .map(|s| s.text.clone())
-            .collect::<Vec<_>>()
-            .join("|");
+        let joined: String = page.spans.iter().map(|s| s.text.clone()).collect::<Vec<_>>().join("|");
         assert!(
             joined.contains("fi"),
             "round {}: replacement must appear in spans, got {:?}",
@@ -1450,15 +1399,8 @@ fn probe38b_repeated_extract_page_text_carries_replacement_each_time() {
 #[test]
 fn probe35_extract_structured_byte_equal_with_extract_text() {
     let mut b = PdfBuilder::new();
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec(),
-    );
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("fi")
-            .k(K::Mcid(0, 0)),
-    );
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec());
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("fi").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     let pdf = b.build();
     let doc = PdfDocument::from_bytes(pdf).expect("open");
@@ -1547,9 +1489,7 @@ fn probe4_mcid_iteration_order_uses_struct_tree_preorder() {
 fn probe8_actualtext_spanning_all_pages_emits_only_first() {
     let mut b = PdfBuilder::new();
     for _ in 0..3 {
-        b.add_page_content(
-            b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(Z) Tj\nEMC\nET\n".to_vec(),
-        );
+        b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(Z) Tj\nEMC\nET\n".to_vec());
     }
     // For 3 pages: catalog=1, pages=2, font=3, page0=4, page1=5,
     // page2=6, content0=7, content1=8, content2=9, parent_tree=10,
@@ -1647,8 +1587,11 @@ fn probe18_two_layers_both_excluded_drops_emission() {
         out.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
     }
     out.extend_from_slice(
-        format!("trailer\n<< /Size 11 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_offset)
-            .as_bytes(),
+        format!(
+            "trailer\n<< /Size 11 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+            xref_offset
+        )
+        .as_bytes(),
     );
 
     let doc = PdfDocument::from_bytes(out).expect("open");
@@ -1705,22 +1648,19 @@ fn probe18_two_layers_both_excluded_drops_emission() {
 #[test]
 fn probe37_cloned_spans_carry_replacement_not_raw() {
     let mut b = PdfBuilder::new();
-    b.add_page_content(
-        b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec(),
-    );
-    let _ = b.add_elem(
-        Elem::new(8, "Span", 7)
-            .page(4)
-            .actual_text("fi")
-            .k(K::Mcid(0, 0)),
-    );
+    b.add_page_content(b"BT\n/F1 12 Tf\n50 700 Td\n/Span << /MCID 0 >> BDC\n(X) Tj\nEMC\nET\n".to_vec());
+    let _ = b.add_elem(Elem::new(8, "Span", 7).page(4).actual_text("fi").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 8);
     let pdf = b.build();
     let doc = PdfDocument::from_bytes(pdf).expect("open");
     let page = doc.extract_page_text(0).expect("extract_page_text");
     let cloned: Vec<_> = page.spans.to_vec();
     for s in &cloned {
-        assert!(!s.text.contains('X'), "cloned span must NOT contain raw 'X', got {:?}", s.text);
+        assert!(
+            !s.text.contains('X'),
+            "cloned span must NOT contain raw 'X', got {:?}",
+            s.text
+        );
     }
     let any_fi = cloned.iter().any(|s| s.text.contains("fi"));
     assert!(
@@ -1789,7 +1729,11 @@ fn probe40_cross_mcid_fragments_do_not_merge() {
     let page = doc.extract_page_text(0).expect("extract_page_text");
 
     let texts: Vec<String> = page.spans.iter().map(|s| s.text.clone()).collect();
-    assert!(texts.iter().any(|t| t == "He"), "fragment 'He' missing from spans: {:?}", texts);
+    assert!(
+        texts.iter().any(|t| t == "He"),
+        "fragment 'He' missing from spans: {:?}",
+        texts
+    );
     assert!(
         texts.iter().any(|t| t == "llo"),
         "fragment 'llo' missing from spans: {:?}",

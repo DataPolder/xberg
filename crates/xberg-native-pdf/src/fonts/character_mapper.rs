@@ -212,7 +212,7 @@ impl CharacterMapper {
                 } else {
                     None
                 }
-            },
+            }
             _ => None,
         };
 
@@ -358,7 +358,7 @@ impl CharacterMapper {
             0x41..=0x5A => {
                 let ch = (code - 0x41) as u8 + b'A';
                 Some((ch as char).to_string())
-            },
+            }
 
             0x5B => Some("bracketleft".to_string()),
             0x5C => Some("backslash".to_string()),
@@ -370,7 +370,7 @@ impl CharacterMapper {
             0x61..=0x7A => {
                 let ch = (code - 0x61) as u8 + b'a';
                 Some((ch as char).to_string())
-            },
+            }
 
             0x7B => Some("braceleft".to_string()),
             0x7C => Some("bar".to_string()),

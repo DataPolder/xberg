@@ -215,12 +215,7 @@ impl RichMediaContent {
         let names: Vec<Object> = self
             .assets
             .iter()
-            .flat_map(|a| {
-                vec![
-                    Object::text_string(&a.name),
-                    Object::Dictionary(a.build(None)),
-                ]
-            })
+            .flat_map(|a| vec![Object::text_string(&a.name), Object::Dictionary(a.build(None))])
             .collect();
         if !names.is_empty() {
             assets.insert("Names".to_string(), Object::Array(names));
@@ -315,8 +310,10 @@ impl RichMediaSettings {
 
         let mut activation = HashMap::new();
         activation.insert("Type".to_string(), Object::Name("RichMediaActivation".to_string()));
-        activation
-            .insert("Condition".to_string(), Object::Name(self.activation.pdf_name().to_string()));
+        activation.insert(
+            "Condition".to_string(),
+            Object::Name(self.activation.pdf_name().to_string()),
+        );
 
         let mut presentation = HashMap::new();
         presentation.insert("Type".to_string(), Object::Name("RichMediaPresentation".to_string()));
@@ -473,11 +470,7 @@ impl RichMediaAnnotation {
 
         dict.insert(
             "NM".to_string(),
-            Object::String(
-                format!("RichMedia_{}", self.rect.x as i32)
-                    .as_bytes()
-                    .to_vec(),
-            ),
+            Object::String(format!("RichMedia_{}", self.rect.x as i32).as_bytes().to_vec()),
         );
 
         if self.flags.bits() != 0 {
@@ -490,7 +483,10 @@ impl RichMediaAnnotation {
 
         dict.insert("RichMediaContent".to_string(), Object::Dictionary(self.content.build()));
 
-        dict.insert("RichMediaSettings".to_string(), Object::Dictionary(self.settings.build()));
+        dict.insert(
+            "RichMediaSettings".to_string(),
+            Object::Dictionary(self.settings.build()),
+        );
 
         dict
     }
@@ -665,8 +661,7 @@ mod tests {
     #[test]
     fn test_richmedia_annotation_build() {
         let rect = Rect::new(72.0, 400.0, 320.0, 240.0);
-        let annot =
-            RichMediaAnnotation::video(rect, "test.mp4", vec![1, 2, 3]).with_title("Test Video");
+        let annot = RichMediaAnnotation::video(rect, "test.mp4", vec![1, 2, 3]).with_title("Test Video");
 
         let dict = annot.build(&[]);
 

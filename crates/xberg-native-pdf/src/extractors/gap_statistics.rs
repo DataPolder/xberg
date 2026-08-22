@@ -92,11 +92,7 @@ impl GapStatistics {
     /// Useful for understanding relative variability in gap sizes.
     /// Returns 0.0 if mean is 0 or negative.
     pub fn coefficient_of_variation(&self) -> f32 {
-        if self.mean > 0.0 {
-            self.std_dev / self.mean
-        } else {
-            0.0
-        }
+        if self.mean > 0.0 { self.std_dev / self.mean } else { 0.0 }
     }
 }
 
@@ -505,19 +501,14 @@ pub fn calculate_statistics(mut gaps: Vec<f32>) -> Option<GapStatistics> {
 ///
 /// println!("Threshold: {}pt", threshold);
 /// ```
-pub fn determine_adaptive_threshold(
-    stats: &GapStatistics,
-    config: &AdaptiveThresholdConfig,
-) -> f32 {
+pub fn determine_adaptive_threshold(stats: &GapStatistics, config: &AdaptiveThresholdConfig) -> f32 {
     let base_threshold = if config.use_iqr {
         stats.iqr() * config.median_multiplier
     } else {
         stats.median * config.median_multiplier
     };
 
-    base_threshold
-        .max(config.min_threshold_pt)
-        .min(config.max_threshold_pt)
+    base_threshold.max(config.min_threshold_pt).min(config.max_threshold_pt)
 }
 
 /// Detect word boundary threshold using percentile-based analysis.
@@ -620,10 +611,7 @@ fn detect_word_boundary_threshold(spans: &[TextSpan]) -> Option<f32> {
 /// let config = AdaptiveThresholdConfig::aggressive();
 /// let result = analyze_document_gaps(&spans, Some(config));
 /// ```
-pub fn analyze_document_gaps(
-    spans: &[TextSpan],
-    config: Option<AdaptiveThresholdConfig>,
-) -> AdaptiveThresholdResult {
+pub fn analyze_document_gaps(spans: &[TextSpan], config: Option<AdaptiveThresholdConfig>) -> AdaptiveThresholdResult {
     let config = config.unwrap_or_default();
 
     debug!(
@@ -652,8 +640,10 @@ pub fn analyze_document_gaps(
     }
 
     if let Some(bimodal_threshold) = detect_word_boundary_threshold(spans) {
-        let reason =
-            format!("Bimodal detection: identified word boundary at {:.4}pt", bimodal_threshold);
+        let reason = format!(
+            "Bimodal detection: identified word boundary at {:.4}pt",
+            bimodal_threshold
+        );
         debug!("Using bimodal threshold: {}", reason);
 
         return AdaptiveThresholdResult {
@@ -695,7 +685,10 @@ pub fn analyze_document_gaps(
         );
         positive_gaps
     } else {
-        debug!("Not enough positive gaps ({}) to filter, using all gaps", positive_gaps.len());
+        debug!(
+            "Not enough positive gaps ({}) to filter, using all gaps",
+            positive_gaps.len()
+        );
         gaps
     };
 
@@ -710,7 +703,7 @@ pub fn analyze_document_gaps(
                 stats: None,
                 reason,
             };
-        },
+        }
     };
 
     let threshold_pt = determine_adaptive_threshold(&stats, &config);

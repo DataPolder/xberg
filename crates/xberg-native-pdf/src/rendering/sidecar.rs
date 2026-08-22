@@ -174,8 +174,8 @@ impl BlendModeClass {
         match name {
             // ISO 32000-1 §11.3.5.2: ten separable modes; all
             // white-preserving except Difference and Exclusion (Note 2). ~keep
-            "Normal" | "Multiply" | "Screen" | "Overlay" | "Darken" | "Lighten" | "ColorDodge"
-            | "ColorBurn" | "HardLight" | "SoftLight" => Self::SeparableWhitePreserving,
+            "Normal" | "Multiply" | "Screen" | "Overlay" | "Darken" | "Lighten" | "ColorDodge" | "ColorBurn"
+            | "HardLight" | "SoftLight" => Self::SeparableWhitePreserving,
             "Difference" | "Exclusion" => Self::SeparableNonWhitePreserving,
             // ISO 32000-1 §11.3.5.3: four non-separable modes. ~keep
             "Hue" | "Saturation" | "Color" | "Luminosity" => Self::NonSeparable,
@@ -196,9 +196,7 @@ impl BlendModeClass {
     pub fn spot_dispatch(&self) -> SpotBlendDispatch {
         match self {
             Self::SeparableWhitePreserving => SpotBlendDispatch::UseRequested,
-            Self::SeparableNonWhitePreserving | Self::NonSeparable => {
-                SpotBlendDispatch::SubstituteNormal
-            },
+            Self::SeparableNonWhitePreserving | Self::NonSeparable => SpotBlendDispatch::SubstituteNormal,
         }
     }
 }
@@ -483,7 +481,7 @@ pub(crate) fn discover_page_spot_inks(doc: &PdfDocument, page_index: usize) -> V
                 e
             );
             Vec::new()
-        },
+        }
     }
 }
 
@@ -506,15 +504,11 @@ pub(crate) fn discover_page_spot_inks(doc: &PdfDocument, page_index: usize) -> V
 /// through composite-then-decompose where the §11.4 model evaluates
 /// against the composite buffer.
 pub(crate) fn page_declares_transparency(doc: &PdfDocument, resources: &Object) -> bool {
-    let mut visited: std::collections::HashSet<crate::object::ObjectRef> =
-        std::collections::HashSet::new();
+    let mut visited: std::collections::HashSet<crate::object::ObjectRef> = std::collections::HashSet::new();
     resources_declare_transparency_or_overprint(doc, resources, &mut visited, 0, false)
 }
 
-fn ext_g_states_signal_transparency_only(
-    doc: &PdfDocument,
-    ext_g_states: &HashMap<String, Object>,
-) -> bool {
+fn ext_g_states_signal_transparency_only(doc: &PdfDocument, ext_g_states: &HashMap<String, Object>) -> bool {
     for state in ext_g_states.values() {
         let state_resolved = match doc.resolve_object(state) {
             Ok(o) => o,
@@ -537,17 +531,13 @@ fn ext_g_states_signal_transparency_only(
             }
         }
         if let Some(smask_raw) = state_dict.get("SMask") {
-            let smask = doc
-                .resolve_object(smask_raw)
-                .unwrap_or_else(|_| smask_raw.clone());
+            let smask = doc.resolve_object(smask_raw).unwrap_or_else(|_| smask_raw.clone());
             if !matches!(&smask, Object::Name(n) if n == "None") {
                 return true;
             }
         }
         if let Some(bm_raw) = state_dict.get("BM") {
-            let bm = doc
-                .resolve_object(bm_raw)
-                .unwrap_or_else(|_| bm_raw.clone());
+            let bm = doc.resolve_object(bm_raw).unwrap_or_else(|_| bm_raw.clone());
             if bm_is_non_normal(&bm) {
                 return true;
             }
@@ -573,12 +563,8 @@ fn ext_g_states_signal_transparency_only(
 /// The detection-OFF path is byte-identical to a sidecar-less render
 /// because the sidecar-consuming helpers fall back to additive-clamp
 /// inversion when the sidecar is `None`.
-pub(crate) fn page_declares_transparency_or_overprint(
-    doc: &PdfDocument,
-    resources: &Object,
-) -> bool {
-    let mut visited: std::collections::HashSet<crate::object::ObjectRef> =
-        std::collections::HashSet::new();
+pub(crate) fn page_declares_transparency_or_overprint(doc: &PdfDocument, resources: &Object) -> bool {
+    let mut visited: std::collections::HashSet<crate::object::ObjectRef> = std::collections::HashSet::new();
     resources_declare_transparency_or_overprint(doc, resources, &mut visited, 0, true)
 }
 
@@ -662,13 +648,7 @@ fn resources_declare_transparency_or_overprint(
                 Some(Ok(o)) => o,
                 _ => continue,
             };
-            if resources_declare_transparency_or_overprint(
-                doc,
-                &form_res,
-                visited,
-                depth + 1,
-                include_overprint,
-            ) {
+            if resources_declare_transparency_or_overprint(doc, &form_res, visited, depth + 1, include_overprint) {
                 return true;
             }
         }
@@ -677,10 +657,7 @@ fn resources_declare_transparency_or_overprint(
     false
 }
 
-fn ext_g_states_signal_transparency(
-    doc: &PdfDocument,
-    ext_g_states: &HashMap<String, Object>,
-) -> bool {
+fn ext_g_states_signal_transparency(doc: &PdfDocument, ext_g_states: &HashMap<String, Object>) -> bool {
     for state in ext_g_states.values() {
         let state_resolved = match doc.resolve_object(state) {
             Ok(o) => o,
@@ -720,9 +697,7 @@ fn ext_g_states_signal_transparency(
             }
         }
         if let Some(smask_raw) = state_dict.get("SMask") {
-            let smask = doc
-                .resolve_object(smask_raw)
-                .unwrap_or_else(|_| smask_raw.clone());
+            let smask = doc.resolve_object(smask_raw).unwrap_or_else(|_| smask_raw.clone());
             if !matches!(&smask, Object::Name(n) if n == "None") {
                 return true;
             }
@@ -735,9 +710,7 @@ fn ext_g_states_signal_transparency(
         // mode is non-/Normal. The raw `/BM` may itself be an indirect
         // ref to a name / array, so resolve before classifying. ~keep
         if let Some(bm_raw) = state_dict.get("BM") {
-            let bm = doc
-                .resolve_object(bm_raw)
-                .unwrap_or_else(|_| bm_raw.clone());
+            let bm = doc.resolve_object(bm_raw).unwrap_or_else(|_| bm_raw.clone());
             if bm_is_non_normal(&bm) {
                 return true;
             }
@@ -825,7 +798,7 @@ pub(crate) fn separable_blend(mode: &str, c_b: f32, c_s: f32) -> f32 {
         "Overlay" => {
             // HardLight(c_s, c_b) — symmetric swap per Table 136. ~keep
             hard_light_component(c_s, c_b)
-        },
+        }
         "Darken" => c_b.min(c_s),
         "Lighten" => c_b.max(c_s),
         "ColorDodge" => {
@@ -834,14 +807,14 @@ pub(crate) fn separable_blend(mode: &str, c_b: f32, c_s: f32) -> f32 {
             } else {
                 (c_b / (1.0 - c_s)).min(1.0)
             }
-        },
+        }
         "ColorBurn" => {
             if c_s <= 0.0 {
                 0.0
             } else {
                 1.0 - ((1.0 - c_b) / c_s).min(1.0)
             }
-        },
+        }
         "HardLight" => hard_light_component(c_b, c_s),
         "SoftLight" => soft_light_component(c_b, c_s),
         "Difference" => (c_b - c_s).abs(),
@@ -899,11 +872,7 @@ fn soft_light_component(c_b: f32, c_s: f32) -> f32 {
 ///
 /// The returned ordering matches the source declaration order so the
 /// caller can pair component-index N with colorant-index N.
-pub(crate) fn extract_paint_spot_inks(
-    space: &Object,
-    components: &[f32],
-    doc: &PdfDocument,
-) -> Vec<(String, f32)> {
+pub(crate) fn extract_paint_spot_inks(space: &Object, components: &[f32], doc: &PdfDocument) -> Vec<(String, f32)> {
     let arr = match space.as_array() {
         Some(a) => a,
         None => return Vec::new(),
@@ -912,8 +881,7 @@ pub(crate) fn extract_paint_spot_inks(
         Some(n) => n,
         None => return Vec::new(),
     };
-    let deref =
-        |obj: &Object| -> Object { doc.resolve_object(obj).unwrap_or_else(|_| obj.clone()) };
+    let deref = |obj: &Object| -> Object { doc.resolve_object(obj).unwrap_or_else(|_| obj.clone()) };
 
     match type_name {
         "Separation" => {
@@ -931,7 +899,7 @@ pub(crate) fn extract_paint_spot_inks(
             // branches on them per §8.6.6.3 (paint every plate at the
             // tint, or skip every plate). ~keep
             vec![(ink.to_string(), components[0])]
-        },
+        }
         "Pattern" => {
             // ISO 32000-1 §8.7.3.1: a Pattern colour space may declare
             // an underlying colour space at array index 1 (uncoloured
@@ -965,7 +933,7 @@ pub(crate) fn extract_paint_spot_inks(
             // <tint>]), the recursive call handles the /Separation
             // arm and surfaces (PMS185, components[0]). ~keep
             extract_paint_spot_inks(&underlying, components, doc)
-        },
+        }
         "DeviceN" => {
             let names_obj = match arr.get(1) {
                 Some(o) => deref(o),
@@ -990,8 +958,7 @@ pub(crate) fn extract_paint_spot_inks(
             // `extract_process_paint_cmyk` policy (which returns None
             // and falls through). HONEST_GAP_DEVICEN_PROCESS_MISMATCHED
             // _NAMES documents the open question. ~keep
-            let process_names: std::collections::HashSet<String> =
-                process_names_if_valid_prefix(arr, names, &deref);
+            let process_names: std::collections::HashSet<String> = process_names_if_valid_prefix(arr, names, &deref);
 
             let mut out = Vec::with_capacity(names.len());
             for (i, ink_obj) in names.iter().enumerate() {
@@ -1011,7 +978,7 @@ pub(crate) fn extract_paint_spot_inks(
                 out.push((ink.to_string(), tint));
             }
             out
-        },
+        }
         _ => Vec::new(),
     }
 }
@@ -1052,10 +1019,8 @@ fn process_names_if_valid_prefix(
     if proc_components.is_empty() {
         return std::collections::HashSet::new();
     }
-    let names_set: std::collections::HashSet<String> = names
-        .iter()
-        .filter_map(|o| o.as_name().map(str::to_string))
-        .collect();
+    let names_set: std::collections::HashSet<String> =
+        names.iter().filter_map(|o| o.as_name().map(str::to_string)).collect();
     if proc_components.iter().all(|c| names_set.contains(c)) {
         proc_components.into_iter().collect()
     } else {
@@ -1127,8 +1092,7 @@ pub(crate) fn extract_process_paint_cmyk(
     if arr.first().and_then(Object::as_name)? != "DeviceN" {
         return None;
     }
-    let deref =
-        |obj: &Object| -> Object { doc.resolve_object(obj).unwrap_or_else(|_| obj.clone()) };
+    let deref = |obj: &Object| -> Object { doc.resolve_object(obj).unwrap_or_else(|_| obj.clone()) };
 
     // Parent /Names array — every colorant name appears here in source
     // declaration order. The source tints (`components`) index into
@@ -1136,13 +1100,10 @@ pub(crate) fn extract_process_paint_cmyk(
     let names_obj = deref(arr.get(1)?);
     let names = names_obj.as_array()?;
     let name_index = |target: &str| -> Option<usize> {
-        names
-            .iter()
-            .enumerate()
-            .find_map(|(i, o)| match o.as_name() {
-                Some(n) if n == target => Some(i),
-                _ => None,
-            })
+        names.iter().enumerate().find_map(|(i, o)| match o.as_name() {
+            Some(n) if n == target => Some(i),
+            _ => None,
+        })
     };
 
     let attrs_obj = deref(arr.get(4)?);
@@ -1199,7 +1160,7 @@ pub(crate) fn extract_process_paint_cmyk(
                     return None;
                 }
                 Some((proc_tints[0], proc_tints[1], proc_tints[2], proc_tints[3]))
-            },
+            }
             "DeviceRGB" | "RGB" => {
                 // §10.3.5 additive-clamp inverse: C = 1-R, M = 1-G,
                 // Y = 1-B, K = 0. Per §8.6.6.5 the process tints are
@@ -1212,7 +1173,7 @@ pub(crate) fn extract_process_paint_cmyk(
                 let m = (1.0 - proc_tints[1]).clamp(0.0, 1.0);
                 let y = (1.0 - proc_tints[2]).clamp(0.0, 1.0);
                 Some((c, m, y, 0.0))
-            },
+            }
             "DeviceGray" | "G" => {
                 // Gray → CMYK convention used by every device-space arm
                 // in the renderer: K = 1 − g, C = M = Y = 0. ~keep
@@ -1221,7 +1182,7 @@ pub(crate) fn extract_process_paint_cmyk(
                 }
                 let k = (1.0 - proc_tints[0]).clamp(0.0, 1.0);
                 Some((0.0, 0.0, 0.0, k))
-            },
+            }
             _ => None,
         };
     }
@@ -1292,17 +1253,13 @@ pub(crate) fn extract_process_paint_cmyk(
                 //
                 // See HONEST_GAP_DEVICEN_PROCESS_ICC_PROFILE_MISMATCH
                 // for the three-state matrix. ~keep
-                if let Some(retargeted) = try_retarget_cmyk_via_embedded_profile(
-                    cs_arr,
-                    &proc_tints,
-                    doc,
-                    rendering_intent,
-                    retarget_cache,
-                ) {
+                if let Some(retargeted) =
+                    try_retarget_cmyk_via_embedded_profile(cs_arr, &proc_tints, doc, rendering_intent, retarget_cache)
+                {
                     return Some(retargeted);
                 }
                 Some((proc_tints[0], proc_tints[1], proc_tints[2], proc_tints[3]))
-            },
+            }
             3 => {
                 if proc_tints.len() < 3 {
                     return None;
@@ -1311,14 +1268,14 @@ pub(crate) fn extract_process_paint_cmyk(
                 let m = (1.0 - proc_tints[1]).clamp(0.0, 1.0);
                 let y = (1.0 - proc_tints[2]).clamp(0.0, 1.0);
                 Some((c, m, y, 0.0))
-            },
+            }
             1 => {
                 if proc_tints.is_empty() {
                     return None;
                 }
                 let k = (1.0 - proc_tints[0]).clamp(0.0, 1.0);
                 Some((0.0, 0.0, 0.0, k))
-            },
+            }
             _ => None,
         };
     }
@@ -1422,9 +1379,7 @@ fn try_retarget_cmyk_via_embedded_profile(
     // no-cache path stays around for non-rendering callers (e.g.
     // initial-colour evaluation in colour-space setup). ~keep
     let transform: Arc<crate::color::CmykRetargetTransform> = match retarget_cache {
-        Some(cache) => {
-            cache.get_or_build_cmyk_retarget(&src_profile, &dst_profile, rendering_intent)?
-        },
+        Some(cache) => cache.get_or_build_cmyk_retarget(&src_profile, &dst_profile, rendering_intent)?,
         None => Arc::new(crate::color::CmykRetargetTransform::new(
             src_profile,
             dst_profile,
@@ -1496,8 +1451,7 @@ pub(crate) fn initial_colour_for_space(
     rendering_intent: crate::color::RenderingIntent,
     retarget_cache: Option<&crate::rendering::resolution::context::IccTransformCache>,
 ) -> InitialColour {
-    let deref =
-        |obj: &Object| -> Object { doc.resolve_object(obj).unwrap_or_else(|_| obj.clone()) };
+    let deref = |obj: &Object| -> Object { doc.resolve_object(obj).unwrap_or_else(|_| obj.clone()) };
 
     match space_name {
         "DeviceGray" | "G" | "CalGray" => {
@@ -1507,7 +1461,7 @@ pub(crate) fn initial_colour_for_space(
                 cmyk: None,
                 spot_inks: Vec::new(),
             };
-        },
+        }
         "DeviceRGB" | "RGB" | "CalRGB" => {
             return InitialColour {
                 components: vec![0.0, 0.0, 0.0],
@@ -1515,7 +1469,7 @@ pub(crate) fn initial_colour_for_space(
                 cmyk: None,
                 spot_inks: Vec::new(),
             };
-        },
+        }
         "DeviceCMYK" | "CMYK" => {
             // Initial CMYK is (0, 0, 0, 1) — pure black per §8.6.8. ~keep
             let (r, g, b) = (0.0_f32, 0.0_f32, 0.0_f32);
@@ -1525,7 +1479,7 @@ pub(crate) fn initial_colour_for_space(
                 cmyk: Some((0.0, 0.0, 0.0, 1.0)),
                 spot_inks: Vec::new(),
             };
-        },
+        }
         "Pattern" => {
             return InitialColour {
                 components: Vec::new(),
@@ -1533,8 +1487,8 @@ pub(crate) fn initial_colour_for_space(
                 cmyk: None,
                 spot_inks: Vec::new(),
             };
-        },
-        _ => {},
+        }
+        _ => {}
     }
 
     let arr = match resolved_space.and_then(Object::as_array) {
@@ -1546,7 +1500,7 @@ pub(crate) fn initial_colour_for_space(
                 cmyk: None,
                 spot_inks: Vec::new(),
             };
-        },
+        }
     };
     let type_name = arr.first().and_then(Object::as_name).unwrap_or("");
     match type_name {
@@ -1576,18 +1530,14 @@ pub(crate) fn initial_colour_for_space(
             // common case); a custom /Range that excludes 0 is rare
             // and the rasteriser will clamp downstream anyway. ~keep
             let components = vec![0.0_f32; n.max(1) as usize];
-            let cmyk = if n == 4 {
-                Some((0.0, 0.0, 0.0, 0.0))
-            } else {
-                None
-            };
+            let cmyk = if n == 4 { Some((0.0, 0.0, 0.0, 0.0)) } else { None };
             InitialColour {
                 components,
                 rgb: (0.0, 0.0, 0.0),
                 cmyk,
                 spot_inks: Vec::new(),
             }
-        },
+        }
         "Indexed" => InitialColour {
             components: vec![0.0],
             rgb: (0.0, 0.0, 0.0),
@@ -1615,7 +1565,7 @@ pub(crate) fn initial_colour_for_space(
                 cmyk: None,
                 spot_inks,
             }
-        },
+        }
         "DeviceN" => {
             let names_obj = arr.get(1).map(deref);
             let names = names_obj
@@ -1643,12 +1593,7 @@ pub(crate) fn initial_colour_for_space(
                 .map(deref)
                 .as_ref()
                 .and_then(Object::as_array)
-                .map(|comps| {
-                    comps
-                        .iter()
-                        .filter_map(|o| o.as_name().map(str::to_string))
-                        .collect()
-                })
+                .map(|comps| comps.iter().filter_map(|o| o.as_name().map(str::to_string)).collect())
                 .unwrap_or_default();
             let spot_inks: Vec<(String, f32)> = names
                 .iter()
@@ -1682,7 +1627,7 @@ pub(crate) fn initial_colour_for_space(
                 cmyk,
                 spot_inks,
             }
-        },
+        }
         "Pattern" => InitialColour {
             components: Vec::new(),
             rgb: (0.0, 0.0, 0.0),
@@ -1704,7 +1649,10 @@ mod tests {
 
     #[test]
     fn classify_normal_is_separable_white_preserving() {
-        assert_eq!(BlendModeClass::from_name("Normal"), BlendModeClass::SeparableWhitePreserving);
+        assert_eq!(
+            BlendModeClass::from_name("Normal"),
+            BlendModeClass::SeparableWhitePreserving
+        );
     }
 
     #[test]
@@ -1866,11 +1814,7 @@ mod tests {
     where
         S: tracing::Subscriber,
     {
-        fn on_event(
-            &self,
-            event: &tracing::Event<'_>,
-            _ctx: tracing_subscriber::layer::Context<'_, S>,
-        ) {
+        fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
             if *event.metadata().level() > tracing::Level::WARN {
                 return;
             }
@@ -1913,8 +1857,7 @@ mod tests {
     fn discover_page_spot_inks_warns_on_deep_walk_error() {
         use tracing_subscriber::layer::SubscriberExt as _;
 
-        let buf: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let buf: std::sync::Arc<std::sync::Mutex<Vec<String>>> = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let subscriber = tracing_subscriber::registry().with(CapturingLayer { buf: buf.clone() });
 
         // Single-page synthetic PDF. We will then ask for page 42 — out
@@ -1933,8 +1876,7 @@ mod tests {
             .to_vec();
         let doc = PdfDocument::from_bytes(pdf).expect("synthetic PDF parses");
 
-        let spots =
-            tracing::subscriber::with_default(subscriber, || discover_page_spot_inks(&doc, 42));
+        let spots = tracing::subscriber::with_default(subscriber, || discover_page_spot_inks(&doc, 42));
         assert!(
             spots.is_empty(),
             "discover_page_spot_inks must return an empty vec on \
@@ -1945,9 +1887,7 @@ mod tests {
         // The warning message names the page index and includes the
         // word "spot inks" so a log scrape can find it. ~keep
         let records: Vec<String> = buf.lock().unwrap().clone();
-        let saw_warning = records
-            .iter()
-            .any(|m| m.contains("page 42") && m.contains("spot inks"));
+        let saw_warning = records.iter().any(|m| m.contains("page 42") && m.contains("spot inks"));
         assert!(
             saw_warning,
             "expected tracing::warn! naming page 42 and 'spot inks' on the \
@@ -2164,10 +2104,7 @@ mod tests {
     /// page-content stream. Returns the parsed `PdfDocument` and the
     /// page's `/Resources` dictionary so callers can hand both to
     /// `page_declares_transparency_*`.
-    fn build_doc_with_resources_and_objs(
-        resources_inner: &str,
-        extra_objs: &[&str],
-    ) -> (PdfDocument, Object) {
+    fn build_doc_with_resources_and_objs(resources_inner: &str, extra_objs: &[&str]) -> (PdfDocument, Object) {
         let mut buf: Vec<u8> = Vec::new();
         buf.extend_from_slice(b"%PDF-1.4\n");
         let cat_off = buf.len();
@@ -2196,9 +2133,7 @@ mod tests {
 
         let xref_off = buf.len();
         let total_objs = 4 + extra_objs.len();
-        buf.extend_from_slice(
-            format!("xref\n0 {}\n0000000000 65535 f \n", total_objs + 1).as_bytes(),
-        );
+        buf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", total_objs + 1).as_bytes());
         for off in [cat_off, pages_off, page_off, stream_off] {
             buf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
         }

@@ -13,24 +13,13 @@ use std::io::Cursor;
 ///
 /// Bytes 0x00..0x7F are identical to ASCII and are handled by the caller.
 /// This table covers 0x80..0xFF per Apple's Mac Roman → Unicode reference.
-#[rustfmt::skip]
 const MAC_ROMAN_HIGH: [char; 128] = [
-    'Ä', 'Å', 'Ç', 'É', 'Ñ', 'Ö', 'Ü', 'á',
-    'à', 'â', 'ä', 'ã', 'å', 'ç', 'é', 'è',
-    'ê', 'ë', 'í', 'ì', 'î', 'ï', 'ñ', 'ó',
-    'ò', 'ô', 'ö', 'õ', 'ú', 'ù', 'û', 'ü',
-    '†', '°', '¢', '£', '§', '•', '¶', 'ß',
-    '®', '©', '™', '´', '¨', '≠', 'Æ', 'Ø',
-    '∞', '±', '≤', '≥', '¥', 'µ', '∂', '∑',
-    '∏', 'π', '∫', 'ª', 'º', 'Ω', 'æ', 'ø',
-    '¿', '¡', '¬', '√', 'ƒ', '≈', '∆', '«',
-    '»', '…', '\u{00A0}', 'À', 'Ã', 'Õ', 'Œ', 'œ',
-    '–', '—', '"', '"', '\'', '\'', '÷', '◊',
-    'ÿ', 'Ÿ', '⁄', '€', '‹', '›', 'ﬁ', 'ﬂ',
-    '‡', '·', '‚', '„', '‰', 'Â', 'Ê', 'Á',
-    'Ë', 'È', 'Í', 'Î', 'Ï', 'Ì', 'Ó', 'Ô',
-    '\u{F8FF}', 'Ò', 'Ú', 'Û', 'Ù', 'ı', 'ˆ', '˜',
-    '¯', '˘', '˙', '˚', '¸', '˝', '˛', 'ˇ',
+    'Ä', 'Å', 'Ç', 'É', 'Ñ', 'Ö', 'Ü', 'á', 'à', 'â', 'ä', 'ã', 'å', 'ç', 'é', 'è', 'ê', 'ë', 'í', 'ì', 'î', 'ï', 'ñ',
+    'ó', 'ò', 'ô', 'ö', 'õ', 'ú', 'ù', 'û', 'ü', '†', '°', '¢', '£', '§', '•', '¶', 'ß', '®', '©', '™', '´', '¨', '≠',
+    'Æ', 'Ø', '∞', '±', '≤', '≥', '¥', 'µ', '∂', '∑', '∏', 'π', '∫', 'ª', 'º', 'Ω', 'æ', 'ø', '¿', '¡', '¬', '√', 'ƒ',
+    '≈', '∆', '«', '»', '…', '\u{00A0}', 'À', 'Ã', 'Õ', 'Œ', 'œ', '–', '—', '"', '"', '\'', '\'', '÷', '◊', 'ÿ', 'Ÿ',
+    '⁄', '€', '‹', '›', 'ﬁ', 'ﬂ', '‡', '·', '‚', '„', '‰', 'Â', 'Ê', 'Á', 'Ë', 'È', 'Í', 'Î', 'Ï', 'Ì', 'Ó', 'Ô',
+    '\u{F8FF}', 'Ò', 'Ú', 'Û', 'Ù', 'ı', 'ˆ', '˜', '¯', '˘', '˙', '˚', '¸', '˝', '˛', 'ˇ',
 ];
 
 #[inline]
@@ -62,16 +51,9 @@ impl TrueTypeCMap {
     pub fn from_font_data(data: &[u8]) -> Result<Self, String> {
         let mut cursor = Cursor::new(data);
 
-        let (num_tables, search_range, entry_selector, range_shift) =
-            Self::parse_sfnt_header(&mut cursor)?;
+        let (num_tables, search_range, entry_selector, range_shift) = Self::parse_sfnt_header(&mut cursor)?;
 
-        let cmap_offset = Self::find_cmap_table(
-            &mut cursor,
-            num_tables,
-            search_range,
-            entry_selector,
-            range_shift,
-        )?;
+        let cmap_offset = Self::find_cmap_table(&mut cursor, num_tables, search_range, entry_selector, range_shift)?;
 
         cursor.set_position(cmap_offset as u64);
         let cmap_version = cursor
@@ -331,16 +313,14 @@ impl TrueTypeCMap {
     fn parse_cmap_format4(cursor: &mut Cursor<&[u8]>) -> Result<HashMap<u16, char>, String> {
         let _length = cursor
             .read_u16::<BigEndian>()
-            .map_err(|e| format!("Failed to read format 4 length: {}", e))?
-            as u32;
+            .map_err(|e| format!("Failed to read format 4 length: {}", e))? as u32;
         let _language = cursor
             .read_u16::<BigEndian>()
             .map_err(|e| format!("Failed to read format 4 language: {}", e))?;
 
         let seg_count_x2 = cursor
             .read_u16::<BigEndian>()
-            .map_err(|e| format!("Failed to read segCountX2: {}", e))?
-            as usize;
+            .map_err(|e| format!("Failed to read segCountX2: {}", e))? as usize;
         let seg_count = seg_count_x2 / 2;
 
         let _search_range = cursor
@@ -407,17 +387,11 @@ impl TrueTypeCMap {
                 } else {
                     // Per TrueType spec: index into glyphIdArray
                     // offset = idRangeOffset[i]/2 + (charCode - startCode[i]) + i - segCount ~keep
-                    let offset = (id_range_offsets[seg] as usize) / 2
-                        + (char_code as usize - start as usize)
-                        + seg
-                        - seg_count;
+                    let offset =
+                        (id_range_offsets[seg] as usize) / 2 + (char_code as usize - start as usize) + seg - seg_count;
                     if offset < glyph_id_array.len() {
                         let raw = glyph_id_array[offset];
-                        if raw != 0 {
-                            (raw as i32 + id_delta) as u16
-                        } else {
-                            0
-                        }
+                        if raw != 0 { (raw as i32 + id_delta) as u16 } else { 0 }
                     } else {
                         0
                     }
@@ -481,8 +455,7 @@ impl TrueTypeCMap {
 
         let num_groups = cursor
             .read_u32::<BigEndian>()
-            .map_err(|e| format!("Failed to read numGroups: {}", e))?
-            as usize;
+            .map_err(|e| format!("Failed to read numGroups: {}", e))? as usize;
 
         let mut gid_to_unicode = HashMap::new();
 
@@ -637,8 +610,7 @@ mod tests {
         data.write_u32::<BigEndian>(4 + 8).unwrap();
 
         data.write_u16::<BigEndian>(6).unwrap();
-        data.write_u16::<BigEndian>((10 + gids.len() * 2) as u16)
-            .unwrap();
+        data.write_u16::<BigEndian>((10 + gids.len() * 2) as u16).unwrap();
         data.write_u16::<BigEndian>(0).unwrap();
         data.write_u16::<BigEndian>(first_code).unwrap();
         data.write_u16::<BigEndian>(gids.len() as u16).unwrap();
@@ -673,8 +645,7 @@ mod tests {
 
         data.write_u16::<BigEndian>(12).unwrap();
         data.write_u16::<BigEndian>(0).unwrap();
-        data.write_u32::<BigEndian>((16 + groups.len() * 12) as u32)
-            .unwrap();
+        data.write_u32::<BigEndian>((16 + groups.len() * 12) as u32).unwrap();
         data.write_u32::<BigEndian>(0).unwrap();
         data.write_u32::<BigEndian>(groups.len() as u32).unwrap();
         for &(start, end, start_gid) in groups {
@@ -1057,11 +1028,7 @@ mod tests {
 
         let result = TrueTypeCMap::from_font_data(&data);
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Unsupported cmap table version")
-        );
+        assert!(result.unwrap_err().contains("Unsupported cmap table version"));
     }
 
     #[test]

@@ -263,11 +263,7 @@ impl XYCutStrategy {
             .filter(|&sz| sz > 0.0)
             .collect();
         let median_body = if non_bold_sizes.is_empty() {
-            let mut sizes: Vec<f32> = spans
-                .iter()
-                .map(|s| s.font_size)
-                .filter(|&sz| sz > 0.0)
-                .collect();
+            let mut sizes: Vec<f32> = spans.iter().map(|s| s.font_size).filter(|&sz| sz > 0.0).collect();
             if sizes.is_empty() {
                 return Vec::new();
             }
@@ -279,8 +275,7 @@ impl XYCutStrategy {
         };
         let heading_size_floor = median_body * 1.15;
 
-        let is_heading_like =
-            |s: &TextSpan| -> bool { s.font_weight.is_bold() || s.font_size > heading_size_floor };
+        let is_heading_like = |s: &TextSpan| -> bool { s.font_weight.is_bold() || s.font_size > heading_size_floor };
 
         // Sort indices by reading order (top of page first; Rect::top()
         // is the SMALLER Y of the normalized rect — see comment at
@@ -337,12 +332,7 @@ impl XYCutStrategy {
             // line_height = max of the two spans' bbox heights, plus a
             // floor of font_size to handle ascender-only / descender-only
             // glyphs with collapsed bboxes. ~keep
-            let line_h = last
-                .bbox
-                .height
-                .max(span.bbox.height)
-                .max(last.font_size)
-                .max(1.0);
+            let line_h = last.bbox.height.max(span.bbox.height).max(last.font_size).max(1.0);
             let leading_tolerance = line_h * 1.5;
 
             // PDF coords: y grows up, so the wrapped line sits at a
@@ -404,11 +394,7 @@ impl XYCutStrategy {
     ///   synthetic span `k`. Length 1 for pass-throughs, ≥ 2 for
     ///   heading-run placeholders. Used by `expand_blocks` to project
     ///   partition output back into original-span space.
-    fn synthesize_for_partition(
-        &self,
-        spans: &[TextSpan],
-        runs: &[HeadingRun],
-    ) -> (Vec<TextSpan>, Vec<Vec<usize>>) {
+    fn synthesize_for_partition(&self, spans: &[TextSpan], runs: &[HeadingRun]) -> (Vec<TextSpan>, Vec<Vec<usize>>) {
         let mut in_run: Vec<Option<usize>> = vec![None; spans.len()];
         for (r_idx, run) in runs.iter().enumerate() {
             for &i in &run.span_indices {
@@ -425,7 +411,7 @@ impl XYCutStrategy {
                 None => {
                     synthetic.push(span.clone());
                     origins.push(vec![i]);
-                },
+                }
                 Some(r_idx) if !emitted_run[r_idx] => {
                     let run = &runs[r_idx];
                     let mut placeholder = span.clone();
@@ -445,8 +431,8 @@ impl XYCutStrategy {
                     synthetic.push(placeholder);
                     origins.push(run.span_indices.clone());
                     emitted_run[r_idx] = true;
-                },
-                Some(_) => {},
+                }
+                Some(_) => {}
             }
         }
 
@@ -488,12 +474,7 @@ impl XYCutStrategy {
     /// singleton peels, so without a cap a page with many distinct-Y
     /// header/footer strips can recurse O(n) deep (O(n² log n) work);
     /// `MAX_PARTITION_DEPTH` bounds it.
-    fn partition_indexed_depth(
-        &self,
-        all_spans: &[TextSpan],
-        indices: &[usize],
-        depth: u32,
-    ) -> Vec<Vec<usize>> {
+    fn partition_indexed_depth(&self, all_spans: &[TextSpan], indices: &[usize], depth: u32) -> Vec<Vec<usize>> {
         if indices.is_empty() {
             return Vec::new();
         }
@@ -525,10 +506,7 @@ impl XYCutStrategy {
         // this scale. Falls back to the flat Y-then-X sort when no clean
         // gutter is found at all (ordinary short single-column snippets). ~keep
         if indices.len() < self.min_spans_for_split {
-            if self
-                .find_horizontal_split_indexed(all_spans, indices)
-                .is_some()
-            {
+            if self.find_horizontal_split_indexed(all_spans, indices).is_some() {
                 let mut stream_order: Vec<usize> = indices.to_vec();
                 stream_order.sort_by_key(|&i| all_spans[i].sequence);
                 return vec![stream_order];
@@ -641,21 +619,11 @@ impl XYCutStrategy {
             return vec![self.sort_indices(all_spans, indices)];
         }
 
-        let split_h =
-            |s: &Self, sp: &[TextSpan], idx: &[usize]| s.find_horizontal_split_indexed(sp, idx);
-        let split_v =
-            |s: &Self, sp: &[TextSpan], idx: &[usize]| s.find_vertical_split_indexed(sp, idx);
+        let split_h = |s: &Self, sp: &[TextSpan], idx: &[usize]| s.find_horizontal_split_indexed(sp, idx);
+        let split_v = |s: &Self, sp: &[TextSpan], idx: &[usize]| s.find_vertical_split_indexed(sp, idx);
 
-        let first_split = if self.prefer_horizontal {
-            split_h
-        } else {
-            split_v
-        };
-        let second_split = if self.prefer_horizontal {
-            split_v
-        } else {
-            split_h
-        };
+        let first_split = if self.prefer_horizontal { split_h } else { split_v };
+        let second_split = if self.prefer_horizontal { split_v } else { split_h };
 
         if let Some((a, b)) = first_split(self, all_spans, indices) {
             let mut result = self.partition_indexed_depth(all_spans, &a, depth + 1);
@@ -698,8 +666,7 @@ impl XYCutStrategy {
             return RegionKind::Mixed;
         }
 
-        let mut lines: std::collections::BTreeMap<i32, (f32, f32, usize)> =
-            std::collections::BTreeMap::new();
+        let mut lines: std::collections::BTreeMap<i32, (f32, f32, usize)> = std::collections::BTreeMap::new();
         for &i in indices {
             let s = &all_spans[i];
             let y_key = s.bbox.top().round() as i32;
@@ -765,9 +732,7 @@ impl XYCutStrategy {
         // boundaries), centre (the dominant gap sits off-centre),
         // char-balance (the label column is tiny), or left-edge clusters
         // (≥ 3 columns). The long-line accept path above is byte-unchanged. ~keep
-        if mean_chars <= 20.0
-            && self.short_line_central_corridor_prose(all_spans, indices, x_min, region_width)
-        {
+        if mean_chars <= 20.0 && self.short_line_central_corridor_prose(all_spans, indices, x_min, region_width) {
             return RegionKind::Prose;
         }
 
@@ -824,8 +789,7 @@ impl XYCutStrategy {
 
         // Re-cluster spans into lines, keeping PER-SPAN (left, right, chars)
         // so we can find the within-line gutter gap and split char mass. ~keep
-        let mut lines: std::collections::BTreeMap<i32, Vec<(f32, f32, usize)>> =
-            std::collections::BTreeMap::new();
+        let mut lines: std::collections::BTreeMap<i32, Vec<(f32, f32, usize)>> = std::collections::BTreeMap::new();
         for &i in indices {
             let s = &all_spans[i];
             let y_key = s.bbox.top().round() as i32;
@@ -923,9 +887,7 @@ impl XYCutStrategy {
         if total_chars == 0 {
             return false;
         }
-        if (left_chars as f32) < total_chars as f32 * 0.35
-            || (right_chars as f32) < total_chars as f32 * 0.35
-        {
+        if (left_chars as f32) < total_chars as f32 * 0.35 || (right_chars as f32) < total_chars as f32 * 0.35 {
             return false;
         }
 
@@ -1013,8 +975,7 @@ impl XYCutStrategy {
         // on the same Y baseline. The whole-line bbox.right -
         // bbox.left = 358 pt looks "wide" (358 > 0.6 × 500 = 300)
         // even though each side is a narrow column half. ~keep
-        let mut lines_spans: std::collections::BTreeMap<i32, Vec<(f32, f32)>> =
-            std::collections::BTreeMap::new();
+        let mut lines_spans: std::collections::BTreeMap<i32, Vec<(f32, f32)>> = std::collections::BTreeMap::new();
         for &i in indices {
             let s = &all_spans[i];
             let y_key = s.bbox.top().round() as i32;
@@ -1085,10 +1046,7 @@ impl XYCutStrategy {
         let cluster_radius = 30.0_f32;
         let mut clusters: Vec<(f32, usize)> = Vec::new();
         for &x in &narrow_lefts {
-            if let Some(c) = clusters
-                .iter_mut()
-                .find(|(c, _)| (*c - x).abs() <= cluster_radius)
-            {
+            if let Some(c) = clusters.iter_mut().find(|(c, _)| (*c - x).abs() <= cluster_radius) {
                 let count = c.1 as f32;
                 c.0 = (c.0 * count + x) / (count + 1.0);
                 c.1 += 1;
@@ -1188,15 +1146,11 @@ impl XYCutStrategy {
             return None;
         }
 
-        let mut lines: std::collections::BTreeMap<i32, Vec<(f32, f32)>> =
-            std::collections::BTreeMap::new();
+        let mut lines: std::collections::BTreeMap<i32, Vec<(f32, f32)>> = std::collections::BTreeMap::new();
         for &i in indices {
             let s = &all_spans[i];
             let y_key = s.bbox.top().round() as i32;
-            lines
-                .entry(y_key)
-                .or_default()
-                .push((s.bbox.left(), s.bbox.right()));
+            lines.entry(y_key).or_default().push((s.bbox.left(), s.bbox.right()));
         }
         if lines.len() < 12 {
             return None;
@@ -1338,8 +1292,7 @@ impl XYCutStrategy {
         // a conservative fallback used ONLY when adjacent bbox edges
         // overlap (a signal of bbox inflation).
         // ~keep
-        let mut lines: std::collections::BTreeMap<i32, Vec<(f32, f32, f32)>> =
-            std::collections::BTreeMap::new();
+        let mut lines: std::collections::BTreeMap<i32, Vec<(f32, f32, f32)>> = std::collections::BTreeMap::new();
         for &i in indices {
             let s = &all_spans[i];
             let y_key = s.bbox.top().round() as i32;
@@ -1568,9 +1521,8 @@ impl XYCutStrategy {
         // for wide single-column body spans the center can also drift
         // past the split. Left edge is anchored to the true glyph start
         // and reliably places each span into its actual column. ~keep
-        let (left, right): (Vec<usize>, Vec<usize>) = indices
-            .iter()
-            .partition(|&&i| all_spans[i].bbox.left() < split_x);
+        let (left, right): (Vec<usize>, Vec<usize>) =
+            indices.iter().partition(|&&i| all_spans[i].bbox.left() < split_x);
 
         if left.is_empty() || right.is_empty() {
             return None;
@@ -1686,10 +1638,8 @@ impl XYCutStrategy {
             // in the reading-order code so `density` sentinel values can't
             // reach a `partial_cmp` that maps them to `Equal`. ~keep
             let mid = n / 2;
-            let left_peak =
-                (0..mid).max_by(|&a, &b| crate::utils::safe_float_cmp(smoothed[a], smoothed[b]))?;
-            let right_peak =
-                (mid..n).max_by(|&a, &b| crate::utils::safe_float_cmp(smoothed[a], smoothed[b]))?;
+            let left_peak = (0..mid).max_by(|&a, &b| crate::utils::safe_float_cmp(smoothed[a], smoothed[b]))?;
+            let right_peak = (mid..n).max_by(|&a, &b| crate::utils::safe_float_cmp(smoothed[a], smoothed[b]))?;
 
             if smoothed[left_peak] == 0.0 || smoothed[right_peak] == 0.0 {
                 return None;
@@ -1701,17 +1651,15 @@ impl XYCutStrategy {
                 return None;
             }
 
-            let trough_pos = (search_start..search_end)
-                .min_by(|&a, &b| crate::utils::safe_float_cmp(smoothed[a], smoothed[b]))?;
+            let trough_pos =
+                (search_start..search_end).min_by(|&a, &b| crate::utils::safe_float_cmp(smoothed[a], smoothed[b]))?;
 
             let weaker_peak = smoothed[left_peak].min(smoothed[right_peak]);
             if smoothed[trough_pos] > weaker_peak * 0.5 {
                 return None;
             }
 
-            if trough_pos < self.min_valley_width as usize
-                || trough_pos + self.min_valley_width as usize > n
-            {
+            if trough_pos < self.min_valley_width as usize || trough_pos + self.min_valley_width as usize > n {
                 return None;
             }
 
@@ -1751,9 +1699,8 @@ impl XYCutStrategy {
         // projection valley (an empty band by construction), spans should
         // not straddle it in practice; any that do (e.g. a tall header
         // glyph whose ascenders dip into the valley) fall into `below`. ~keep
-        let (above, below): (Vec<usize>, Vec<usize>) = indices
-            .iter()
-            .partition(|&&i| all_spans[i].bbox.top() >= split_y);
+        let (above, below): (Vec<usize>, Vec<usize>) =
+            indices.iter().partition(|&&i| all_spans[i].bbox.top() >= split_y);
 
         if above.is_empty() || below.is_empty() {
             return None;
@@ -1772,11 +1719,7 @@ impl XYCutStrategy {
     }
 
     /// Calculate horizontal projection profile from indexed spans.
-    fn horizontal_projection_indexed(
-        &self,
-        all_spans: &[TextSpan],
-        indices: &[usize],
-    ) -> Option<ProjectionProfile> {
+    fn horizontal_projection_indexed(&self, all_spans: &[TextSpan], indices: &[usize]) -> Option<ProjectionProfile> {
         if indices.is_empty() {
             return None;
         }
@@ -1823,12 +1766,7 @@ impl XYCutStrategy {
         for &i in indices {
             let span = &all_spans[i];
             let height = span.bbox.bottom() - span.bbox.top();
-            let char_count = span
-                .text
-                .chars()
-                .filter(|c| !c.is_whitespace())
-                .count()
-                .max(1);
+            let char_count = span.text.chars().filter(|c| !c.is_whitespace()).count().max(1);
             // 0.45em per char is a reasonable average across common PDF
             // fonts (Helvetica/Times/Arial at body size) and narrower
             // than the 0.5em advance used for monospace. ~keep
@@ -1855,19 +1793,11 @@ impl XYCutStrategy {
             }
         }
 
-        Some(ProjectionProfile {
-            density,
-            x_min,
-            y_min,
-        })
+        Some(ProjectionProfile { density, x_min, y_min })
     }
 
     /// Calculate vertical projection profile from indexed spans.
-    fn vertical_projection_indexed(
-        &self,
-        all_spans: &[TextSpan],
-        indices: &[usize],
-    ) -> Option<ProjectionProfile> {
+    fn vertical_projection_indexed(&self, all_spans: &[TextSpan], indices: &[usize]) -> Option<ProjectionProfile> {
         if indices.is_empty() {
             return None;
         }
@@ -1907,11 +1837,7 @@ impl XYCutStrategy {
             }
         }
 
-        Some(ProjectionProfile {
-            density,
-            x_min,
-            y_min,
-        })
+        Some(ProjectionProfile { density, x_min, y_min })
     }
 
     /// Find the widest valley (white space gap) in projection profile.
@@ -2017,8 +1943,7 @@ impl XYCutStrategy {
     fn sort_indices(&self, all_spans: &[TextSpan], indices: &[usize]) -> Vec<usize> {
         let mut sorted: Vec<usize> = indices.to_vec();
         sorted.sort_by(|&a, &b| {
-            let y_cmp =
-                crate::utils::safe_float_cmp(all_spans[b].bbox.top(), all_spans[a].bbox.top());
+            let y_cmp = crate::utils::safe_float_cmp(all_spans[b].bbox.top(), all_spans[a].bbox.top());
             if y_cmp != std::cmp::Ordering::Equal {
                 return y_cmp;
             }
@@ -2039,11 +1964,7 @@ struct ProjectionProfile {
 }
 
 impl ReadingOrderStrategy for XYCutStrategy {
-    fn apply(
-        &self,
-        spans: Vec<TextSpan>,
-        _context: &ReadingOrderContext,
-    ) -> Result<Vec<OrderedTextSpan>> {
+    fn apply(&self, spans: Vec<TextSpan>, _context: &ReadingOrderContext) -> Result<Vec<OrderedTextSpan>> {
         // Detects multi-line heading runs and routes the
         // partition through synthetic-span space so the splitter treats
         // each wrapped heading as a single atomic block. When no
@@ -2055,8 +1976,7 @@ impl ReadingOrderStrategy for XYCutStrategy {
             let indices: Vec<usize> = (0..spans.len()).collect();
             self.partition_indexed(&spans, &indices)
         } else {
-            let (synthetic, synthetic_origin) =
-                self.synthesize_for_partition(&spans, &heading_runs);
+            let (synthetic, synthetic_origin) = self.synthesize_for_partition(&spans, &heading_runs);
             let synth_indices: Vec<usize> = (0..synthetic.len()).collect();
             let synth_groups = self.partition_indexed(&synthetic, &synth_indices);
             // Project synthetic-space groups back to ORIGINAL-span
@@ -2083,8 +2003,7 @@ impl ReadingOrderStrategy for XYCutStrategy {
             for &i in group {
                 if let Some(span) = span_slots[i].take() {
                     ordered.push(
-                        OrderedTextSpan::with_info(span, order_index, ReadingOrderInfo::xycut())
-                            .with_group(group_idx),
+                        OrderedTextSpan::with_info(span, order_index, ReadingOrderInfo::xycut()).with_group(group_idx),
                     );
                     order_index += 1;
                 }
@@ -2118,14 +2037,7 @@ mod tests {
         make_span_text(x, y, width, height, &text, 12.0)
     }
 
-    fn make_span_text(
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-        text: &str,
-        font_size: f32,
-    ) -> TextSpan {
+    fn make_span_text(x: f32, y: f32, width: f32, height: f32, text: &str, font_size: f32) -> TextSpan {
         use crate::layout::{Color, FontWeight};
 
         TextSpan {
@@ -2139,11 +2051,7 @@ mod tests {
             font_weight: FontWeight::Normal,
             is_italic: false,
             is_monospace: false,
-            color: Color {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-            },
+            color: Color { r: 0.0, g: 0.0, b: 0.0 },
             mcid: None,
             mcid_scope: None,
             sequence: 0,
@@ -2256,7 +2164,11 @@ mod tests {
         let ordered = strategy.apply(spans, &context).unwrap();
 
         let texts: Vec<&str> = ordered.iter().map(|o| o.span.text.as_str()).collect();
-        assert!(texts[0].contains("HEADER"), "expected HEADER first, got sequence {:?}", texts);
+        assert!(
+            texts[0].contains("HEADER"),
+            "expected HEADER first, got sequence {:?}",
+            texts
+        );
     }
 
     /// Single-column page with a tall header band ("Title" or "Chapter
@@ -2354,10 +2266,7 @@ mod tests {
     #[test]
     fn test_horizontal_projection() {
         let strategy = XYCutStrategy::new();
-        let spans = vec![
-            make_span(10.0, 100.0, 30.0, 10.0),
-            make_span(100.0, 100.0, 30.0, 10.0),
-        ];
+        let spans = vec![make_span(10.0, 100.0, 30.0, 10.0), make_span(100.0, 100.0, 30.0, 10.0)];
 
         if let Some(profile) = strategy.horizontal_projection(&spans) {
             assert!(!profile.density.is_empty());
@@ -2376,10 +2285,7 @@ mod tests {
     #[test]
     fn test_vertical_projection() {
         let strategy = XYCutStrategy::new();
-        let spans = vec![
-            make_span(10.0, 100.0, 50.0, 20.0),
-            make_span(10.0, 50.0, 50.0, 20.0),
-        ];
+        let spans = vec![make_span(10.0, 100.0, 50.0, 20.0), make_span(10.0, 50.0, 50.0, 20.0)];
 
         if let Some(profile) = strategy.vertical_projection(&spans) {
             assert!(!profile.density.is_empty());
@@ -2390,10 +2296,7 @@ mod tests {
     #[test]
     fn test_narrow_gap_rejected() {
         let strategy = XYCutStrategy::new();
-        let spans = vec![
-            make_span(10.0, 100.0, 30.0, 10.0),
-            make_span(45.0, 100.0, 30.0, 10.0),
-        ];
+        let spans = vec![make_span(10.0, 100.0, 30.0, 10.0), make_span(45.0, 100.0, 30.0, 10.0)];
 
         let groups = strategy.partition_region(&spans);
         assert_eq!(groups.len(), 1);
@@ -2647,14 +2550,21 @@ mod tests {
 
         let runs = strategy.find_heading_runs(&spans);
         assert_eq!(runs.len(), 1, "expected exactly one heading run, got {runs:?}");
-        assert_eq!(runs[0].span_indices.len(), 2, "expected the run to cover both heading lines");
+        assert_eq!(
+            runs[0].span_indices.len(),
+            2,
+            "expected the run to cover both heading lines"
+        );
 
         // A LONE bold span (no second line) must NOT be locked: that
         // case is a single-line heading that XY-cut already handles. ~keep
         let mut spans_single = vec![make_body_span(body_left, 720.0, body_width, 12.0); 5];
         spans_single.push(make_bold_span(body_left, 500.0, 180.0, "Lone Heading", 14.0));
         let runs_single = strategy.find_heading_runs(&spans_single);
-        assert!(runs_single.is_empty(), "single-line bold runs must not produce a HeadingRun");
+        assert!(
+            runs_single.is_empty(),
+            "single-line bold runs must not produce a HeadingRun"
+        );
     }
 
     /// fix-543 unit: the canonical repro shape — left-column 2-line
@@ -2711,10 +2621,7 @@ mod tests {
             .expect("heading line 1 must land in some group");
         let heading_second_group = groups
             .iter()
-            .position(|g| {
-                g.iter()
-                    .any(|s| s.text.contains("Advantages of Vari-linear Network"))
-            })
+            .position(|g| g.iter().any(|s| s.text.contains("Advantages of Vari-linear Network")))
             .expect("heading line 2 must land in some group");
 
         assert_eq!(
@@ -2827,16 +2734,7 @@ mod tests {
         // density is realistic. ~keep
         for i in 0..14 {
             let y = 600.0 - (i as f32) * 14.0;
-            let left_words = [
-                "Dwarf",
-                "spheroidal",
-                "galaxies",
-                "of",
-                "the",
-                "Local",
-                "Group",
-                "are",
-            ];
+            let left_words = ["Dwarf", "spheroidal", "galaxies", "of", "the", "Local", "Group", "are"];
             let mut x = 40.0;
             for w in left_words {
                 spans.push(make_word(x, y, w));
@@ -2884,9 +2782,7 @@ mod tests {
                 "group {} contains spans from both columns — the column split did \
                  not separate them: {:?}",
                 gi,
-                g.iter()
-                    .map(|s| (s.text.clone(), s.bbox.left()))
-                    .collect::<Vec<_>>()
+                g.iter().map(|s| (s.text.clone(), s.bbox.left())).collect::<Vec<_>>()
             );
         }
     }
@@ -2944,10 +2840,7 @@ mod tests {
         // Count groups that contain at least one body span (x < 100): ~keep
         let body_groups = groups
             .iter()
-            .filter(|g| {
-                g.iter()
-                    .any(|s| s.bbox.left() < 100.0 && s.text != "Figure")
-            })
+            .filter(|g| g.iter().any(|s| s.bbox.left() < 100.0 && s.text != "Figure"))
             .count();
         assert!(
             body_groups <= 1,
@@ -3020,11 +2913,7 @@ mod tests {
         );
         assert!(
             strategy
-                .detect_narrow_gutter_prose(
-                    &spans,
-                    &indices,
-                    strategy.classify_region_kind(&spans, &indices),
-                )
+                .detect_narrow_gutter_prose(&spans, &indices, strategy.classify_region_kind(&spans, &indices),)
                 .is_some(),
             "detect_narrow_gutter_prose must accept the routed short-verse \
              body (gutter found) so it is cut at the gutter"
@@ -3073,11 +2962,7 @@ mod tests {
         );
         assert!(
             strategy
-                .detect_narrow_gutter_prose(
-                    &spans,
-                    &indices,
-                    strategy.classify_region_kind(&spans, &indices),
-                )
+                .detect_narrow_gutter_prose(&spans, &indices, strategy.classify_region_kind(&spans, &indices),)
                 .is_none(),
             "detect_narrow_gutter_prose must reject the short-cell table \
              (no central-corridor Prose admission) so it is NOT cut"

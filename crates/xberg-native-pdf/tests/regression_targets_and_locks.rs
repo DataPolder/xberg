@@ -18,7 +18,10 @@ fn type0_pdf(runs: &[Run]) -> Vec<u8> {
     let mut content = String::new();
     for r in runs {
         let hex: String = r.codes.iter().map(|c| format!("{c:04X}")).collect();
-        content.push_str(&format!("BT /F1 12 Tf 1 0 0 1 {:.1} {:.1} Tm <{hex}> Tj ET\n", r.x, r.y));
+        content.push_str(&format!(
+            "BT /F1 12 Tf 1 0 0 1 {:.1} {:.1} Tm <{hex}> Tj ET\n",
+            r.x, r.y
+        ));
     }
     let mut pairs: Vec<(u16, char)> = Vec::new();
     for r in runs {
@@ -74,7 +77,12 @@ fn build_pdf(content: &str, type0: Option<(&str, &str)>) -> Vec<u8> {
         buf.extend_from_slice(format!("{id} 0 obj\n{body}\nendobj\n").as_bytes());
     };
     obj(&mut buf, &mut off, 1, "<< /Type /Catalog /Pages 2 0 R >>".into());
-    obj(&mut buf, &mut off, 2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into());
+    obj(
+        &mut buf,
+        &mut off,
+        2,
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+    );
     obj(
         &mut buf,
         &mut off,
@@ -128,8 +136,7 @@ fn build_pdf(content: &str, type0: Option<(&str, &str)>) -> Vec<u8> {
             &mut buf,
             &mut off,
             5,
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
-                .into(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".into(),
         );
     }
     let xref = buf.len();
@@ -195,7 +202,9 @@ fn rw1_full_width_title_reads_contiguously() {
     // Wide right body column (long lines from x≈195 across to ≈545), below the
     // sidebar block (real first-page layout: metadata block, then the body flow). ~keep
     for i in 0..24 {
-        owned.push(format!("Body line {i} reads across the wide main column of the page here now"));
+        owned.push(format!(
+            "Body line {i} reads across the wide main column of the page here now"
+        ));
     }
     let mut k = 0;
     for i in 0..8 {
@@ -302,5 +311,8 @@ fn subscript_unicode_codepoint_is_preserved() {
         text: "H\u{2082}O",
         codes: &[0x0001, 0x0002, 0x0003],
     }]));
-    assert!(t.contains("H\u{2082}O"), "subscript codepoint not preserved — got: {t:?}");
+    assert!(
+        t.contains("H\u{2082}O"),
+        "subscript codepoint not preserved — got: {t:?}"
+    );
 }

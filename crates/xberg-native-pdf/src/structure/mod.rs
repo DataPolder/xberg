@@ -51,18 +51,14 @@ pub use article_threads::{ArticleThread, Bead, parse_article_threads};
 pub use converter::StructureConverter;
 pub(crate) use parser::checked_mcid;
 pub use parser::{parse_structure_tree, parse_structure_tree_with_budget};
-pub use spatial_table_detector::{
-    DetectedTable, SpatialTableDetector, TableDetectionConfig, detect_tables_from_spans,
-};
+pub use spatial_table_detector::{DetectedTable, SpatialTableDetector, TableDetectionConfig, detect_tables_from_spans};
 pub use table_extractor::{
     Table, TableCell, TableRow, extract_table, extract_table_from_spans, find_table_elements,
     find_table_elements_all_pages,
 };
 pub use traversal::{
-    ListRole, OrderedContent, extract_reading_order, traverse_structure_tree,
-    traverse_structure_tree_all_pages,
+    ListRole, OrderedContent, extract_reading_order, traverse_structure_tree, traverse_structure_tree_all_pages,
 };
 pub use types::{
-    ActualTextIndex, MarkInfo, McidScope, ParentTree, StructChild, StructElem, StructTreeRoot,
-    StructType,
+    ActualTextIndex, MarkInfo, McidScope, ParentTree, StructChild, StructElem, StructTreeRoot, StructType,
 };

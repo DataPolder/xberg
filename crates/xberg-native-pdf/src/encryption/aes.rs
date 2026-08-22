@@ -32,7 +32,7 @@ fn map_err(e: crate::crypto::Error) -> &'static str {
         crate::crypto::Error::Backend(s) => s,
         crate::crypto::Error::AlgorithmNotPermitted { .. } => {
             "AES algorithm rejected by active CryptoProvider's policy"
-        },
+        }
     }
 }
 
@@ -59,11 +59,7 @@ pub fn aes128_encrypt(key: &[u8], iv: &[u8], data: &[u8]) -> Result<Vec<u8>, &'s
 ///
 /// Used by Algorithm 2.B (R=6) which handles its own data alignment.
 /// Data length must be a multiple of 16.
-pub fn aes128_encrypt_no_padding(
-    key: &[u8],
-    iv: &[u8],
-    data: &[u8],
-) -> Result<Vec<u8>, &'static str> {
+pub fn aes128_encrypt_no_padding(key: &[u8], iv: &[u8], data: &[u8]) -> Result<Vec<u8>, &'static str> {
     if data.is_empty() {
         return Ok(Vec::new());
     }
@@ -77,11 +73,7 @@ pub fn aes128_encrypt_no_padding(
 ///
 /// Used for R=6 file encryption key unwrapping (UE/OE decryption).
 /// Data length must be a multiple of 16.
-pub fn aes256_decrypt_no_padding(
-    key: &[u8],
-    iv: &[u8],
-    data: &[u8],
-) -> Result<Vec<u8>, &'static str> {
+pub fn aes256_decrypt_no_padding(key: &[u8], iv: &[u8], data: &[u8]) -> Result<Vec<u8>, &'static str> {
     if data.is_empty() {
         return Ok(Vec::new());
     }
@@ -95,11 +87,7 @@ pub fn aes256_decrypt_no_padding(
 ///
 /// Used for R>=5 file encryption key wrapping (UE/OE encryption).
 /// Data length must be a multiple of 16.
-pub fn aes256_encrypt_no_padding(
-    key: &[u8],
-    iv: &[u8],
-    data: &[u8],
-) -> Result<Vec<u8>, &'static str> {
+pub fn aes256_encrypt_no_padding(key: &[u8], iv: &[u8], data: &[u8]) -> Result<Vec<u8>, &'static str> {
     if data.is_empty() {
         return Ok(Vec::new());
     }

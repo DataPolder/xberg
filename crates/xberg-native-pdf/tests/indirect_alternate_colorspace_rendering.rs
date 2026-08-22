@@ -68,12 +68,7 @@ fn centre_pixel(pdf: Vec<u8>) -> [u8; 4] {
     let img = render_page(&doc, 0, &opts).expect("render");
     let (w, h) = (img.width as usize, img.height as usize);
     let at = (h / 2 * w + w / 2) * 4;
-    [
-        img.data[at],
-        img.data[at + 1],
-        img.data[at + 2],
-        img.data[at + 3],
-    ]
+    [img.data[at], img.data[at + 1], img.data[at + 2], img.data[at + 3]]
 }
 
 #[test]

@@ -105,11 +105,7 @@ impl SpacingConfig {
 /// # Returns
 ///
 /// `SpaceInsertion` indicating whether to insert a space.
-pub fn should_insert_space(
-    prev: &TextSpan,
-    next: &TextSpan,
-    config: &SpacingConfig,
-) -> SpaceInsertion {
+pub fn should_insert_space(prev: &TextSpan, next: &TextSpan, config: &SpacingConfig) -> SpaceInsertion {
     if has_boundary_whitespace(&prev.text, &next.text) {
         return SpaceInsertion::no();
     }
@@ -131,8 +127,7 @@ pub fn should_insert_space(
 /// Check if boundary between texts already has whitespace.
 #[inline]
 fn has_boundary_whitespace(prev: &str, next: &str) -> bool {
-    prev.chars().last().is_some_and(|c| c.is_whitespace())
-        || next.chars().next().is_some_and(|c| c.is_whitespace())
+    prev.chars().last().is_some_and(|c| c.is_whitespace()) || next.chars().next().is_some_and(|c| c.is_whitespace())
 }
 
 #[cfg(test)]

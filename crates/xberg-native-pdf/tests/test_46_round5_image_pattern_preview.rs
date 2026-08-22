@@ -264,12 +264,7 @@ fn b1_imagemask_do_inside_k_knockout_last_paint_wins_byte_exact() {
          /XObject << /K1 6 0 R >>",
         tint_func
     );
-    let pdf = build_pdf_with_output_intent(
-        content,
-        &resources,
-        &icc,
-        &[form_obj.as_str(), im_obj_str.as_str()],
-    );
+    let pdf = build_pdf_with_output_intent(content, &resources, &icc, &[form_obj.as_str(), im_obj_str.as_str()]);
     let doc = PdfDocument::from_bytes(pdf).expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
 
@@ -523,8 +518,7 @@ fn b2_pattern_with_separation_underlying_indirect_ref_byte_exact() {
     // index-1 underlying is an indirect reference, not an inline
     // array. This is the production-realistic shape: a shared
     // underlying space referenced by several Pattern declarations. ~keep
-    let underlying_obj =
-        format!("6 0 obj\n[/Separation /PMS185 /DeviceCMYK {}]\nendobj\n", tint_fn);
+    let underlying_obj = format!("6 0 obj\n[/Separation /PMS185 /DeviceCMYK {}]\nendobj\n", tint_fn);
     // Same paint sequence as B2 (the inline-array case). Byte-exact
     // outcome must match B2: the indirect ref classifies and walks
     // identically. ~keep

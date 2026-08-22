@@ -10,8 +10,7 @@ fn form_pdf(button_value: &str) -> Vec<u8> {
     let mut bodies: Vec<Vec<u8>> = vec![Vec::new(); 8];
     bodies[1] = b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 7 0 R] >> >>".to_vec();
     bodies[2] = b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec();
-    bodies[3] =
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [4 0 R 7 0 R] >>".to_vec();
+    bodies[3] = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Annots [4 0 R 7 0 R] >>".to_vec();
     bodies[4] = format!(
         "<< /Type /Annot /Subtype /Widget /FT /Btn /T (Answer) /V /{button_value} /AS /{button_value} \
          /Rect [10 10 30 30] /AP << /N << /No 5 0 R /Off 6 0 R >> >> >>"
@@ -19,9 +18,7 @@ fn form_pdf(button_value: &str) -> Vec<u8> {
     .into_bytes();
     bodies[5] = b"<< /Length 0 >>\nstream\n\nendstream".to_vec();
     bodies[6] = b"<< /Length 0 >>\nstream\n\nendstream".to_vec();
-    bodies[7] =
-        b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (Name) /V (Alice) /Rect [10 40 100 60] >>"
-            .to_vec();
+    bodies[7] = b"<< /Type /Annot /Subtype /Widget /FT /Tx /T (Name) /V (Alice) /Rect [10 40 100 60] >>".to_vec();
 
     let mut out: Vec<u8> = Vec::new();
     out.extend_from_slice(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
@@ -37,9 +34,7 @@ fn form_pdf(button_value: &str) -> Vec<u8> {
     for id in 1..=7 {
         out.extend_from_slice(format!("{:010} 00000 n \n", offsets[id]).as_bytes());
     }
-    out.extend_from_slice(
-        format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
-    );
+    out.extend_from_slice(format!("trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes());
     out
 }
 

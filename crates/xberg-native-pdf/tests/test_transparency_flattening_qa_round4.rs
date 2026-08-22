@@ -574,8 +574,9 @@ fn fixture_with_resources_only(extra_resources: &str) -> Vec<u8> {
 /// Detection trigger: /OP true (stroke overprint flag).
 #[test]
 fn qa_round4_a5_detection_trigger_op_uppercase_fires() {
-    let rgba =
-        render_rgba(fixture_with_resources_only("/Trig << /Type /ExtGState /OP true /ca 0.5 >>"));
+    let rgba = render_rgba(fixture_with_resources_only(
+        "/Trig << /Type /ExtGState /OP true /ca 0.5 >>",
+    ));
     let (r, g, b, _) = pixel_at(&rgba, 50, 50);
     assert!(
         r == g && g == b,
@@ -587,8 +588,9 @@ fn qa_round4_a5_detection_trigger_op_uppercase_fires() {
 /// Detection trigger: /op true (fill overprint flag).
 #[test]
 fn qa_round4_a5_detection_trigger_op_lowercase_fires() {
-    let rgba =
-        render_rgba(fixture_with_resources_only("/Trig << /Type /ExtGState /op true /ca 0.5 >>"));
+    let rgba = render_rgba(fixture_with_resources_only(
+        "/Trig << /Type /ExtGState /op true /ca 0.5 >>",
+    ));
     let (r, g, b, _) = pixel_at(&rgba, 50, 50);
     assert!(
         r == g && g == b,
@@ -600,8 +602,9 @@ fn qa_round4_a5_detection_trigger_op_lowercase_fires() {
 /// Detection trigger: /CA 0.5 (stroke alpha).
 #[test]
 fn qa_round4_a5_detection_trigger_ca_uppercase_fires() {
-    let rgba =
-        render_rgba(fixture_with_resources_only("/Trig << /Type /ExtGState /CA 0.5 /ca 0.5 >>"));
+    let rgba = render_rgba(fixture_with_resources_only(
+        "/Trig << /Type /ExtGState /CA 0.5 /ca 0.5 >>",
+    ));
     let (r, g, b, _) = pixel_at(&rgba, 50, 50);
     assert!(
         r == g && g == b,

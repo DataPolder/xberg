@@ -56,8 +56,7 @@ fn japanese_form_fill_roundtrip_no_mojibake() {
     let out = ed.save_to_bytes().unwrap();
 
     fn contains_ascii_ci(hay: &[u8], needle: &[u8]) -> bool {
-        hay.windows(needle.len())
-            .any(|w| w.eq_ignore_ascii_case(needle))
+        hay.windows(needle.len()).any(|w| w.eq_ignore_ascii_case(needle))
     }
     assert!(
         contains_ascii_ci(&out, b"FEFF5C717530592A90CE"),

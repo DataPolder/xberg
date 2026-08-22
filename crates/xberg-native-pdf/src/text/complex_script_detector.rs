@@ -155,10 +155,7 @@ pub fn is_devanagari_nukta(code: u32) -> bool {
 /// 3. **No boundary before nukta**: Nukta modifies preceding character
 /// 4. **No boundary before anusvara/visarga**: These attach to syllables
 /// 5. **No boundary between multiple diacritics**: Keep all marks together
-pub fn handle_devanagari_boundary(
-    prev_char: &CharacterInfo,
-    curr_char: &CharacterInfo,
-) -> Option<bool> {
+pub fn handle_devanagari_boundary(prev_char: &CharacterInfo, curr_char: &CharacterInfo) -> Option<bool> {
     let prev_code = prev_char.code;
     let curr_code = curr_char.code;
 
@@ -356,9 +353,7 @@ pub fn is_indic_diacritic(code: u32) -> bool {
         0x0C01..=0x0C03 | 0x0C3E..=0x0C4C | 0x0C4D | 0x0C55..=0x0C56 | 0x0C62..=0x0C63 => true,
 
         // Kannada diacritics ~keep
-        0x0C81..=0x0C83 | 0x0CBC | 0x0CBE..=0x0CCC | 0x0CCD | 0x0CD5..=0x0CD6 | 0x0CE2..=0x0CE3 => {
-            true
-        },
+        0x0C81..=0x0C83 | 0x0CBC | 0x0CBE..=0x0CCC | 0x0CCD | 0x0CD5..=0x0CD6 | 0x0CE2..=0x0CE3 => true,
 
         // Malayalam diacritics ~keep
         0x0D01..=0x0D03 | 0x0D3E..=0x0D4C | 0x0D4D | 0x0D57 | 0x0D62..=0x0D63 => true,

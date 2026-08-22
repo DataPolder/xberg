@@ -115,9 +115,7 @@ pub enum Error {
     /// This error is returned when attempting to extract content from a PDF that
     /// requires a password. Call `authenticate(password)` or open with
     /// `PdfDocument::open_with_password()` before extracting content.
-    #[error(
-        "PDF is encrypted and requires a password. Call authenticate(password) before extracting content."
-    )]
+    #[error("PDF is encrypted and requires a password. Call authenticate(password) before extracting content.")]
     EncryptedPdf,
 
     /// Runtime error during PostScript Type 4 function evaluation

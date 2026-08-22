@@ -98,9 +98,7 @@ impl TextContent {
 
     /// Check if this text is rotated (non-zero rotation).
     pub fn is_rotated(&self) -> bool {
-        self.rotation_degrees
-            .map(|r| r.abs() > 0.1)
-            .unwrap_or(false)
+        self.rotation_degrees.map(|r| r.abs() > 0.1).unwrap_or(false)
     }
 
     /// Get rotation angle in radians.

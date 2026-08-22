@@ -113,12 +113,7 @@ mod citation_tests {
     /// - x, y: top-left corner coordinates
     /// - width, height: dimensions of the rectangle
     fn create_rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
-        Rect {
-            x,
-            y,
-            width,
-            height,
-        }
+        Rect { x, y, width, height }
     }
 
     /// Test helper for citation context detection
@@ -189,7 +184,15 @@ mod citation_tests {
         let prev_bbox = create_rect(0.0, 700.0, 10.0, 7.0);
         let next_bbox = create_rect(15.0, 702.0, 5.0, 7.0);
 
-        test_citation(Some(&prev_bbox), Some(&next_bbox), 10.0, 7.0, 10.0, true, "raised_position");
+        test_citation(
+            Some(&prev_bbox),
+            Some(&next_bbox),
+            10.0,
+            7.0,
+            10.0,
+            true,
+            "raised_position",
+        );
     }
 
     #[test]
@@ -358,7 +361,15 @@ mod citation_tests {
         let prev_bbox = create_rect(0.0, 700.0, 7.0, 7.0);
         let next_bbox = create_rect(15.0, 701.0, 7.0, 7.0);
 
-        test_citation(Some(&prev_bbox), Some(&next_bbox), 10.0, 7.0, 7.0, true, "both_superscript");
+        test_citation(
+            Some(&prev_bbox),
+            Some(&next_bbox),
+            10.0,
+            7.0,
+            7.0,
+            true,
+            "both_superscript",
+        );
     }
 
     #[test]

@@ -39,8 +39,7 @@ fn test_primary_mode_fallback_to_tiebreaker() {
 
 #[test]
 fn test_backward_compat_with_tiebreaker_mode() {
-    let config =
-        TextPipelineConfig::default().with_word_boundary_mode(WordBoundaryMode::Tiebreaker);
+    let config = TextPipelineConfig::default().with_word_boundary_mode(WordBoundaryMode::Tiebreaker);
 
     assert_eq!(config.word_boundary_mode, WordBoundaryMode::Tiebreaker);
 }

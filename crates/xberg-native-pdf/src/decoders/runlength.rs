@@ -36,24 +36,22 @@ impl StreamDecoder for RunLengthDecoder {
 
                     output.extend_from_slice(&input[i..i + count]);
                     i += count;
-                },
+                }
                 128 => {
                     // EOD marker - no-op, but we'll break to end decoding ~keep
                     break;
-                },
+                }
                 129..=255 => {
                     let count = 257 - length as usize;
 
                     if i >= input.len() {
-                        return Err(Error::Decode(
-                            "RunLengthDecode: missing byte for run".to_string(),
-                        ));
+                        return Err(Error::Decode("RunLengthDecode: missing byte for run".to_string()));
                     }
 
                     let byte = input[i];
                     i += 1;
                     output.resize(output.len() + count, byte);
-                },
+                }
             }
         }
 

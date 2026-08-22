@@ -58,8 +58,7 @@ impl XfdfWriter {
 
     /// Add a text field to export.
     pub fn add_field(&mut self, name: impl Into<String>, value: impl Into<String>) {
-        self.fields
-            .push(FdfField::new(name, FdfValue::Text(value.into())));
+        self.fields.push(FdfField::new(name, FdfValue::Text(value.into())));
     }
 
     /// Add an FDF field directly.
@@ -122,13 +121,9 @@ fn field_to_xml(field: &FdfField, indent_level: usize) -> String {
                 } else {
                     "Off".to_string()
                 }
-            },
+            }
             FdfValue::Name(s) => xml_escape(s),
-            FdfValue::Array(arr) => arr
-                .iter()
-                .map(|s| xml_escape(s))
-                .collect::<Vec<_>>()
-                .join(","),
+            FdfValue::Array(arr) => arr.iter().map(|s| xml_escape(s)).collect::<Vec<_>>().join(","),
             FdfValue::None => String::new(),
         };
 

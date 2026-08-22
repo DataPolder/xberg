@@ -183,7 +183,7 @@ impl ImageContent {
             Some((h, v)) => {
                 let min_dpi = h.min(v);
                 (150.0..300.0).contains(&min_dpi)
-            },
+            }
             None => false,
         }
     }
@@ -197,8 +197,7 @@ impl ImageContent {
     /// Returns an error if the bytes do not start with a recognised image magic number.
     pub fn from_bytes(bbox: Rect, data: Vec<u8>) -> Result<Self, crate::error::Error> {
         use crate::writer::{ColorSpace as HCS, ImageData, ImageFormat as HIF};
-        let parsed =
-            ImageData::from_bytes(&data).map_err(|e| crate::error::Error::Image(e.to_string()))?;
+        let parsed = ImageData::from_bytes(&data).map_err(|e| crate::error::Error::Image(e.to_string()))?;
         let format = match parsed.format {
             HIF::Jpeg => ImageFormat::Jpeg,
             HIF::Png => ImageFormat::Png,
@@ -346,13 +345,7 @@ mod tests {
 
     #[test]
     fn test_aspect_ratio() {
-        let image = ImageContent::new(
-            Rect::new(0.0, 0.0, 100.0, 100.0),
-            ImageFormat::Png,
-            vec![],
-            1920,
-            1080,
-        );
+        let image = ImageContent::new(Rect::new(0.0, 0.0, 100.0, 100.0), ImageFormat::Png, vec![], 1920, 1080);
 
         let ratio = image.aspect_ratio();
         assert!((ratio - (1920.0 / 1080.0)).abs() < 0.001);
@@ -375,13 +368,7 @@ mod tests {
     #[test]
     fn test_dpi_calculation_high_res() {
         // 600 pixels in 2 inches (144 points) = 300 DPI ~keep
-        let image = ImageContent::new(
-            Rect::new(0.0, 0.0, 144.0, 144.0),
-            ImageFormat::Jpeg,
-            vec![],
-            600,
-            600,
-        );
+        let image = ImageContent::new(Rect::new(0.0, 0.0, 144.0, 144.0), ImageFormat::Jpeg, vec![], 600, 600);
 
         let (h, v) = image.resolution().unwrap();
         assert!((h - 300.0).abs() < 1.0);
@@ -393,8 +380,7 @@ mod tests {
     #[test]
     fn test_dpi_calculation_low_res() {
         // 100 pixels in 1 inch (72 points) = ~100 DPI ~keep
-        let image =
-            ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 100, 100);
+        let image = ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 100, 100);
 
         let (h, v) = image.resolution().unwrap();
         assert!((h - 100.0).abs() < 1.0);
@@ -406,8 +392,7 @@ mod tests {
     #[test]
     fn test_dpi_calculation_medium_res() {
         // 200 pixels in 1 inch = 200 DPI (medium) ~keep
-        let image =
-            ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 200, 200);
+        let image = ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 200, 200);
 
         let (h, v) = image.resolution().unwrap();
         assert!((h - 200.0).abs() < 1.0);
@@ -420,8 +405,7 @@ mod tests {
         // Different DPI in horizontal and vertical
         // 300 pixels in 1 inch (horizontal) = 300 DPI
         // 100 pixels in 1 inch (vertical) = 100 DPI ~keep
-        let image =
-            ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 300, 100);
+        let image = ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 300, 100);
 
         let (h, v) = image.resolution().unwrap();
         assert!((h - 300.0).abs() < 1.0);
@@ -442,8 +426,7 @@ mod tests {
 
     #[test]
     fn test_dpi_getters() {
-        let image =
-            ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 300, 300);
+        let image = ImageContent::new(Rect::new(0.0, 0.0, 72.0, 72.0), ImageFormat::Png, vec![], 300, 300);
 
         assert!(image.get_horizontal_dpi().is_some());
         assert!(image.get_vertical_dpi().is_some());

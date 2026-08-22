@@ -136,7 +136,7 @@ impl PdfBuilder {
         let oc_props = match ocg {
             Some(o) => {
                 format!(" /OCProperties << /OCGs [{} 0 R] /D << /Order [{} 0 R] >> >>", o, o)
-            },
+            }
             None => String::new(),
         };
         objs.insert(
@@ -322,12 +322,7 @@ fn fixture_nested_with_outer_sibling() -> Vec<u8> {
             .k(K::Obj(9))
             .k(K::Mcid(1, 0)),
     );
-    let _inner = b.add_elem(
-        Elem::new(9, "Span", 8)
-            .page(4)
-            .actual_text("I")
-            .k(K::Mcid(0, 0)),
-    );
+    let _inner = b.add_elem(Elem::new(9, "Span", 8).page(4).actual_text("I").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, 9);
     b.register_mcid(0, 1, 8);
     b.build()
@@ -339,11 +334,15 @@ fn critical1_nested_with_outer_sibling_emits_both() {
     let doc = PdfDocument::from_bytes(pdf).expect("open");
     let _opts = ConversionOptions::default();
 
-    let surfaces: Vec<(&str, String)> =
-        vec![("extract_text", doc.extract_text(0).expect("extract_text"))];
+    let surfaces: Vec<(&str, String)> = vec![("extract_text", doc.extract_text(0).expect("extract_text"))];
 
     for (name, out) in &surfaces {
-        assert!(out.contains('I'), "{}: inner replacement 'I' must appear, got {:?}", name, out);
+        assert!(
+            out.contains('I'),
+            "{}: inner replacement 'I' must appear, got {:?}",
+            name,
+            out
+        );
         assert!(
             out.contains('O'),
             "{}: outer replacement 'O' must appear for the sibling MCID, got {:?}",
@@ -383,11 +382,7 @@ fn fixture_cross_page_mcid_collision() -> Vec<u8> {
     );
 
     // Page-0 H1 with /ActualText "Heading" covering page-0 MCID 0. ~keep
-    let h1 = b.add_elem(
-        Elem::new(10, "H1", 9)
-            .actual_text("Heading")
-            .k(K::Mcid(0, 0)),
-    );
+    let h1 = b.add_elem(Elem::new(10, "H1", 9).actual_text("Heading").k(K::Mcid(0, 0)));
     b.register_mcid(0, 0, h1);
 
     // Page-1 plain /P (no /ActualText) wrapping page-1 MCID 0. ~keep
