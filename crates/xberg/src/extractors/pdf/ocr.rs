@@ -5687,9 +5687,12 @@ fn upright_raster_for_backend(
 /// the geometry problem is identical: a point in a rotated raster mapped back to the unrotated
 /// one it will be rescaled against.
 ///
-/// Only `ocr_internal_document` element bboxes and `tables` bboxes are corrected: those are the
-/// two pixel-space geometry sources `build_mixed_ocr_page_document` reads from a backend result
-/// before rescaling into page points.
+/// `ocr_internal_document` element bboxes, `tables` bboxes and `formulas` bboxes are corrected:
+/// those are the pixel-space geometry sources read from a backend result before rescaling into
+/// page points. `formulas` matters for GLM paired mode, which pushes the SAME `region_bbox` into
+/// both `formulas[].bbox` and `table_bboxes` (`candle_ocr/glm_ocr_backend.rs`); correcting only
+/// the table half left `formula_bbox_to_page_points` rescaling an upright-raster box against
+/// MediaBox-raster page dimensions on any `/Rotate != 0` page.
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 fn undo_upright_raster_correction(
     result: &mut crate::types::ExtractedDocument,
@@ -5719,6 +5722,11 @@ fn undo_upright_raster_correction(
     }
     for table in &mut result.tables {
         if let Some(bbox) = table.bounding_box.as_mut() {
+            undo_bbox(bbox);
+        }
+    }
+    for formula in &mut result.formulas {
+        if let Some(bbox) = formula.bbox.as_mut() {
             undo_bbox(bbox);
         }
     }
@@ -5778,6 +5786,59 @@ mod tests {
     #[cfg(feature = "ocr")]
     fn t() -> OcrQualityThresholds {
         OcrQualityThresholds::default()
+    }
+
+    /// GLM paired mode pushes the SAME `region_bbox` into both `formulas[].bbox` and
+    /// `table_bboxes` (`candle_ocr/glm_ocr_backend.rs`), but
+    /// `undo_upright_raster_correction` corrected only `ocr_internal_document` elements
+    /// and `tables`. On a `/Rotate != 0` page the formula box therefore stayed in the
+    /// upright raster's frame while its table twin was mapped back, and
+    /// `formula_bbox_to_page_points` then rescaled it against MediaBox-raster page
+    /// dimensions.
+    ///
+    /// Against unfixed code the formula assertion below fails with the untouched input
+    /// box (10, 20, 30, 40) instead of the corrected one.
+    #[cfg(all(feature = "ocr", feature = "pdf"))]
+    #[test]
+    fn undo_upright_raster_correction_maps_a_formula_bbox_like_its_table_twin() {
+        let region = crate::types::extraction::BoundingBox {
+            x0: 10.0,
+            y0: 20.0,
+            x1: 30.0,
+            y1: 40.0,
+        };
+        let mut result = crate::types::ExtractedDocument {
+            tables: vec![crate::types::Table {
+                bounding_box: Some(region.clone()),
+                ..Default::default()
+            }],
+            formulas: vec![crate::types::Formula {
+                latex: "x^2".to_string(),
+                bbox: Some(region.clone()),
+                page: Some(1),
+            }],
+            ..Default::default()
+        };
+
+        undo_upright_raster_correction(&mut result, 90, 200, 100);
+
+        let table_bbox = result.tables[0]
+            .bounding_box
+            .clone()
+            .expect("the table bbox must survive the correction");
+        let formula_bbox = result.formulas[0]
+            .bbox
+            .clone()
+            .expect("the formula bbox must survive the correction");
+
+        assert_ne!(
+            table_bbox, region,
+            "a 90 degree correction must actually move the table bbox, or this test proves nothing"
+        );
+        assert_eq!(
+            formula_bbox, table_bbox,
+            "a formula bbox holding the same region as a table bbox must be mapped identically"
+        );
     }
 
     #[cfg(feature = "ocr")]
