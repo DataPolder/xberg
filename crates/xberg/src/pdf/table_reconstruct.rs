@@ -58,13 +58,37 @@ use super::hierarchy::SegmentData;
 /// unrotated case, matching the plain x/y this replaced) so the row/column
 /// clustering downstream in `native::table::cluster_words_into_vertical_regions`
 /// operates on the table's actual advance/cross axes instead of the page's.
+///
+/// Standalone calls (no sibling segments) always use `(0.0, 0.0)` offsets: a
+/// single segment can never be lifted relative to a run it isn't part of.
+/// Only [`segments_to_words`] computes a real offset, from the whole page.
 #[cfg(feature = "pdf")]
 pub(crate) fn segment_to_hocr_word(seg: &SegmentData, page_height: f32) -> HocrWord {
+    segment_to_hocr_word_lifted(seg, page_height, 0.0, 0.0)
+}
+
+/// Like [`segment_to_hocr_word`], but adds `advance_offset`/`top_offset` to
+/// the segment's upright-frame position before clamping to the unsigned
+/// `HocrWord` fields.
+///
+/// GH#1358: a rotated run's advance/cross can be negative for every word on
+/// the page (e.g. `-90` gives `advance == -y`; `180` gives `advance == -x` and
+/// `cross == -y`), and a per-word `.max(0.0)` clamp saturates every one of
+/// them onto the same `0`, collapsing a table's columns and/or rows and
+/// making it single-column/single-row — which downstream clustering then
+/// rejects outright. `rotation_lifts_for_page` computes, once per rotation
+/// group sharing a page, the amount needed to lift that group's *minimum*
+/// advance/top to zero; adding it here before the per-word clamp preserves
+/// the run's relative geometry instead of destroying it. Unrotated content
+/// and any rotation whose minimum is already non-negative gets `(0.0, 0.0)`
+/// here, leaving this identical to the unlifted computation.
+#[cfg(feature = "pdf")]
+fn segment_to_hocr_word_lifted(seg: &SegmentData, page_height: f32, advance_offset: f32, top_offset: f32) -> HocrWord {
     let (advance, cross) = seg.upright_origin();
-    let top_image = (page_height - (cross + seg.height)).round().max(0.0) as u32;
+    let top_image = (page_height - (cross + seg.height) + top_offset).round().max(0.0) as u32;
     HocrWord {
         text: seg.text.clone(),
-        left: advance.round().max(0.0) as u32,
+        left: (advance + advance_offset).round().max(0.0) as u32,
         top: top_image,
         width: seg.width.round().max(0.0) as u32,
         height: seg.height.round().max(0.0) as u32,
@@ -81,15 +105,35 @@ pub(crate) fn segment_to_hocr_word(seg: &SegmentData, page_height: f32) -> HocrW
 /// Single-word segments use `segment_to_hocr_word` directly (fast path).
 /// Multi-word segments get proportional bbox estimation per word based on
 /// byte offset within the segment text.
+///
+/// See [`segment_to_hocr_word`] for why a standalone call always lifts by
+/// `(0.0, 0.0)`.
 #[cfg(feature = "pdf")]
 pub(crate) fn split_segment_to_words(seg: &SegmentData, page_height: f32) -> Vec<HocrWord> {
+    split_segment_to_words_lifted(seg, page_height, 0.0, 0.0)
+}
+
+/// Like [`split_segment_to_words`], with the same `advance_offset`/
+/// `top_offset` lift documented on [`segment_to_hocr_word_lifted`].
+#[cfg(feature = "pdf")]
+fn split_segment_to_words_lifted(
+    seg: &SegmentData,
+    page_height: f32,
+    advance_offset: f32,
+    top_offset: f32,
+) -> Vec<HocrWord> {
     let trimmed = seg.text.trim();
     if trimmed.is_empty() {
         return Vec::new();
     }
 
     if !trimmed.contains(char::is_whitespace) {
-        return vec![segment_to_hocr_word(seg, page_height)];
+        return vec![segment_to_hocr_word_lifted(
+            seg,
+            page_height,
+            advance_offset,
+            top_offset,
+        )];
     }
 
     let text = &seg.text;
@@ -104,7 +148,7 @@ pub(crate) fn split_segment_to_words(seg: &SegmentData, page_height: f32) -> Vec
     // below advances along via `frac_start * seg.width` — consistent
     // whether or not the run is rotated.
     let (advance, cross) = seg.upright_origin();
-    let top_image = (page_height - (cross + seg.height)).round().max(0.0) as u32;
+    let top_image = (page_height - (cross + seg.height) + top_offset).round().max(0.0) as u32;
     let seg_height = seg.height.round().max(0.0) as u32;
 
     let mut words = Vec::new();
@@ -121,7 +165,7 @@ pub(crate) fn split_segment_to_words(seg: &SegmentData, page_height: f32) -> Vec
 
         words.push(HocrWord {
             text: word.to_string(),
-            left: (advance + frac_start * seg.width).round().max(0.0) as u32,
+            left: (advance + advance_offset + frac_start * seg.width).round().max(0.0) as u32,
             top: top_image,
             width: (frac_width * seg.width).round().max(1.0) as u32,
             height: seg_height,
@@ -132,15 +176,110 @@ pub(crate) fn split_segment_to_words(seg: &SegmentData, page_height: f32) -> Vec
     words
 }
 
+/// Per-rotation lift computed once for a page's segments (GH#1358).
+///
+/// Holds, for one `rotation_degrees` value, how far that group's advance and
+/// top must be translated so its minimum lands at `0.0` — the "lift the whole
+/// frame" fix: computing the minimum over the *run* first (rather than
+/// clamping each word independently) preserves relative spacing between
+/// words instead of collapsing every negative value onto the same floor.
+#[cfg(feature = "pdf")]
+struct RotationLift {
+    rotation_degrees: f32,
+    advance_offset: f32,
+    top_offset: f32,
+}
+
+/// Computes [`RotationLift`]s for every distinct rotation present in
+/// `segments`, restricted to rotated content.
+///
+/// Unrotated segments are deliberately excluded: their advance/cross already
+/// equal ordinary page-space x/y, so lifting them would translate normal,
+/// already-correct page content by a constant offset instead of fixing
+/// anything. A rotation's lift is `0.0` on an axis whose minimum is already
+/// non-negative, so a page whose rotated content never goes negative (the
+/// `+90` case is non-negative on both axes for real page content) gets
+/// `(0.0, 0.0)` here and this function is a no-op for it — unchanged
+/// behavior from before this fix.
+#[cfg(feature = "pdf")]
+fn rotation_lifts_for_page(segments: &[SegmentData], page_height: f32) -> Vec<RotationLift> {
+    let mut lifts: Vec<RotationLift> = Vec::new();
+    for seg in segments {
+        if seg.is_unrotated() {
+            continue;
+        }
+        let (advance, cross) = seg.upright_origin();
+        let top = page_height - (cross + seg.height);
+        match lifts
+            .iter_mut()
+            .find(|lift| (lift.rotation_degrees - seg.rotation_degrees).abs() <= f32::EPSILON)
+        {
+            Some(lift) => {
+                lift.advance_offset = lift.advance_offset.min(advance);
+                lift.top_offset = lift.top_offset.min(top);
+            }
+            None => lifts.push(RotationLift {
+                rotation_degrees: seg.rotation_degrees,
+                advance_offset: advance,
+                top_offset: top,
+            }),
+        }
+    }
+    for lift in &mut lifts {
+        lift.advance_offset = (-lift.advance_offset).max(0.0);
+        lift.top_offset = (-lift.top_offset).max(0.0);
+    }
+    lifts
+}
+
+#[cfg(feature = "pdf")]
+fn lift_for_rotation(lifts: &[RotationLift], rotation_degrees: f32) -> (f32, f32) {
+    lifts
+        .iter()
+        .find(|lift| (lift.rotation_degrees - rotation_degrees).abs() <= f32::EPSILON)
+        .map(|lift| (lift.advance_offset, lift.top_offset))
+        .unwrap_or((0.0, 0.0))
+}
+
+/// Whether any rotated group on this page needed [`rotation_lifts_for_page`]
+/// to translate it into non-negative image space.
+///
+/// `HocrWord` carries no rotation field, so once words are built there is no
+/// way to tell, from a table region alone, whether its geometry came from a
+/// translated rotated frame. Callers that compute a page-space bounding box
+/// from `HocrWord`s (`native::table::region_bounding_box`) must ask this
+/// *before* that conversion and, if true, not trust that bounding box as
+/// page-space: `region_bounding_box`'s inversion only cancels out to real
+/// page coordinates for the unrotated identity mapping, so a lifted frame's
+/// `left`/`top` fed through it back-projects to a rectangle in no page
+/// coordinate system at all — which would then be compared against real
+/// `SegmentData::x`/`y` by `filter_segments_by_table_bboxes` and could delete
+/// unrelated prose it spuriously overlaps. See GH#1358.
+#[cfg(feature = "pdf")]
+pub(crate) fn page_has_lifted_rotation_frame(segments: &[SegmentData], page_height: f32) -> bool {
+    rotation_lifts_for_page(segments, page_height)
+        .iter()
+        .any(|lift| lift.advance_offset > 0.0 || lift.top_offset > 0.0)
+}
+
 /// Convert a page's segments to word-level `HocrWord`s for table extraction.
 ///
 /// Splits multi-word segments into individual words with proportional bounding
 /// boxes, ensuring each word can be independently matched to table cells.
+///
+/// GH#1358: before per-segment conversion, computes each rotation's page-wide
+/// lift (see [`rotation_lifts_for_page`]) so a rotated table's columns/rows
+/// survive into `HocrWord`'s unsigned fields instead of collapsing onto a
+/// shared clamp floor.
 #[cfg(feature = "pdf")]
 pub(crate) fn segments_to_words(segments: &[SegmentData], page_height: f32) -> Vec<HocrWord> {
+    let lifts = rotation_lifts_for_page(segments, page_height);
     segments
         .iter()
-        .flat_map(|seg| split_segment_to_words(seg, page_height))
+        .flat_map(|seg| {
+            let (advance_offset, top_offset) = lift_for_rotation(&lifts, seg.rotation_degrees);
+            split_segment_to_words_lifted(seg, page_height, advance_offset, top_offset)
+        })
         .collect()
 }
 

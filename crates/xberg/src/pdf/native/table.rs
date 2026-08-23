@@ -409,6 +409,7 @@ pub(crate) fn extract_tables_heuristic(
         .ok()
         .map_or(0, |paths| crate::pdf::rules::count_rules(&paths).0);
 
+        let page_tables_start = tables.len();
         tables.extend(reconstruct_page_region_tables(
             &regions,
             page_height,
@@ -416,6 +417,23 @@ pub(crate) fn extract_tables_heuristic(
             allow_single_column,
             horizontal_rules,
         ));
+
+        // GH#1358: a page with a rotated run whose frame needed lifting (see
+        // `table_reconstruct::page_has_lifted_rotation_frame`) produces
+        // `HocrWord`s whose left/top live in that run's advance/cross axes,
+        // not real page-space x/y. `region_bounding_box`'s page_height-only
+        // inversion is exact for the unrotated identity mapping but for a
+        // lifted frame back-projects to a rectangle in no real coordinate
+        // system — comparing that against real `SegmentData::x`/`y` in
+        // `filter_segments_by_table_bboxes` could delete unrelated prose it
+        // spuriously overlaps. Drop the bounding box rather than trust a
+        // fabricated one; the table's cell content is unaffected, and
+        // downstream page assignment and dedup are bbox-agnostic.
+        if crate::pdf::table_reconstruct::page_has_lifted_rotation_frame(segments, page_height) {
+            for table in &mut tables[page_tables_start..] {
+                table.bounding_box = None;
+            }
+        }
     }
 
     Ok(HeuristicTableExtraction {
@@ -3105,12 +3123,6 @@ mod tests {
     /// `UprightFrames` to preserve relative geometry without prescribing the
     /// particular origin it chooses.
     #[test]
-    #[ignore = "GH#1358: needs a per-rotation upright frame that does not fabricate a \
-                page-space bounding box. A corpus scan of 377 PDFs finds -90 content in 3 \
-                documents (9/5/1 runs) and 180 in 3 (2 runs each) -- never forming a table -- \
-                while the +90 quadrant, which is 28 of the 31 rotated documents, needs no \
-                translation at all. Un-ignore together with the frame + per-rotation \
-                clustering work. Precedent: 0a60357897."]
     fn should_keep_columns_distinct_when_a_table_is_rotated_minus_ninety_degrees() {
         let segments = vec![
             sideways_table_segment("A1", 124.0, 520.0, -90.0),
@@ -3162,7 +3174,6 @@ mod tests {
     /// `height = 10`, so a correct implementation must find exactly one region
     /// of three rows by two columns.
     #[test]
-    #[ignore = "GH#1358: needs a per-rotation upright frame; see the sibling -90 test."]
     fn should_cluster_a_minus_ninety_rotated_table_into_a_single_region() {
         let segments = vec![
             sideways_table_segment("A1", 124.0, 520.0, -90.0),
@@ -3204,7 +3215,6 @@ mod tests {
     /// Columns 120 apart on page-`x` (advance runs along `-x`, so `x = 220` is
     /// the leading column), three rows on page-`y`.
     #[test]
-    #[ignore = "GH#1358: needs a per-rotation upright frame; see the sibling -90 test."]
     fn should_keep_columns_distinct_when_a_table_is_rotated_one_hundred_eighty_degrees() {
         let segments = vec![
             sideways_table_segment("A1", 220.0, 100.0, 180.0),
@@ -3253,7 +3263,6 @@ mod tests {
     /// is three rows 12 apart — inside `row_gap_split` (18) and outside
     /// `row_tolerance` (5).
     #[test]
-    #[ignore = "GH#1358: needs a per-rotation upright frame; see the sibling -90 test."]
     fn should_keep_rows_distinct_when_a_minus_ninety_table_runs_past_the_page_height_reference() {
         let segments = vec![
             sideways_table_segment("A1", 824.0, 520.0, -90.0),
