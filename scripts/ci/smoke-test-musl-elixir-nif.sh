@@ -48,5 +48,18 @@ docker run --rm \
   -e EXPECTED_TEXT="$EXPECTED_TEXT" \
   alpine:3.21 sh -euc '
     apk add --no-cache elixir >/dev/null
+    # The vendored libonnxruntime.so.1 comes from Alpine edge (the builder stage of
+    # docker/Dockerfile.musl-rustler upgrades libstdc++ to 15.2.0 before compiling)
+    # and relocates against symbols GCC 15 added, so on 3.21 it dies with
+    # "Error relocating: _ZNSt8__format25__locale_encoding_to_utf8...: symbol not found".
+    # Bundling libstdc++.so.6 in the closure cannot fix this one: apk add elixir pulls
+    # Erlang, which links libstdc++ itself, so the BEAM already has 3.21 14.2.0 mapped
+    # under that soname before the NIF is dlopened, and the $ORIGIN copy beside the NIF
+    # is never consulted. Upgrading here -- after elixir, since apk resolves Erlang
+    # so:libstdc++.so.6 against the 3.21 package either way -- puts the runtime on the
+    # same libstdc++ the artifact was linked against, which is also why the Java gate
+    # installs its JDK from the edge repositories. ~keep
+    apk add --no-cache --upgrade libstdc++ \
+      --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main >/dev/null
     elixir /smoke/smoke_test_elixir_nif.exs /fixture.pdf "${EXPECTED_TEXT}"
   '
