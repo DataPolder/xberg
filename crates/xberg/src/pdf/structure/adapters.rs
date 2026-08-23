@@ -49,6 +49,12 @@ impl OcrFontSizeScale {
     /// `element.bbox` and `element.ocr_geometry` are both still in the same unit
     /// space (raw OCR raster pixels on the pure-OCR route, or already-uniform test
     /// fixtures): apply one real points-per-pixel ratio to both branches.
+    // Every caller sits behind an OCR-document assembly path that `layout-detection` without
+    // `ocr`/`ocr-wasm` compiles out, while `ocr-pipeline` still brings this type in. ~keep
+    #[cfg_attr(
+        all(feature = "layout-detection", not(feature = "ocr"), not(feature = "ocr-wasm")),
+        allow(dead_code)
+    )]
     pub(crate) fn uniform(points_per_pixel: f32) -> Self {
         Self {
             bbox_points_per_pixel: points_per_pixel,
