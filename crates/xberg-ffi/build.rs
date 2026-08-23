@@ -194,13 +194,14 @@ fn atomic_write(destination: &Path, contents: &[u8]) -> io::Result<()> {
             ),
         ));
     }
-    if had_destination {
-        if let Err(error) = std::fs::remove_file(&backup) {
-            println!(
-                "cargo:warning=generated header published but stale backup {} could not be removed: {error}",
-                backup.display()
-            );
-        }
+    if !had_destination {
+        return Ok(());
+    }
+    if let Err(error) = std::fs::remove_file(&backup) {
+        println!(
+            "cargo:warning=generated header published but stale backup {} could not be removed: {error}",
+            backup.display()
+        );
     }
     Ok(())
 }
