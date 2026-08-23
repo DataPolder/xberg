@@ -8245,9 +8245,9 @@ dependencies = [
 
 [[package]]
 name = "sceptre"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cc4b8d765fb28b38d63c64aecb0b8114c43b1af3f737f00d4c28c0d98af41d3"
+checksum = "bffa0292e0e2469a5f26a6189948f08301fd2ca054bf71d27671846f22747c02"
 dependencies = [
  "candle-core",
  "candle-nn",
