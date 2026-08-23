@@ -37,11 +37,28 @@ done
 set -E
 trap 'log "ERROR: exit $? at line ${LINENO} (function: ${FUNCNAME[0]:-main}): ${BASH_COMMAND}"' ERR
 
+# libc and the loader are the only things a target is truly guaranteed to
+# supply at a compatible version, so they -- and the openssl pair, which a
+# host is expected to patch on its own schedule -- stay unbundled.
+#
+# libstdc++/libgcc_s are deliberately NOT in this list. The musl images build
+# against Alpine *edge* packages (see the --repository flags in
+# docker/Dockerfile.musl-*), so the vendored libonnxruntime.so.1 carries
+# undefined references that only edge's libstdc++ 6.0.34 defines -- notably
+# std::__format::__locale_encoding_to_utf8. Alpine 3.21/3.22 stable ship
+# 6.0.33, which does not, so treating the C++ runtime as a base library
+# shipped an artifact that cannot relocate on any stable Alpine: the Elixir
+# smoke test failed with exactly that symbol, and the Java smoke test failed
+# on the same closure the C# one loaded fine, differing only in whether the
+# base image happened to carry a new enough libstdc++. Bundling the C++
+# runtime beside the artifact under $ORIGIN is what auditwheel already does
+# for the musl Python wheel in this repo -- the one artifact of the five that
+# was unaffected. ~keep
 is_base_lib() {
   case "$1" in
   ld-linux* | ld-musl* | libc.so* | libc.musl* | libc-*.so* | libm.so* | libmvec.so* | \
-    libdl.so* | librt.so* | libpthread.so* | libresolv.so* | libgcc_s.so* | \
-    libstdc++.so* | libssl.so* | libcrypto.so*) return 0 ;;
+    libdl.so* | librt.so* | libpthread.so* | libresolv.so* | \
+    libssl.so* | libcrypto.so*) return 0 ;;
   *) return 1 ;;
   esac
 }
