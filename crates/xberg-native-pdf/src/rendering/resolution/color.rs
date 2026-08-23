@@ -799,12 +799,12 @@ fn evaluate_tint_function(
 }
 
 /// Cap on the number of sampled-function input dimensions we'll evaluate.
-/// Real-world DeviceN colorant counts top out around 8 (see the inline-cap
-/// comment in `resolution/intent.rs`); `2^8 = 256` corner samples per
-/// evaluation keeps multilinear interpolation cheap while still covering
-/// every DeviceN tint transform seen in practice. A `/Size` array longer
-/// than this is rejected rather than allocating `2^N` corners for an
-/// attacker-controlled `N`.
+/// Real-world DeviceN colorant counts top out around 8 (the same ceiling
+/// `page_renderer.rs` applies to its own Type 0 evaluator); `2^8 = 256`
+/// corner samples per evaluation keeps multilinear interpolation cheap while
+/// still covering every DeviceN tint transform seen in practice. A `/Size`
+/// array longer than this is rejected rather than allocating `2^N` corners
+/// for an attacker-controlled `N`.
 const MAX_SAMPLED_FUNCTION_DIMS: usize = 8;
 
 /// Evaluate a Type 0 (sampled) function (SS 7.10.2) for one or more inputs:
