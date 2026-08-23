@@ -61,6 +61,20 @@ fi
 # unit tests. ~keep
 export XBERG_SKIP_LIVE_HF=1
 
+# libtest spawns every test thread with no `.stack_size()`, so std's 2 MiB
+# DEFAULT_MIN_STACK_SIZE applies -- the 8 MiB main-thread figure never does, and
+# `#[tokio::test]` is current_thread so `block_on` runs on that same 2 MiB thread.
+# The extraction future sits within a few percent of that budget and overflows on
+# some runs, aborting with an uncatchable SIGABRT that names no test
+# (`benchmark_harness::batch_diagnostic::tests::diagnostic_uses_equivalent_public_extraction_paths`).
+# Every CI workflow already sets this at workflow level (ci-rust.yaml, ci-e2e,
+# ci-gpu, ci-integrations, benchmarks, profiling); this script is the single choke
+# point behind `task rust:test` locally and was the only place missing it, so the
+# failure reproduced only on developer machines. 16 MiB matches every other stack
+# budget in the repo (core/runtime.rs, xberg-cli, xberg-node, xberg-py, the elixir
+# NIF, html/stack_management.rs). ~keep
+export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
+
 echo "=== Starting cargo test ==="
 
 # NOTE: We intentionally avoid `--all-features` for the `xberg` crate because
