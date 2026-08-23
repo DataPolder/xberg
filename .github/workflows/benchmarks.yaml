@@ -360,6 +360,118 @@ jobs:
           path: benchmark-results/
           retention-days: 30
 
+  # Exercises `PdfBackend::Pdfium` (crates/xberg/src/extractors/pdf/pdfium_engine.rs) as its own
+  # recorded framework, separate from `bench-rust`'s native-backend legs. `setup` already builds
+  # `xberg-cli` with `--features all,...`, and `all` includes `pdf-pdfium-surface` ->
+  # `xberg/pdf-pdfium` (crates/xberg-cli/Cargo.toml), so the CLI binary this job downloads already
+  # has the pdfium engine compiled in -- what it lacks is a real `libpdfium` runtime library,
+  # provisioned below via the same `download-pdfium` composite action `ci-rust.yaml`'s
+  # `pdfium-engine` job uses, pinned to the same 7678 release the checked-in
+  # `crates/xberg-pdfium-render` bindings were generated against (see that job for the version
+  # mismatch rationale). Restricted to the `baseline` pipeline and the PDF-only cohort: the
+  # pdfium engine has no OCR fallback and is deliberately smaller in scope than the native engine
+  # (no tables/images/annotations/form fields), so this is not a fair substitute for the
+  # native-backend legs above -- it is a distinct measurement, hence the `-pdfium` framework
+  # suffix and its own uploaded artifact.
+  #
+  # Deliberately named without a `bench-` prefix, matching `sceptre-tract-diagnostic` below: both
+  # are xberg benchmark jobs that sit outside the pinned release cohort contract enforced by
+  # `scripts/ci/benchmarks/validate-workflow-matrix.py` (`workflow_cells()` only discovers jobs
+  # whose name starts with `bench-`) and `bench_matrix::Cohort`'s `cohort-contract` output, which
+  # `aggregate-and-publish` consolidates into the published release comparison. Folding this leg
+  # into that closed contract would require teaching `bench_matrix.rs` a new PDF-backend axis on
+  # top of pipeline/format/mode for every release cohort -- out of scope here. ~keep
+  pdfium-benchmark:
+    name: pdfium-benchmark (baseline, ${{ matrix.output_format }}, ${{ matrix.mode }})
+    needs: setup
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        output_format: [markdown, plaintext]
+        mode: [single-file, batch]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.setup.outputs.source-sha }}
+
+          submodules: recursive
+      - name: Free disk space
+        uses: xberg-io/actions/free-disk-space-linux@v1
+
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
+
+      - name: Setup Rust toolchain
+        uses: xberg-io/actions/setup-rust@v1
+        with:
+          cache-key-prefix: benchmarks-rust-pdfium
+          use-sccache: "true"
+          report-stats: "true"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.setup.outputs.artifact-name }}
+          path: target/release
+
+      - name: Restore benchmark binary permissions
+        run: scripts/benchmarks/restore-binary-permissions.sh
+
+      # Only the pdf/ fixtures the native-pdf-fast-b8 cohort references are needed here.
+      - name: Fetch test_documents fixtures
+        uses: xberg-io/actions/fetch-test-documents@v1
+        with:
+          include: |
+            pdf/**
+
+      - name: Download reference corpus cache
+        uses: actions/download-artifact@v8
+        with:
+          name: benchmark-corpus-cache
+          path: ${{ runner.temp }}/benchmark-corpus-cache
+
+      - name: Unpack reference corpus cache
+        run: tar -C test_documents -xf "${RUNNER_TEMP}/benchmark-corpus-cache/corpus-cache.tar"
+
+      # bench-rust runs this step unconditionally regardless of pipeline (not gated on
+      # `contains(matrix.pipeline, ...)`), so the `xberg-cli` binary built with `--features all`
+      # apparently expects an ONNX Runtime library reachable even for a baseline-only run.
+      # Mirrored here rather than assumed-unnecessary. ~keep
+      - name: Setup ONNX Runtime
+        uses: ./.github/actions/setup-onnx-runtime
+        with:
+          ort-version: ${{ env.ORT_VERSION }}
+
+      - name: Download Pdfium runtime (pinned to the checked-in bindings' release)
+        uses: ./.github/actions/download-pdfium
+        with:
+          pdfium-version: "7678"
+
+      - name: Run benchmark
+        env:
+          FRAMEWORK: xberg-${{ matrix.output_format }}-baseline-pdfium
+          MODE: ${{ matrix.mode }}
+          OUTPUT_FORMAT: ${{ matrix.output_format }}
+          PDF_BACKENDS: pdfium
+          ITERATIONS: ${{ env.ITERATIONS }}
+          TIMEOUT: ${{ github.event.inputs.timeout }}
+          COHORT: tools/benchmark-harness/cohorts/native-pdf-fast-b8.json
+          PDFIUM_DYNAMIC_LIB_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
+          LD_LIBRARY_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
+        run: scripts/benchmarks/run-benchmark.sh
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmarks-rust-pdfium-baseline-${{ matrix.output_format }}-${{ matrix.mode }}-native-pdf-fast-b8-${{ github.run_id }}
+          path: benchmark-results/
+          retention-days: 30
+
   sceptre-tract-diagnostic:
     name: sceptre-tract diagnostic (${{ matrix.mode }})
     needs: setup
