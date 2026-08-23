@@ -111,13 +111,26 @@ verify_local_closure() {
   log "ldd output for $(basename "$native") (exit $ldd_status):"
   cat "$report" >&2
 
-  if [ "$ldd_status" -ne 0 ]; then
+  # musl's ldd performs full relocation processing, so it reports undefined
+  # SYMBOLS (`Error relocating <file>: <sym>: symbol not found`) in the same
+  # breath as missing LIBRARIES, and exits 127 for either. A CPython extension
+  # module leaves every `Py*` symbol undefined by design -- it links no
+  # libpython, and the interpreter exports those symbols to the process at
+  # load time -- so keying failure on ldd's exit status, or on a bare
+  # `not found` substring, rejects a wheel whose closure is in fact complete.
+  # That is exactly what killed the musl wheel build: `_xberg.abi3.so has
+  # unresolved dependencies after vendoring (ldd exited 127)`, where all 101
+  # named symbols were `Py*`/`_Py*` and no library was missing at all.
+  # A genuinely absent library is what must be fatal, and it is reported
+  # distinctly: musl says `Error loading shared library <soname>`, glibc says
+  # `<soname> => not found`. Undefined symbols fall through to the dlopen
+  # probe below, which resolves them against a real interpreter process. ~keep
+  if grep -qE '=> not found|Error loading shared library' "$report"; then
     rm -f "$report"
-    die "$(basename "$native") has unresolved dependencies after vendoring (ldd exited $ldd_status)"
+    die "$(basename "$native") is missing a shared library after vendoring"
   fi
-  if grep -q 'not found' "$report"; then
-    rm -f "$report"
-    die "$(basename "$native") has unresolved dependencies after vendoring"
+  if [ "$ldd_status" -ne 0 ]; then
+    log "ldd exited $ldd_status for $(basename "$native") but named no missing library; treating the remaining diagnostics as undefined symbols the host process supplies at load time"
   fi
 
   while IFS= read -r lib; do
