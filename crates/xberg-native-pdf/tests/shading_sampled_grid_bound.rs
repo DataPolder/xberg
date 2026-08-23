@@ -72,3 +72,70 @@ fn sampled_function_size_larger_than_stream_renders() {
     let img = render_page(&doc, 0, &RenderOptions::default()).expect("page with an oversized sampled function renders");
     assert!(!img.data.is_empty(), "renderer produced an empty buffer");
 }
+
+// ---------------------------------------------------------------------------
+// §11.6.5.2 + §7.10.2: a Type 0 tint transform reached through a /SMask /BC
+// DeviceN backdrop interpolates across `2^N` grid corners, where `N` is the
+// pair count of the function's document-declared `/Domain`. Setting every
+// `/Size` entry to 1 collapses the sample grid to a single value, so a
+// one-byte stream satisfies the `/Size`-product and stream-length guards at
+// any `N` whatsoever — leaving the corner count as the only thing `N` drives.
+// --------------------------------------------------------------------------- ~keep
+
+/// Build a page whose /SMask /BC backdrop routes `dims` tints through a
+/// Type 0 sampled tint transform declaring `dims` input dimensions.
+///
+/// Every `/Size` entry is 1 and `/Range` has a single output pair, so the
+/// declared sample count is exactly 1 and the attached one-byte stream is
+/// long enough. Nothing else in the fixture scales with `dims`, which
+/// isolates the `2^dims` corner loop as the sole cost of raising it.
+fn devicen_smask_type0_pdf(dims: usize) -> Vec<u8> {
+    let names: String = (1..=dims).map(|i| format!("/Ink{i} ")).collect();
+    let domain = "0 1 ".repeat(dims);
+    let sizes = "1 ".repeat(dims);
+    let backdrop = "0.5 ".repeat(dims);
+
+    let objects = vec![
+        obj("<< /Type /Catalog /Pages 2 0 R >>"),
+        obj("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        obj("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 40 40] /Contents 4 0 R \
+             /Resources << /ExtGState << /GS0 5 0 R >> >> >>"),
+        stream_obj("", b"q /GS0 gs 1 0 0 rg 0 0 40 40 re f Q"),
+        obj(&format!(
+            "<< /Type /ExtGState /SMask << /Type /Mask /S /Luminosity /G 6 0 R /BC [{backdrop}] >> >>"
+        )),
+        // The Form's /Group /CS is what tells the /BC pre-fill that the
+        // backdrop is DeviceN and which function to run on it. ~keep
+        stream_obj(
+            &format!(
+                "/Type /XObject /Subtype /Form /BBox [0 0 40 40] /Resources << >> \
+                 /Group << /Type /Group /S /Transparency \
+                 /CS [/DeviceN [{names}] /DeviceGray 7 0 R] >>"
+            ),
+            b"% empty form\n",
+        ),
+        stream_obj(
+            &format!("/FunctionType 0 /Domain [{domain}] /Range [0 1] /Size [{sizes}] /BitsPerSample 8"),
+            &[0u8],
+        ),
+    ];
+    build_pdf(&objects)
+}
+
+/// 64 declared input dimensions, exercised end to end so the arity guard is
+/// proven reachable from a parsed document and not merely unit-tested.
+///
+/// `1usize << 64` is a shift past the width of `usize`: the evaluator must
+/// reject the arity before computing a corner count at all. Note this test is
+/// only a gate under `overflow-checks` (on by default in the dev profile) —
+/// with them off the shift is masked to `<< 0` and uncapped code completes.
+/// The arity bound itself is gated unconditionally by the unit tests on
+/// `evaluate_type0_multi` in `rendering/page_renderer.rs`. ~keep
+#[test]
+fn smask_bc_devicen_type0_with_64_input_dimensions_renders() {
+    let doc = PdfDocument::from_bytes(devicen_smask_type0_pdf(64)).expect("synthetic PDF parses");
+
+    let img = render_page(&doc, 0, &RenderOptions::default())
+        .expect("page with a 64-dimension sampled tint transform renders");
+    assert!(!img.data.is_empty(), "renderer produced an empty buffer");
+}

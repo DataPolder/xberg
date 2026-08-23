@@ -8067,6 +8067,18 @@ fn evaluate_type3_multi(
     evaluate_bc_tint_function(doc, &sub_resolved, sub_dict, &[encoded])
 }
 
+/// Cap on the number of sampled-function input dimensions we'll evaluate.
+/// Real-world DeviceN colorant counts top out around 8 (the same ceiling
+/// `resolution/color.rs` applies to its own Type 0 evaluator); `2^8 = 256`
+/// corner samples per evaluation keeps multilinear interpolation cheap while
+/// still covering every DeviceN tint transform seen in practice. A `/Domain`
+/// array longer than this is rejected rather than looping `2^N` corners for
+/// an attacker-controlled `N` — the `/Size` and stream-length guards do not
+/// bound `N` on their own, because an all-ones `/Size` makes a one-byte
+/// sample stream satisfy them at any dimension count, and at `N >= 64` the
+/// `1usize << N` corner count overflows outright.
+const MAX_SAMPLED_FUNCTION_DIMS: usize = 8;
+
 /// Evaluate a Type 0 (sampled) function with n-dimensional input `bc`
 /// per §7.10.2.
 ///
@@ -8082,7 +8094,8 @@ fn evaluate_type3_multi(
 /// /Size or /Range, /BitsPerSample outside the canonical 8-bit case
 /// (other depths are spec-legal but rare for tint transforms; rejecting
 /// the call lets the caller report unsupported), input arity mismatch,
-/// stream too short, or any malformed array.
+/// more input dimensions than [`MAX_SAMPLED_FUNCTION_DIMS`], stream too
+/// short, or any malformed array.
 fn evaluate_type0_multi(
     obj: &Object,
     dict: &std::collections::HashMap<String, Object>,
@@ -8095,7 +8108,7 @@ fn evaluate_type0_multi(
     }
     let n_in = domain_arr.len() / 2;
     let n_out = range_arr.len() / 2;
-    if n_in == 0 || n_out == 0 || bc.len() < n_in {
+    if n_in == 0 || n_out == 0 || bc.len() < n_in || n_in > MAX_SAMPLED_FUNCTION_DIMS {
         return None;
     }
 
@@ -10326,5 +10339,65 @@ mod tests {
         let img = renderer.render_page(&doc, 0).expect("render page");
 
         assert_eq!(img.data.len(), (img.width * img.height * 4) as usize);
+    }
+    /// A Type 0 sampled tint transform's input arity comes straight from the
+    /// document's `/Domain` array, and the evaluator interpolates across
+    /// `2^arity` grid corners. An all-ones `/Size` collapses the declared
+    /// sample count to 1, so a one-byte stream satisfies every length guard at
+    /// any arity whatsoever — which leaves [`MAX_SAMPLED_FUNCTION_DIMS`] as the
+    /// only thing bounding the corner loop.
+    fn all_ones_type0_function(dims: usize) -> (Object, std::collections::HashMap<String, Object>) {
+        let mut dict = std::collections::HashMap::new();
+        dict.insert(
+            "Domain".to_string(),
+            Object::Array(
+                (0..dims)
+                    .flat_map(|_| [Object::Integer(0), Object::Integer(1)])
+                    .collect(),
+            ),
+        );
+        dict.insert(
+            "Range".to_string(),
+            Object::Array(vec![Object::Integer(0), Object::Integer(1)]),
+        );
+        dict.insert("Size".to_string(), Object::Array(vec![Object::Integer(1); dims]));
+        dict.insert("BitsPerSample".to_string(), Object::Integer(8));
+        let obj = Object::Stream {
+            dict: dict.clone(),
+            data: bytes::Bytes::from_static(&[0u8]),
+        };
+        (obj, dict)
+    }
+
+    /// The cap is a real ceiling, not a rejection of everything: a tint
+    /// transform sitting exactly on it must still evaluate. Without this the
+    /// dimension guard could be tightened to zero and every negative test
+    /// would keep passing.
+    #[test]
+    fn sampled_tint_transform_at_the_dimension_cap_still_evaluates() {
+        let (obj, dict) = all_ones_type0_function(MAX_SAMPLED_FUNCTION_DIMS);
+        let bc = vec![0.5_f32; MAX_SAMPLED_FUNCTION_DIMS];
+
+        assert_eq!(
+            evaluate_type0_multi(&obj, &dict, &bc),
+            Some(vec![0.0]),
+            "a {MAX_SAMPLED_FUNCTION_DIMS}-dimension tint transform is legal and must still evaluate"
+        );
+    }
+
+    /// One dimension past the cap must be rejected on arity alone. Against
+    /// uncapped code this returns `Some` — every other guard is satisfied by
+    /// the all-ones `/Size` — so the corner count is document-controlled.
+    #[test]
+    fn sampled_tint_transform_past_the_dimension_cap_is_rejected() {
+        let dims = MAX_SAMPLED_FUNCTION_DIMS + 1;
+        let (obj, dict) = all_ones_type0_function(dims);
+        let bc = vec![0.5_f32; dims];
+
+        assert_eq!(
+            evaluate_type0_multi(&obj, &dict, &bc),
+            None,
+            "a {dims}-dimension /Domain must be rejected before the 2^{dims} corner loop"
+        );
     }
 }
