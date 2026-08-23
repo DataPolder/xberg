@@ -111,6 +111,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `task verify:feature-parity` checks that each per-target Cargo feature aggregate still carries
+  every code-bearing feature its superset does. `windows-target` is hand-maintained, the only
+  Windows CI job proves it compiles rather than that it is complete, and nothing correlated it with
+  `full` — which is how GH#1443 shipped nine features compiled out of every Windows artifact.
+- `task verify:docker-crates` additionally checks that every path a Dockerfile `COPY`s survives
+  `.dockerignore`, and that no allowlist entry names a crate that no longer exists. The existing
+  check knew only about workspace membership, so it reported full coverage throughout the outage
+  above.
+- End-to-end coverage for the `.doc` field-instruction fix against a real Word binary. The nine
+  existing tests all ran on synthetic strings and would have passed even if the parser upstream
+  never delivered field bytes.
+
 - The benchmark harness now has an exact `pdf-regressions` cohort for the six unique PDFs tracked
   by #1406, with checked document paths, ground-truth references, and byte sizes. This provides a
   stable baseline/layout comparison target without weakening the existing calibrated quality floors.
@@ -302,6 +314,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Repinned to alef 0.65.0 and regenerated every binding. Picks up `is_empty` fixes across
+  Swift/Elixir/Dart/Kotlin/Java, TypeScript/node internally-tagged enum nesting, C/doc-snippet
+  optional-argument sentinel selection, pyo3 snippet imports and streaming stub signatures, C#
+  streaming e2e iteration, and rustler/extendr emission order-invariance. `packages/dart/pubspec.yaml`'s
+  `freezed` dependency is pinned back to `^3.2.5`: a prior `task upgrade` bumped it to the
+  prerelease `^4.0.0-dev.3`, which `flutter_rust_bridge_codegen` 2.12.0's own version gate rejects
+  even though pub resolves it fine.
+- **BREAKING.** The PDF backend is selected with `"native"` instead of `"pdf_oxide"`, and the Rust
+  enum variant is `PdfBackend::Native`. This affects `pdf_options.backend` in a config file, the
+  `--pdf-backend` CLI flag, and the equivalent field in every binding. There is deliberately no
+  back-compatibility alias: an accepted old spelling would keep it alive in user configs
+  indefinitely, so the old value is rejected with an error naming the valid ones. A config
+  carrying `backend = "pdf_oxide"` must be updated; the default is unchanged, so a config that
+  never set the field is unaffected.
+- The PDF engine is now a workspace member, `crates/xberg-native-pdf`, published as
+  `xberg-native-pdf`. It was previously a separate repository consumed from crates.io as
+  `xberg-pdf-oxide`, which is yanked and will not receive further releases. The engine's own
+  history and its upstream provenance are recorded in `ATTRIBUTIONS.md` and in the crate's
+  `CHANGELOG.md`; behaviour is unchanged by the move itself.
+- The engine's `tracing` target root moves with the crate name and is now exported as
+  `xberg_native_pdf::LOG_TARGET_ROOT`. Anything filtering on the old prefix must switch. Both
+  in-tree consumers — the render-warning capture and the CLI's quiet-directive list — derive the
+  prefix from that constant rather than spelling it, so the coupling is compiler-checked instead
+  of being a literal that can silently stop matching (GH#697).
+- `security_limits.max_pages` is enforced for PPTX, ODP, Keynote and multi-frame TIFF, not only
+  PDF. The cost argument behind the limit is format-independent: a 4,000-slide deck carries the
+  same per-page OCR and layout cost a 4,000-page PDF does. Formats whose page count is a layout
+  outcome rather than a stored value — DOCX, ODT — are still not covered, and the field's own
+  documentation now names both sets rather than implying a universal guarantee (GH#1451).
+- `create_client_with_credential_provider` returns a `ManagedClient`, and
+  `LlmConfig.max_concurrency = Some(0)` is now an error at client construction rather than being
+  silently clamped to 1.
+- Dependency requirements advanced by `cargo upgrade --incompatible`: jsonschema 0.49 to 0.50,
+  crawlberg 1.3.0 to 1.3.3, liter-llm 1.17.0 to 1.18.1, unhwp 0.9.0 to 0.9.1, cc 1.4.3 to 1.4.4,
+  mail-parser 0.11.7 to 0.11.8, tree-sitter-language-pack 1.15.0 to 1.15.7, uuid 1.24 to 1.25, and
+  quick-xml 0.41 to 0.42.
+- `quick-xml` 0.42 decodes at parse time rather than handing back bytes, so XML element and
+  attribute names arrive as `&str` and the per-call-site lossy UTF-8 decode is gone throughout the
+  office, excel, xml, hwpx, html and svg extractors. This is not purely an API change: the reader
+  now validates UTF-8 while parsing, so a document that is not already UTF-8 would fail the whole
+  read where it previously degraded field by field. Input is therefore transcoded up front — see
+  the corresponding entry under Fixed.
+- Container-relative path resolution for DOCX, PPTX and EPUB is one shared implementation rather
+  than several partial ones. It is boundary-relative, not `..`-phobic: a `..` that leaves and
+  returns without crossing the container root resolves normally, and only a `..` that pops past
+  the root is rejected, alongside NUL bytes and drive-letter/UNC prefixes. One user-visible
+  consequence: a DOCX relationship targeting `../media/image1.png` — the ordinary OPC shape for an
+  image stored at the package root — now resolves instead of being silently dropped, so such
+  images are extracted where before they went missing. Percent-decoding stays with the caller,
+  because decoding after resolution would let an encoded `../` slip past a check that already ran.
+
 - Extracted PDF pages now reflect reading-order reordering per page instead of only in the
   joined document text, so `AUTO` and `ALWAYS` reading-order modes no longer return
   byte-identical `pages[].content`.
@@ -382,6 +445,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- The unused batch and object-pooling stacks: `BatchProcessor`, `batch_optimizations`,
+  `utils::pool` and `utils::pool_sizing`. Batch extraction is, and remains, implemented in the
+  extraction engine; these were a second implementation that no code path reached and that the
+  FFI surface already excluded. The pooling code was gated behind a feature nothing enabled, and
+  its documented throughput benefit had never been measured because it was never wired to a
+  caller. `utils` is a public module, so the two `utils::` paths were public API.
+- The PDF writer and editor stacks from `xberg-native-pdf`, together with the XFA converter and
+  the PDF builder API. The engine is consumed only as a reader and nothing first-party wrote PDFs
+  through it. The read-only XFA analysis it contained is retained. Tests that had built their
+  fixtures by writing a PDF now use committed fixture bytes instead.
+
 - **Breaking (bindings):** `ExtractedDocument.formatted_content` / `formattedContent` is no longer
   exposed by any language binding (Python, Node, Ruby, PHP, Go, Java, C#, Elixir, Dart, Swift,
   Kotlin, Zig, WASM, C FFI), and the C symbol `xberg_extracted_document_formatted_content` is gone.
@@ -422,50 +496,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exported — none of their symbols appear among the 2525 declarations in the published C header,
   so no C, Swift, Go or Zig consumer can have been calling them.
 
-### Security
-
-- `biblib` moves from the exact pin `=0.4.3` to `0.8`, taking the citation parser off `quick-xml`
-  0.37 and onto 0.41. That clears RUSTSEC-2026-0194 (quadratic duplicate-attribute checking) and
-  RUSTSEC-2026-0195 (unbounded namespace-declaration allocation), both scored 7.5, which reached
-  every downstream consumer of the `office` feature. The old pin existed because biblib 0.4.4 called
-  a `quick-xml` API that had been removed; 0.8 no longer does. Its `regex` feature is gone —
-  matching is now unconditional `regex-lite` — and its RIS parser keeps records that earlier
-  versions rejected, so RIS input that used to fail to parse now yields a citation.
-
-  0.37 and onto 0.41. That clears RUSTSEC-2026-0194 (quadratic duplicate-attribute checking) and
-  RUSTSEC-2026-0195 (unbounded namespace-declaration allocation), both scored 7.5, which reached
-  every downstream consumer of the `office` feature. The old pin existed because biblib 0.4.4 called
-  a `quick-xml` API that had been removed; 0.8 no longer does. Its `regex` feature is gone —
-  matching is now unconditional `regex-lite` — and its RIS parser keeps records that earlier
-  versions rejected, so RIS input that used to fail to parse now yields a citation.
-- Zip-bomb accounting no longer overflows or skips entries. Declared entry sizes are read from the
-  central directory, where a ZIP64 extended field can carry a full eight-byte value, and were summed
-  with an unchecked addition, so two crafted entries could wrap the accumulator to zero and pass a
-  cap of 18 exabytes — or panic outright in a debug build. Entries whose compression method the
-  reader rejected were also dropped from the totals while validation still returned success. The
-  depth budget additionally took the looser of the XML-depth and nesting-depth limits, so tightening
-  either one had no effect.
-- The configured cache namespace is validated before any directory is created. It reached
-  `create_dir_all` unchecked, so a traversing or absolute value wrote outside the cache root. It is
-  now allowlisted at both boundaries. Cache entries also carried no build fingerprint, so an entry
-  written by a different build was served after extraction behaviour had changed; the key now embeds
-  a hash over the package version and a schema version.
-- Redaction no longer reports personally identifying information as redacted that it did not remove.
-  LLM-detected entities were resolved by a first-match search, so only the first mention of a
-  repeated name was replaced; findings were recorded before the span was checked to be applicable, so
-  skipped spans still counted as redacted; detections were applied to `content` alone, leaving the
-  same name intact in metadata, chunks, pages, formulas, revisions, document structure, format
-  metadata and nested archive members; custom labels were dropped by the category filter, and
-  requesting only custom labels skipped the detection backend entirely; and the audit total counted
-  findings in `content` only. One pass now walks every text-bearing field and records a finding only
-  once the replacement is provably applicable.
-- The public `elements` field no longer carries pre-post-processing text. The element tree was
-  snapshotted before the Early, Middle and Late post-processors, token reduction and Unicode
-  normalisation ran, and then never updated, while the renderer preferred that tree over `content` —
-  so with redaction configured, `elements` and the copy handed to foreign renderers held unredacted
-  text. The tree is now discarded when `content` diverges from what it stands for.
-
 ### Fixed
+
+- The musl smoke-test images (C#, Java, Node, Elixir) now bundle the FULL transitive shared-lib
+  closure of the vendored ONNX Runtime, not a hand-picked allowlist. `libonnxruntime.so.1` on
+  Alpine transitively needs `libprotobuf-lite` plus roughly forty `libabsl_*`/`libre2`/`libicu*`
+  libraries; `Dockerfile.musl-ffi` bundled only `libonnxruntime`/`libheif`/`libde265`/etc. beside
+  `libxberg_ffi.so`, and `Dockerfile.musl-rustler` bundled nothing at all for `libxberg_nif.so`.
+  Both now reuse `scripts/ci/vendor-native-closure.sh` (already used by the Node and Python musl
+  builds), which walks `ldd` recursively and hard-fails the build if anything is still unresolved
+  after vendoring. Separately, `smoke-test-musl-elixir-nif.sh` and `smoke-test-musl-java-ffi.sh`
+  each mounted only the bare `.so` file into the smoke-test container, discarding the vendored
+  closure sitting beside it and turning a missing-transitive-library failure into a nameless
+  NIF-load / FFI-call failure; both now mount the whole native directory, matching the C# and
+  Node scripts.
+- Documents whose XML is not UTF-8 still extract instead of failing outright. The `quick-xml` 0.42
+  reader validates UTF-8 as it parses, so bytes in any other encoding abort the read rather than
+  degrading to a lossy decode as they did when each extractor decoded for itself. `parse_xml` and
+  the FictionBook extractor now transcode before parsing, honouring the `<?xml encoding=...?>`
+  declaration and falling back to charset detection, and report the lossy decode as a processing
+  warning. FictionBook is the format most exposed — windows-1251 is its common encoding and it
+  passes raw file bytes straight to the reader — and had no coverage for this at all.
+- Diagram edges painted with the `B`, `B*` and `b*` combined fill-stroke operators are recovered
+  from cairo-written PDFs. The operators reached no dispatch arm, so the path was never finalized
+  and the operand buffer never cleared: a `B`-painted path merged into the next one and the last in
+  a content stream was discarded, which for graphviz output meant the arrowheads. Without an
+  arrowhead an edge's reach stays at the snap tolerance and cannot cross to its node.
+  `cairo_graphviz_flow.pdf` goes from 3/4 edges to 4/4, `cairo_graphviz_ortho.pdf` from 4/5 to 5/5,
+  and `cairo_graphviz_large.pdf` from 136/141 to 137/141, losing only the same four long-range
+  shortcuts its SVG twin loses (GH#1436).
+- A numbered section heading is no longer welded to the unnumbered lines that follow it. The
+  paragraph break asked only whether the current line *starts* a section, never whether the previous
+  line *was* one, so a subsection heading followed by a callout in the same weight and size — how
+  installation manuals set warnings — was absorbed into one prose-length element with the numbering
+  no longer at a line start, unrecoverable for any consumer deriving a section hierarchy. The term
+  is now symmetric, guarded so that only the line immediately after the heading closes it and so
+  that a heading wrapping onto its own next line stays intact. The mirror guard is applied in
+  `merge_continuation_paragraphs` as well, which would otherwise have re-joined the split and left
+  the fix inert (GH#1467).
+- Docker image builds. Every image had failed to build since `crates/xberg-pdfium-render` became a
+  workspace member: the Dockerfiles gained a `COPY` for it but `.dockerignore`, which excludes
+  everything and re-includes an allowlist, did not, so buildx aborted with
+  `"/crates/xberg-pdfium-render": not found` before compiling anything. Nothing caught it because
+  the Docker workflow triggers only on paths that commit did not touch.
+- VLM request concurrency is bounded in the LLM client rather than at the OCR call sites. The
+  previous limit was selected whenever a VLM backend or fallback was configured and then used as
+  the page batch size, so under `VlmFallbackPolicy::OnLowQuality` — where classical OCR runs on
+  every page — raising a remote limit multiplied concurrent Tesseract jobs and the raster memory
+  budget with them. The bound is now global across extractions instead of per-extraction (GH#1465).
+- A CLI logging test asserted that a `target=warn` directive suppressed WARN events. It permits
+  them; the directive quiets a noisy crate down to warnings rather than silencing them. The test
+  had been failing on `main`, and now asserts the behaviour that exists.
+- A crafted `.pptx` could panic the calling thread. A slide relationship's `Target` is a verbatim,
+  unfiltered XML attribute, and image-path resolution checked only that it began with the two
+  bytes `..` before slicing at byte offset 3. `Target=".."` sliced out of bounds and `Target="..é"`
+  sliced inside a multi-byte character; both abort a direct embedder, which has no panic-catching
+  boundary on this path. Malformed relationships are now rejected as errors rather than resolved.
+- Image URIs are confined to their base directory in two cases that previously escaped it. A base
+  directory that was empty — which is what `Path::parent()` yields for a bare filename — made the
+  containment check pass vacuously, so `../x` resolved to `x`; and a symlink inside the base
+  directory pointing outside it was followed, because the check ran on the path as written rather
+  than on what it resolved to.
+- `layout_wastes_plain_output` is excluded from the generated bindings. alef cannot express it in
+  WebAssembly, so a full regen emitted an unconditional `compile_error!` into `crates/xberg-wasm`
+  and a Swift binding that read a `String` as a tuple struct, which is why
+  `cargo clippy --workspace` has been failing on `main`. The exclusion is on the Rust source; the
+  two generated crates clear on the next regen.
 
 - PDF Markdown and Djot extraction now falls back to complete native text when the structured
   hierarchy retains less than 70% of native tokens, including tokens represented in table cells.
@@ -1187,6 +1283,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   word order and spacing without changing unrotated pages.
 - Alef now extracts Crawlberg binding types from the pinned registry dependency instead of a
   neighboring checkout, keeping generated bindings aligned with the version Cargo compiles.
+
+### Security
+
+- `biblib` moves from the exact pin `=0.4.3` to `0.8`, taking the citation parser off `quick-xml`
+  0.37 and onto 0.41. That clears RUSTSEC-2026-0194 (quadratic duplicate-attribute checking) and
+  RUSTSEC-2026-0195 (unbounded namespace-declaration allocation), both scored 7.5, which reached
+  every downstream consumer of the `office` feature. The old pin existed because biblib 0.4.4 called
+  a `quick-xml` API that had been removed; 0.8 no longer does. Its `regex` feature is gone —
+  matching is now unconditional `regex-lite` — and its RIS parser keeps records that earlier
+  versions rejected, so RIS input that used to fail to parse now yields a citation.
+
+  0.37 and onto 0.41. That clears RUSTSEC-2026-0194 (quadratic duplicate-attribute checking) and
+  RUSTSEC-2026-0195 (unbounded namespace-declaration allocation), both scored 7.5, which reached
+  every downstream consumer of the `office` feature. The old pin existed because biblib 0.4.4 called
+  a `quick-xml` API that had been removed; 0.8 no longer does. Its `regex` feature is gone —
+  matching is now unconditional `regex-lite` — and its RIS parser keeps records that earlier
+  versions rejected, so RIS input that used to fail to parse now yields a citation.
+- Zip-bomb accounting no longer overflows or skips entries. Declared entry sizes are read from the
+  central directory, where a ZIP64 extended field can carry a full eight-byte value, and were summed
+  with an unchecked addition, so two crafted entries could wrap the accumulator to zero and pass a
+  cap of 18 exabytes — or panic outright in a debug build. Entries whose compression method the
+  reader rejected were also dropped from the totals while validation still returned success. The
+  depth budget additionally took the looser of the XML-depth and nesting-depth limits, so tightening
+  either one had no effect.
+- The configured cache namespace is validated before any directory is created. It reached
+  `create_dir_all` unchecked, so a traversing or absolute value wrote outside the cache root. It is
+  now allowlisted at both boundaries. Cache entries also carried no build fingerprint, so an entry
+  written by a different build was served after extraction behaviour had changed; the key now embeds
+  a hash over the package version and a schema version.
+- Redaction no longer reports personally identifying information as redacted that it did not remove.
+  LLM-detected entities were resolved by a first-match search, so only the first mention of a
+  repeated name was replaced; findings were recorded before the span was checked to be applicable, so
+  skipped spans still counted as redacted; detections were applied to `content` alone, leaving the
+  same name intact in metadata, chunks, pages, formulas, revisions, document structure, format
+  metadata and nested archive members; custom labels were dropped by the category filter, and
+  requesting only custom labels skipped the detection backend entirely; and the audit total counted
+  findings in `content` only. One pass now walks every text-bearing field and records a finding only
+  once the replacement is provably applicable.
+- The public `elements` field no longer carries pre-post-processing text. The element tree was
+  snapshotted before the Early, Middle and Late post-processors, token reduction and Unicode
+  normalisation ran, and then never updated, while the renderer preferred that tree over `content` —
+  so with redaction configured, `elements` and the copy handed to foreign renderers held unredacted
+  text. The tree is now discarded when `content` diverges from what it stands for.
 
 ### Documentation
 
