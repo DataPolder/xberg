@@ -24,6 +24,7 @@
     "c/contract/config_embedding_plugin.md",
     "c/contract/config_extraction_timeout.md",
     "c/contract/config_keywords.md",
+    "c/contract/config_llm_max_concurrency.md",
     "c/contract/config_llm_structured_extraction.md",
     "c/contract/config_pages.md",
     "c/contract/config_quality_enabled.md",
@@ -114,6 +115,7 @@
     "csharp/contract/config_embedding_plugin.md",
     "csharp/contract/config_extraction_timeout.md",
     "csharp/contract/config_keywords.md",
+    "csharp/contract/config_llm_max_concurrency.md",
     "csharp/contract/config_llm_structured_extraction.md",
     "csharp/contract/config_pages.md",
     "csharp/contract/config_quality_enabled.md",
@@ -204,6 +206,7 @@
     "dart/contract/config_embedding_plugin.md",
     "dart/contract/config_extraction_timeout.md",
     "dart/contract/config_keywords.md",
+    "dart/contract/config_llm_max_concurrency.md",
     "dart/contract/config_llm_structured_extraction.md",
     "dart/contract/config_pages.md",
     "dart/contract/config_quality_enabled.md",
@@ -294,6 +297,7 @@
     "elixir/contract/config_embedding_plugin.md",
     "elixir/contract/config_extraction_timeout.md",
     "elixir/contract/config_keywords.md",
+    "elixir/contract/config_llm_max_concurrency.md",
     "elixir/contract/config_llm_structured_extraction.md",
     "elixir/contract/config_pages.md",
     "elixir/contract/config_quality_enabled.md",
@@ -384,6 +388,7 @@
     "go/contract/config_embedding_plugin.md",
     "go/contract/config_extraction_timeout.md",
     "go/contract/config_keywords.md",
+    "go/contract/config_llm_max_concurrency.md",
     "go/contract/config_llm_structured_extraction.md",
     "go/contract/config_pages.md",
     "go/contract/config_quality_enabled.md",
@@ -474,6 +479,7 @@
     "java/contract/config_embedding_plugin.md",
     "java/contract/config_extraction_timeout.md",
     "java/contract/config_keywords.md",
+    "java/contract/config_llm_max_concurrency.md",
     "java/contract/config_llm_structured_extraction.md",
     "java/contract/config_pages.md",
     "java/contract/config_quality_enabled.md",
@@ -564,6 +570,7 @@
     "kotlin-android/contract/config_embedding_plugin.md",
     "kotlin-android/contract/config_extraction_timeout.md",
     "kotlin-android/contract/config_keywords.md",
+    "kotlin-android/contract/config_llm_max_concurrency.md",
     "kotlin-android/contract/config_llm_structured_extraction.md",
     "kotlin-android/contract/config_pages.md",
     "kotlin-android/contract/config_quality_enabled.md",
@@ -654,6 +661,7 @@
     "php/contract/config_embedding_plugin.md",
     "php/contract/config_extraction_timeout.md",
     "php/contract/config_keywords.md",
+    "php/contract/config_llm_max_concurrency.md",
     "php/contract/config_llm_structured_extraction.md",
     "php/contract/config_pages.md",
     "php/contract/config_quality_enabled.md",
@@ -744,6 +752,7 @@
     "python/contract/config_embedding_plugin.md",
     "python/contract/config_extraction_timeout.md",
     "python/contract/config_keywords.md",
+    "python/contract/config_llm_max_concurrency.md",
     "python/contract/config_llm_structured_extraction.md",
     "python/contract/config_pages.md",
     "python/contract/config_quality_enabled.md",
@@ -834,6 +843,7 @@
     "ruby/contract/config_embedding_plugin.md",
     "ruby/contract/config_extraction_timeout.md",
     "ruby/contract/config_keywords.md",
+    "ruby/contract/config_llm_max_concurrency.md",
     "ruby/contract/config_llm_structured_extraction.md",
     "ruby/contract/config_pages.md",
     "ruby/contract/config_quality_enabled.md",
@@ -924,6 +934,7 @@
     "rust/contract/config_embedding_plugin.md",
     "rust/contract/config_extraction_timeout.md",
     "rust/contract/config_keywords.md",
+    "rust/contract/config_llm_max_concurrency.md",
     "rust/contract/config_llm_structured_extraction.md",
     "rust/contract/config_pages.md",
     "rust/contract/config_quality_enabled.md",
@@ -1014,6 +1025,7 @@
     "swift/contract/config_embedding_plugin.md",
     "swift/contract/config_extraction_timeout.md",
     "swift/contract/config_keywords.md",
+    "swift/contract/config_llm_max_concurrency.md",
     "swift/contract/config_llm_structured_extraction.md",
     "swift/contract/config_pages.md",
     "swift/contract/config_quality_enabled.md",
@@ -1104,6 +1116,7 @@
     "typescript/contract/config_embedding_plugin.md",
     "typescript/contract/config_extraction_timeout.md",
     "typescript/contract/config_keywords.md",
+    "typescript/contract/config_llm_max_concurrency.md",
     "typescript/contract/config_llm_structured_extraction.md",
     "typescript/contract/config_pages.md",
     "typescript/contract/config_quality_enabled.md",
@@ -1194,6 +1207,7 @@
     "wasm/contract/config_embedding_plugin.md",
     "wasm/contract/config_extraction_timeout.md",
     "wasm/contract/config_keywords.md",
+    "wasm/contract/config_llm_max_concurrency.md",
     "wasm/contract/config_llm_structured_extraction.md",
     "wasm/contract/config_pages.md",
     "wasm/contract/config_quality_enabled.md",
@@ -1284,6 +1298,7 @@
     "zig/contract/config_embedding_plugin.md",
     "zig/contract/config_extraction_timeout.md",
     "zig/contract/config_keywords.md",
+    "zig/contract/config_llm_max_concurrency.md",
     "zig/contract/config_llm_structured_extraction.md",
     "zig/contract/config_pages.md",
     "zig/contract/config_quality_enabled.md",
@@ -1623,6 +1638,18 @@
         "language": "c"
       },
       "path": "c/contract/config_keywords.md",
+      "language": "c",
+      "target": "c",
+      "session": "c",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "c"
+      },
+      "path": "c/contract/config_llm_max_concurrency.md",
       "language": "c",
       "target": "c",
       "session": "c",
@@ -2711,6 +2738,18 @@
     },
     {
       "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "csharp"
+      },
+      "path": "csharp/contract/config_llm_max_concurrency.md",
+      "language": "csharp",
+      "target": "csharp",
+      "session": "csharp",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
         "fixture_id": "config_llm_structured_extraction",
         "language": "csharp"
       },
@@ -3783,6 +3822,18 @@
         "language": "dart"
       },
       "path": "dart/contract/config_keywords.md",
+      "language": "dart",
+      "target": "dart",
+      "session": "dart",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "dart"
+      },
+      "path": "dart/contract/config_llm_max_concurrency.md",
       "language": "dart",
       "target": "dart",
       "session": "dart",
@@ -4871,6 +4922,18 @@
     },
     {
       "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "elixir"
+      },
+      "path": "elixir/contract/config_llm_max_concurrency.md",
+      "language": "elixir",
+      "target": "elixir",
+      "session": "elixir",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
         "fixture_id": "config_llm_structured_extraction",
         "language": "elixir"
       },
@@ -5943,6 +6006,18 @@
         "language": "go"
       },
       "path": "go/contract/config_keywords.md",
+      "language": "go",
+      "target": "go",
+      "session": "go",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "go"
+      },
+      "path": "go/contract/config_llm_max_concurrency.md",
       "language": "go",
       "target": "go",
       "session": "go",
@@ -7031,6 +7106,18 @@
     },
     {
       "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "java"
+      },
+      "path": "java/contract/config_llm_max_concurrency.md",
+      "language": "java",
+      "target": "java",
+      "session": "java",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
         "fixture_id": "config_llm_structured_extraction",
         "language": "java"
       },
@@ -8103,6 +8190,18 @@
         "language": "kotlin_android"
       },
       "path": "kotlin-android/contract/config_keywords.md",
+      "language": "kotlin",
+      "target": "kotlin_android",
+      "session": "kotlin_android",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "kotlin_android"
+      },
+      "path": "kotlin-android/contract/config_llm_max_concurrency.md",
       "language": "kotlin",
       "target": "kotlin_android",
       "session": "kotlin_android",
@@ -9191,6 +9290,18 @@
     },
     {
       "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "php"
+      },
+      "path": "php/contract/config_llm_max_concurrency.md",
+      "language": "php",
+      "target": "php",
+      "session": "php",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
         "fixture_id": "config_llm_structured_extraction",
         "language": "php"
       },
@@ -10263,6 +10374,18 @@
         "language": "python"
       },
       "path": "python/contract/config_keywords.md",
+      "language": "python",
+      "target": "python",
+      "session": "python",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "python"
+      },
+      "path": "python/contract/config_llm_max_concurrency.md",
       "language": "python",
       "target": "python",
       "session": "python",
@@ -11351,6 +11474,18 @@
     },
     {
       "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "ruby"
+      },
+      "path": "ruby/contract/config_llm_max_concurrency.md",
+      "language": "ruby",
+      "target": "ruby",
+      "session": "ruby",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
         "fixture_id": "config_llm_structured_extraction",
         "language": "ruby"
       },
@@ -12162,7 +12297,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12174,7 +12312,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12186,7 +12327,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12198,7 +12342,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12210,7 +12357,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12222,7 +12372,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12234,7 +12387,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12246,7 +12402,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12258,7 +12417,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12270,7 +12432,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12282,7 +12447,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12294,7 +12462,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12306,7 +12477,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12318,7 +12492,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12330,7 +12507,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12342,7 +12522,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12354,7 +12537,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12366,7 +12552,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12378,7 +12567,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12390,7 +12582,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12402,7 +12597,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12414,7 +12612,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12426,7 +12627,25 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
+      "side_effect": "server"
+    },
+    {
+      "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "rust"
+      },
+      "path": "rust/contract/config_llm_max_concurrency.md",
+      "language": "rust",
+      "target": "rust",
+      "session": "rust",
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12438,7 +12657,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12450,7 +12672,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12462,7 +12687,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12474,7 +12702,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12486,7 +12717,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12498,7 +12732,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12510,7 +12747,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12522,7 +12762,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12534,7 +12777,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12546,7 +12792,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12558,7 +12807,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12570,7 +12822,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12582,7 +12837,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12594,7 +12852,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12606,7 +12867,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -12618,7 +12882,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12630,7 +12897,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12642,7 +12912,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12654,7 +12927,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12666,7 +12942,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -12678,7 +12957,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13062,7 +13344,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "safe"
     },
     {
@@ -13074,7 +13359,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13086,7 +13374,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13098,7 +13389,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13110,7 +13404,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13122,7 +13419,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13134,7 +13434,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13146,7 +13449,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13158,7 +13464,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13170,7 +13479,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13182,7 +13494,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13194,7 +13509,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13206,7 +13524,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13218,7 +13539,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13230,7 +13554,10 @@
       "language": "rust",
       "target": "rust",
       "session": "rust",
-      "requires": [],
+      "requires": [
+        "crate:serde_json",
+        "crate:tokio"
+      ],
       "side_effect": "server"
     },
     {
@@ -13503,6 +13830,18 @@
         "language": "swift"
       },
       "path": "swift/contract/config_keywords.md",
+      "language": "swift",
+      "target": "swift",
+      "session": "swift",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "swift"
+      },
+      "path": "swift/contract/config_llm_max_concurrency.md",
       "language": "swift",
       "target": "swift",
       "session": "swift",
@@ -14591,6 +14930,18 @@
     },
     {
       "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "node"
+      },
+      "path": "typescript/contract/config_llm_max_concurrency.md",
+      "language": "typescript",
+      "target": "node",
+      "session": "node",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
         "fixture_id": "config_llm_structured_extraction",
         "language": "node"
       },
@@ -15671,6 +16022,18 @@
     },
     {
       "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "wasm"
+      },
+      "path": "wasm/contract/config_llm_max_concurrency.md",
+      "language": "typescript",
+      "target": "wasm",
+      "session": "wasm",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
         "fixture_id": "config_llm_structured_extraction",
         "language": "wasm"
       },
@@ -16743,6 +17106,18 @@
         "language": "zig"
       },
       "path": "zig/contract/config_keywords.md",
+      "language": "zig",
+      "target": "zig",
+      "session": "zig",
+      "requires": [],
+      "side_effect": "server"
+    },
+    {
+      "key": {
+        "fixture_id": "config_llm_max_concurrency",
+        "language": "zig"
+      },
+      "path": "zig/contract/config_llm_max_concurrency.md",
       "language": "zig",
       "target": "zig",
       "session": "zig",
@@ -18393,6 +18768,66 @@
     },
     {
       "fixture_id": "config_keywords",
+      "language": "zig"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "c"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "csharp"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "dart"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "elixir"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "go"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "java"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "kotlin_android"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "node"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "php"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "python"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "ruby"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "rust"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "swift"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "wasm"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
       "language": "zig"
     },
     {
@@ -23795,6 +24230,66 @@
     },
     {
       "fixture_id": "config_keywords",
+      "language": "zig"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "c"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "csharp"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "dart"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "elixir"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "go"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "java"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "kotlin_android"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "node"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "php"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "python"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "ruby"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "rust"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "swift"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
+      "language": "wasm"
+    },
+    {
+      "fixture_id": "config_llm_max_concurrency",
       "language": "zig"
     },
     {
