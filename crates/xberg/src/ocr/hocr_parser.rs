@@ -65,6 +65,7 @@ pub(crate) fn parse_hocr_to_internal_document(hocr_html: &str) -> InternalDocume
 /// Kept as a separate function (rather than adding a parameter to
 /// [`parse_hocr_to_internal_document`] directly) so the ~30 existing call sites that only
 /// ever want the unfiltered parse -- almost all of them tests -- do not need to change.
+#[cfg(test)]
 pub(crate) fn parse_hocr_to_internal_document_with_dictionary_filter(
     hocr_html: &str,
     dictionary_filter: Option<&DictionaryLineFilter<'_>>,
@@ -903,13 +904,13 @@ fn has_class(tag_content: &str, cls: &str) -> bool {
         // would make the `quote` check below pass on an empty `rest`, and the
         // following `&rest[1..]` then panics slicing byte index 1 out of a
         // 0-length string.
-        if let Some(quote) = rest.as_bytes().first().copied() {
-            if quote == b'"' || quote == b'\'' {
-                let inner = &rest[1..];
-                if let Some(end) = inner.find(quote as char) {
-                    let class_value = &inner[..end];
-                    return class_value.split_whitespace().any(|c| c == cls);
-                }
+        if let Some(quote) = rest.as_bytes().first().copied()
+            && (quote == b'"' || quote == b'\'')
+        {
+            let inner = &rest[1..];
+            if let Some(end) = inner.find(quote as char) {
+                let class_value = &inner[..end];
+                return class_value.split_whitespace().any(|c| c == cls);
             }
         }
     }
@@ -935,12 +936,12 @@ fn extract_attribute(tag_content: &str, attribute: &str) -> Option<String> {
         // See the matching comment in `has_class`: `rest` can be empty when the
         // attribute marker is the last thing in `tag_content`, and defaulting a
         // missing byte to a quote char would make `&rest[1..]` panic below.
-        if let Some(quote) = rest.as_bytes().first().copied() {
-            if quote == b'"' || quote == b'\'' {
-                let inner = &rest[1..];
-                if let Some(end) = inner.find(quote as char) {
-                    return Some(inner[..end].to_string());
-                }
+        if let Some(quote) = rest.as_bytes().first().copied()
+            && (quote == b'"' || quote == b'\'')
+        {
+            let inner = &rest[1..];
+            if let Some(end) = inner.find(quote as char) {
+                return Some(inner[..end].to_string());
             }
         }
     }

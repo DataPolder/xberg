@@ -2103,7 +2103,7 @@ mod set_image_validation_tests {
         let height = 1;
         let bytes_per_pixel = 100_000;
         let bytes_per_line = 1;
-        let data = vec![0u8; 1];
+        let data = [0u8; 1];
 
         let result = validate_image_buffer(data.len(), width, height, bytes_per_pixel, bytes_per_line);
         assert!(matches!(result, Err(TesseractError::InvalidBytesPerLine)));

@@ -3108,12 +3108,12 @@ mod tests {
     /// `advance == +y`, non-negative for all real page content — which is
     /// precisely why the `+90` test above passes. For `-90` it yields
     /// `advance == -y`, **negative** for all real page content, which
-    /// `table_reconstruct::segment_to_hocr_word` used to saturate to `0` when
+    /// `table_reconstruct::segment_to_hocr_word_lifted` used to saturate to `0` when
     /// writing it into the unsigned `HocrWord::left` — so every column of a
     /// `-90` table landed on `left == 0`.
     ///
     /// Revert check (expect RED): drop the `frame.advance` term from
-    /// `segment_to_hocr_word` and `split_segment_to_words`, restoring the bare
+    /// `segment_to_hocr_word_lifted` and `split_segment_to_words`, restoring the bare
     /// `advance.round().max(0.0) as u32`, and this asserts `[0]`.
     ///
     /// Two columns 120 units apart on the advance axis (`y` = 520 and `y` =
@@ -3255,7 +3255,7 @@ mod tests {
     /// disappeared even once its columns were distinct.
     ///
     /// Revert check (expect RED): drop the `frame.top` term from
-    /// `segment_to_hocr_word` and `split_segment_to_words` and this finds zero
+    /// `segment_to_hocr_word_lifted` and `split_segment_to_words` and this finds zero
     /// regions, because all six words collapse onto a single row.
     ///
     /// Rows at `x` = 800 / 812 / 824 against `page_height` 792 give raw tops of

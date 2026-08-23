@@ -440,8 +440,8 @@ mod tests {
     #[test]
     fn genuine_bomb_above_floor_and_below_absolute_cap_is_rejected_by_ratio_check() {
         const DECOMPRESSED_LEN: usize = 20 * 1024 * 1024;
-        assert!(DECOMPRESSED_LEN > MIN_SIZE_FOR_RATIO_CHECK);
-        assert!(DECOMPRESSED_LEN < DEFAULT_MAX_DECOMPRESSED_SIZE);
+        const { assert!(DECOMPRESSED_LEN > MIN_SIZE_FOR_RATIO_CHECK) };
+        const { assert!(DECOMPRESSED_LEN < DEFAULT_MAX_DECOMPRESSED_SIZE) };
 
         let original = vec![0u8; DECOMPRESSED_LEN];
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());

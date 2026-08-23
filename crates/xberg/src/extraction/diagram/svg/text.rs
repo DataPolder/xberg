@@ -165,7 +165,7 @@ impl TextPass {
                 Ok(Event::Start(e)) => {
                     let qname = e.name();
                     let name = local_name(qname.as_ref());
-                    let combined = self.open(&e, &name);
+                    let combined = self.open(&e, name);
                     self.transforms.push(combined);
                     self.depth.push(name.to_string());
                 }
@@ -174,8 +174,8 @@ impl TextPass {
                 Ok(Event::Empty(e)) => {
                     let qname = e.name();
                     let name = local_name(qname.as_ref());
-                    self.open(&e, &name);
-                    self.close(&name, self.depth.len());
+                    self.open(&e, name);
+                    self.close(name, self.depth.len());
                 }
                 Ok(Event::End(_)) => {
                     let name = self.depth.pop().unwrap_or_default();
@@ -184,7 +184,7 @@ impl TextPass {
                 }
                 Ok(Event::Text(e)) => {
                     let raw = e.as_ref();
-                    self.push_text(&raw);
+                    self.push_text(raw);
                 }
                 // A malformed tail costs the labels after it and nothing else;
                 // the shapes come from a parse `usvg` already accepted. ~keep

@@ -5984,12 +5984,12 @@ mod tests {
         };
         let mut result = crate::types::ExtractedDocument {
             tables: vec![crate::types::Table {
-                bounding_box: Some(region.clone()),
+                bounding_box: Some(region),
                 ..Default::default()
             }],
             formulas: vec![crate::types::Formula {
                 latex: "x^2".to_string(),
-                bbox: Some(region.clone()),
+                bbox: Some(region),
                 page: Some(1),
             }],
             ..Default::default()
@@ -5999,11 +5999,9 @@ mod tests {
 
         let table_bbox = result.tables[0]
             .bounding_box
-            .clone()
             .expect("the table bbox must survive the correction");
         let formula_bbox = result.formulas[0]
             .bbox
-            .clone()
             .expect("the formula bbox must survive the correction");
 
         assert_ne!(
@@ -12322,7 +12320,7 @@ Name: ___
 mod recognition_noise_tests {
     use super::{
         NativeTextStats, accept_or_reject_ocr_page, is_dictionary_invalid_noise, is_ocr_recognition_noise,
-        ocr_output_stats, repair_ocr_list_markers,
+        repair_ocr_list_markers,
     };
     use crate::core::config::OcrQualityThresholds;
 
@@ -12483,9 +12481,8 @@ approval of the rezoning request; and";
             stats.word_count >= thresholds.min_words_for_ocr_output_check,
             "fixture must clear the word-count guard so the ratio is what is tested"
         );
-        assert_eq!(
-            is_ocr_recognition_noise(transcript_page, &thresholds),
-            false,
+        assert!(
+            !is_ocr_recognition_noise(transcript_page, &thresholds),
             "a transcript's dividers and line numbers must not read as fragmented words"
         );
     }
@@ -12506,9 +12503,8 @@ approval of the rezoning request; and";
             stats.word_count >= thresholds.min_words_for_ocr_output_check,
             "fixture must clear the word-count guard so the ratio is what is tested"
         );
-        assert_eq!(
+        assert!(
             is_ocr_recognition_noise(diagram_noise, &thresholds),
-            true,
             "genuine alphabetic-fragment noise must still be vetoed"
         );
     }

@@ -379,11 +379,9 @@ fn collect_txbx_content_text(reader: &mut Reader<&[u8]>, budget: &mut SecurityBu
                 "br" => current.push('\n'),
                 _ => {}
             },
-            Ok(Event::Text(e)) => {
-                if in_text {
-                    let text = e.xml10_content();
-                    current.push_str(&text);
-                }
+            Ok(Event::Text(e)) if in_text => {
+                let text = e.xml10_content();
+                current.push_str(&text);
             }
             Ok(Event::End(ref e)) => {
                 budget.leave();
