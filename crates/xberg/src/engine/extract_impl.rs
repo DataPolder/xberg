@@ -140,7 +140,9 @@ async fn extract_uncached(input: ExtractInput, config: &ExtractionConfig) -> Res
     let mut seen = initial_seen_urls(std::slice::from_ref(&input));
     let seed_hosts = initial_seed_hosts(std::slice::from_ref(&input));
     let mut output = Box::pin(extract_one(input, config, 0)).await?;
+
     follow_recursive_document_urls(&mut output, config, &mut seen, &seed_hosts).await?;
+
     Ok(output)
 }
 
@@ -1014,10 +1016,26 @@ async fn extract_one_resolved(
     config: &ExtractionConfig,
     index: usize,
 ) -> Result<ExtractionResult> {
-    match input.kind {
-        ExtractInputKind::Bytes => extract_bytes_input(input, config, index).await,
-        ExtractInputKind::Uri => extract_uri_input(input, config, index).await,
-    }
+    // Type-erased per arm. An inline `.await` embeds BOTH arms' coroutines in this
+    // function's state, and that state is inlined into `extract_one`, which is
+    // alloca'd at four `Box::pin` sites and embedded again in `extract_uncached` --
+    // so every byte here is paid many times over. Boxing leaves an 8-byte pointer and
+    // makes the two arms mutually exclusive in memory as well as in control flow.
+    //
+    // No `+ Send` on wasm32; see the `extract` entry point above. ~keep
+    #[cfg(not(target_arch = "wasm32"))]
+    let resolved: std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExtractionResult>> + Send + '_>> =
+        match input.kind {
+            ExtractInputKind::Bytes => Box::pin(extract_bytes_input(input, config, index)),
+            ExtractInputKind::Uri => Box::pin(extract_uri_input(input, config, index)),
+        };
+    #[cfg(target_arch = "wasm32")]
+    let resolved: std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExtractionResult>> + '_>> = match input.kind
+    {
+        ExtractInputKind::Bytes => Box::pin(extract_bytes_input(input, config, index)),
+        ExtractInputKind::Uri => Box::pin(extract_uri_input(input, config, index)),
+    };
+    resolved.await
 }
 
 async fn extract_bytes_input(input: ExtractInput, config: &ExtractionConfig, index: usize) -> Result<ExtractionResult> {
@@ -1044,7 +1062,30 @@ async fn extract_uri_input(input: ExtractInput, config: &ExtractionConfig, index
         .ok_or_else(|| XbergError::validation("extract input kind 'uri' requires the 'uri' field".to_string()))?;
 
     if uri.starts_with(HTTP_SCHEME) || uri.starts_with(HTTPS_SCHEME) {
-        return extract_remote_uri(&uri, config, index).await;
+        // Type-erased, not merely boxed, and for a stack reason rather than a `Send`-proof one.
+        // This branch is not taken for the overwhelmingly common local-path/`file://` input, yet
+        // an inline `.await` folds the entire URL-ingestion subtree — `extract_remote_uri` (which
+        // holds a `CrawlConfig` by value plus a crawlberg engine future), `output_from_scrape`,
+        // `output_from_crawl`, `extract_downloaded_document` and `run_url_page_pipeline`, the last
+        // two each embedding a full unboxed `extract_bytes` pipeline — into this coroutine's TYPE.
+        // That type is paid unconditionally: it inflates `extract_one_resolved` -> `extract_one`,
+        // and `extract_one` is materialised in an `alloca` at every `Box::pin(extract_one(..))`
+        // call site (rust-lang/rust#54628), so the cost lands on the stack of every extraction,
+        // remote or not. A bare `Box::pin` does NOT fix this: `Pin<Box<Concrete>>` keeps the
+        // concrete coroutine as a type parameter. Coercing to `dyn Future` turns the whole subtree
+        // into a 16-byte pointer here and moves its materialisation into a frame cost paid only
+        // when an HTTP(S) URI is actually seen. ~keep
+        //
+        // No `+ Send` on wasm32, for the same reason as `extract`/`extract_batch` above: extractor
+        // futures are `!Send` there (`async_trait(?Send)`), as are crawlberg/reqwest's JS-backed
+        // wasm futures, and wasm32 has no `tokio::spawn` that would need the bound. ~keep
+        #[cfg(not(target_arch = "wasm32"))]
+        let remote: std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExtractionResult>> + Send + '_>> =
+            Box::pin(extract_remote_uri(&uri, config, index));
+        #[cfg(target_arch = "wasm32")]
+        let remote: std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExtractionResult>> + '_>> =
+            Box::pin(extract_remote_uri(&uri, config, index));
+        return remote.await;
     }
 
     if uri.contains("://") && !uri.starts_with(FILE_SCHEME) {
