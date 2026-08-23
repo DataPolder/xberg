@@ -42,7 +42,17 @@ for dockerfile in docker/Dockerfile.*; do
         if grep -q "COPY crates/${crate}/ " "$dockerfile"; then
             continue
         fi
-        if grep "sed -i" "$dockerfile" | grep -q -- "${crate}"; then
+        # Match a real sed delete ADDRESS for this exact crate, not a bare
+        # substring. `grep -q -- "$crate"` made the core member `xberg` a
+        # substring of every `/xberg-py/d`, `/xberg-node/d`, ... directive, so
+        # `xberg` counted as sed-excluded in all ten Dockerfiles and a missing
+        # `COPY crates/xberg/` could never be reported -- the #325 outage this
+        # script exists to prevent. The two address shapes in use are
+        # `/<crate>/d`, `/"crates\/<crate>"/d`, and -- in Dockerfile.cli, whose
+        # sed runs inside a double-quoted shell string -- the backslash-escaped
+        # `/\"crates\/<crate>\"/d`. The optional `\\?` covers that dialect; without
+        # it xberg-wasm reads as un-excluded and the check false-positives. ~keep
+        if grep "sed -i" "$dockerfile" | grep -qE "[/\"]${crate}\\\\?\"?/d"; then
             continue
         fi
         echo "::error file=${dockerfile}::workspace member 'crates/${crate}' is neither COPYd nor sed-excluded"
