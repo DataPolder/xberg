@@ -191,9 +191,26 @@ impl NativeTextStats {
         };
 
         let words: Vec<&str> = text.split_whitespace().collect();
-        let fragmented_word_ratio = if words.len() >= 10 {
-            let short_count = words.iter().filter(|w| w.len() <= 2).count();
-            short_count as f64 / words.len() as f64
+        // A token with no alphabetic content cannot be a fragmented *word* — it is
+        // structurally-expected punctuation (a `- - - -` section divider, a `:` speaker-turn
+        // marker) or a left-margin line number. Counting those as "short words" is exactly
+        // what makes a court-transcript page indistinguishable from line-art noise: both are
+        // dense with 1-2 character tokens, but the transcript's are dividers and digits, not
+        // truncated recognition. Excluded tokens leave the denominator too, mirroring how a
+        // Markdown table's delimiter row is dropped entirely from the scoring input rather
+        // than kept and merely un-counted as "short" (see `normalize_markdown_for_scoring`).
+        // Keeping them in the denominator while excluding them from the numerator would just
+        // move the false rejection to a different shape of transcript-heavy page. ~keep
+        //
+        // The `>= 10` guard deliberately stays on the TOTAL token count, not the scorable
+        // one: it asks "is there enough on this page to judge at all", which is a question
+        // about the page, not about how many tokens survive the filter. Moving it to the
+        // scorable count would silently abstain on dense line-art whose fragments happen to
+        // be mostly punctuation -- the exact pages the veto exists for. ~keep
+        let scorable_words: Vec<&&str> = words.iter().filter(|w| w.chars().any(char::is_alphabetic)).collect();
+        let fragmented_word_ratio = if words.len() >= 10 && !scorable_words.is_empty() {
+            let short_count = scorable_words.iter().filter(|w| w.len() <= 2).count();
+            short_count as f64 / scorable_words.len() as f64
         } else {
             0.0
         };
@@ -9408,10 +9425,23 @@ Name: ___
             decision.avg_non_whitespace
         );
 
+        // The fixture is still deliberately hostile-looking -- dense, and dominated by
+        // one- and two-character tokens. What changed is that a bare number is no longer
+        // counted as a fragmented *word*: there are no words here to fragment, so the
+        // ratio abstains at 0.00 instead of reading >0.5. The property this test exists
+        // for is unchanged and asserted below: a dense numeric table must not trigger
+        // OCR fallback. ~keep
+        let tokens: Vec<&str> = text.split_whitespace().collect();
+        let short_tokens = tokens.iter().filter(|w| w.len() <= 2).count();
         assert!(
-            stats.fragmented_word_ratio > 0.5,
-            "Test setup: numeric table should have high fragmentation (>0.5), got {:.2}",
-            stats.fragmented_word_ratio
+            short_tokens * 2 > tokens.len(),
+            "Test setup: numeric table should be dominated by short tokens, got {}/{}",
+            short_tokens,
+            tokens.len()
+        );
+        assert_eq!(
+            stats.fragmented_word_ratio, 0.0,
+            "a numeric table carries no alphabetic words to fragment, so the ratio must abstain"
         );
 
         assert!(
@@ -12403,6 +12433,87 @@ approval of the rezoning request; and";
     }
 
     #[test]
+    fn should_not_reject_a_transcript_whose_short_tokens_are_dividers_and_line_numbers() {
+        // Verbatim shape of a scanned court-transcript page (GH#1358): a
+        // `- - - - x` section divider, left-margin line numbers, a colon-terminated
+        // speaker/exhibit column, and ordinary prose. None of that is a fragmented
+        // *word* -- every 1-2 character token is punctuation or a digit -- but the
+        // raw whitespace-split ratio (0.56 on the real page) clears the 0.35 veto
+        // threshold and a perfect transcription gets discarded anyway.
+        let transcript_page = "\
+ 1      IN THE SUPREME COURT OF THE UNITED STATES
+
+ 2   - - - - - - - - - - - - - - - - - x
+
+ 3   MICHAEL A. KNOWLES,                            :
+
+ 4   WARDEN,                                        :
+
+ 5              Petitioner                          :
+
+ 6         v.                                       :        No. 07-1315
+
+ 7   ALEXANDRE MIRZAYANCE.                          :
+
+ 8   - - - - - - - - - - - - - - - - - x
+
+ 9                              Washington, D.C.
+
+10                              Tuesday, January 13, 2009
+
+12                  The above-entitled matter came on for oral
+
+13   argument before the Supreme Court of the United States
+
+14   at 1:01 p.m.
+
+15   APPEARANCES:
+
+16   STEVEN E. MERCER, ESQ., Deputy Attorney General, Los
+
+17     Angeles, Cal.; on behalf of the Petitioner.
+
+18   CHARLES M. SEVILLA, ESQ., San Diego, Cal.; on behalf
+
+19     of the Respondent.";
+        let thresholds = OcrQualityThresholds::default();
+        let stats = NativeTextStats::compute(transcript_page, &thresholds);
+
+        assert!(
+            stats.word_count >= thresholds.min_words_for_ocr_output_check,
+            "fixture must clear the word-count guard so the ratio is what is tested"
+        );
+        assert_eq!(
+            is_ocr_recognition_noise(transcript_page, &thresholds),
+            false,
+            "a transcript's dividers and line numbers must not read as fragmented words"
+        );
+    }
+
+    #[test]
+    fn should_still_reject_line_art_with_genuine_alphabetic_fragments() {
+        // The important complement to the transcript test above: this fixture's short
+        // tokens carry alphabetic content (`am`, `ra`, `sa`, ...), the way a diagram's
+        // misread flourishes actually look, rather than being punctuation or digits. The
+        // fix must not exempt these -- doing so would make the veto never fire, which is
+        // worse than the false positive it was written to correct.
+        let diagram_noise = "am ra sa ed wa au th fl ae oe mc bo fa gm su vc ip la ma no \
+             pe qr st uv wx yz ab cd MOI ARES cumin Lipa mat Saakt";
+        let thresholds = OcrQualityThresholds::default();
+        let stats = NativeTextStats::compute(diagram_noise, &thresholds);
+
+        assert!(
+            stats.word_count >= thresholds.min_words_for_ocr_output_check,
+            "fixture must clear the word-count guard so the ratio is what is tested"
+        );
+        assert_eq!(
+            is_ocr_recognition_noise(diagram_noise, &thresholds),
+            true,
+            "genuine alphabetic-fragment noise must still be vetoed"
+        );
+    }
+
+    #[test]
     fn should_keep_a_page_of_tabular_ocr() {
         // A Markdown table's delimiter row is entirely one-character tokens. Scoring the raw
         // Markdown would make good tabular OCR indistinguishable from line-art noise, so this
@@ -12429,18 +12540,32 @@ Revenue is reported in thousands of dollars and growth is year over year.";
 
     #[test]
     fn should_score_prose_not_markdown_scaffolding() {
-        // Pin the mechanism, not just the outcome: the raw text must look worse than the
-        // normalized text, or the normalization above is not doing anything.
-        let table_page = "| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n\n\
-Each row of the preceding table records one measurement taken during the survey period.";
+        // Pin the mechanism, not just the outcome: pure table scaffolding must contribute
+        // nothing to the fragmented ratio, so prefixing prose with it must not move the
+        // number at all.
+        //
+        // This used to assert `normalized < raw`, i.e. that `normalize_markdown_for_scoring`
+        // improved the ratio. It no longer can: everything that normalization strips for
+        // scoring purposes -- delimiter rows, pipes, bullets, blockquote and heading markers
+        // -- is non-alphabetic, and the character-class filter in `NativeTextStats::compute`
+        // already excludes all of it. Normalization is still load-bearing for the stats that
+        // count whole lines; it is simply no longer what protects this ratio. Asserting
+        // equality pins the filter that actually does, and still fails loudly if it is
+        // removed: without it the scaffolded ratio jumps to 0.5 and over the veto. ~keep
+        let prose = "Each row of the preceding table records one measurement taken during the survey period.";
+        let scaffolded = format!("| --- | --- |\n| | |\n\n{prose}");
         let thresholds = OcrQualityThresholds::default();
 
-        let raw = NativeTextStats::compute(table_page, &thresholds).fragmented_word_ratio;
-        let normalized = ocr_output_stats(table_page, &thresholds).fragmented_word_ratio;
+        let bare = NativeTextStats::compute(prose, &thresholds).fragmented_word_ratio;
+        let with_scaffolding = NativeTextStats::compute(&scaffolded, &thresholds).fragmented_word_ratio;
 
+        assert_eq!(
+            bare, with_scaffolding,
+            "table scaffolding must not be scored: bare {bare:.3} vs scaffolded {with_scaffolding:.3}"
+        );
         assert!(
-            normalized < raw,
-            "normalization changed nothing: raw {raw:.3} vs normalized {normalized:.3}"
+            with_scaffolding < thresholds.max_ocr_output_fragmented_word_ratio,
+            "a prose page with table scaffolding must stay under the veto, got {with_scaffolding:.3}"
         );
     }
 
