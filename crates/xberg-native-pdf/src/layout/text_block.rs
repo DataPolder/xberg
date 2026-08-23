@@ -163,6 +163,13 @@ pub struct TextSpan {
     /// [`Self::page_bbox`] needs this to reconstruct the run frame without
     /// double-transforming. Runtime metadata — deliberately not
     /// serialized.
+    ///
+    /// Written only by `map_span_into_rotated_frame` in
+    /// `xberg_native_pdf::document`, reached only via `extract_spans` /
+    /// `extract_spans_filtered`. The reading-order extraction path
+    /// (`extract_spans_filtered_with_reading_order`) never calls it, so spans
+    /// from that path always carry `0` here, even on a rotated page — see its
+    /// doc comment for why that is intentional, not a gap.
     #[serde(skip)]
     pub page_rotation_applied: i32,
     /// Provenance of this span's Unicode text — which ISO 32000-1 §9.10.2

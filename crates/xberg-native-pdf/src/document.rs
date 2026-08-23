@@ -10039,6 +10039,13 @@ impl PdfDocument {
 
     /// Map a single span's bbox into the displayed frame for a `/Rotate`d page
     /// (translate to origin → [`rotate_span_bbox`] → translate back).
+    ///
+    /// This is the only place `TextSpan::page_rotation_applied` is ever written,
+    /// and it is reached only through `postprocess_spans` — i.e. from
+    /// [`Self::extract_spans`] / `extract_spans_filtered`, never from
+    /// [`Self::extract_spans_filtered_with_reading_order`] (see that function's
+    /// doc comment). Anything reading `page_rotation_applied` off a span must
+    /// know which of the two extraction paths produced it.
     fn map_span_into_rotated_frame(s: &mut crate::layout::TextSpan, rot: i32, llx: f32, lly: f32, w: f32, h: f32) {
         let rel = crate::geometry::Rect::new(s.bbox.x - llx, s.bbox.y - lly, s.bbox.width, s.bbox.height);
         let m = Self::rotate_span_bbox(rel, rot, w, h);
@@ -13897,6 +13904,20 @@ impl PdfDocument {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// **Rotation is handled differently here than in [`Self::extract_spans`].**
+    /// This function calls only `extract_spans_raw`/`_filtered` plus
+    /// `drop_offpage_spans` (see the comment in the body below) and deliberately
+    /// skips `postprocess_spans`, so `map_span_into_rotated_frame` never runs on
+    /// this path and every returned span's `page_rotation_applied` is always
+    /// `0`. Bboxes here stay in raw user space even on a `/Rotate`d page; the
+    /// caller owns the upright transform. xberg's own extraction layer — the
+    /// only caller of this function — already does this via `upright_origin`,
+    /// which rotates by the span's own content-matrix angle. Making this path
+    /// call `postprocess_spans` "for consistency" would be a regression, not a
+    /// fix: `upright_origin` would then rotate a bbox `postprocess_spans` had
+    /// already mapped into the displayed frame, double-transforming it into a
+    /// third, wrong coordinate — this was worked out numerically, not assumed.
     pub fn extract_spans_filtered_with_reading_order(
         &self,
         page_index: usize,
@@ -13917,7 +13938,14 @@ impl PdfDocument {
         // portion, which the raw extractor does not honour. `extract_spans` applies
         // this via `postprocess_spans`; the reading-order path must too, or it
         // emits every page's worth of spans (measured: a stats report emitted a
-        // chart's full hidden data table, ~5x the visible label count). ~keep
+        // chart's full hidden data table, ~5x the visible label count).
+        //
+        // This ports only the off-page filter out of `postprocess_spans`, not the
+        // whole pipeline: the page-/Rotate mapping it also does (via
+        // `map_span_into_rotated_frame`) is deliberately left out, so
+        // `page_rotation_applied` stays 0 on every span this function returns.
+        // See this function's doc comment above for why adding that mapping back
+        // in would make results wrong, not just more consistent. ~keep
         self.drop_offpage_spans(page_index, &mut spans);
 
         match reading_order {
