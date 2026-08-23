@@ -128,7 +128,13 @@ jobs:
           --fixtures tools/benchmark-harness/fixtures --strict
 
       - name: Validate benchmark cohorts
-        run: cargo test --locked --release -p benchmark-harness 'cohort::tests::'
+        run: |
+          set -euo pipefail
+          cargo test --locked --release -p benchmark-harness 'cohort::tests::' 2>&1 | tee /tmp/cohort-tests.log
+          if ! grep -qE '^test result: ok\. [1-9][0-9]* passed' /tmp/cohort-tests.log; then
+            echo "::error::'cohort::tests::' matched 0 tests -- benchmark cohort validation silently stopped executing" >&2
+            exit 1
+          fi
 
       - name: Validate benchmark harness contracts
         # --no-fail-fast: cargo stops after the first failing test BINARY, so a

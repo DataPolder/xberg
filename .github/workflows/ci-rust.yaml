@@ -400,8 +400,26 @@ jobs:
 
       - name: Run no-ORT tract tests
         run: |
+          set -euo pipefail
+          # --list (no execution) confirms each of the four filters still matches at least one
+          # test in this feature closure, before spending time running them. Without this, a
+          # renamed/moved/re-gated test under any one prefix would silently drop that prefix's
+          # coverage to zero while the other three still make the summary line say "N passed".
           cargo test --locked -p xberg --no-default-features --features "${TRACT_FEATURES}" --lib \
-            -- sceptre_ocr:: doc_orientation:: layout:: paddle_ocr::
+            -- sceptre_ocr:: doc_orientation:: layout:: paddle_ocr:: --list 2>&1 | tee /tmp/tract-no-ort-list.log
+          for prefix in sceptre_ocr:: doc_orientation:: layout:: paddle_ocr::; do
+            if ! grep -q "${prefix}" /tmp/tract-no-ort-list.log; then
+              echo "::error::no test matched filter '${prefix}' in the no-ORT tract leg -- this prefix's coverage silently dropped to zero" >&2
+              exit 1
+            fi
+          done
+
+          cargo test --locked -p xberg --no-default-features --features "${TRACT_FEATURES}" --lib \
+            -- sceptre_ocr:: doc_orientation:: layout:: paddle_ocr:: 2>&1 | tee /tmp/tract-no-ort-run.log
+          if ! grep -qE '^test result: ok\. [1-9][0-9]* passed' /tmp/tract-no-ort-run.log; then
+            echo "::error::no-ORT tract leg matched tests via --list but the run reported 0 passed -- see /tmp/tract-no-ort-run.log" >&2
+            exit 1
+          fi
         shell: bash
 
   # #741: narrow, non-ORT feature legs that no other job in this file exercises in
@@ -586,7 +604,14 @@ jobs:
 
       - name: cargo test -p xberg-cli feature_profile_tests --features ${{ matrix.name }}
         if: matrix.run_tests
-        run: cargo test --locked -p xberg-cli --no-default-features --features "${{ matrix.features }}" feature_profile_tests
+        run: |
+          set -euo pipefail
+          cargo test --locked -p xberg-cli --no-default-features --features "${{ matrix.features }}" \
+            feature_profile_tests 2>&1 | tee /tmp/feature-profile-tests-${{ matrix.name }}.log
+          if ! grep -qE '^test result: ok\. [1-9][0-9]* passed' /tmp/feature-profile-tests-${{ matrix.name }}.log; then
+            echo "::error::feature_profile_tests matched 0 tests for the ${{ matrix.name }} feature leg -- clap command-introspection coverage for this leg silently dropped to zero" >&2
+            exit 1
+          fi
         shell: bash
 
   # #702: `PdfBackend::Pdfium` (crates/xberg/src/extractors/pdf/pdfium_engine.rs) had zero
@@ -648,21 +673,22 @@ jobs:
 
       - name: Run pdfium engine test (real library required, not skip-on-absence)
         run: |
+          set -euo pipefail
           cargo test --locked -p xberg --features "pdf,pdf-pdfium" --lib \
             extractors::pdf::tests::pdfium_engine_extracts_real_text_when_the_library_is_available \
-            -- --exact --nocapture
+            -- --exact --nocapture 2>&1 | tee /tmp/pdfium-engine-test.log
+          if ! grep -qE '^test result: ok\. 1 passed' /tmp/pdfium-engine-test.log; then
+            echo "::error::pdfium_engine_extracts_real_text_when_the_library_is_available did not run -- this is the sole CI execution of PdfBackend::Pdfium; a renamed/moved/re-gated test would silently go green here" >&2
+            exit 1
+          fi
         shell: bash
         env:
           PDFIUM_DYNAMIC_LIB_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
           LD_LIBRARY_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
           DYLD_LIBRARY_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
           DYLD_FALLBACK_LIBRARY_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
-          # See ESTABLISHED FACTS / deliverable C: today this env var is not read by the test
-          # (mod.rs soft-skips on MissingDependency and on an unreadable fixture regardless of
-          # any env var). It is set here in anticipation of the mod.rs patch described in the
-          # report so this job starts enforcing a hard failure the moment that patch lands,
-          # without a second workflow edit. Until that patch lands, this job can go green by
-          # executing the bind-failure branch and returning early -- see deliverable E.
+          # Turns the test's soft-skip-on-absence into a hard failure (see mod.rs:4008-4050): both
+          # the unreadable-fixture path and the bind-failure path assert `!require_pdfium`.
           XBERG_REQUIRE_PDFIUM: "1"
 
   live-hf:
@@ -760,12 +786,13 @@ jobs:
               -p xberg \
               --features "layout-detection,auto-rotate,tract" \
               --lib inference::tract_backend \
-              -- --nocapture; then
+              -- --nocapture 2>&1 | tee "/tmp/tract-backend-attempt-${attempt}.log" \
+              && grep -qE '^test result: ok\. [1-9][0-9]* passed' "/tmp/tract-backend-attempt-${attempt}.log"; then
               exit 0
             fi
           done
 
-          echo "::error::tract parity tests failed after 3 attempts"
+          echo "::error::tract parity tests failed or matched 0 tests after 3 attempts -- inference::tract_backend is the sole tract/ORT parity enforcement in CI, and XBERG_REQUIRE_TRACT_PARITY only guards against missing models, not a zero-match filter"
           exit 1
         shell: bash
         env:

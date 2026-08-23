@@ -7,12 +7,12 @@ on:
       - "crates/xberg/**"
       - "crates/xberg-native-pdf/**"
       - "crates/xberg-ffi/**"
-      - "crates/xberg-dart/**"
-      - "crates/xberg-swift/**"
       - "crates/xberg-jni/**"
       - "packages/dart/**"
       - "packages/swift/**"
       - "packages/kotlin-android/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/ci-mobile.yaml"
   pull_request:
     branches: [main]
@@ -20,12 +20,12 @@ on:
       - "crates/xberg/**"
       - "crates/xberg-native-pdf/**"
       - "crates/xberg-ffi/**"
-      - "crates/xberg-dart/**"
-      - "crates/xberg-swift/**"
       - "crates/xberg-jni/**"
       - "packages/dart/**"
       - "packages/swift/**"
       - "packages/kotlin-android/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/ci-mobile.yaml"
   workflow_dispatch:
 
