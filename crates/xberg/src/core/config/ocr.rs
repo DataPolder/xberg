@@ -404,6 +404,28 @@ pub struct OcrPipelineStage {
     pub backend_options: Option<serde_json::Value>,
 }
 
+/// [`OcrConfig::backend_options`] key carrying the true resolution, in DPI, of the raster in
+/// this one call.
+///
+/// Stamped per page by the PDF OCR route, which is the only caller that can know it: it
+/// rendered the page itself and can divide the raster's pixel width by the MediaBox width (see
+/// `crate::pdf::render::rendered_page_dpi`). Deliberately absent for callers that genuinely do
+/// not know the resolution of the bytes they hold — the standalone image extractor, plugin
+/// callers passing arbitrary user images — so those keep defaulting to 72 DPI.
+///
+/// This is per *page*, not per document: the OCR route clones the config for each page (the
+/// same mechanism `page_rotation_degrees` uses), so a document mixing page sizes, or one page
+/// whose DPI `choose_safe_dpi` reduced, still reports its own value.
+///
+/// Declared here rather than as a literal at each end so the producer
+/// (`extractors::pdf::ocr::ocr_config_with_page_rotation_hint`) and the consumer
+/// (`ocr::tesseract_backend::TesseractBackend::config_to_tesseract`) cannot drift apart.
+///
+/// Both users are feature-gated (`ocr`/`ocr-pipeline`, and `pdf` for the producer), so builds
+/// that compile neither leave this unreferenced rather than unused-by-mistake.
+#[allow(dead_code)]
+pub(crate) const SOURCE_DPI_BACKEND_OPTION: &str = "source_dpi";
+
 fn default_priority() -> u32 {
     100
 }

@@ -69,6 +69,19 @@ fn hash_config_for_schema(config: &TesseractConfig, result_schema_version: u8) -
     }
 
     hasher.update(&[config.auto_rotate as u8]);
+    // `source_dpi` selects the scale factor the DPI-normalization step resizes by, so two calls
+    // with byte-identical images but different source resolutions produce different rasters,
+    // different `scan_res` values and different output. Omitting it here would serve one page's
+    // result for another exactly the way `hocr_font_info` did in #687.
+    match config.source_dpi {
+        Some(dpi) => {
+            hasher.update(&[1]);
+            hasher.update(&dpi.to_bits().to_le_bytes());
+        }
+        None => {
+            hasher.update(&[0]);
+        }
+    }
     match config.tessdata_path.as_ref() {
         Some(path) => {
             hasher.update(&[1]);
@@ -186,6 +199,37 @@ mod tests {
 
         assert_eq!(hash1, hash2);
         assert_eq!(hash1.len(), 32);
+    }
+
+    /// `source_dpi` changes the raster the preprocessor produces and the `scan_res` Tesseract is
+    /// given, so it must be part of the cache identity. Two pages of a mixed-size document can
+    /// otherwise share a key and be served each other's result — the same failure mode as #687.
+    ///
+    /// Fails on unfixed code: `TesseractConfig` has no `source_dpi` field, so this does not
+    /// compile. Adding the field but not hashing it makes it compile and fail on the first
+    /// assertion, since all three hashes would then be identical.
+    #[test]
+    fn should_distinguish_cache_keys_by_source_dpi() {
+        let unknown = create_test_config();
+        let at_150 = TesseractConfig {
+            source_dpi: Some(150.0),
+            ..create_test_config()
+        };
+        let at_300 = TesseractConfig {
+            source_dpi: Some(300.0),
+            ..create_test_config()
+        };
+
+        assert_ne!(
+            hash_config(&unknown),
+            hash_config(&at_150),
+            "a known source DPI must not collide with the unknown/72-assumption case"
+        );
+        assert_ne!(
+            hash_config(&at_150),
+            hash_config(&at_300),
+            "two different known source DPIs must not collide"
+        );
     }
 
     #[test]

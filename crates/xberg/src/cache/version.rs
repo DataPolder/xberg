@@ -62,7 +62,17 @@
 /// also failed to bump it, so a stale entry would have hidden a working fix just as
 /// effectively, and the two are indistinguishable after the fact. Any A/B measuring this
 /// fix MUST run against a cold cache -- see `ocr::cache::OcrCache`.
-pub(crate) const CACHE_SCHEMA_VERSION: u32 = 4;
+///
+/// Bumped for the PDF OCR source-DPI fix: `extractors::pdf::ocr` now tells the Tesseract
+/// backend the true resolution of each rendered page (`SOURCE_DPI_BACKEND_OPTION`), so
+/// `image::preprocessing::normalize_image_dpi_owned` stops assuming 72 DPI for rasters
+/// rendered at 150. Every PDF OCR page therefore produces a differently sized raster, a
+/// different Tesseract `scan_res`, and different output for an unchanged input and config.
+/// `hash_config` now folds `TesseractConfig::source_dpi` in, but that only separates future
+/// entries from each other; the entries already on disk were written under the 72 assumption
+/// with a key that cannot distinguish them, and this bump is what makes them unreachable. Any
+/// A/B measuring this fix MUST run against a cold cache.
+pub(crate) const CACHE_SCHEMA_VERSION: u32 = 5;
 
 /// Number of hex characters in the cache version tag.
 const VERSION_TAG_HEX_LEN: usize = 8;

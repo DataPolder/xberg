@@ -413,7 +413,11 @@ const MIN_LIGHT_PIXEL_FRACTION_FOR_INVERT: f64 = 0.01;
 /// representative.
 const POLARITY_SAMPLE_STRIDE: i32 = 4;
 
-/// Source resolution used when OCR receives the original image unchanged.
+/// Source resolution assumed when OCR receives the original image unchanged and the caller did
+/// not tell us what resolution it really is.
+///
+/// Only a fallback. `TesseractConfig::source_dpi`, when the caller knows the true value, takes
+/// precedence — see [`prepare_ocr_image`].
 const RAW_IMAGE_SOURCE_DPI: i32 = 72;
 /// Source resolution retained when explicit DPI normalization fails.
 const PREPROCESSING_FALLBACK_SOURCE_DPI: i32 = 300;
@@ -438,6 +442,13 @@ struct PreparedOcrImage {
     apply_pix_preprocessing: bool,
 }
 
+/// Prepare the raster Tesseract will recognize, and report the resolution it should be told.
+///
+/// `known_source_dpi` is the true resolution of `rgb_data` when the caller knows it (the PDF OCR
+/// route derives it from the render), and `None` when it genuinely does not (raw images handed in
+/// by a user). Both branches below honour it: the unpreprocessed branch reports it verbatim
+/// instead of the [`RAW_IMAGE_SOURCE_DPI`] assumption, and the preprocessed branch feeds it to
+/// DPI normalization so the resize scales from the real resolution.
 fn prepare_ocr_image(
     rgb_data: Vec<u8>,
     width: u32,
@@ -445,6 +456,7 @@ fn prepare_ocr_image(
     preprocessing: Option<&crate::types::ImagePreprocessingConfig>,
     images_config: Option<&crate::core::config::ImageExtractionConfig>,
     ci_debug_enabled: bool,
+    known_source_dpi: Option<f64>,
 ) -> PreparedOcrImage {
     let Some(preprocessing) = preprocessing else {
         if should_apply_default_preprocessing(&rgb_data) {
@@ -455,18 +467,29 @@ fn prepare_ocr_image(
                 &crate::types::ImagePreprocessingConfig::default(),
                 images_config,
                 ci_debug_enabled,
+                known_source_dpi,
             );
         }
         return PreparedOcrImage {
             data: rgb_data,
             width,
             height,
-            source_dpi: RAW_IMAGE_SOURCE_DPI,
+            // The image is passed through untouched, so its resolution is whatever the caller
+            // says it is; 72 remains the assumption only when nobody knows.
+            source_dpi: known_source_dpi.map_or(RAW_IMAGE_SOURCE_DPI, |dpi| dpi.round() as i32),
             apply_pix_preprocessing: false,
         };
     };
 
-    prepare_preprocessed_ocr_image(rgb_data, width, height, preprocessing, images_config, ci_debug_enabled)
+    prepare_preprocessed_ocr_image(
+        rgb_data,
+        width,
+        height,
+        preprocessing,
+        images_config,
+        ci_debug_enabled,
+        known_source_dpi,
+    )
 }
 
 /// Classify bright, page-like RGB images that benefit from the default OCR preprocessing path.
@@ -501,6 +524,7 @@ fn prepare_preprocessed_ocr_image(
     preprocessing: &crate::types::ImagePreprocessingConfig,
     images_config: Option<&crate::core::config::ImageExtractionConfig>,
     ci_debug_enabled: bool,
+    known_source_dpi: Option<f64>,
 ) -> PreparedOcrImage {
     // `target_dpi` always comes from the (Tesseract-specific) `preprocessing` config, which
     // takes precedence when explicitly set. The dimension/auto-adjust limits have no home in
@@ -516,7 +540,12 @@ fn prepare_preprocessed_ocr_image(
             ..Default::default()
         },
     };
-    match normalize_image_dpi_owned(rgb_data, width as usize, height as usize, &dpi_config, None) {
+    // `known_source_dpi` is the whole point of this parameter: passing `None` here makes
+    // `normalize_image_dpi_owned` assume 72 DPI, which on a page rendered at 150 inflates the
+    // scale factor to `target_dpi / 72` and drives a Letter page into the `max_image_dimension`
+    // clamp — 6x the pixels of the correct resize, carrying no more information, and reported to
+    // Tesseract as roughly half the raster's real `scan_res`.
+    match normalize_image_dpi_owned(rgb_data, width as usize, height as usize, &dpi_config, known_source_dpi) {
         Ok(result) => {
             let normalized_width = result.dimensions.0 as u32;
             let normalized_height = result.dimensions.1 as u32;
@@ -547,7 +576,9 @@ fn prepare_preprocessed_ocr_image(
                 data,
                 width,
                 height,
-                source_dpi: PREPROCESSING_FALLBACK_SOURCE_DPI,
+                // The image comes back unresized here, so its resolution is still the source
+                // one. The 300 fallback is a guess for when there is nothing better.
+                source_dpi: known_source_dpi.map_or(PREPROCESSING_FALLBACK_SOURCE_DPI, |dpi| dpi.round() as i32),
                 apply_pix_preprocessing: true,
             }
         }
@@ -928,6 +959,7 @@ pub(super) fn perform_ocr(
         config.preprocessing.as_ref(),
         images_config,
         ci_debug_enabled,
+        config.source_dpi,
     );
     let image_data = prepared_image.data;
     let width = prepared_image.width;
@@ -2202,7 +2234,7 @@ mod tests {
     fn test_prepare_ocr_image_without_config_preserves_shadowed_rgb() {
         let rgb_data = vec![0, 1, 2, 3, 4, 5];
 
-        let prepared = prepare_ocr_image(rgb_data.clone(), 2, 1, None, None, false);
+        let prepared = prepare_ocr_image(rgb_data.clone(), 2, 1, None, None, false, None);
 
         assert_eq!(prepared.data, rgb_data);
         assert_eq!(prepared.width, 2);
@@ -2225,7 +2257,7 @@ mod tests {
         const HEIGHT: u32 = 4;
         let rgb_data = vec![u8::MAX; WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT];
 
-        let prepared = prepare_ocr_image(rgb_data, WIDTH, HEIGHT, None, None, false);
+        let prepared = prepare_ocr_image(rgb_data, WIDTH, HEIGHT, None, None, false, None);
 
         assert!(prepared.apply_pix_preprocessing);
     }
@@ -2247,7 +2279,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prepared = prepare_ocr_image(rgb_data, 2, 2, Some(&preprocessing), None, false);
+        let prepared = prepare_ocr_image(rgb_data, 2, 2, Some(&preprocessing), None, false, None);
 
         assert!(prepared.apply_pix_preprocessing);
     }
@@ -2276,6 +2308,7 @@ mod tests {
             &preprocessing,
             Some(&images_config),
             false,
+            None,
         );
 
         assert_eq!(prepared.width, 2, "max_image_dimension=2 must clamp the resized width");
@@ -2283,6 +2316,130 @@ mod tests {
             prepared.height, 2,
             "max_image_dimension=2 must clamp the resized height"
         );
+    }
+
+    /// Pixel width of a US Letter page (612pt wide) rendered at the 150 DPI the PDF OCR route
+    /// asks `render_page_with_safeguards` for.
+    const LETTER_AT_150_DPI_WIDTH_PX: u32 = 1275;
+    /// Pixel height of the same page (792pt tall) at 150 DPI.
+    const LETTER_AT_150_DPI_HEIGHT_PX: u32 = 1650;
+
+    /// A clean white Letter-sized raster, the shape the PDF OCR route actually hands over: it
+    /// passes `should_apply_default_preprocessing`, so both the explicit and the implicit
+    /// preprocessing branch reach DPI normalization.
+    fn letter_page_raster_at_150_dpi() -> Vec<u8> {
+        vec![u8::MAX; LETTER_AT_150_DPI_WIDTH_PX as usize * LETTER_AT_150_DPI_HEIGHT_PX as usize * RGB_CHANNEL_COUNT]
+    }
+
+    /// The defect: a page rendered at 150 DPI was normalized as if it were 72 DPI, so the scale
+    /// factor became `target_dpi / 72` instead of `target_dpi / 150`.
+    ///
+    /// With the real 150 handed in, `calculate_smart_dpi` sees a 8.5x11in page (612x792pt),
+    /// finds 300 DPI fits inside `max_image_dimension` (11in * 300 = 3300px <= 4096), and
+    /// returns the full 300. The resize is then a clean 2.0x to exactly 2550x3300 with no
+    /// dimension clamp, and Tesseract is told 300 — which is what the raster now is.
+    ///
+    /// Fails against unfixed code: `prepare_ocr_image` has no `known_source_dpi` parameter at
+    /// all there, so this does not compile. Restoring the old six-argument call (dropping the
+    /// `Some(150.0)`) makes it compile and then fail on the first assertion, because the 72
+    /// assumption yields `final_dpi = 179` and a 3165x4096 clamped raster:
+    /// `assertion \`left == right\` failed: left: 4096, right: 3300`.
+    #[test]
+    fn should_honour_known_source_dpi_instead_of_assuming_72() {
+        const KNOWN_RENDER_DPI: f64 = 150.0;
+        const EXPECTED_WIDTH_PX: u32 = 2550;
+        const EXPECTED_HEIGHT_PX: u32 = 3300;
+        const EXPECTED_SOURCE_DPI: i32 = 300;
+
+        let prepared = prepare_ocr_image(
+            letter_page_raster_at_150_dpi(),
+            LETTER_AT_150_DPI_WIDTH_PX,
+            LETTER_AT_150_DPI_HEIGHT_PX,
+            Some(&crate::types::ImagePreprocessingConfig::default()),
+            None,
+            false,
+            Some(KNOWN_RENDER_DPI),
+        );
+
+        assert_eq!(
+            prepared.height, EXPECTED_HEIGHT_PX,
+            "a 150 DPI Letter page scaled to the 300 DPI target is 3300px tall, not the 4096px \
+             the max_image_dimension clamp produces when the source is mistaken for 72 DPI"
+        );
+        assert_eq!(
+            prepared.width, EXPECTED_WIDTH_PX,
+            "the matching width for a clean 2.0x resize"
+        );
+        assert_eq!(
+            prepared.source_dpi, EXPECTED_SOURCE_DPI,
+            "Tesseract must be told the raster's real resolution, not the 179 the 72 assumption \
+             derives"
+        );
+    }
+
+    /// The contrast leg, pinning the arithmetic the defect produced so a regression is visible
+    /// rather than merely different: with no known source DPI the 72 assumption still applies,
+    /// the smart-DPI step derives 179 from an apparent 17.7x22.9in page, and the resize runs
+    /// into the 4096px `max_image_dimension` clamp.
+    ///
+    /// Fails against unfixed code only by not compiling (the seventh argument does not exist);
+    /// its values are identical either way, which is the point — this leg proves the fix changed
+    /// nothing for callers that do not supply a DPI.
+    #[test]
+    fn should_keep_assuming_72_dpi_when_source_dpi_is_unknown() {
+        const CLAMPED_DIMENSION_PX: u32 = 4096;
+        const DERIVED_SOURCE_DPI: i32 = 179;
+
+        let prepared = prepare_ocr_image(
+            letter_page_raster_at_150_dpi(),
+            LETTER_AT_150_DPI_WIDTH_PX,
+            LETTER_AT_150_DPI_HEIGHT_PX,
+            Some(&crate::types::ImagePreprocessingConfig::default()),
+            None,
+            false,
+            None,
+        );
+
+        assert_eq!(
+            prepared.height, CLAMPED_DIMENSION_PX,
+            "without a known source DPI the 72 assumption drives the resize into the clamp"
+        );
+        assert_eq!(
+            prepared.source_dpi, DERIVED_SOURCE_DPI,
+            "and reports the DPI that assumption implies"
+        );
+    }
+
+    /// A raw image the caller knows nothing about still gets the 72 fallback on the
+    /// pass-through branch, so standalone image OCR is untouched by the new parameter.
+    ///
+    /// Fails against unfixed code by not compiling; behaviourally it is the pre-existing
+    /// contract, asserted here so the new parameter cannot quietly displace it.
+    #[test]
+    fn should_default_to_72_dpi_for_unpreprocessed_raw_image_without_known_dpi() {
+        let rgb_data = vec![0, 1, 2, 3, 4, 5];
+
+        let prepared = prepare_ocr_image(rgb_data.clone(), 2, 1, None, None, false, None);
+
+        assert_eq!(prepared.data, rgb_data, "the raster must pass through untouched");
+        assert_eq!(prepared.source_dpi, RAW_IMAGE_SOURCE_DPI);
+    }
+
+    /// The same pass-through branch reports a known resolution verbatim rather than the 72
+    /// fallback: the bytes are unchanged, so their resolution is whatever the caller measured.
+    ///
+    /// Fails against unfixed code: there is no way to express this at all — `prepare_ocr_image`
+    /// hardcodes `RAW_IMAGE_SOURCE_DPI` on this branch, so the reported DPI is 72 and the
+    /// assertion reads `assertion \`left == right\` failed: left: 72, right: 150`.
+    #[test]
+    fn should_report_known_source_dpi_on_the_unpreprocessed_branch() {
+        const KNOWN_RENDER_DPI: f64 = 150.0;
+        let rgb_data = vec![0, 1, 2, 3, 4, 5];
+
+        let prepared = prepare_ocr_image(rgb_data, 2, 1, None, None, false, Some(KNOWN_RENDER_DPI));
+
+        assert_eq!(prepared.source_dpi, 150);
+        assert!(!prepared.apply_pix_preprocessing);
     }
 
     #[test]

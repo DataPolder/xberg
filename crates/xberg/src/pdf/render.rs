@@ -385,6 +385,39 @@ pub(crate) fn get_page_dimensions_pt(doc: &xberg_native_pdf::PdfDocument, page_i
         .unwrap_or((612.0, 792.0))
 }
 
+/// Derive the true resolution, in DPI, of a page raster produced by
+/// [`render_page_with_safeguards`].
+///
+/// The renderer does not necessarily honour the DPI it is asked for: [`choose_safe_dpi`]
+/// silently reduces it whenever the MediaBox would rasterize past
+/// [`MAX_RENDER_DIMENSION_PX`], and the effective value it picked is then discarded — the
+/// `RenderedImage` it returns carries only `data`, `width`, `height` and `format`. Recovering
+/// the resolution from the raster's own pixel width against the page's MediaBox width is
+/// exact whether or not that reduction fired, so nothing has to be threaded back out of the
+/// renderer. It also stays correct per page in a document that mixes page sizes, which is why
+/// this is derived per call rather than carried on a config.
+///
+/// The raster must be the MediaBox-oriented one [`normalize_rendered_page_for_ocr`] produces
+/// (its axes align with the MediaBox, see [`pixel_bbox_to_pdf_points`]), not a raster that has
+/// since been rotated upright — after a 90/270 degree rotation the width no longer corresponds
+/// to `page_width_pt`. The resolution itself is rotation-invariant, so deriving it before any
+/// such rotation and carrying the scalar forward is safe.
+///
+/// Returns `None` for a degenerate page box or an empty raster so callers keep their
+/// "resolution unknown" behaviour instead of adopting a fabricated one.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+pub(crate) fn rendered_page_dpi(rendered_width_px: u32, page_width_pt: f32) -> Option<f64> {
+    /// Points per inch in PDF user space: a MediaBox is expressed in these units, so a page's
+    /// width in inches is its width in points divided by this.
+    const POINTS_PER_INCH: f64 = 72.0;
+
+    let page_width_pt = f64::from(page_width_pt);
+    if rendered_width_px == 0 || !page_width_pt.is_finite() || page_width_pt <= 0.0 {
+        return None;
+    }
+    Some(f64::from(rendered_width_px) * POINTS_PER_INCH / page_width_pt)
+}
+
 /// Map a bounding box from OCR-image pixel space (origin top-left, y down)
 /// to PDF point space (origin bottom-left, y up).
 ///
@@ -951,6 +984,38 @@ mod tests {
     fn test_choose_safe_dpi_extreme_wide_reduced() {
         let dpi = choose_safe_dpi(20000.0, 200.0, 150);
         assert_eq!(dpi, 72);
+    }
+
+    /// The raster's own pixel width is the only honest record of the resolution a page was
+    /// rendered at, because `render_page_with_safeguards` throws `choose_safe_dpi`'s effective
+    /// value away. A Letter page rendered at the OCR route's requested 150 DPI is 1275px wide,
+    /// and that must read back as 150 — not as the 72 the preprocessor assumes when nobody
+    /// tells it otherwise.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn should_derive_render_dpi_from_raster_width_and_mediabox() {
+        assert_eq!(rendered_page_dpi(1275, 612.0), Some(150.0));
+    }
+
+    /// The same derivation on a page `choose_safe_dpi` reduced: a 20000pt-wide sheet asked for
+    /// at 150 DPI comes back at 72 (see `test_choose_safe_dpi_extreme_wide_reduced`), i.e.
+    /// 20000px, and must read back as the 72 it really is rather than the 150 that was asked
+    /// for.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn should_derive_reduced_render_dpi_when_safe_dpi_clamped_the_page() {
+        assert_eq!(rendered_page_dpi(20000, 20000.0), Some(72.0));
+    }
+
+    /// A degenerate MediaBox or an empty raster yields no resolution at all, so the caller
+    /// keeps its "unknown" behaviour instead of dividing by zero into an infinite DPI.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn should_return_none_when_page_box_or_raster_is_degenerate() {
+        assert_eq!(rendered_page_dpi(1275, 0.0), None);
+        assert_eq!(rendered_page_dpi(1275, -612.0), None);
+        assert_eq!(rendered_page_dpi(1275, f32::NAN), None);
+        assert_eq!(rendered_page_dpi(0, 612.0), None);
     }
 
     #[test]

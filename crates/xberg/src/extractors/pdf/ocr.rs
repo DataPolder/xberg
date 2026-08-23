@@ -2315,8 +2315,12 @@ pub(crate) async fn extract_mixed_ocr_native(
             for (page_idx, data, width, height) in &encoded {
                 let backend_clone = Arc::clone(backend);
                 let page_rotation_degrees = page_rotations.get(*page_idx).copied().unwrap_or(0);
+                // Derived from the MediaBox-oriented raster, before `upright_raster_for_backend`
+                // may swap its axes.
+                let source_dpi = rendered_page_source_dpi(&render_doc, *page_idx, *width);
                 let config_clone =
-                    ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees).into_owned();
+                    ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees, source_dpi)
+                        .into_owned();
                 let (upright_data, upright_width, upright_height, correction_degrees) =
                     upright_raster_for_backend(data, *width, *height, page_rotation_degrees, orientation_handling)?;
                 let idx = *page_idx;
@@ -2396,7 +2400,9 @@ pub(crate) async fn extract_mixed_ocr_native(
         {
             for (page_idx, data, width, height) in &encoded {
                 let page_rotation_degrees = page_rotations.get(*page_idx).copied().unwrap_or(0);
-                let config_for_page = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees);
+                let source_dpi = rendered_page_source_dpi(&render_doc, *page_idx, *width);
+                let config_for_page =
+                    ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees, source_dpi);
                 let (upright_data, upright_width, upright_height, correction_degrees) =
                     upright_raster_for_backend(data, *width, *height, page_rotation_degrees, orientation_handling)?;
                 let mut extraction_result = backend
@@ -4325,8 +4331,20 @@ async fn extract_with_ocr_for_page(
                 };
                 #[cfg(not(feature = "pdf"))]
                 let page_rotation_degrees: u32 = 0;
+                // Only the branch that rendered the pages itself knows their resolution.
+                // `lazy_pdf_render_state` is exactly that branch's marker — it is only opened
+                // when `images.is_none()` (see its `let` above) — so when the caller supplied
+                // arbitrary pre-rendered images the hint stays absent and they keep the 72-DPI
+                // assumption, which for them is the honest answer.
+                #[cfg(feature = "pdf")]
+                let source_dpi = lazy_pdf_render_state
+                    .as_ref()
+                    .and_then(|(doc, _, _)| rendered_page_source_dpi(doc, *page_idx, *width));
+                #[cfg(not(feature = "pdf"))]
+                let source_dpi: Option<f64> = None;
                 let config_clone =
-                    ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees).into_owned();
+                    ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees, source_dpi)
+                        .into_owned();
                 // No PDF `/Rotate` is ever known without the `pdf` feature (`page_rotation_degrees`
                 // is always `0` above in that build), so there is nothing to correct upright.
                 #[cfg(feature = "pdf")]
@@ -4379,7 +4397,15 @@ async fn extract_with_ocr_for_page(
                 };
                 #[cfg(not(feature = "pdf"))]
                 let page_rotation_degrees: u32 = 0;
-                let config_for_page = ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees);
+                // See the JoinSet branch above: only the PDF-rendered branch knows the DPI.
+                #[cfg(feature = "pdf")]
+                let source_dpi = lazy_pdf_render_state
+                    .as_ref()
+                    .and_then(|(doc, _, _)| rendered_page_source_dpi(doc, *page_idx, *width));
+                #[cfg(not(feature = "pdf"))]
+                let source_dpi: Option<f64> = None;
+                let config_for_page =
+                    ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees, source_dpi);
                 #[cfg(feature = "pdf")]
                 let (upright_data, upright_width, upright_height, correction_degrees) = upright_raster_for_backend(
                     image_data,
@@ -5612,16 +5638,27 @@ fn filter_public_ocr_elements(
 /// does not, so this hint is the minimal, backend-local fix rather than changing
 /// the shared raster every backend (including Tesseract) receives.
 ///
-/// A no-op for `page_rotation_degrees == 0` (the overwhelmingly common case) so
-/// unrotated pages never pay a config clone. Backends that don't recognise the
-/// `page_rotation_degrees` key ignore it, per `OcrConfig.backend_options`'s
-/// documented contract.
+/// Also injects `source_dpi`: the true resolution of the raster accompanying this call, which
+/// only this route can know because it rendered the page. Without it the OCR preprocessor
+/// assumes 72 DPI (`image::preprocessing::normalize_image_dpi_owned`), which is wrong for every
+/// page here — they are rendered at 150, or lower still when `choose_safe_dpi` reduced an
+/// oversized page — and that mistake both inflates the resize past the `max_image_dimension`
+/// clamp and hands Tesseract a `scan_res` unrelated to the raster it is looking at.
+///
+/// Both hints are per page, not per document: the config is cloned for each page, so mixed page
+/// sizes and per-page DPI reductions each report their own value.
+///
+/// A no-op when there is nothing to say (`page_rotation_degrees == 0` and no known DPI) so such
+/// pages never pay a config clone. Backends that don't recognise either key ignore it, per
+/// `OcrConfig.backend_options`'s documented contract.
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 fn ocr_config_with_page_rotation_hint(
     config: &crate::core::config::ocr::OcrConfig,
     page_rotation_degrees: u32,
+    source_dpi: Option<f64>,
 ) -> Cow<'_, crate::core::config::ocr::OcrConfig> {
-    if page_rotation_degrees == 0 {
+    let source_dpi = source_dpi.and_then(serde_json::Number::from_f64);
+    if page_rotation_degrees == 0 && source_dpi.is_none() {
         return Cow::Borrowed(config);
     }
     let mut config = config.clone();
@@ -5630,13 +5667,36 @@ fn ocr_config_with_page_rotation_hint(
         opts = serde_json::json!({});
     }
     if let Some(obj) = opts.as_object_mut() {
-        obj.insert(
-            "page_rotation_degrees".to_string(),
-            serde_json::Value::Number(page_rotation_degrees.into()),
-        );
+        if page_rotation_degrees != 0 {
+            obj.insert(
+                "page_rotation_degrees".to_string(),
+                serde_json::Value::Number(page_rotation_degrees.into()),
+            );
+        }
+        if let Some(source_dpi) = source_dpi {
+            obj.insert(
+                crate::core::config::ocr::SOURCE_DPI_BACKEND_OPTION.to_string(),
+                serde_json::Value::Number(source_dpi),
+            );
+        }
     }
     config.backend_options = Some(opts);
     Cow::Owned(config)
+}
+
+/// Derive the [`ocr_config_with_page_rotation_hint`] `source_dpi` value for one rendered page.
+///
+/// `rendered_width_px` must be the width of the MediaBox-oriented raster as
+/// `normalize_rendered_page_for_ocr` produced it, before any `upright_raster_for_backend`
+/// rotation — see `crate::pdf::render::rendered_page_dpi`.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn rendered_page_source_dpi(
+    doc: &xberg_native_pdf::PdfDocument,
+    page_index: usize,
+    rendered_width_px: u32,
+) -> Option<f64> {
+    let (page_width_pt, _) = page_dimensions_pt(doc, page_index);
+    crate::pdf::render::rendered_page_dpi(rendered_width_px, page_width_pt)
 }
 
 /// Rotate a page raster upright before handing it to a backend that cannot cope with a
@@ -10491,6 +10551,92 @@ Name: ___
                 "/Rotate {rotation}: converted bbox must fit within the page"
             );
         }
+    }
+
+    /// The PDF OCR route is the only caller that can know a raster's true resolution, and it
+    /// must say so: without the hint the OCR preprocessor assumes 72 DPI for a page rendered at
+    /// 150 and resizes by more than twice the correct factor.
+    ///
+    /// Fails on unfixed code: `ocr_config_with_page_rotation_hint` takes two arguments there, so
+    /// this does not compile. Dropping the third argument makes it compile and then fail on the
+    /// first assertion — an unrotated page is a documented no-op, so `backend_options` stays
+    /// `None` and the lookup yields `None` rather than `Some(150.0)`.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn should_stamp_source_dpi_hint_even_on_an_unrotated_page() {
+        const RENDER_DPI: f64 = 150.0;
+        let config = crate::core::config::ocr::OcrConfig::default();
+
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, Some(RENDER_DPI));
+
+        let options = hinted
+            .backend_options
+            .as_ref()
+            .expect("a known source DPI must produce backend_options");
+        assert_eq!(
+            options
+                .get(crate::core::config::ocr::SOURCE_DPI_BACKEND_OPTION)
+                .and_then(serde_json::Value::as_f64),
+            Some(RENDER_DPI)
+        );
+        assert!(
+            options.get("page_rotation_degrees").is_none(),
+            "an unrotated page must not gain a rotation hint it does not need"
+        );
+    }
+
+    /// Both hints are independent and both survive on a page that has each.
+    ///
+    /// Fails on unfixed code by not compiling (two-argument signature); with the third argument
+    /// dropped the `source_dpi` assertion fails with `left: None, right: Some(96.0)`.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn should_stamp_both_page_hints_when_a_rotated_page_has_a_known_dpi() {
+        const REDUCED_RENDER_DPI: f64 = 96.0;
+        let config = crate::core::config::ocr::OcrConfig::default();
+
+        let hinted = ocr_config_with_page_rotation_hint(&config, 270, Some(REDUCED_RENDER_DPI));
+
+        let options = hinted.backend_options.as_ref().expect("both hints must be carried");
+        assert_eq!(
+            options.get("page_rotation_degrees").and_then(serde_json::Value::as_u64),
+            Some(270)
+        );
+        assert_eq!(
+            options
+                .get(crate::core::config::ocr::SOURCE_DPI_BACKEND_OPTION)
+                .and_then(serde_json::Value::as_f64),
+            Some(REDUCED_RENDER_DPI)
+        );
+    }
+
+    /// With nothing to say the helper still borrows rather than clones, so pages that carry
+    /// neither hint keep paying nothing.
+    ///
+    /// Fails on unfixed code by not compiling; the borrow behaviour itself is unchanged, which
+    /// is what this pins.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn should_borrow_config_when_no_page_hint_applies() {
+        let config = crate::core::config::ocr::OcrConfig::default();
+
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None);
+
+        assert!(matches!(hinted, Cow::Borrowed(_)), "no hints must mean no config clone");
+    }
+
+    /// The derivation itself, at the call site's own boundary: a Letter page rendered at the 150
+    /// DPI the route asks for is 1275px wide, and that is what must reach the hint.
+    ///
+    /// Fails on unfixed code: `rendered_page_source_dpi` does not exist, so this does not
+    /// compile — there was no per-page DPI anywhere on this route to assert against.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn should_derive_source_dpi_from_the_rendered_letter_page() {
+        let content = crate::pdf::render::build_minimal_pdf_with_mediabox(612.0, 792.0);
+        let doc = xberg_native_pdf::PdfDocument::from_bytes(content).expect("fixture must open");
+
+        assert_eq!(rendered_page_source_dpi(&doc, 0, 1275), Some(150.0));
     }
 
     /// Closes the gap left by 972d2269f7: that commit threaded a `page_rotation_degrees`

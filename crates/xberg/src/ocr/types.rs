@@ -146,6 +146,23 @@ pub struct TesseractConfig {
     /// When set, [`resolve_tessdata_path`](crate::ocr::processor) uses this path
     /// before consulting `TESSDATA_PREFIX`, cache, or system locations.
     pub tessdata_path: Option<std::path::PathBuf>,
+
+    /// True resolution, in DPI, of the image bytes accompanying this config, when the caller
+    /// knows it.
+    ///
+    /// This is *not* a user-facing knob and has no counterpart on the public
+    /// [`crate::types::TesseractConfig`]: it is a per-call fact about one image, set by the PDF
+    /// OCR route from [`crate::core::config::ocr::SOURCE_DPI_BACKEND_OPTION`] because that route
+    /// rendered the page and can derive it exactly. Every other caller leaves it `None`.
+    ///
+    /// `None` means "unknown", and the DPI-normalization step then falls back to assuming 72 DPI
+    /// as it always has. That assumption is what this field exists to displace: a page rendered
+    /// at 150 DPI but declared as 72 gets scaled by `target_dpi / 72` instead of
+    /// `target_dpi / 150`, which on a Letter page means upscaling into the 4096px dimension clamp
+    /// for no added information and then telling Tesseract a `scan_res` that is roughly half the
+    /// raster's real resolution.
+    #[serde(default)]
+    pub source_dpi: Option<f64>,
 }
 
 /// Word-level confidence floor (0.0-100.0) below which Tesseract drops a recognized word.
@@ -195,6 +212,7 @@ impl Default for TesseractConfig {
             thresholding_method: false,
             auto_rotate: false,
             tessdata_path: None,
+            source_dpi: None,
         }
     }
 }
@@ -243,6 +261,9 @@ impl From<&crate::types::TesseractConfig> for TesseractConfig {
             thresholding_method: config.thresholding_method,
             auto_rotate: config.preprocessing.as_ref().map(|p| p.auto_rotate).unwrap_or(false),
             tessdata_path: None,
+            // The public config is a user-supplied document-wide setting and cannot know the
+            // resolution of any one image; only the per-call `backend_options` hint can.
+            source_dpi: None,
         }
     }
 }

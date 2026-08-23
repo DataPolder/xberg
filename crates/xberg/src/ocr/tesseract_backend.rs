@@ -92,7 +92,26 @@ impl TesseractBackend {
             internal.auto_rotate = true;
         }
         internal.tessdata_path = config.tessdata_path.clone();
+        internal.source_dpi = Self::source_dpi_from_backend_options(config);
         internal
+    }
+
+    /// Read the per-call source-resolution hint out of `backend_options`.
+    ///
+    /// Mirrors `PaddleOcrBackend::page_rotation_degrees_from_backend_options`: an absent,
+    /// malformed, or non-positive value is treated as "unknown" rather than as an error, so
+    /// callers that never set the hint (standalone image OCR, other backends' tests reusing this
+    /// config) keep the historical 72-DPI assumption and nothing about their behaviour changes.
+    ///
+    /// Non-finite and non-positive values are rejected because they would propagate into the
+    /// `target_dpi / source_dpi` scale factor as a NaN or a negative resize.
+    fn source_dpi_from_backend_options(config: &OcrConfig) -> Option<f64> {
+        config
+            .backend_options
+            .as_ref()
+            .and_then(|options| options.get(crate::core::config::ocr::SOURCE_DPI_BACKEND_OPTION))
+            .and_then(serde_json::Value::as_f64)
+            .filter(|dpi| dpi.is_finite() && *dpi > 0.0)
     }
 
     /// Get cached available languages, lazily querying Tesseract if needed.
@@ -898,6 +917,68 @@ mod tests {
         assert_eq!(tess_config.language, "fra");
         assert_eq!(tess_config.psm, 6);
         assert!(tess_config.enable_table_detection);
+    }
+
+    /// The `source_dpi` hint the PDF OCR route stamps per page must survive the crossing into
+    /// the internal config — that is the whole delivery path, and it needs no change to the
+    /// `OcrBackend` trait because `backend_options` is already a documented per-call channel.
+    ///
+    /// Fails on unfixed code: `InternalTesseractConfig` has no `source_dpi` field, so this does
+    /// not compile. There is no expression of the value to assert against at all.
+    #[test]
+    fn should_read_source_dpi_hint_from_backend_options() {
+        let backend = TesseractBackend::new();
+        let ocr_config = OcrConfig {
+            backend: "tesseract".to_string(),
+            backend_options: Some(serde_json::json!({ "source_dpi": 150.0 })),
+            ..Default::default()
+        };
+
+        assert_eq!(backend.config_to_tesseract(&ocr_config).source_dpi, Some(150.0));
+    }
+
+    /// Callers that do not know their image's resolution — standalone image OCR, plugin callers
+    /// handed arbitrary bytes — must keep reaching the historical 72-DPI assumption rather than
+    /// being given a fabricated value.
+    ///
+    /// Fails on unfixed code by not compiling; behaviourally this is the pre-existing contract,
+    /// pinned so the new hint cannot silently displace it.
+    #[test]
+    fn should_leave_source_dpi_unknown_when_no_hint_is_supplied() {
+        let backend = TesseractBackend::new();
+        let ocr_config = OcrConfig {
+            backend: "tesseract".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(backend.config_to_tesseract(&ocr_config).source_dpi, None);
+    }
+
+    /// A malformed or impossible hint is "unknown", not an error and not a poisoned scale
+    /// factor: a zero or negative DPI would make the resize factor infinite or negative, and a
+    /// string would silently become `None` anyway.
+    ///
+    /// Fails on unfixed code by not compiling.
+    #[test]
+    fn should_reject_non_positive_or_malformed_source_dpi_hints() {
+        let backend = TesseractBackend::new();
+        for hint in [
+            serde_json::json!({ "source_dpi": 0.0 }),
+            serde_json::json!({ "source_dpi": -150.0 }),
+            serde_json::json!({ "source_dpi": "150" }),
+        ] {
+            let ocr_config = OcrConfig {
+                backend: "tesseract".to_string(),
+                backend_options: Some(hint.clone()),
+                ..Default::default()
+            };
+
+            assert_eq!(
+                backend.config_to_tesseract(&ocr_config).source_dpi,
+                None,
+                "hint {hint} must be treated as unknown"
+            );
+        }
     }
 
     #[test]
