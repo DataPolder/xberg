@@ -26,10 +26,15 @@ NATIVE_DIR="$(cd "$NATIVE_DIR" && pwd)"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIXTURE="$REPO_ROOT/scripts/ci/fixtures/musl-python-smoke.pdf"
 SMOKE_SCRIPT="$REPO_ROOT/scripts/ci/smoke_test_elixir_nif.exs"
+# The smoke script loads the NIF through alef's generated `Xberg.Native` rather than a
+# stub, because :erlang.load_nif/2 requires the calling module to be named exactly what
+# `rustler::init!` declares and to export all 325 declared NIFs. ~keep
+NATIVE_EX="$REPO_ROOT/packages/elixir/lib/xberg/native.ex"
 EXPECTED_TEXT="XBERG MUSL SMOKE 490"
 
 [ -f "$FIXTURE" ] || die "smoke-test fixture missing: $FIXTURE"
 [ -f "$SMOKE_SCRIPT" ] || die "smoke-test script missing: $SMOKE_SCRIPT"
+[ -f "$NATIVE_EX" ] || die "generated Xberg.Native module missing: $NATIVE_EX"
 find "$NATIVE_DIR" -maxdepth 1 -name 'libxberg_nif.so' | grep -q . || die "no libxberg_nif.so found under $NATIVE_DIR"
 
 # alpine:3.21 matches docker/Dockerfile.musl-rustler's build image, so this is
@@ -44,7 +49,9 @@ docker run --rm \
   -v "$NATIVE_DIR:/native:ro" \
   -v "$FIXTURE:/fixture.pdf:ro" \
   -v "$SMOKE_SCRIPT:/smoke/smoke_test_elixir_nif.exs:ro" \
+  -v "$NATIVE_EX:/smoke/native.ex:ro" \
   -e XBERG_NIF_PATH="/native/libxberg_nif" \
+  -e XBERG_NATIVE_EX="/smoke/native.ex" \
   -e EXPECTED_TEXT="$EXPECTED_TEXT" \
   alpine:3.21 sh -euc '
     apk add --no-cache elixir >/dev/null
