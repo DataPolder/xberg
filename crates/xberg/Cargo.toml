@@ -142,7 +142,7 @@ image-encode = ["dep:image"]
 # page rendering, multi-backend pipeline) usable without the Tesseract binary.
 # Implied by `liter-llm` so VLM-only OCR works without enabling the full `ocr` feature.
 # Also implied by `ocr` and `ocr-wasm` (see those feature definitions).
-ocr-pipeline = ["dep:image", "image-encode"]
+ocr-pipeline = ["dep:image", "image-encode", "dep:fast_image_resize"]
 
 tree-sitter = ["dep:tree-sitter-language-pack"]
 tree-sitter-wasm = ["tree-sitter"]

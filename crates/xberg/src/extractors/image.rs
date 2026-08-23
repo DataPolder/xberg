@@ -1319,7 +1319,7 @@ fn sparse_image_ocr_fallback_config(
 /// Falls back to the original bytes unchanged if decoding or normalization
 /// fails; OCR should still be attempted on the original image rather than
 /// aborting the extraction.
-#[cfg(feature = "ocr")]
+#[cfg(feature = "ocr-pipeline")]
 fn normalize_image_bytes_for_ocr(
     content: &[u8],
     images_config: &crate::core::config::ImageExtractionConfig,
@@ -1347,7 +1347,7 @@ fn normalize_image_bytes_for_ocr(
     }
 }
 
-#[cfg(feature = "ocr")]
+#[cfg(feature = "ocr-pipeline")]
 fn encode_rgb_as_png(rgb_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
     use image::ImageEncoder;
 
@@ -1542,14 +1542,14 @@ impl ImageExtractor {
         // `ExtractionConfig::images`, so DPI/dimension normalization from
         // `ImageExtractionConfig` has to happen here, once, before any backend
         // ever sees the bytes (issue #209). ~keep
-        #[cfg(feature = "ocr")]
+        #[cfg(feature = "ocr-pipeline")]
         let normalized_ocr_bytes = config
             .images
             .as_ref()
             .map(|images_config| normalize_image_bytes_for_ocr(content, images_config));
-        #[cfg(feature = "ocr")]
+        #[cfg(feature = "ocr-pipeline")]
         let ocr_input: &[u8] = normalized_ocr_bytes.as_deref().unwrap_or(content);
-        #[cfg(not(feature = "ocr"))]
+        #[cfg(not(feature = "ocr-pipeline"))]
         let ocr_input: &[u8] = content;
 
         let ocr_result = backend.process_image(ocr_input, &ocr_config_with_format).await?;
@@ -2313,6 +2313,40 @@ impl InternalDocumentExtractor for ImageExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #860: `normalize_image_bytes_for_ocr` applies `ImageExtractionConfig`'s
+    /// `max_image_dimension` / DPI settings at the extractor boundary, because OCR
+    /// backends only ever see `OcrConfig` and have no route back to them (#209).
+    ///
+    /// It used to be gated on `feature = "ocr"`, while `extract_with_ocr` is gated on
+    /// `ocr` OR `ocr-wasm` OR `ocr-pipeline`. Every `candle-*` backend — and any
+    /// `liter-llm` VLM-only build — implies `ocr-pipeline` but NOT `ocr`, so those
+    /// builds took the `#[cfg(not(feature = "ocr"))]` arm and passed the raw bytes
+    /// through with the settings silently dropped.
+    ///
+    /// Run this under a candle-only feature set to see the fix: before it, the
+    /// function did not exist in such a build at all.
+    #[cfg(feature = "ocr-pipeline")]
+    #[test]
+    fn normalizes_a_standalone_image_to_the_configured_maximum_dimension() {
+        let oversized = image::RgbImage::from_pixel(1200, 600, image::Rgb([255, 255, 255]));
+        let png = encode_rgb_as_png(oversized.as_raw(), 1200, 600).expect("encode the fixture");
+
+        let images_config = crate::core::config::ImageExtractionConfig {
+            max_image_dimension: 300,
+            auto_adjust_dpi: false,
+            ..Default::default()
+        };
+        let normalized = normalize_image_bytes_for_ocr(&png, &images_config);
+
+        assert_ne!(normalized, png, "the oversized image should not pass through unchanged");
+        let decoded = image::load_from_memory(&normalized).expect("decode the normalized image");
+        assert_eq!(
+            (decoded.width(), decoded.height()),
+            (300, 150),
+            "the long edge should be clamped to max_image_dimension, preserving the 2:1 aspect ratio"
+        );
+    }
 
     #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
     #[test]

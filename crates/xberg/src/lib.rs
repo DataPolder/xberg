@@ -108,7 +108,7 @@ pub mod sparse_embeddings;
 #[cfg(any(feature = "late-interaction-presets", feature = "late-interaction"))]
 pub mod late_interaction;
 
-#[cfg(feature = "ocr")]
+#[cfg(feature = "ocr-pipeline")]
 /// Image preprocessing and DPI utilities for OCR pipelines.
 pub mod image;
 
