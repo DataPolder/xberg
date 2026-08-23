@@ -26,42 +26,6 @@ fn wants_dot_output(config: &ExtractionConfig) -> bool {
     matches!(&config.output_format, crate::core::config::OutputFormat::Custom(name) if name == "dot")
 }
 
-/// Decode raw XML bytes to a UTF-8 string, honoring the `<?xml encoding=...?>`
-/// declaration when present and falling back to charset detection otherwise.
-/// Strips a leading BOM.
-///
-/// Returns whether any bytes were lost to a U+FFFD replacement (#395). This is the one
-/// call site in the crate where that can happen under an *explicit* encoding rather
-/// than only through `quality`'s chardetng detection: a declared `<?xml encoding=...?>`
-/// that does not match the actual bytes decodes deterministically with errors in both
-/// build configurations, so `decode_with_provenance` must be consulted for the declared
-/// path too, not only the detection fallback.
-fn decode_xml_to_utf8(content: &[u8]) -> (String, bool) {
-    let prolog_len = content.len().min(256);
-    let prolog = String::from_utf8_lossy(&content[..prolog_len]);
-    let declared = prolog
-        .split_once("encoding")
-        .and_then(|(_, rest)| rest.split_once(['"', '\'']))
-        .and_then(|(_, rest)| rest.split(['"', '\'']).next())
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-
-    // `decode_with_provenance` honors a valid `declared` label the same way the previous
-    // manual `encoding_rs::Encoding::for_label` check did, and falls through to
-    // detection/lossy decoding for `None` or an unrecognized label -- so passing `declared`
-    // through unconditionally reproduces the old branching without duplicating it here.
-    //
-    // One deliberate behaviour change under `quality`: the declared-label path now also
-    // runs `fix_mojibake_internal`, which the old raw `encoding.decode()` call skipped.
-    // That is what every other extractor already does with its decoded text, so XML was
-    // the outlier; the alternative would be to keep XML uniquely un-repaired. ~keep
-    let outcome = crate::utils::decode_with_provenance(content, declared);
-    (
-        crate::utils::strip_bom(&outcome.text).to_string(),
-        outcome.replaced_characters,
-    )
-}
-
 /// Build an `InternalDocument` from XML content by parsing element hierarchy.
 ///
 /// Maps XML elements to headings (for parent elements with children) and
@@ -79,7 +43,7 @@ fn build_internal_document(content: &[u8], mime_type: &str, budget: &mut Securit
     let mut doc = InternalDocument::new("xml");
     let is_svg = mime_type == "image/svg+xml";
 
-    let (decoded, decoded_lossily) = decode_xml_to_utf8(content);
+    let (decoded, decoded_lossily) = crate::utils::xml_utils::decode_xml_to_utf8(content);
     if decoded_lossily {
         crate::core::diagnostics::push_lossy_decode_warning(
             &mut doc.processing_warnings,
@@ -102,13 +66,12 @@ fn build_internal_document(content: &[u8], mime_type: &str, budget: &mut Securit
         match reader.read_event() {
             Ok(Event::Start(e)) => {
                 budget.enter()?;
-                let name_bytes = e.name().as_ref().to_vec();
-                let name_owned = String::from_utf8_lossy(&name_bytes).into_owned();
+                let name_owned = e.name().as_ref().to_string();
 
                 let mut attrs = AHashMap::new();
                 for attr in e.attributes().flatten() {
-                    let key: Cow<str> = String::from_utf8_lossy(attr.key.as_ref());
-                    let val: Cow<str> = String::from_utf8_lossy(&attr.value);
+                    let key: Cow<str> = std::borrow::Cow::Borrowed(attr.key.as_ref());
+                    let val: Cow<str> = std::borrow::Cow::Borrowed(attr.value.as_ref());
                     budget.check_attr(&key, &val)?;
                     let trimmed_val = val.trim();
                     if !trimmed_val.is_empty() {
@@ -142,7 +105,7 @@ fn build_internal_document(content: &[u8], mime_type: &str, budget: &mut Securit
                         continue;
                     }
                 }
-                let text: std::borrow::Cow<str> = String::from_utf8_lossy(e.as_ref());
+                let text: std::borrow::Cow<str> = std::borrow::Cow::Borrowed(e.as_ref());
                 budget.check_entity(&text)?;
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
@@ -154,13 +117,12 @@ fn build_internal_document(content: &[u8], mime_type: &str, budget: &mut Securit
                 }
             }
             Ok(Event::Empty(e)) => {
-                let name_bytes = e.name().as_ref().to_vec();
-                let name = String::from_utf8_lossy(&name_bytes).into_owned();
+                let name = e.name().as_ref().to_string();
 
                 let mut attrs = AHashMap::new();
                 for attr in e.attributes().flatten() {
-                    let key: std::borrow::Cow<str> = String::from_utf8_lossy(attr.key.as_ref());
-                    let val: std::borrow::Cow<str> = String::from_utf8_lossy(&attr.value);
+                    let key: std::borrow::Cow<str> = std::borrow::Cow::Borrowed(attr.key.as_ref());
+                    let val: std::borrow::Cow<str> = std::borrow::Cow::Borrowed(attr.value.as_ref());
                     budget.check_attr(&key, &val)?;
                     let trimmed_val = val.trim();
                     if !trimmed_val.is_empty() {
@@ -177,7 +139,7 @@ fn build_internal_document(content: &[u8], mime_type: &str, budget: &mut Securit
                 index += 1;
             }
             Ok(Event::CData(e)) => {
-                let text: std::borrow::Cow<str> = String::from_utf8_lossy(&e);
+                let text: std::borrow::Cow<str> = std::borrow::Cow::Borrowed(e.as_ref());
                 budget.check_entity(&text)?;
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {

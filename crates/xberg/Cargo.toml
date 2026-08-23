@@ -1326,7 +1326,7 @@ pdfium-render = { workspace = true, optional = true }
 # `default-features = false` drops the `protobuf` dependency, which nothing here needs.
 prometheus = { version = "0.14", default-features = false, optional = true }
 pulldown-cmark = { version = "0.13" }
-quick-xml = { version = "0.41.0", features = ["serialize"], optional = true }
+quick-xml = { version = "0.42.0", features = ["serialize"], optional = true }
 rake = { version = "0.3.6", optional = true }
 rayon = { workspace = true }
 regex = "1.13.1"

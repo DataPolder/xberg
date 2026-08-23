@@ -108,8 +108,8 @@ fn extract_para_with_annotations_jats(
                     "ext-link" => {
                         let mut href = None;
                         for attr in e.attributes().flatten() {
-                            let key = String::from_utf8_lossy(attr.key.as_ref());
-                            let val = String::from_utf8_lossy(attr.value.as_ref());
+                            let key = std::borrow::Cow::Borrowed(attr.key.as_ref());
+                            let val = std::borrow::Cow::Borrowed(attr.value.as_ref());
                             budget.check_attr(&key, &val)?;
                             if key == "xlink:href" || key.ends_with(":href") || key == "href" {
                                 href = Some(val.to_string());
@@ -163,7 +163,7 @@ fn extract_para_with_annotations_jats(
                 depth -= 1;
             }
             Ok(Event::Text(t)) => {
-                let decoded = String::from_utf8_lossy(t.as_ref()).to_string();
+                let decoded = t.as_ref().to_string();
                 if !decoded.trim().is_empty() {
                     budget.check_entity(decoded.trim())?;
                     budget.account_text(decoded.trim().len())?;
@@ -174,7 +174,7 @@ fn extract_para_with_annotations_jats(
                 }
             }
             Ok(Event::CData(t)) => {
-                let decoded = utf8_validation::from_utf8(t.as_ref()).unwrap_or("").to_string();
+                let decoded = t.as_ref().to_string();
                 if !decoded.trim().is_empty() {
                     budget.check_entity(decoded.trim())?;
                     budget.account_text(decoded.trim().len())?;

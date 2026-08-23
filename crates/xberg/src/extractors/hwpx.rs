@@ -165,7 +165,7 @@ fn collect_section_formulas<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) ->
                     _ => {}
                 },
                 Ok(Event::Text(t)) if in_script => {
-                    script.push_str(&String::from_utf8_lossy(t.as_ref()));
+                    script.push_str(&std::borrow::Cow::Borrowed(t.as_ref()));
                 }
                 Ok(Event::End(e)) => match local_name(e.name().as_ref()) {
                     "tbl" => table_depth = table_depth.saturating_sub(1),
@@ -208,11 +208,10 @@ fn section_index_of(name: &str) -> Option<usize> {
 }
 
 /// Return the local part of a possibly prefixed XML qualified name.
-fn local_name(qname: &[u8]) -> &str {
-    let name = std::str::from_utf8(qname).unwrap_or("");
-    match name.rsplit_once(':') {
+fn local_name(qname: &str) -> &str {
+    match qname.rsplit_once(':') {
         Some((_, local)) => local,
-        None => name,
+        None => qname,
     }
 }
 

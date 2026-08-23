@@ -694,7 +694,7 @@ fn omml_node_to_run(container: &Node, xml_str: &str) -> Option<Run> {
     };
 
     let raw_xml = xml_str.get(math_node.range())?;
-    let expected_tag: &[u8] = if is_display { b"m:oMathPara" } else { b"m:oMath" };
+    let expected_tag: &str = if is_display { "m:oMathPara" } else { "m:oMath" };
 
     let mut reader = quick_xml::Reader::from_str(raw_xml);
     reader.config_mut().trim_text(false);
