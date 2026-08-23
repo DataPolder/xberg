@@ -163,6 +163,27 @@ pub struct TesseractConfig {
     /// raster's real resolution.
     #[serde(default)]
     pub source_dpi: Option<f64>,
+
+    /// The true, 1-indexed page number of the source document that `image_bytes` came
+    /// from, when the caller knows it.
+    ///
+    /// Like `source_dpi`, this is *not* a user-facing knob and has no counterpart on the
+    /// public [`crate::types::TesseractConfig`]: `perform_ocr` runs Tesseract on exactly one
+    /// loaded image per call, so Tesseract's own per-call page index (hOCR's `ppageno`, the
+    /// TSV `page_num` column, and the iterator extraction's page argument) is always `0`/`1`
+    /// regardless of which page of the source document this image actually is. Every parsed
+    /// element, table, and `OcrElement` is stamped with this field's value instead of that
+    /// per-call index, so a caller processing page 2 of a multi-page document must set this
+    /// to `2` for the resulting elements to report the right page. Callers that don't know
+    /// (or don't need) the true page number leave it at the default, `1`.
+    #[serde(default = "default_page_number")]
+    pub page_number: u32,
+}
+
+/// Default for [`TesseractConfig::page_number`]: page 1, matching Tesseract's own
+/// single-image `ppageno`/TSV convention when no caller-supplied page number is known.
+fn default_page_number() -> u32 {
+    1
 }
 
 /// Word-level confidence floor (0.0-100.0) below which Tesseract drops a recognized word.
@@ -213,6 +234,7 @@ impl Default for TesseractConfig {
             auto_rotate: false,
             tessdata_path: None,
             source_dpi: None,
+            page_number: default_page_number(),
         }
     }
 }
@@ -264,6 +286,12 @@ impl From<&crate::types::TesseractConfig> for TesseractConfig {
             // The public config is a user-supplied document-wide setting and cannot know the
             // resolution of any one image; only the per-call `backend_options` hint can.
             source_dpi: None,
+            // Same rationale as `source_dpi`: the public config has no notion of which page
+            // of a document this one call is for. Unlike `source_dpi`, no caller currently
+            // threads a per-call value in through `backend_options`, so this always resolves
+            // to the default; direct callers of the internal `TesseractConfig`/`perform_ocr`
+            // API can still set it explicitly.
+            page_number: default_page_number(),
         }
     }
 }

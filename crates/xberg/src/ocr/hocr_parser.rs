@@ -68,6 +68,23 @@ pub(crate) fn parse_hocr_to_internal_document_with_dictionary_filter(
     hocr_html: &str,
     dictionary_filter: Option<&DictionaryLineFilter<'_>>,
 ) -> InternalDocument {
+    parse_hocr_to_internal_document_with_page_offset(hocr_html, dictionary_filter, 1)
+}
+
+/// Same as [`parse_hocr_to_internal_document_with_dictionary_filter`], except elements' page
+/// numbers are computed as `ppageno + page_offset` instead of always `ppageno + 1`.
+///
+/// Tesseract numbers every single-image `recognize()` call's hOCR page as `ppageno 0`
+/// regardless of which page of the source document that image actually is -- `perform_ocr`
+/// (`ocr::processor::execution`) loads and recognizes exactly one image per call, so the hOCR
+/// it gets back can never know the true page number on its own. Callers that OCR one page at a
+/// time out of a larger document (the PDF OCR route) pass the real 1-indexed page number here,
+/// via `TesseractConfig::page_number`, instead of letting every page collapse to `1`.
+pub(crate) fn parse_hocr_to_internal_document_with_page_offset(
+    hocr_html: &str,
+    dictionary_filter: Option<&DictionaryLineFilter<'_>>,
+    page_offset: u32,
+) -> InternalDocument {
     let mut doc = InternalDocument::new("ocr");
     doc.mime_type = "application/x-hocr".to_string();
 
@@ -96,7 +113,7 @@ pub(crate) fn parse_hocr_to_internal_document_with_dictionary_filter(
         if has_class(tag_content, "ocr_page") {
             let title = extract_title_attr(tag_content);
             let props = parse_title_properties(&title);
-            let page_number = props.ppageno.map(|p| p + 1);
+            let page_number = props.ppageno.map(|p| p + page_offset);
 
             if let Some(prev) = last_page
                 && page_number != Some(prev)
@@ -132,7 +149,7 @@ pub(crate) fn parse_hocr_to_internal_document_with_dictionary_filter(
             let (paragraph, end_pos) = parse_paragraph(
                 hocr_html,
                 pos,
-                last_page.unwrap_or(1),
+                last_page.unwrap_or(page_offset),
                 element_index,
                 &par_tag_name,
                 dictionary_filter,
@@ -1052,6 +1069,40 @@ mod tests {
 
         let conf = elem.ocr_confidence.as_ref().unwrap();
         assert!((conf.recognition - 0.925).abs() < 0.01);
+    }
+
+    /// Regression test: Tesseract numbers every single-image `recognize()` call's hOCR page
+    /// as `ppageno 0`, since each `perform_ocr` call only ever loads one image. When that
+    /// image is page 2 of a larger document, the parser must report the caller-supplied true
+    /// page number rather than the ppageno-derived `1` every single-image hOCR call would
+    /// otherwise produce for every page of the document.
+    ///
+    /// Fails against unfixed code: before `parse_hocr_to_internal_document_with_page_offset`
+    /// existed, this exact hOCR (`ppageno 0`, identical to what Tesseract emits for page 2 of
+    /// a document, page 5, or any other page) could only be parsed by
+    /// `parse_hocr_to_internal_document`/`_with_dictionary_filter`, both of which hardcode the
+    /// offset to `1` -- so every page of a multi-page source would assert `elem.page ==
+    /// Some(1)`, never the true page number.
+    #[test]
+    fn should_report_the_true_page_number_for_each_ocr_element() {
+        let hocr = r#"<div class="ocr_page" title="bbox 0 0 1000 1500; ppageno 0">
+            <p class="ocr_par" title="bbox 100 100 900 200">
+                <span class="ocr_line" title="bbox 100 100 900 150">
+                    <span class="ocrx_word" title="bbox 100 100 200 140; x_wconf 95">Hello</span>
+                    <span class="ocrx_word" title="bbox 210 100 350 140; x_wconf 90">World</span>
+                </span>
+            </p>
+        </div>"#;
+
+        // `page_offset: 2` stands in for `TesseractConfig::page_number` when `perform_ocr` is
+        // called on page 2 of a multi-page document.
+        let doc = parse_hocr_to_internal_document_with_page_offset(hocr, None, 2);
+        let elements = doc.elements;
+
+        assert_eq!(elements.len(), 1);
+        let elem = &elements[0];
+        assert_eq!(elem.text, "Hello World");
+        assert_eq!(elem.page, Some(2));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::image::normalize_image_dpi_owned;
 use crate::ocr::cache::OcrCache;
 use crate::ocr::conversion::{TsvRow, iterator_word_to_element, tsv_row_to_element};
 use crate::ocr::error::OcrError;
-use crate::ocr::hocr_parser::{DictionaryLineFilter, parse_hocr_to_internal_document_with_dictionary_filter};
+use crate::ocr::hocr_parser::{DictionaryLineFilter, parse_hocr_to_internal_document_with_page_offset};
 #[cfg(feature = "pdf")]
 use crate::ocr::table::post_process_table;
 use crate::ocr::table::{extract_words_from_tsv, reconstruct_table, table_to_markdown};
@@ -116,11 +116,15 @@ fn rotate_rgb_image_data(data: &[u8], width: u32, height: u32, degrees: i32) -> 
 ///
 /// * `tsv_data` - Raw TSV output from Tesseract
 /// * `min_confidence` - Minimum confidence threshold (0-100 scale)
+/// * `page_number` - The true, 1-indexed page number of the source document this TSV came
+///   from. Tesseract's own `page_num` TSV column is always `1` for a single-image call (see
+///   `TesseractConfig::page_number`'s doc comment), so it is used only to build each
+///   element's opaque `parent_id`, never as the returned elements' page number.
 ///
 /// # Returns
 ///
 /// Vector of OcrElements for word-level and line-level entries
-fn parse_tsv_to_elements(tsv_data: &str, min_confidence: f64) -> Vec<OcrElement> {
+fn parse_tsv_to_elements(tsv_data: &str, min_confidence: f64, page_number: u32) -> Vec<OcrElement> {
     let mut elements = Vec::new();
 
     for line in tsv_data.lines().skip(1) {
@@ -165,7 +169,9 @@ fn parse_tsv_to_elements(tsv_data: &str, min_confidence: f64) -> Vec<OcrElement>
             text,
         };
 
-        elements.push(tsv_row_to_element(&tsv_row));
+        let mut element = tsv_row_to_element(&tsv_row);
+        element.page_number = page_number;
+        elements.push(element);
     }
 
     elements
@@ -1271,7 +1277,8 @@ pub(super) fn perform_ocr(
                 max_invalid_ratio: crate::ocr::hocr_parser::DEFAULT_DICT_INVALID_LINE_RATIO,
             };
 
-            let internal_doc = parse_hocr_to_internal_document_with_dictionary_filter(&hocr, Some(&dictionary_filter));
+            let internal_doc =
+                parse_hocr_to_internal_document_with_page_offset(&hocr, Some(&dictionary_filter), config.page_number);
             let content = flatten_hocr_elements_to_text(&internal_doc.elements);
             hocr_document = Some(internal_doc);
 
@@ -1458,7 +1465,7 @@ pub(super) fn perform_ocr(
             tables.push(OcrTable {
                 cells: cleaned,
                 markdown: markdown_table,
-                page_number: 1,
+                page_number: config.page_number,
                 bounding_box: Some(OcrTableBoundingBox {
                     left,
                     top,
@@ -1490,7 +1497,7 @@ pub(super) fn perform_ocr(
         }
     }
 
-    let iterator_extraction = extract_elements_via_iterator(&api, 1, config.min_confidence);
+    let iterator_extraction = extract_elements_via_iterator(&api, config.page_number, config.min_confidence);
     match iterator_extraction {
         Ok(extraction) if !extraction.elements.is_empty() => {
             insert_word_iterator_skipped_count_metadata(&mut metadata, extraction.skipped_words);
@@ -1512,7 +1519,7 @@ pub(super) fn perform_ocr(
         }
         _ => {
             if let Some(ref tsv_data) = tsv_data_for_tables {
-                let elements = parse_tsv_to_elements(tsv_data, config.min_confidence);
+                let elements = parse_tsv_to_elements(tsv_data, config.min_confidence, config.page_number);
                 if !elements.is_empty() {
                     ocr_elements = Some(elements);
                 }

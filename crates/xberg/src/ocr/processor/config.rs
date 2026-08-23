@@ -91,6 +91,12 @@ fn hash_config_for_schema(config: &TesseractConfig, result_schema_version: u8) -
             hasher.update(&[0]);
         }
     }
+    // `page_number` is stamped onto every returned element, table, and `OcrElement` (see
+    // `perform_ocr`), so two calls with byte-identical images but different declared page
+    // numbers produce different output for an unchanged image hash. Omitting it here would
+    // serve one page's result for another exactly the way `source_dpi` and `hocr_font_info`
+    // did in #687.
+    hasher.update(&config.page_number.to_le_bytes());
 
     let hash = hasher.finalize();
     hex::encode(&hash.as_bytes()[..16])
@@ -229,6 +235,28 @@ mod tests {
             hash_config(&at_150),
             hash_config(&at_300),
             "two different known source DPIs must not collide"
+        );
+    }
+
+    /// `page_number` is stamped onto every returned element/table/`OcrElement`, so it must be
+    /// part of the cache identity the same way `source_dpi` is — two calls with byte-identical
+    /// images but different declared page numbers must not share a cache entry.
+    ///
+    /// Fails on unfixed code: `TesseractConfig` has no `page_number` field, so this does not
+    /// compile. Adding the field but not hashing it makes it compile and fail on the
+    /// assertion, since both hashes would then be identical.
+    #[test]
+    fn should_distinguish_cache_keys_by_page_number() {
+        let page_one = create_test_config();
+        let page_two = TesseractConfig {
+            page_number: 2,
+            ..create_test_config()
+        };
+
+        assert_ne!(
+            hash_config(&page_one),
+            hash_config(&page_two),
+            "two different declared page numbers must not collide"
         );
     }
 

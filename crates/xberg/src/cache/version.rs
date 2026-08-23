@@ -72,7 +72,16 @@
 /// entries from each other; the entries already on disk were written under the 72 assumption
 /// with a key that cannot distinguish them, and this bump is what makes them unreachable. Any
 /// A/B measuring this fix MUST run against a cold cache.
-pub(crate) const CACHE_SCHEMA_VERSION: u32 = 5;
+///
+/// Bumped for the OCR page-number fix: `perform_ocr` (`ocr::processor::execution`) stamped
+/// every returned element, table, and `OcrElement` with `1` regardless of which page of the
+/// source document the image actually was, because Tesseract numbers every single-image call's
+/// hOCR/TSV/iterator page as `0`/`1` internally (see `TesseractConfig::page_number`'s doc
+/// comment). `hash_config` now folds `page_number` in, but that only separates future entries
+/// from each other; entries already on disk were written with the always-`1` page baked into
+/// their cached content and a key that cannot distinguish them, and this bump is what makes
+/// them unreachable.
+pub(crate) const CACHE_SCHEMA_VERSION: u32 = 6;
 
 /// Number of hex characters in the cache version tag.
 const VERSION_TAG_HEX_LEN: usize = 8;
