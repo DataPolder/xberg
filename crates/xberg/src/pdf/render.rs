@@ -283,9 +283,35 @@ fn glyph_drop_warning(page_index: usize, cause: &str) -> ProcessingWarning {
     )
 }
 
-/// Render a page while capturing any `xberg_native_pdf` glyph-drop warnings it logs
-/// during the call, deduping them into [`ENGINE_PENDING_WARNINGS`] for
-/// later collection via [`take_xberg_native_pdf_render_warnings`].
+/// Whether a captured engine warning means a whole image XObject failed to rasterize
+/// (e.g. its stream failed to decode, tripped a decompression-bomb guard, or carried an
+/// unsupported colour space), as opposed to a single glyph being dropped.
+///
+/// Matches the exact wording `xberg_native_pdf::rendering::page_renderer::render_xobject` logs
+/// at its `render_image`/`render_image_mask` catch sites ("Skipping unrenderable image
+/// XObject '{name}': {e}" / "Skipping unrenderable ImageMask XObject '{name}': {e}") when
+/// `render_image` returns `Err` and the page is left with a blank region instead. That is a
+/// materially different defect from a dropped glyph — a whole picture is missing, not one
+/// character's ink — and reporting it as "glyph ink is missing" would misdescribe the cause
+/// to anyone reading `processing_warnings`.
+fn indicates_unrenderable_image(cause: &str) -> bool {
+    cause.contains("unrenderable image XObject") || cause.contains("unrenderable ImageMask XObject")
+}
+
+fn image_render_failure_warning(page_index: usize, cause: &str) -> ProcessingWarning {
+    warning(
+        PDF_RENDER_WARNING_SOURCE,
+        format!(
+            "Page {} could not rasterize one or more images and left that region blank: {cause}",
+            page_index + 1
+        ),
+    )
+}
+
+/// Render a page while capturing any `xberg_native_pdf` render-degradation warnings it
+/// logs during the call — dropped glyphs and unrenderable image XObjects alike — deduping
+/// them into [`ENGINE_PENDING_WARNINGS`] for later collection via
+/// [`take_xberg_native_pdf_render_warnings`].
 ///
 /// Capture is opt-in: unless the application called
 /// [`install_pdf_render_diagnostics`], this arms nothing and is exactly
@@ -304,7 +330,12 @@ fn render_page_capturing_glyph_drops(
         ENGINE_PENDING_WARNINGS.with(|pending| {
             let mut pending = pending.borrow_mut();
             for cause in captured.iter().filter(|cause| indicates_dropped_glyph_ink(cause)) {
-                push_warning_deduped(&mut pending, glyph_drop_warning(page_index, cause));
+                let processing_warning = if indicates_unrenderable_image(cause) {
+                    image_render_failure_warning(page_index, cause)
+                } else {
+                    glyph_drop_warning(page_index, cause)
+                };
+                push_warning_deduped(&mut pending, processing_warning);
             }
         });
     }

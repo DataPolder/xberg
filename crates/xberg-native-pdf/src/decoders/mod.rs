@@ -44,10 +44,29 @@ pub use runlength::RunLengthDecoder;
 /// are necessary security measures to prevent memory exhaustion attacks.
 ///
 /// Default values:
-/// - Max decompression ratio: 100:1 (compressed:decompressed)
+/// - Max decompression ratio: 100:1 (compressed:decompressed), only enforced once the
+///   decompressed output exceeds `MIN_SIZE_FOR_RATIO_CHECK`
 /// - Max decompressed size: 100 MB
 const DEFAULT_MAX_DECOMPRESSION_RATIO: u32 = 100;
 const DEFAULT_MAX_DECOMPRESSED_SIZE: usize = 100 * 1024 * 1024;
+
+/// Floor below which the decompression-ratio check is skipped entirely.
+///
+/// Ratio alone is a poor bomb signal for small outputs: a plain, mostly-white
+/// scanned page (e.g. `/Filter [/ASCII85Decode /FlateDecode]` on a
+/// 1000x1400 RGB raster) compresses to a few tens of KB and expands to a few
+/// MB, comfortably past a 100:1 ratio, with nothing malicious about it.
+/// A genuine decompression bomb, by contrast, expands a tiny payload into
+/// hundreds of MB or gigabytes — it clears this floor by a wide margin, so
+/// gating the ratio check on absolute size does not weaken it against real
+/// attacks.
+///
+/// Set to 10 MiB: comfortably above the ~4 MB a legitimate single-page RGB
+/// scan decompresses to (leaving headroom for larger/higher-DPI scans), and
+/// well below `DEFAULT_MAX_DECOMPRESSED_SIZE` (100 MB) so the ratio check
+/// still has a meaningful window in which to catch a bomb that would
+/// otherwise sneak in just under the absolute cap.
+const MIN_SIZE_FOR_RATIO_CHECK: usize = 10 * 1024 * 1024;
 
 /// PDF stream filter types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -204,8 +223,9 @@ pub fn decode_stream(data: &[u8], filters: &[String]) -> Result<Vec<u8>> {
 /// # Security
 ///
 /// This function includes decompression bomb protection:
-/// - Checks decompression ratio before decompressing
-/// - Checks output size limit after decompression
+/// - Checks decompression ratio after each filter, but only once the decompressed
+///   output exceeds [`MIN_SIZE_FOR_RATIO_CHECK`] — see that constant for why
+/// - Checks the absolute output size limit after decompression, unconditionally
 /// - Uses limits from `options` or defaults if None
 pub fn decode_stream_with_options(
     data: &[u8],
@@ -228,10 +248,14 @@ pub fn decode_stream_with_options(
 
         current = decoder.decode(&current)?;
 
-        // SECURITY: Check decompression ratio after each filter
+        // SECURITY: Check decompression ratio after each filter, but only once the
+        // decompressed output clears MIN_SIZE_FOR_RATIO_CHECK. Below that floor, a
+        // high ratio is expected of ordinary, small, highly-compressible content
+        // (e.g. a mostly-white scanned page) and is not itself a sign of an attack;
+        // DEFAULT_MAX_DECOMPRESSED_SIZE below is what actually bounds small outputs.
         // PDF Spec: ISO 32000-1:2008 does not specify limits, but this is a
         // critical security measure to prevent decompression bomb attacks. ~keep
-        if max_ratio > 0 && compressed_size > 0 {
+        if max_ratio > 0 && compressed_size > 0 && current.len() > MIN_SIZE_FOR_RATIO_CHECK {
             let ratio = current.len() as u64 / compressed_size.max(1) as u64;
             if ratio > max_ratio as u64 {
                 return Err(Error::Decode(format!(
@@ -294,6 +318,9 @@ pub fn decode_stream_with_params(data: &[u8], filters: &[String], params: Option
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::Compression;
+    use flate2::write::ZlibEncoder;
+    use std::io::Write;
 
     #[test]
     fn test_decode_stream_no_filters() {
@@ -362,5 +389,77 @@ mod tests {
         let filters = vec!["AHx".to_string()];
         let result = decode_stream(data, &filters).unwrap();
         assert_eq!(result, b"Hello");
+    }
+
+    /// GH: this crate's `crates/xberg/tests/fixtures/ocr/scanned_hello.pdf` is a plain,
+    /// mostly-white scanned page whose ASCII85+Flate image stream decodes to exactly
+    /// 4,200,000 bytes — a 1000x1400 RGB raster — at a cumulative ratio of 170:1 and a
+    /// Flate-stage ratio of 182:1, both well past the 100:1 `DEFAULT_MAX_DECOMPRESSION_RATIO`.
+    /// Before gating the ratio check on `MIN_SIZE_FOR_RATIO_CHECK`, this
+    /// stream was rejected outright as a "decompression bomb", silently
+    /// blanking the rendered page (`render_image` returns `Err`, the page
+    /// renders all-white, OCR correctly finds no text on a blank page). A
+    /// solid-colour 4.2 MB payload compresses to a tiny fraction of its size
+    /// too, so this reproduces the same "small absolute output, high ratio"
+    /// shape without needing the real fixture bytes.
+    #[test]
+    fn small_high_ratio_image_stream_decodes_despite_ratio_over_limit() {
+        const DECOMPRESSED_LEN: usize = 4_200_000; // 1000 * 1400 * 3, matching the RGB fixture
+
+        let original = vec![0xFFu8; DECOMPRESSED_LEN];
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&original).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        // Sanity-check the test setup: a solid-colour payload must compress well past the
+        // 100:1 default ratio limit, otherwise this test would not exercise the guard at all.
+        let ratio = DECOMPRESSED_LEN as u64 / compressed.len().max(1) as u64;
+        assert!(
+            ratio > DEFAULT_MAX_DECOMPRESSION_RATIO as u64,
+            "test setup must produce a ratio over the default limit to be meaningful, got {ratio}:1"
+        );
+
+        let filters = vec!["FlateDecode".to_string()];
+        let result = decode_stream_with_options(&compressed, &filters, None, None)
+            .expect("a 4.2 MB image stream must decode despite exceeding the ratio limit");
+        assert_eq!(
+            result.len(),
+            DECOMPRESSED_LEN,
+            "decoded output must be the full 4,200,000-byte raster, not truncated or rejected"
+        );
+    }
+
+    /// A genuine decompression bomb — high ratio AND an absolute output large enough to
+    /// matter — must still be rejected. This is the guardrail test: a fix that merely
+    /// raised or removed the ratio limit would pass the test above while leaving actual
+    /// bombs unguarded. The output here (20 MB) sits comfortably above
+    /// `MIN_SIZE_FOR_RATIO_CHECK` (10 MB) and comfortably below
+    /// `DEFAULT_MAX_DECOMPRESSED_SIZE` (100 MB), so rejection can only come from the ratio
+    /// check, not the absolute-size cap — proving the ratio guard itself still fires once
+    /// output clears the floor, rather than having been disabled altogether.
+    #[test]
+    fn genuine_bomb_above_floor_and_below_absolute_cap_is_rejected_by_ratio_check() {
+        const DECOMPRESSED_LEN: usize = 20 * 1024 * 1024;
+        assert!(DECOMPRESSED_LEN > MIN_SIZE_FOR_RATIO_CHECK);
+        assert!(DECOMPRESSED_LEN < DEFAULT_MAX_DECOMPRESSED_SIZE);
+
+        let original = vec![0u8; DECOMPRESSED_LEN];
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&original).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let filters = vec!["FlateDecode".to_string()];
+        let result = decode_stream_with_options(&compressed, &filters, None, None);
+
+        match result {
+            Err(Error::Decode(message)) => {
+                assert!(
+                    message.contains("Decompression bomb detected: ratio"),
+                    "a bomb above the floor and below the absolute cap must be caught by the \
+                     ratio check specifically, got: {message}"
+                );
+            }
+            other => panic!("expected a ratio-based Decode error, got: {other:?}"),
+        }
     }
 }
