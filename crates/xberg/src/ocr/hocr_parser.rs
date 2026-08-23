@@ -51,6 +51,7 @@ struct HocrBlockExtent {
 /// | `ocrx_word`   | word text, bbox, `x_wconf` → `OcrConfidence` |
 ///
 /// Page numbers come from the `ppageno` title property (converted to 1-indexed).
+#[cfg(test)]
 pub(crate) fn parse_hocr_to_internal_document(hocr_html: &str) -> InternalDocument {
     parse_hocr_to_internal_document_with_dictionary_filter(hocr_html, None)
 }
