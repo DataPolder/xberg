@@ -110,7 +110,7 @@ jobs:
       release_zig: ${{ steps.meta.outputs.release_zig }}
       release_kotlin: ${{ steps.meta.outputs.release_kotlin }}
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -118,7 +118,7 @@ jobs:
           owner: xberg-io
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ (inputs.republish == true && (inputs.ref || github.event.repository.default_branch)) || inputs.ref || inputs.tag || github.ref }}
           fetch-depth: 0
@@ -168,7 +168,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -473,7 +473,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-15, macos-15-intel]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -618,7 +618,7 @@ jobs:
           - { os: ubuntu-latest, arch: x86_64, target: x86_64-unknown-linux-musl }
           - { os: ubuntu-24.04-arm, arch: aarch64, target: aarch64-unknown-linux-musl }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -664,14 +664,14 @@ jobs:
     if: ${{ !cancelled() && needs.prepare.outputs.dry_run != 'true' && needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_python == 'true' && (needs.check-pypi.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
 
           submodules: false
       - uses: xberg-io/actions/setup-rust@v1
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -704,7 +704,7 @@ jobs:
           # sync with alef's [crates.node].exclude_platforms=["darwin-x64"]. ~keep
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -817,7 +817,7 @@ jobs:
           - { os: ubuntu-latest, arch: x86_64, napi_arch: x64, target: x86_64-unknown-linux-musl }
           - { os: ubuntu-24.04-arm, arch: aarch64, napi_arch: arm64, target: aarch64-unknown-linux-musl }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -905,7 +905,7 @@ jobs:
               image: quay.io/pypa/manylinux_2_28_aarch64,
             }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -973,7 +973,7 @@ jobs:
     env:
       CARGO_BUILD_JOBS: 1
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1104,7 +1104,7 @@ jobs:
           - { os: macos-15, label: macos-arm64 }
           - { os: windows-latest, label: windows-x86_64 }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1183,7 +1183,7 @@ jobs:
           - { os: macos-15, label: macos-arm64, target: aarch64-apple-darwin }
           - { os: windows-latest, label: windows-x86_64, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1296,7 +1296,7 @@ jobs:
             }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1468,7 +1468,7 @@ jobs:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1519,7 +1519,7 @@ jobs:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, features: binstall-ocr }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, features: binstall }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1565,7 +1565,7 @@ jobs:
           - { os: macos-15, platform: macos-arm64, target: aarch64-apple-darwin }
           - { os: windows-latest, platform: windows-x86_64, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1637,7 +1637,7 @@ jobs:
           - { os: macos-15, platform: macos-arm64, target: aarch64-apple-darwin }
           - { os: windows-latest, platform: windows-x86_64, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1739,7 +1739,7 @@ jobs:
           - { os: macos-15, classifier: macos-arm64, target: aarch64-apple-darwin }
           - { os: windows-latest, classifier: windows-x86_64, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1806,7 +1806,7 @@ jobs:
           - { os: ubuntu-latest, arch: x86_64, classifier: linux-musl-x86_64 }
           - { os: ubuntu-24.04-arm, arch: aarch64, classifier: linux-musl-aarch64 }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1858,7 +1858,7 @@ jobs:
           - { abi: arm64-v8a }
           - { abi: x86_64 }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1896,7 +1896,7 @@ jobs:
           - { os: macos-15, rid: osx-arm64, target: aarch64-apple-darwin }
           - { os: windows-latest, rid: win-x64, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -1964,7 +1964,7 @@ jobs:
           - { os: ubuntu-latest, arch: x64, rid: linux-musl-x64 }
           - { os: ubuntu-24.04-arm, arch: arm64, rid: linux-musl-arm64 }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -2032,7 +2032,7 @@ jobs:
             label: windows-x86_64
             target: x86_64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -2048,7 +2048,7 @@ jobs:
         shell: bash
         run: echo "ImageOS=win25" >> "$GITHUB_ENV"
 
-      - uses: erlef/setup-beam@v1.24.0
+      - uses: erlef/setup-beam@v1.24.1
         with:
           elixir-version: "1.17"
           otp-version: "27"
@@ -2161,7 +2161,7 @@ jobs:
             arch: aarch64
             target: aarch64-unknown-linux-musl
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -2241,7 +2241,7 @@ jobs:
               lib: xberg_dart.dll,
             }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -2340,7 +2340,7 @@ jobs:
     if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.prepare.outputs.release_dart == 'true' && needs.dart-server-natives.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -2391,7 +2391,7 @@ jobs:
     if: ${{ needs.prepare.outputs.release_swift == 'true' }}
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -2430,7 +2430,7 @@ jobs:
     if: ${{ needs.prepare.outputs.release_swift == 'true' }}
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -2463,14 +2463,14 @@ jobs:
     if: ${{ needs.prepare.outputs.release_swift == 'true' && needs.upload-swift-bundle.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
           owner: xberg-io
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -2528,7 +2528,7 @@ jobs:
     if: ${{ needs.prepare.outputs.release_zig == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
@@ -2568,12 +2568,12 @@ jobs:
           - { target: x86_64-unknown-linux-musl }
           - { target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -2706,7 +2706,7 @@ jobs:
     if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.cli-binaries.result == 'success' && needs.cli-binaries-musl.result == 'success' && needs.cli-binaries-binstall.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -2760,7 +2760,7 @@ jobs:
     if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.go-ffi-libraries.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -2809,14 +2809,14 @@ jobs:
     if: ${{ !cancelled() && needs.prepare.outputs.is_tag == 'true' && needs.prepare.outputs.dry_run != 'true' && needs.upload-go-release.result == 'success' && (needs.update-swift-package-manifest.result == 'success' || needs.update-swift-package-manifest.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
           owner: xberg-io
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Pin to the tag by name so checkout takes its CURRENT commit rather
           # than asserting the triggering `github.sha`. update-swift-package-manifest
@@ -2846,7 +2846,7 @@ jobs:
     if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.c-ffi-libraries.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -2878,7 +2878,7 @@ jobs:
     if: ${{ needs.prepare.outputs.dry_run != 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.elixir-natives.result == 'success' || needs.elixir-natives-musl.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -2905,7 +2905,7 @@ jobs:
     if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.php-extension.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -2936,7 +2936,7 @@ jobs:
     if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.swift-artifactbundle.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -2972,7 +2972,7 @@ jobs:
       # with finalize and the other release-writing jobs. Without it the lookup
       # failed every retry with "release not found", skipping finalize and
       # cascading into a skipped Homebrew bottle build (issue #1247). ~keep
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -3003,7 +3003,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
@@ -3062,12 +3062,12 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -3120,7 +3120,7 @@ jobs:
       - name: Update RubyGems for OIDC trusted publishing
         run: gem update --system
 
-      - uses: rubygems/configure-rubygems-credentials@v2.0.0
+      - uses: rubygems/configure-rubygems-credentials@v2.1.0
 
       - name: Verify Ruby gem package contents
         uses: xberg-io/actions/verify-package-contents@v1
@@ -3143,7 +3143,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
@@ -3334,7 +3334,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
@@ -3436,7 +3436,7 @@ jobs:
     if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_java == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-maven.outputs.java_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
@@ -3487,7 +3487,7 @@ jobs:
     if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_kotlin == 'true' && needs.prepare.outputs.is_tag == 'true' && (needs.check-maven.outputs.kotlin_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
@@ -3534,7 +3534,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
@@ -3555,7 +3555,7 @@ jobs:
           done
         shell: bash
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "8.0.x"
 
@@ -3626,7 +3626,7 @@ jobs:
       && needs.upload-elixir-release.result != 'failure' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -3654,13 +3654,13 @@ jobs:
       && (needs.check-hex.outputs.elixir_exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
 
           submodules: false
       - uses: xberg-io/actions/setup-rust@v1
-      - uses: erlef/setup-beam@v1.24.0
+      - uses: erlef/setup-beam@v1.24.1
         with:
           elixir-version: "1.17"
           otp-version: "27"
@@ -3707,7 +3707,7 @@ jobs:
       actions: write
       contents: read
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -3739,7 +3739,7 @@ jobs:
       && (needs.check-zig.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
           submodules: false
@@ -3803,7 +3803,7 @@ jobs:
       # Mint the app token immediately before the upload. GitHub App installation
       # tokens have a hard 1h TTL; laying out the multi-platform FFI bundle (>1GB)
       # can outlast a token minted at job start, causing the release upload to 401. ~keep
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -3850,14 +3850,14 @@ jobs:
       && (needs.check-homebrew.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
           owner: xberg-io
 
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: tap-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -3866,14 +3866,14 @@ jobs:
           repositories: homebrew-tap
 
       - name: Checkout source repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           token: ${{ steps.app-token.outputs.token }}
           persist-credentials: true
 
       - name: Checkout homebrew-tap
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: xberg-io/homebrew-tap
           token: ${{ steps.tap-token.outputs.token }}
@@ -3934,7 +3934,7 @@ jobs:
           - { os: ubuntu-latest, bottle_tag: x86_64_linux, install_brew: true }
           - { os: ubuntu-24.04-arm, bottle_tag: arm64_linux, install_brew: true }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
 
@@ -3958,7 +3958,7 @@ jobs:
           github-repo: xberg-io/xberg
           upload: false
 
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -4014,7 +4014,7 @@ jobs:
       && needs.prepare.outputs.is_tag == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: tap-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -4022,13 +4022,13 @@ jobs:
           owner: xberg-io
           repositories: homebrew-tap
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
 
           submodules: false
       - name: Checkout homebrew-tap
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: xberg-io/homebrew-tap
           token: ${{ steps.tap-token.outputs.token }}
@@ -4107,7 +4107,7 @@ jobs:
       needs.publish-zig.result != 'failure'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -4156,7 +4156,7 @@ jobs:
       !contains(needs.*.result, 'failure')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@v3
         id: app-token
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
@@ -4179,7 +4179,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
       - uses: xberg-io/actions/setup-node-workspace@v1
@@ -4212,7 +4212,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
       - name: Install uv
@@ -4254,7 +4254,7 @@ jobs:
       && needs.prepare.outputs.is_tag == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.ref }}
       - uses: actions/setup-java@v5
@@ -4327,7 +4327,7 @@ jobs:
           - langchain-xberg
           - llamaindex-xberg
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
       - uses: xberg-io/actions/setup-node-workspace@v1
@@ -4372,7 +4372,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
       - uses: xberg-io/actions/setup-node-workspace@v1
@@ -4415,7 +4415,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.checkout_ref }}
       - name: Install uv

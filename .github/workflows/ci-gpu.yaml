@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -39,7 +39,7 @@ jobs:
           toolchain: "1.95"
 
       - name: Cache Cargo
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -72,7 +72,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -135,7 +135,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -237,7 +237,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -294,7 +294,7 @@ jobs:
       - name: Restore cached model weights
         if: matrix.model.hf_repo != ''
         id: model-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ${{ github.workspace }}/models/${{ matrix.model.name }}
           key: hf-weights-${{ matrix.model.name }}-${{ matrix.model.manifest != '' && hashFiles(matrix.model.manifest) || 'v1' }}
@@ -360,7 +360,7 @@ jobs:
         if: >-
           always() && steps.model-cache.outputs.cache-hit != 'true' &&
           steps.download-hf.outcome == 'success' && steps.verify-weights.outcome != 'failure'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ${{ github.workspace }}/models/${{ matrix.model.name }}
           key: hf-weights-${{ matrix.model.name }}-${{ matrix.model.manifest != '' && hashFiles(matrix.model.manifest) || 'v1' }}

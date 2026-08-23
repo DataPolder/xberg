@@ -51,7 +51,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Resolve version
         id: meta
@@ -123,7 +123,7 @@ jobs:
 
       - name: Install oras
         if: steps.meta.outputs.dry_run != 'true'
-        uses: oras-project/setup-oras@v1
+        uses: oras-project/setup-oras@v2
 
       - name: Registry login
         if: steps.meta.outputs.dry_run != 'true'

@@ -61,7 +61,7 @@ jobs:
     name: Benchmark script regressions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install Task
         uses: xberg-io/actions/install-task@v1
       - name: Validate benchmark scripts
@@ -71,7 +71,7 @@ jobs:
     name: Plugin bundle freshness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       # The plugin version must track the core crate version (task version:sync keeps it
@@ -94,7 +94,7 @@ jobs:
       # fetch of the submodule to run here. If a gitlink is unreachable, checkout
       # would die with a cryptic "not our ref" fatal; this job instead runs the
       # same check standalone so it can report the path, the SHA, and the fix. ~keep
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: false
       # CI has a reliable network, so unlike the local pre-push hook (which warns
@@ -107,7 +107,7 @@ jobs:
     name: Alef readme/docs paths resolve
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install Task
         uses: xberg-io/actions/install-task@v1
       # Static check: every readme/docs path alef.toml points at (templates,
@@ -155,7 +155,7 @@ jobs:
     name: Alef-generated bindings freshness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # `alef verify` hashes the same alef.toml [[crates.source_crates]] entries
       # the e2e-freshness job below does, and those point at sibling polyrepo
       # checkouts. Without them it dies on `failed to compute sources hash:
@@ -176,12 +176,12 @@ jobs:
           fi
           echo "crawlberg=v$crawlberg" >>"$GITHUB_OUTPUT"
           echo "html_to_markdown=v$html_to_markdown" >>"$GITHUB_OUTPUT"
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: xberg-io/crawlberg
           ref: ${{ steps.siblings.outputs.crawlberg }}
           path: .polyrepo-siblings/crawlberg
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: xberg-io/html-to-markdown
           ref: ${{ steps.siblings.outputs.html_to_markdown }}
@@ -222,7 +222,7 @@ jobs:
     name: Generated e2e suites freshness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # alef.toml's [[crates.source_crates]] entries hash Rust sources living in
       # sibling polyrepo checkouts (`../crawlberg`, `../html-to-markdown`), so
       # `alef e2e generate` cannot even compute its input hashes without them --
@@ -249,12 +249,12 @@ jobs:
           fi
           echo "crawlberg=v$crawlberg" >>"$GITHUB_OUTPUT"
           echo "html_to_markdown=v$html_to_markdown" >>"$GITHUB_OUTPUT"
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: xberg-io/crawlberg
           ref: ${{ steps.siblings.outputs.crawlberg }}
           path: .polyrepo-siblings/crawlberg
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: xberg-io/html-to-markdown
           ref: ${{ steps.siblings.outputs.html_to_markdown }}
@@ -294,7 +294,7 @@ jobs:
     name: Docs snippets gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install Task
         uses: xberg-io/actions/install-task@v1
       - name: Install alef CLI

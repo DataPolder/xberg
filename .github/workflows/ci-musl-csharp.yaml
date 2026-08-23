@@ -64,7 +64,7 @@ jobs:
           - { os: ubuntu-latest, arch: x64, rid: linux-musl-x64 }
           - { os: ubuntu-24.04-arm, arch: arm64, rid: linux-musl-arm64 }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: false
 
