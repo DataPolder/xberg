@@ -45,5 +45,12 @@ docker run --rm \
   -e EXPECTED_TEXT="$EXPECTED_TEXT" \
   alpine:3.22 sh -euc '
     apk add --no-cache nodejs >/dev/null
+    # Same libstdc++ skew the Elixir gate hits: the vendored libonnxruntime.so.1 comes
+    # from Alpine edge (docker/Dockerfile.musl-node upgrades libstdc++ before compiling)
+    # and relocates against symbols GCC 15 added. Node links libstdc++ itself, so the
+    # process already has 3.22 14.2.0 mapped under that soname before the addon is
+    # dlopened and the $ORIGIN copy beside the .node is never consulted. ~keep
+    apk add --no-cache --upgrade libstdc++ \
+      --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main >/dev/null
     node /smoke/smoke_test_node_binding.js /smoke/index.js /fixture.pdf "${EXPECTED_TEXT}"
   '
