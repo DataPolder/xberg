@@ -119,10 +119,10 @@ fn emit_rerun_directives(manifest_dir: &str) {
 }
 
 fn build_id() -> String {
-    if let Ok(id) = std::env::var("XBERG_BUILD_ID") {
-        if !id.is_empty() {
-            return id;
-        }
+    if let Ok(id) = std::env::var("XBERG_BUILD_ID")
+        && !id.is_empty()
+    {
+        return id;
     }
 
     let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") else {
