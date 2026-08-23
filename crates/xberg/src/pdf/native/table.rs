@@ -3043,6 +3043,248 @@ mod tests {
         );
     }
 
+    /// Build a segment of a sideways table: page-space origin `(x, y)`, painted
+    /// on a text matrix rotated by `rotation_degrees`.
+    ///
+    /// Mirrors the inline builder in
+    /// [`should_preserve_cell_order_in_a_rotated_table`] above, but takes the
+    /// rotation as a parameter so the negative and 180-degree quadrants — the
+    /// ones `snap_run_rotation` in `xberg_native_pdf`'s text extractor also
+    /// emits (its snap set is `0 / 90 / 180 / -90`) — can be exercised too.
+    fn sideways_table_segment(text: &str, x: f32, y: f32, rotation_degrees: f32) -> crate::pdf::hierarchy::SegmentData {
+        crate::pdf::hierarchy::SegmentData {
+            text: text.to_string(),
+            x,
+            y,
+            width: 50.0,
+            height: 10.0,
+            font_size: 10.0,
+            is_bold: false,
+            is_italic: false,
+            is_monospace: false,
+            baseline_y: y,
+            rotation_degrees,
+            assigned_role: None,
+        }
+    }
+
+    /// The distinct `HocrWord::left` values produced for `segments`, sorted.
+    ///
+    /// `left` is the only column signal `cluster_words_into_vertical_regions`
+    /// has (its `xs.len() >= 2` retain guard), so collapsing distinct columns
+    /// onto one `left` is what makes a table disappear rather than merely come
+    /// out misordered.
+    fn distinct_word_lefts(segments: &[crate::pdf::hierarchy::SegmentData], page_height: f32) -> Vec<u32> {
+        let words = crate::pdf::table_reconstruct::segments_to_words(segments, page_height);
+        let mut lefts: Vec<u32> = words.iter().map(|word| word.left).collect();
+        lefts.sort_unstable();
+        lefts.dedup();
+        lefts
+    }
+
+    /// GH#1358, the quadrant [`should_preserve_cell_order_in_a_rotated_table`]
+    /// does not reach: a table rotated **-90** degrees loses every column.
+    ///
+    /// `SegmentData::upright_origin` returns `(advance, cross)` by rotating the
+    /// page-space origin by `-rotation_degrees`. For `+90` that yields
+    /// `advance == +y`, non-negative for all real page content — which is
+    /// precisely why the `+90` test above passes. For `-90` it yields
+    /// `advance == -y`, **negative** for all real page content, which
+    /// `table_reconstruct::segment_to_hocr_word` used to saturate to `0` when
+    /// writing it into the unsigned `HocrWord::left` — so every column of a
+    /// `-90` table landed on `left == 0`.
+    ///
+    /// Revert check (expect RED): drop the `frame.advance` term from
+    /// `segment_to_hocr_word` and `split_segment_to_words`, restoring the bare
+    /// `advance.round().max(0.0) as u32`, and this asserts `[0]`.
+    ///
+    /// Two columns 120 units apart on the advance axis (`y` = 520 and `y` =
+    /// 400; advance runs along `-y`, so `y = 520` is the leading column) across
+    /// three rows. The assertion is deliberately translation-invariant — it
+    /// pins the *separation*, not absolute positions — so it constrains
+    /// `UprightFrames` to preserve relative geometry without prescribing the
+    /// particular origin it chooses.
+    #[test]
+    #[ignore = "GH#1358: needs a per-rotation upright frame that does not fabricate a \
+                page-space bounding box. A corpus scan of 377 PDFs finds -90 content in 3 \
+                documents (9/5/1 runs) and 180 in 3 (2 runs each) -- never forming a table -- \
+                while the +90 quadrant, which is 28 of the 31 rotated documents, needs no \
+                translation at all. Un-ignore together with the frame + per-rotation \
+                clustering work. Precedent: 0a60357897."]
+    fn should_keep_columns_distinct_when_a_table_is_rotated_minus_ninety_degrees() {
+        let segments = vec![
+            sideways_table_segment("A1", 124.0, 520.0, -90.0),
+            sideways_table_segment("B1", 124.0, 400.0, -90.0),
+            sideways_table_segment("A2", 112.0, 520.0, -90.0),
+            sideways_table_segment("B2", 112.0, 400.0, -90.0),
+            sideways_table_segment("A3", 100.0, 520.0, -90.0),
+            sideways_table_segment("B3", 100.0, 400.0, -90.0),
+        ];
+
+        let lefts = distinct_word_lefts(&segments, 800.0);
+
+        assert_eq!(
+            lefts.len(),
+            2,
+            "a -90-degree table's two columns must stay two distinct word x-positions, but the \
+             unsigned HocrWord::left clamp collapsed them onto {lefts:?}"
+        );
+        assert_eq!(
+            lefts[1] - lefts[0],
+            120,
+            "the two columns are 120 units apart on the rotated table's advance axis; got {lefts:?}"
+        );
+    }
+
+    /// GH#1358: a **-90**-degree table must survive clustering, exactly as the
+    /// `+90` one does in [`should_preserve_cell_order_in_a_rotated_table`].
+    ///
+    /// Same geometry as
+    /// [`should_keep_columns_distinct_when_a_table_is_rotated_minus_ninety_degrees`],
+    /// carried one stage further so the user-visible consequence is pinned:
+    /// under the old per-word advance clamp all six words sat on `left == 0`,
+    /// so the `xs.len() >= 2` guard in `cluster_words_into_vertical_regions`
+    /// dropped the region outright. The page then yielded **zero** table
+    /// candidates and the sideways table came out as prose — the reported
+    /// #1358 symptom — rather than as a scrambled grid.
+    ///
+    /// This is the per-page path: `extract_tables_heuristic` runs exactly this
+    /// `segments_to_words` -> `cluster_words_into_vertical_regions` pair once
+    /// per page and stamps the resulting `Table::page_number`, which is what
+    /// `assign_tables_and_images_to_pages` later keys `pages[].content` on, so
+    /// a document-level table count can be satisfied by other pages while this
+    /// page carries none.
+    ///
+    /// Row geometry: the cross axis is page-`x`, so `top = page_height - x -
+    /// height` and the row nearest the top of the reading frame is the one at
+    /// the largest `x`. Rows at `x` = 124 / 112 / 100 are 12 apart, inside the
+    /// `row_gap_split` of 18 and outside the `row_tolerance` of 5 for
+    /// `height = 10`, so a correct implementation must find exactly one region
+    /// of three rows by two columns.
+    #[test]
+    #[ignore = "GH#1358: needs a per-rotation upright frame; see the sibling -90 test."]
+    fn should_cluster_a_minus_ninety_rotated_table_into_a_single_region() {
+        let segments = vec![
+            sideways_table_segment("A1", 124.0, 520.0, -90.0),
+            sideways_table_segment("B1", 124.0, 400.0, -90.0),
+            sideways_table_segment("A2", 112.0, 520.0, -90.0),
+            sideways_table_segment("B2", 112.0, 400.0, -90.0),
+            sideways_table_segment("A3", 100.0, 520.0, -90.0),
+            sideways_table_segment("B3", 100.0, 400.0, -90.0),
+        ];
+
+        let words = crate::pdf::table_reconstruct::segments_to_words(&segments, 800.0);
+        let regions = cluster_words_into_vertical_regions(&words);
+
+        assert_eq!(
+            regions.len(),
+            1,
+            "the -90-degree table's six words must cluster into a single region; the column \
+             collapse makes the run single-column, which clustering rejects outright, so this \
+             page contributes no table at all; got {regions:?}"
+        );
+        let ordered: Vec<&str> = regions[0].iter().map(|word| word.text.as_str()).collect();
+        assert_eq!(
+            ordered,
+            vec!["A1", "B1", "A2", "B2", "A3", "B3"],
+            "-90-degree table words must come out in row-major reading order (row0: A1,B1; \
+             row1: A2,B2; row2: A3,B3); got {ordered:?}"
+        );
+    }
+
+    /// GH#1358, the other negative-advance quadrant: an upside-down (**180**
+    /// degree) table also loses every column.
+    ///
+    /// `upright_origin` for 180 degrees returns `advance == -x`, negative for
+    /// all real page content, so the same per-word clamp saturated every column
+    /// onto `left == 0` here too. 180 is in `snap_run_rotation`'s snap set
+    /// alongside `0 / 90 / -90`, so the backend does emit it, and it needs its
+    /// own case because `UprightFrames` measures each rotation separately.
+    ///
+    /// Columns 120 apart on page-`x` (advance runs along `-x`, so `x = 220` is
+    /// the leading column), three rows on page-`y`.
+    #[test]
+    #[ignore = "GH#1358: needs a per-rotation upright frame; see the sibling -90 test."]
+    fn should_keep_columns_distinct_when_a_table_is_rotated_one_hundred_eighty_degrees() {
+        let segments = vec![
+            sideways_table_segment("A1", 220.0, 100.0, 180.0),
+            sideways_table_segment("B1", 100.0, 100.0, 180.0),
+            sideways_table_segment("A2", 220.0, 112.0, 180.0),
+            sideways_table_segment("B2", 100.0, 112.0, 180.0),
+            sideways_table_segment("A3", 220.0, 124.0, 180.0),
+            sideways_table_segment("B3", 100.0, 124.0, 180.0),
+        ];
+
+        let lefts = distinct_word_lefts(&segments, 800.0);
+
+        assert_eq!(
+            lefts.len(),
+            2,
+            "a 180-degree table's two columns must stay two distinct word x-positions, but the \
+             unsigned HocrWord::left clamp collapsed them onto {lefts:?}"
+        );
+        assert_eq!(
+            lefts[1] - lefts[0],
+            120,
+            "the two columns are 120 units apart on the rotated table's advance axis; got {lefts:?}"
+        );
+    }
+
+    /// GH#1358, the cross axis: a `-90` table on a page **wider than the
+    /// `page_height` reference** loses its rows the same way the advance clamp
+    /// lost its columns.
+    ///
+    /// For `-90` the cross axis is page-`x`, so
+    /// `top = page_height - (x + height)`. `page_height` is derived from the
+    /// segments' own `y` extent with a 792 floor
+    /// (`extract_tables_heuristic`, `structure::pipeline`), so on landscape
+    /// content whose `x` runs past that reference — A4 landscape is 842 wide
+    /// against a 792 floor — `top` goes negative and the per-word
+    /// `.max(0.0)` flattened every row onto `top == 0`. Clustering's
+    /// `row_ycs.len() >= 3` guard then rejected the region, so the table
+    /// disappeared even once its columns were distinct.
+    ///
+    /// Revert check (expect RED): drop the `frame.top` term from
+    /// `segment_to_hocr_word` and `split_segment_to_words` and this finds zero
+    /// regions, because all six words collapse onto a single row.
+    ///
+    /// Rows at `x` = 800 / 812 / 824 against `page_height` 792 give raw tops of
+    /// -18 / -30 / -42; the frame translation lifts them to 24 / 12 / 0, which
+    /// is three rows 12 apart — inside `row_gap_split` (18) and outside
+    /// `row_tolerance` (5).
+    #[test]
+    #[ignore = "GH#1358: needs a per-rotation upright frame; see the sibling -90 test."]
+    fn should_keep_rows_distinct_when_a_minus_ninety_table_runs_past_the_page_height_reference() {
+        let segments = vec![
+            sideways_table_segment("A1", 824.0, 520.0, -90.0),
+            sideways_table_segment("B1", 824.0, 400.0, -90.0),
+            sideways_table_segment("A2", 812.0, 520.0, -90.0),
+            sideways_table_segment("B2", 812.0, 400.0, -90.0),
+            sideways_table_segment("A3", 800.0, 520.0, -90.0),
+            sideways_table_segment("B3", 800.0, 400.0, -90.0),
+        ];
+
+        let words = crate::pdf::table_reconstruct::segments_to_words(&segments, 792.0);
+
+        let mut tops: Vec<u32> = words.iter().map(|word| word.top).collect();
+        tops.sort_unstable();
+        tops.dedup();
+        assert_eq!(
+            tops,
+            vec![0, 12, 24],
+            "the three rows must stay 12 apart after the frame is lifted into non-negative \
+             image space; a per-word clamp flattens them all onto 0"
+        );
+
+        let regions = cluster_words_into_vertical_regions(&words);
+        assert_eq!(
+            regions.len(),
+            1,
+            "a -90 table wider than the page_height reference must still cluster into one \
+             region; got {regions:?}"
+        );
+    }
+
     #[test]
     fn dense_numeric_region_caps_adaptive_column_gap() {
         let mut words = Vec::new();
