@@ -1499,9 +1499,9 @@ fn undo_auto_rotate_point(
     processed_height: f64,
 ) -> (f64, f64) {
     match correction_degrees {
-        90 => (y, processed_height - x),
+        90 => (y, processed_width - x),
         180 => (processed_width - x, processed_height - y),
-        270 => (processed_width - y, x),
+        270 => (processed_height - y, x),
         _ => (x, y),
     }
 }
@@ -5747,12 +5747,18 @@ fn upright_raster_for_backend(
 /// the geometry problem is identical: a point in a rotated raster mapped back to the unrotated
 /// one it will be rescaled against.
 ///
-/// `ocr_internal_document` element bboxes, `tables` bboxes and `formulas` bboxes are corrected:
-/// those are the pixel-space geometry sources read from a backend result before rescaling into
-/// page points. `formulas` matters for GLM paired mode, which pushes the SAME `region_bbox` into
+/// `ocr_internal_document` element bboxes, `tables` bboxes, `formulas` bboxes, and
+/// `ocr_elements` word/line/block geometry are corrected: those are the pixel-space
+/// geometry sources read from a backend result before rescaling into page points.
+/// `formulas` matters for GLM paired mode, which pushes the SAME `region_bbox` into
 /// both `formulas[].bbox` and `table_bboxes` (`candle_ocr/glm_ocr_backend.rs`); correcting only
 /// the table half left `formula_bbox_to_page_points` rescaling an upright-raster box against
-/// MediaBox-raster page dimensions on any `/Rotate != 0` page.
+/// MediaBox-raster page dimensions on any `/Rotate != 0` page. `ocr_elements` matters because
+/// `attach_page_ocr_payload` copies it straight onto the assembled document's
+/// `prebuilt_ocr_elements` with no further pixel-space transform of its own (unlike
+/// `ocr_internal_document`, which `rescale_ocr_bboxes_to_page_points` still rescales downstream)
+/// — leaving it uncorrected here means every word/line box a `RequiresUpright` backend reports
+/// stays in the upright raster's frame forever on any `/Rotate != 0` page.
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 fn undo_upright_raster_correction(
     result: &mut crate::types::ExtractedDocument,
@@ -5765,9 +5771,11 @@ fn undo_upright_raster_correction(
     }
     let correction_degrees = correction_degrees as u16;
     let (processed_width, processed_height) = (f64::from(upright_width), f64::from(upright_height));
+    let undo_point =
+        |x: f64, y: f64| undo_auto_rotate_point(x, y, correction_degrees, processed_width, processed_height);
     let undo_bbox = |bbox: &mut crate::types::extraction::BoundingBox| {
-        let (x0, y0) = undo_auto_rotate_point(bbox.x0, bbox.y0, correction_degrees, processed_width, processed_height);
-        let (x1, y1) = undo_auto_rotate_point(bbox.x1, bbox.y1, correction_degrees, processed_width, processed_height);
+        let (x0, y0) = undo_point(bbox.x0, bbox.y0);
+        let (x1, y1) = undo_point(bbox.x1, bbox.y1);
         bbox.x0 = x0.min(x1);
         bbox.x1 = x0.max(x1);
         bbox.y0 = y0.min(y1);
@@ -5788,6 +5796,58 @@ fn undo_upright_raster_correction(
     for formula in &mut result.formulas {
         if let Some(bbox) = formula.bbox.as_mut() {
             undo_bbox(bbox);
+        }
+    }
+    if let Some(elements) = result.ocr_elements.as_mut() {
+        for element in elements {
+            undo_ocr_element_geometry(&mut element.geometry, undo_point);
+        }
+    }
+}
+
+/// Undo an upright-raster (or auto-rotate) correction on one `OcrElement`'s geometry, the
+/// word/line/block-level boxes reported by [`crate::types::OcrElement`]. Missed entirely by
+/// [`undo_upright_raster_correction`] before this fix (#657 follow-up): that function only
+/// walked `ocr_internal_document`, `tables`, and `formulas`, leaving every `ocr_elements` entry
+/// in the upright raster's pixel frame.
+///
+/// `Rectangle` is corrected corner-to-corner like a [`crate::types::extraction::BoundingBox`]
+/// (top-left and bottom-right corners, then re-derived into `left`/`top`/`width`/`height` from
+/// the transformed corners' min/max, since a quarter turn can swap which corner is which).
+/// `Quadrilateral` is corrected point-by-point — a quarter turn does not preserve the
+/// "clockwise from top-left" point order the type promises, but no downstream reader currently
+/// depends on point order, only on the region the four points enclose.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn undo_ocr_element_geometry(
+    geometry: &mut crate::types::ocr_elements::OcrBoundingGeometry,
+    undo_point: impl Fn(f64, f64) -> (f64, f64),
+) {
+    use crate::types::ocr_elements::OcrBoundingGeometry;
+    match geometry {
+        OcrBoundingGeometry::Rectangle {
+            left,
+            top,
+            width,
+            height,
+        } => {
+            let (x0, y0) = (f64::from(*left), f64::from(*top));
+            let (x1, y1) = (x0 + f64::from(*width), y0 + f64::from(*height));
+            let (nx0, ny0) = undo_point(x0, y0);
+            let (nx1, ny1) = undo_point(x1, y1);
+            let min_x = nx0.min(nx1);
+            let min_y = ny0.min(ny1);
+            let max_x = nx0.max(nx1);
+            let max_y = ny0.max(ny1);
+            *left = min_x.round().max(0.0) as u32;
+            *top = min_y.round().max(0.0) as u32;
+            *width = (max_x - min_x).round().max(0.0) as u32;
+            *height = (max_y - min_y).round().max(0.0) as u32;
+        }
+        OcrBoundingGeometry::Quadrilateral { points } => {
+            for point in points.iter_mut() {
+                let (x, y) = undo_point(f64::from(point.0), f64::from(point.1));
+                *point = (x.round().max(0.0) as u32, y.round().max(0.0) as u32);
+            }
         }
     }
 }
@@ -5848,6 +5908,44 @@ mod tests {
         OcrQualityThresholds::default()
     }
 
+    /// Deliberately non-square (`processed_width` 200 != `processed_height` 100):
+    /// a square raster cannot distinguish a width/height mix-up from correct code,
+    /// since the two dimensions are interchangeable in that case. This is exactly
+    /// the shape that let the pre-fix 90/270 arms of `undo_auto_rotate_point` ship
+    /// with `processed_width` and `processed_height` swapped relative to what the
+    /// inverse rotation requires.
+    ///
+    /// Against the unfixed 90 arm (`(y, processed_height - x)`), this call returns
+    /// `(40.0, 70.0)` instead of the `(40.0, 170.0)` asserted below.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn undo_auto_rotate_point_90_arm_uses_processed_width_for_the_second_coordinate() {
+        let (x, y) = undo_auto_rotate_point(30.0, 40.0, 90, 200.0, 100.0);
+        assert_eq!((x, y), (40.0, 170.0));
+    }
+
+    /// Companion to the 90-arm test above, same non-square dimensions.
+    ///
+    /// Against the unfixed 270 arm (`(processed_width - y, x)`), this call returns
+    /// `(160.0, 30.0)` instead of the `(60.0, 30.0)` asserted below.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn undo_auto_rotate_point_270_arm_uses_processed_height_for_the_first_coordinate() {
+        let (x, y) = undo_auto_rotate_point(30.0, 40.0, 270, 200.0, 100.0);
+        assert_eq!((x, y), (60.0, 30.0));
+    }
+
+    /// Control: the 180 arm was already correct before and after the 90/270 fix
+    /// (a half-turn does not swap width and height, so there is no dimension to mix
+    /// up). Same non-square dimensions and inputs as the 90/270 tests above; this
+    /// must stay green across the fix.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn undo_auto_rotate_point_180_arm_is_unaffected_by_the_90_270_fix() {
+        let (x, y) = undo_auto_rotate_point(30.0, 40.0, 180, 200.0, 100.0);
+        assert_eq!((x, y), (170.0, 60.0));
+    }
+
     /// GLM paired mode pushes the SAME `region_bbox` into both `formulas[].bbox` and
     /// `table_bboxes` (`candle_ocr/glm_ocr_backend.rs`), but
     /// `undo_upright_raster_correction` corrected only `ocr_internal_document` elements
@@ -5898,6 +5996,68 @@ mod tests {
         assert_eq!(
             formula_bbox, table_bbox,
             "a formula bbox holding the same region as a table bbox must be mapped identically"
+        );
+    }
+
+    /// `undo_upright_raster_correction` corrected `ocr_internal_document`, `tables`, and
+    /// `formulas` but skipped `ocr_elements` entirely — the word/line/block boxes
+    /// `attach_page_ocr_payload` copies straight onto the assembled document with no further
+    /// pixel-space transform. On a `RequiresUpright` backend (sceptre, PaddleOCR-VL, the VLM
+    /// backend, GLM-OCR, DeepSeek-OCR, TrOCR, Tesseract-WASM) run against a `/Rotate != 0`
+    /// page, every word/line box stayed in the upright raster's frame forever.
+    ///
+    /// Non-square `upright_width`/`upright_height` (200x100), matching the Bug-A tests, so a
+    /// square raster cannot hide a width/height mix-up in the geometry conversion either.
+    ///
+    /// Against unfixed code neither assertion holds: `ocr_elements` is not read at all inside
+    /// `undo_upright_raster_correction`, so the rectangle stays `{left: 10, top: 20, width: 15,
+    /// height: 10}` and the quadrilateral stays `[(0,0), (50,0), (50,20), (0,20)]` — identical
+    /// to the untouched input asserted against below.
+    #[cfg(all(feature = "ocr", feature = "pdf"))]
+    #[test]
+    fn undo_upright_raster_correction_maps_ocr_element_geometry() {
+        use crate::types::ocr_elements::{OcrBoundingGeometry, OcrElement};
+
+        let mut result = crate::types::ExtractedDocument {
+            ocr_elements: Some(vec![
+                OcrElement {
+                    geometry: OcrBoundingGeometry::Rectangle {
+                        left: 10,
+                        top: 20,
+                        width: 15,
+                        height: 10,
+                    },
+                    ..Default::default()
+                },
+                OcrElement {
+                    geometry: OcrBoundingGeometry::Quadrilateral {
+                        points: [(0, 0), (50, 0), (50, 20), (0, 20)],
+                    },
+                    ..Default::default()
+                },
+            ]),
+            ..Default::default()
+        };
+
+        undo_upright_raster_correction(&mut result, 90, 200, 100);
+
+        let elements = result.ocr_elements.expect("ocr_elements must survive the correction");
+        assert_eq!(
+            elements[0].geometry,
+            OcrBoundingGeometry::Rectangle {
+                left: 20,
+                top: 175,
+                width: 10,
+                height: 15,
+            },
+            "the rectangle's corners must be mapped through the fixed 90-degree arm, not left in the upright raster"
+        );
+        assert_eq!(
+            elements[1].geometry,
+            OcrBoundingGeometry::Quadrilateral {
+                points: [(0, 200), (0, 150), (20, 150), (20, 200)],
+            },
+            "the quad's points must be mapped through the fixed 90-degree arm, not left in the upright raster"
         );
     }
 
@@ -9948,7 +10108,16 @@ Name: ___
     /// This fails against the unfixed code (no call to
     /// `undo_auto_rotate_document_bboxes`): skipping straight to the rescale leaves
     /// the raw bbox {10, 20, 30, 60} scaled 1:1 and unchanged, not the
-    /// rotation-corrected {40, 10, 80, 30} asserted below.
+    /// rotation-corrected {140, 10, 180, 30} asserted below.
+    ///
+    /// (These expected numbers were previously {40, 10, 80, 30} — the output of
+    /// `undo_auto_rotate_point`'s pre-fix 270-degree arm, `(processed_width - y, x)`,
+    /// which used `processed_width` where the inverse rotation requires
+    /// `processed_height`. Forward-mapping {140, 10, 180, 30} through the actual
+    /// rotation PaddleOCR applies for `orientation.degrees == 90`
+    /// (`image::imageops::rotate270`, i.e. 90° counter-clockwise) reproduces the
+    /// input rectangle {10, 20}-{30, 60} exactly; forward-mapping the old {40, 10,
+    /// 80, 30} does not, which is how the dimension-swap bug was confirmed.)
     #[cfg(feature = "pdf")]
     #[test]
     fn should_undo_auto_rotate_bboxes_before_rescaling_to_page_points() {
@@ -10001,9 +10170,9 @@ Name: ___
         rescale_ocr_bboxes_to_page_points(Some(&mut doc), &mut [], 200, 100, 200.0, 100.0);
 
         let bbox = doc.elements[0].bbox.expect("element must keep its bbox");
-        assert_eq!(bbox.x0, 40.0);
+        assert_eq!(bbox.x0, 140.0);
         assert_eq!(bbox.y0, 10.0);
-        assert_eq!(bbox.x1, 80.0);
+        assert_eq!(bbox.x1, 180.0);
         assert_eq!(bbox.y1, 30.0);
     }
 
