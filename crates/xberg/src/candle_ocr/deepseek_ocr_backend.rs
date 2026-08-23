@@ -344,6 +344,30 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_options_non_object_json_returns_defaults() {
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!(null)),
+            ..Default::default()
+        };
+        let (model_path, device, version) = DeepseekOcrBackend::parse_options(&config);
+        assert!(model_path.is_none());
+        assert_eq!(device, DevicePreference::Auto);
+        assert_eq!(version, 2);
+    }
+
+    #[test]
+    fn test_parse_options_empty_object_returns_defaults() {
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({})),
+            ..Default::default()
+        };
+        let (model_path, device, version) = DeepseekOcrBackend::parse_options(&config);
+        assert!(model_path.is_none());
+        assert_eq!(device, DevicePreference::Auto);
+        assert_eq!(version, 2);
+    }
+
+    #[test]
     fn test_initialize_and_shutdown() {
         let backend = DeepseekOcrBackend::new();
         assert!(backend.initialize().is_ok());

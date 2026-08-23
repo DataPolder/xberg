@@ -487,6 +487,36 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_options_non_object_json_returns_defaults() {
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!(false)),
+            ..Default::default()
+        };
+        let options = PaddleOcrVlBackend::parse_options(&config);
+        assert_eq!(options.task, PaddleOcrVlTask::Ocr);
+        assert!(options.model_path.is_none());
+        assert_eq!(options.model_id, DEFAULT_MODEL_ID);
+        assert!(options.hf_revision.is_none());
+        assert!(options.cache_dir.is_none());
+        assert_eq!(options.device, DevicePreference::Auto);
+    }
+
+    #[test]
+    fn test_parse_options_empty_object_returns_defaults() {
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({})),
+            ..Default::default()
+        };
+        let options = PaddleOcrVlBackend::parse_options(&config);
+        assert_eq!(options.task, PaddleOcrVlTask::Ocr);
+        assert!(options.model_path.is_none());
+        assert_eq!(options.model_id, DEFAULT_MODEL_ID);
+        assert!(options.hf_revision.is_none());
+        assert!(options.cache_dir.is_none());
+        assert_eq!(options.device, DevicePreference::Auto);
+    }
+
+    #[test]
     fn test_initialize_and_shutdown() {
         let backend = PaddleOcrVlBackend::default_task();
         assert!(backend.initialize().is_ok());
