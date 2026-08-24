@@ -113,6 +113,11 @@ jobs:
       - name: Install Task
         uses: xberg-io/actions/install-task@v1
 
+      - name: Verify system Tesseract dynamic linking
+        if: matrix.os == 'ubuntu-latest'
+        run: task rust:check:tesseract-dynamic
+        shell: bash
+
       - name: Run clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
         shell: bash

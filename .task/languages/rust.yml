@@ -24,6 +24,12 @@ tasks:
       - cargo --version
       - rustc --version
 
+  check:tesseract-dynamic:
+    desc: "Verify OCR links host Tesseract without touching the vendor cache"
+    platforms: [linux]
+    cmds:
+      - bash scripts/ci/rust/check-tesseract-dynamic.sh
+
   build:
     desc: "Build all Rust crates with {{.BUILD_PROFILE}} profile"
     cmds:

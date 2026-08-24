@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The new `tesseract-dynamic` Cargo feature lets `ocr` link host-provided Tesseract and Leptonica
+  without fetching or compiling vendored sources, providing the native dependency path required by
+  network-isolated and distribution-package builds (#1407).
 - Rust callers can now cooperatively cancel extraction through
   `CancellationToken::{new, cancel, is_cancelled}` and `ExtractionConfig::cancel_token`. Pre-cancelled
   single and batch requests stop before cache lookup or extractor dispatch (#1476).
