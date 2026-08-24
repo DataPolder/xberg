@@ -16,7 +16,8 @@ use crate::document::PdfDocument;
 use crate::error::{Error, Result};
 use crate::object::Object;
 use quick_xml::Reader;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesText, Event};
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 /// XMP metadata extracted from a PDF document.
@@ -141,6 +142,62 @@ impl XmpMetadata {
 /// XMP metadata extractor.
 pub struct XmpExtractor;
 
+/// XML event reader that restores whole text nodes after quick-xml splits them
+/// around entity and character references.
+struct XmpEventReader<'x> {
+    reader: Reader<&'x [u8]>,
+    pending: Option<Event<'x>>,
+}
+
+impl<'x> XmpEventReader<'x> {
+    fn from_str(content: &'x str) -> Self {
+        Self {
+            reader: Reader::from_str(content),
+            pending: None,
+        }
+    }
+
+    fn read_event(&mut self) -> quick_xml::Result<Event<'x>> {
+        let first = match self.pending.take() {
+            Some(event) => event,
+            None => self.reader.read_event()?,
+        };
+        let mut text = match first {
+            Event::Text(text) => Cow::Borrowed(text.as_ref()).into_owned(),
+            Event::GeneralRef(reference) => resolve_xmp_reference(&reference),
+            other => return Ok(other),
+        };
+
+        loop {
+            match self.reader.read_event()? {
+                Event::Text(fragment) => text.push_str(&Cow::Borrowed(fragment.as_ref())),
+                Event::GeneralRef(reference) => {
+                    text.push_str(&resolve_xmp_reference(&reference));
+                }
+                other => {
+                    self.pending = Some(other);
+                    break;
+                }
+            }
+        }
+
+        Ok(Event::Text(BytesText::from_escaped(text)))
+    }
+}
+
+fn resolve_xmp_reference(reference: &quick_xml::events::BytesRef<'_>) -> String {
+    if let Ok(Some(character)) = reference.resolve_char_ref() {
+        return character.to_string();
+    }
+
+    let name: Cow<'_, str> = Cow::Borrowed(reference.as_ref());
+    if let Some(resolved) = quick_xml::escape::resolve_predefined_entity(&name) {
+        return resolved.to_string();
+    }
+
+    format!("&{name};")
+}
+
 impl XmpExtractor {
     /// Helper function to resolve an Object (handles indirect references).
     fn resolve_object(doc: &PdfDocument, obj: &Object) -> Result<Object> {
@@ -231,8 +288,7 @@ impl XmpExtractor {
         let mut metadata = XmpMetadata::new();
         metadata.raw_xml = Some(xml.to_string());
 
-        let mut reader = Reader::from_str(xmp_content);
-        reader.config_mut().trim_text(true);
+        let mut reader = XmpEventReader::from_str(xmp_content);
 
         let mut element_stack: Vec<String> = Vec::new();
 
@@ -445,5 +501,52 @@ mod tests {
 
         let metadata = XmpExtractor::parse_xmp(xmp).unwrap().unwrap();
         assert_eq!(metadata.dc_subject, vec!["PDF", "Rust", "Metadata"]);
+    }
+
+    #[test]
+    fn parse_xmp_preserves_named_references_in_scalar_values() {
+        let xmp = r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+            xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <rdf:Description>
+                <dc:description><rdf:Alt>
+                    <rdf:li>&lt;div&gt;alpha &amp; beta&lt;/div&gt;</rdf:li>
+                </rdf:Alt></dc:description>
+            </rdf:Description>
+        </rdf:RDF>"#;
+
+        let metadata = XmpExtractor::parse_xmp(xmp).unwrap().unwrap();
+
+        assert_eq!(metadata.dc_description, Some("<div>alpha & beta</div>".to_string()));
+    }
+
+    #[test]
+    fn parse_xmp_preserves_numeric_references_in_scalar_values() {
+        let xmp = r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+            xmlns:pdf="http://ns.adobe.com/pdf/1.3/">
+            <rdf:Description>
+                <pdf:Keywords>alpha&#32;beta&#x20AC;&#33;</pdf:Keywords>
+            </rdf:Description>
+        </rdf:RDF>"#;
+
+        let metadata = XmpExtractor::parse_xmp(xmp).unwrap().unwrap();
+
+        assert_eq!(metadata.pdf_keywords, Some("alpha beta€!".to_string()));
+    }
+
+    #[test]
+    fn parse_xmp_coalesces_fragmented_sequence_values() {
+        let xmp = r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+            xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <rdf:Description>
+                <dc:creator><rdf:Seq>
+                    <rdf:li>Jane &amp; John &#35;1</rdf:li>
+                    <rdf:li>Smith</rdf:li>
+                </rdf:Seq></dc:creator>
+            </rdf:Description>
+        </rdf:RDF>"#;
+
+        let metadata = XmpExtractor::parse_xmp(xmp).unwrap().unwrap();
+
+        assert_eq!(metadata.dc_creator, vec!["Jane & John #1", "Smith"]);
     }
 }

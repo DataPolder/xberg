@@ -406,6 +406,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserved named and numeric XML references in PDF XMP scalar and sequence metadata instead of
+  dropping text fragments split around entity boundaries (#1475).
+
 - The musl smoke-test images (C#, Java, Node, Elixir) now bundle the FULL transitive shared-lib
   closure of the vendored ONNX Runtime, not a hand-picked allowlist. `libonnxruntime.so.1` on
   Alpine transitively needs `libprotobuf-lite` plus roughly forty `libabsl_*`/`libre2`/`libicu*`
