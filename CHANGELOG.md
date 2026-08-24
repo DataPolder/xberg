@@ -1208,6 +1208,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- REST and MCP extraction requests can no longer override LLM credentials, provider registrations,
+  custom endpoints, headers, environment loading, or managed credential providers. Validation covers
+  request-level and per-input configurations before trusted server defaults are merged, while Rust
+  embedders and operator-owned server configuration retain the full `LlmConfig` surface. The async
+  REST path now also applies the same local-file URI restrictions as the synchronous path.
 - `biblib` moves from the exact pin `=0.4.3` to `0.8`, taking the citation parser off `quick-xml`
   0.37 and onto 0.41. That clears RUSTSEC-2026-0194 (quadratic duplicate-attribute checking) and
   RUSTSEC-2026-0195 (unbounded namespace-declaration allocation), both scored 7.5, which reached

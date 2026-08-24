@@ -83,6 +83,12 @@ impl ApiExtractInput {
             },
         }
     }
+
+    fn config(&self) -> Option<&crate::core::config::FileExtractionConfig> {
+        match self {
+            Self::Bytes { config, .. } | Self::Uri { config, .. } => config.as_ref(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -92,6 +98,30 @@ pub(crate) struct UnifiedExtractRequest {
     output_format: Option<crate::core::config::OutputFormat>,
     pdf_passwords: Vec<String>,
     use_toon: bool,
+}
+
+impl UnifiedExtractRequest {
+    fn validate_caller_config(&self) -> Result<(), ApiError> {
+        if let Some(config) = &self.config {
+            validate_serializable_caller_config(config)?;
+        }
+        for input in &self.inputs {
+            if let Some(config) = input.config() {
+                validate_serializable_caller_config(config)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_serializable_caller_config(config: &impl serde::Serialize) -> Result<(), ApiError> {
+    let value = serde_json::to_value(config).map_err(|_| {
+        ApiError::validation(crate::error::XbergError::validation(
+            "Failed to validate caller extraction configuration",
+        ))
+    })?;
+    crate::core::config::request_security::validate_caller_extraction_config(&value)
+        .map_err(|message| ApiError::validation(crate::error::XbergError::validation(message)))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -155,7 +185,7 @@ where
             .and_then(|value| value.to_str().ok())
             .unwrap_or("");
 
-        if content_type.starts_with("multipart/form-data") {
+        let request = if content_type.starts_with("multipart/form-data") {
             parse_multipart_extract_request(req, state).await
         } else if is_json_content_type(content_type) {
             parse_json_extract_request(req).await
@@ -166,7 +196,9 @@ where
                     "Expected Content-Type application/json or multipart/form-data for extraction",
                 ),
             ))
-        }
+        }?;
+        request.validate_caller_config()?;
+        Ok(request)
     }
 }
 
@@ -644,8 +676,7 @@ pub(crate) async fn extract_handler(
 
     let mut final_config = request.config.unwrap_or_else(|| (*state.default_config).clone());
     apply_multipart_config_fields(&mut final_config, request.output_format, request.pdf_passwords);
-    enforce_api_uri_policy(&request.inputs)?;
-    apply_api_uri_policy_to_config(&mut final_config);
+    enforce_and_apply_api_uri_policy(&request.inputs, &mut final_config, api_allows_local_uri_inputs())?;
     let results = extract_unified_inputs(request.inputs, final_config).await?;
 
     if use_toon {
@@ -669,8 +700,12 @@ async fn extract_unified_inputs(
     crate::extract_batch(inputs, &config).await.map_err(ApiError::from)
 }
 
-fn enforce_api_uri_policy(inputs: &[ApiExtractInput]) -> Result<(), ApiError> {
-    if api_allows_local_uri_inputs() {
+fn enforce_and_apply_api_uri_policy(
+    inputs: &[ApiExtractInput],
+    config: &mut crate::core::config::ExtractionConfig,
+    allow_local: bool,
+) -> Result<(), ApiError> {
+    if allow_local {
         return Ok(());
     }
     for input in inputs {
@@ -682,15 +717,9 @@ fn enforce_api_uri_policy(inputs: &[ApiExtractInput]) -> Result<(), ApiError> {
             )));
         }
     }
-    Ok(())
-}
-
-fn apply_api_uri_policy_to_config(config: &mut crate::core::config::ExtractionConfig) {
-    if api_allows_local_uri_inputs() {
-        return;
-    }
     config.url.allow_local_file_inputs = false;
     config.url.allow_file_uris = false;
+    Ok(())
 }
 
 fn api_allows_local_uri_inputs() -> bool {
@@ -1187,7 +1216,7 @@ pub(crate) async fn extract_async_handler(
     let job_id = state.job_store.create_job();
     let mut effective_config = request.config.unwrap_or_else(|| (*state.default_config).clone());
     apply_multipart_config_fields(&mut effective_config, request.output_format, request.pdf_passwords);
-    enforce_api_uri_policy(&request.inputs)?;
+    enforce_and_apply_api_uri_policy(&request.inputs, &mut effective_config, api_allows_local_uri_inputs())?;
     effective_config.cancel_token = state.job_store.cancellation_token(&job_id);
     let inputs = request.inputs;
 
@@ -1494,6 +1523,93 @@ mod tests {
             core_inputs[1].config.is_none(),
             "an input that declared no config must not inherit its sibling's override"
         );
+    }
+
+    #[tokio::test]
+    async fn should_reject_request_level_llm_transport_config_without_leaking_value() {
+        let secret_url = "http://169.254.169.254/latest/meta-data";
+        let body = serde_json::json!({
+            "inputs": [{"text": "safe input"}],
+            "config": {"ocr": {"vlm_config": {"model": "openai/gpt-4o-mini", "base_url": secret_url}}}
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri("/extract")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).expect("request body serializes")))
+            .expect("valid request");
+
+        let error = UnifiedExtractRequest::from_request(request, &())
+            .await
+            .expect_err("caller transport config must be rejected");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.body.message,
+            "Validation error: Caller extraction config may not set ocr.vlm_config.base_url"
+        );
+        assert!(
+            !error.body.message.contains(secret_url),
+            "rejection must not include caller-controlled values"
+        );
+    }
+
+    #[tokio::test]
+    async fn should_reject_llm_transport_config_in_per_input_override() {
+        let body = serde_json::json!({
+            "inputs": [{
+                "text": "safe input",
+                "config": {"captioning": {"llm": {"model": "openai/gpt-4o-mini", "load_env": false}}}
+            }]
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri("/extract")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).expect("request body serializes")))
+            .expect("valid request");
+
+        let error = UnifiedExtractRequest::from_request(request, &())
+            .await
+            .expect_err("per-input transport config must be rejected");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.body.message,
+            "Validation error: Caller extraction config may not set captioning.llm.load_env"
+        );
+    }
+
+    #[test]
+    fn should_disable_nested_url_flags_for_remote_inputs_when_local_access_is_disabled() {
+        let inputs = vec![ApiExtractInput::Uri {
+            uri: "https://example.com/document.pdf".to_string(),
+            mime_type: None,
+            config: None,
+        }];
+        let mut config = crate::ExtractionConfig::default();
+        config.url.allow_local_file_inputs = true;
+        config.url.allow_file_uris = true;
+
+        enforce_and_apply_api_uri_policy(&inputs, &mut config, false).expect("remote URI must remain allowed");
+
+        assert!(!config.url.allow_local_file_inputs);
+        assert!(!config.url.allow_file_uris);
+    }
+
+    #[test]
+    fn should_reject_direct_local_uri_when_local_access_is_disabled() {
+        let inputs = vec![ApiExtractInput::Uri {
+            uri: "file:///etc/passwd".to_string(),
+            mime_type: None,
+            config: None,
+        }];
+        let mut config = crate::ExtractionConfig::default();
+
+        let error =
+            enforce_and_apply_api_uri_policy(&inputs, &mut config, false).expect_err("local URI must be rejected");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

@@ -773,6 +773,10 @@ fn resolve_cache_base() -> std::path::PathBuf {
 }
 
 fn parse_extract_input(value: serde_json::Value) -> Result<crate::ExtractInput, rmcp::ErrorData> {
+    if let Some(config) = value.get("config") {
+        crate::core::config::request_security::validate_caller_extraction_config(config)
+            .map_err(|message| rmcp::ErrorData::invalid_params(message, None))?;
+    }
     serde_json::from_value::<crate::ExtractInput>(value)
         .map_err(|error| rmcp::ErrorData::invalid_params(format!("Invalid ExtractInput: {error}"), None))
 }
@@ -1304,6 +1308,31 @@ mod tests {
 
         assert!(server.default_config.force_ocr);
         assert!(!server.default_config.use_cache);
+    }
+
+    #[test]
+    fn should_reject_llm_transport_config_in_mcp_per_input_override() {
+        let value = serde_json::json!({
+            "kind": "bytes",
+            "data": [115, 97, 102, 101],
+            "mime_type": "text/plain",
+            "config": {
+                "summarization": {
+                    "llm": {"model": "openai/gpt-4o-mini", "api_key": "must-not-leak"}
+                }
+            }
+        });
+
+        let error = parse_extract_input(value).expect_err("caller credential must be rejected");
+
+        assert_eq!(
+            error.message,
+            "Caller extraction config may not set summarization.llm.api_key"
+        );
+        assert!(
+            !error.message.contains("must-not-leak"),
+            "rejection must not include caller-controlled values"
+        );
     }
 
     #[test]

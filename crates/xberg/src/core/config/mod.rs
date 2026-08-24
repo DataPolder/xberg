@@ -26,6 +26,7 @@ pub mod page;
 pub mod pdf;
 pub mod processing;
 pub mod redaction;
+pub(crate) mod request_security;
 pub mod reranker;
 pub mod sparse_embedding;
 pub mod summarization;
