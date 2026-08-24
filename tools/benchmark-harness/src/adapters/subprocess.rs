@@ -354,7 +354,7 @@ fn effective_ocr_config_from_args(args: &[String]) -> Option<serde_json::Value> 
 }
 
 /// True if a JSON `ocr` object's backend — or any stage of a multi-stage `ocr.pipeline` — is
-/// `"tesseract"`. Used to gate the PSM-aware Tesseract result-cache materialization below: only
+/// `"tesseract"`. Used to gate the Tesseract result-cache override below: only
 /// Tesseract has an independent on-disk OCR result cache and PSM auto-selection to preserve.
 fn ocr_uses_tesseract(ocr_object: &serde_json::Map<String, serde_json::Value>) -> bool {
     if ocr_object.get("backend").and_then(serde_json::Value::as_str) == Some("tesseract") {
@@ -376,14 +376,12 @@ fn ocr_uses_tesseract(ocr_object: &serde_json::Map<String, serde_json::Value>) -
 }
 
 /// Sets `languages` on a JSON `ocr` object (and any Tesseract stage of a multi-stage
-/// `ocr.pipeline`), and ensures every Tesseract config's result cache is genuinely disabled.
+/// `ocr.pipeline`), and ensures every Tesseract result cache is genuinely disabled.
 ///
 /// A `tesseract_config` that already exists (an explicit PSM preset) only has its `language` and
-/// `use_cache` refreshed — its `psm` is left untouched. A `tesseract_config` that is absent is
-/// materialized with `use_cache: false` and the PSM `apply_default_whole_image_tesseract_psm` in
-/// `crates/xberg/src/extractors/image.rs` would itself have picked for `languages` (PSM 11, or
-/// PSM 5 for a `*_vert` language) — never a bare `{"use_cache": false}`, which would deserialize
-/// with the Tesseract PSM default (3) and silently defeat xberg's own auto-PSM selection. ~keep
+/// `use_cache` refreshed — its `psm` is left untouched. When `tesseract_config` is absent, cache
+/// control travels through `backend_options` so it does not turn xberg's automatic whole-image
+/// PSM selection and sparse-image fallback into an apparently explicit configuration. ~keep
 fn materialize_tesseract_ocr(ocr_object: &mut serde_json::Map<String, serde_json::Value>, languages: &[String]) {
     ocr_object.insert("language".to_string(), serde_json::json!(languages));
 
@@ -410,22 +408,24 @@ fn materialize_tesseract_ocr(ocr_object: &mut serde_json::Map<String, serde_json
 }
 
 fn apply_tesseract_result_cache_control(object: &mut serde_json::Map<String, serde_json::Value>, languages: &[String]) {
-    match object
+    if let Some(tesseract_config) = object
         .get_mut("tesseract_config")
         .and_then(serde_json::Value::as_object_mut)
     {
-        Some(tesseract_config) => {
-            tesseract_config.insert("language".to_string(), serde_json::json!(languages));
-            tesseract_config.insert("use_cache".to_string(), serde_json::json!(false));
-        }
-        None => {
-            let psm = crate::adapter::xberg_default_tesseract_psm(languages);
-            object.insert(
-                "tesseract_config".to_string(),
-                serde_json::json!({ "use_cache": false, "psm": psm, "language": languages }),
-            );
-        }
+        tesseract_config.insert("language".to_string(), serde_json::json!(languages));
+        tesseract_config.insert("use_cache".to_string(), serde_json::json!(false));
     }
+
+    let backend_options = object
+        .entry("backend_options".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !backend_options.is_object() {
+        *backend_options = serde_json::json!({});
+    }
+    backend_options
+        .as_object_mut()
+        .expect("initialized as an object above")
+        .insert("use_cache".to_string(), serde_json::json!(false));
 }
 
 /// Resolves the effective language list for a Tesseract benchmark call: the fixture's
@@ -440,14 +440,15 @@ fn effective_tesseract_languages(ocr_language: Option<&str>) -> Vec<String> {
 }
 
 /// Rewrites the request's effective OCR config so a Tesseract benchmark subprocess gets a
-/// genuinely cold OCR result cache without regressing PSM (see [`materialize_tesseract_ocr`]).
+/// genuinely cold OCR result cache without changing automatic PSM/fallback behavior (see
+/// [`materialize_tesseract_ocr`]).
 ///
 /// This is the final request-args boundary: it starts from [`effective_ocr_config_from_args`],
 /// which already merges an `ocr` key that a `--config-json` value may carry with any CLI-only
 /// `--ocr`/`--ocr-backend`/`--no-ocr` override — including the case where OCR is enabled purely
 /// via a CLI flag (e.g. `request_args_from`'s force-OCR upgrade path) and the base
 /// `--config-json` carries no `ocr` key at all. Whatever that merge produces is where the
-/// materialized Tesseract config gets written back to, via [`inject_ocr_config_into_args`] —
+/// rewritten Tesseract settings get written back via [`inject_ocr_config_into_args`] —
 /// creating a `--config-json` flag if none existed — so this always applies, not just when a
 /// `tesseract_config`-carrying `--config-json` was already present.
 ///
@@ -470,9 +471,9 @@ fn apply_tesseract_ocr_override_to_args(args: &[String], ocr_language: Option<&s
 }
 
 /// Writes `ocr` into the request's `--config-json` value, replacing any `ocr` key it already
-/// carries so the materialized cache/PSM/language settings win. Creates a `--config-json` flag
+/// carries so the cache/language settings win. Creates a `--config-json` flag
 /// (`{"ocr": ocr}`) when the request has none — the CLI-only OCR-enable path (no pre-existing
-/// `--config-json`) still needs the result cache disabled and PSM set. Returns `None` (leaving
+/// `--config-json`) still needs the result cache disabled. Returns `None` (leaving
 /// the request untouched) if an existing `--config-json` value fails to parse as a JSON object,
 /// rather than risk clobbering an unparseable-but-intentional value.
 fn inject_ocr_config_into_args(args: &[String], ocr: serde_json::Value) -> Option<Vec<String>> {
@@ -3153,7 +3154,7 @@ mod tests {
     }
 
     #[test]
-    fn tesseract_file_config_materializes_whole_image_psm_without_fixture_language() {
+    fn tesseract_file_config_preserves_implicit_psm_without_fixture_language() {
         let base_ocr = serde_json::json!({"enabled": true, "backend": "tesseract"});
         let cwd = tempfile::tempdir().unwrap();
         let input = Path::new("sample.pdf");
@@ -3165,20 +3166,15 @@ mod tests {
         assert_eq!(config.pointer("/ocr/language"), Some(&serde_json::json!(["eng"])));
         assert_eq!(
             config
-                .pointer("/ocr/tesseract_config/use_cache")
+                .pointer("/ocr/backend_options/use_cache")
                 .and_then(serde_json::Value::as_bool),
             Some(false)
         );
-        assert_eq!(
-            config
-                .pointer("/ocr/tesseract_config/psm")
-                .and_then(serde_json::Value::as_i64),
-            Some(crate::adapter::XBERG_WHOLE_IMAGE_TESSERACT_PSM as i64)
-        );
+        assert_eq!(config.pointer("/ocr/tesseract_config"), None);
     }
 
     #[test]
-    fn tesseract_file_config_materializes_vertical_psm_for_vert_fixture_language() {
+    fn tesseract_file_config_preserves_implicit_vertical_psm_selection() {
         let base_ocr = serde_json::json!({"enabled": true, "backend": "tesseract"});
         let cwd = tempfile::tempdir().unwrap();
         let input = Path::new("sample.jpeg");
@@ -3190,16 +3186,11 @@ mod tests {
         assert_eq!(config.pointer("/ocr/language"), Some(&serde_json::json!(["jpn_vert"])));
         assert_eq!(
             config
-                .pointer("/ocr/tesseract_config/use_cache")
+                .pointer("/ocr/backend_options/use_cache")
                 .and_then(serde_json::Value::as_bool),
             Some(false)
         );
-        assert_eq!(
-            config
-                .pointer("/ocr/tesseract_config/psm")
-                .and_then(serde_json::Value::as_i64),
-            Some(crate::adapter::XBERG_VERTICAL_BLOCK_TESSERACT_PSM as i64)
-        );
+        assert_eq!(config.pointer("/ocr/tesseract_config"), None);
     }
 
     #[test]
@@ -3215,7 +3206,7 @@ mod tests {
     }
 
     #[test]
-    fn single_file_tesseract_override_materializes_whole_image_psm_without_fixture_language() {
+    fn single_file_tesseract_override_preserves_implicit_psm_without_fixture_language() {
         let args = vec![
             "--config-json".to_string(),
             r#"{"ocr":{"enabled":true,"backend":"tesseract"}}"#.to_string(),
@@ -3226,26 +3217,16 @@ mod tests {
 
         assert_eq!(config.pointer("/ocr/language"), Some(&serde_json::json!(["eng"])));
         assert_eq!(
-            config.pointer("/ocr/tesseract_config/language"),
-            Some(&serde_json::json!(["eng"])),
-            "language must land on both ocr.language and the materialized tesseract_config.language"
-        );
-        assert_eq!(
             config
-                .pointer("/ocr/tesseract_config/use_cache")
+                .pointer("/ocr/backend_options/use_cache")
                 .and_then(serde_json::Value::as_bool),
             Some(false)
         );
-        assert_eq!(
-            config
-                .pointer("/ocr/tesseract_config/psm")
-                .and_then(serde_json::Value::as_i64),
-            Some(crate::adapter::XBERG_WHOLE_IMAGE_TESSERACT_PSM as i64)
-        );
+        assert_eq!(config.pointer("/ocr/tesseract_config"), None);
     }
 
     #[test]
-    fn single_file_tesseract_override_materializes_vertical_psm_for_vert_fixture_language() {
+    fn single_file_tesseract_override_preserves_implicit_vertical_psm_selection() {
         let args = vec![
             "--config-json".to_string(),
             r#"{"ocr":{"enabled":true,"backend":"tesseract"}}"#.to_string(),
@@ -3258,17 +3239,18 @@ mod tests {
         assert_eq!(config.pointer("/ocr/language"), Some(&serde_json::json!(["jpn_vert"])));
         assert_eq!(
             config
-                .pointer("/ocr/tesseract_config/psm")
-                .and_then(serde_json::Value::as_i64),
-            Some(crate::adapter::XBERG_VERTICAL_BLOCK_TESSERACT_PSM as i64)
+                .pointer("/ocr/backend_options/use_cache")
+                .and_then(serde_json::Value::as_bool),
+            Some(false)
         );
+        assert_eq!(config.pointer("/ocr/tesseract_config"), None);
     }
 
     #[test]
     fn single_file_tesseract_override_preserves_explicit_psm() {
         let args = vec![
             "--config-json".to_string(),
-            r#"{"ocr":{"enabled":true,"backend":"tesseract","tesseract_config":{"psm":6}}}"#.to_string(),
+            r#"{"ocr":{"enabled":true,"backend":"tesseract","backend_options":{"use_cache":true},"tesseract_config":{"psm":6}}}"#.to_string(),
         ];
 
         let rewritten =
@@ -3285,6 +3267,12 @@ mod tests {
         assert_eq!(
             config
                 .pointer("/ocr/tesseract_config/use_cache")
+                .and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            config
+                .pointer("/ocr/backend_options/use_cache")
                 .and_then(serde_json::Value::as_bool),
             Some(false)
         );
@@ -3305,8 +3293,8 @@ mod tests {
         // BLOCKER 1 regression: OCR enabled purely via `--ocr true` (e.g. `request_args_from`'s
         // force-OCR upgrade path for an adapter whose base `--config-json` carries no `ocr` key
         // at all — see `forced_ocr_adds_cli_ocr_for_native_xberg_config`) must still get its
-        // result cache disabled and PSM materialized, not just its language forwarded via
-        // `--ocr-language`.
+        // result cache disabled without materializing an explicit PSM, not just its language
+        // forwarded via `--ocr-language`.
         let args = vec!["--ocr".to_string(), "true".to_string()];
 
         let rewritten =
@@ -3320,16 +3308,11 @@ mod tests {
         assert_eq!(config.pointer("/ocr/language"), Some(&serde_json::json!(["deu"])));
         assert_eq!(
             config
-                .pointer("/ocr/tesseract_config/use_cache")
+                .pointer("/ocr/backend_options/use_cache")
                 .and_then(serde_json::Value::as_bool),
             Some(false)
         );
-        assert_eq!(
-            config
-                .pointer("/ocr/tesseract_config/psm")
-                .and_then(serde_json::Value::as_i64),
-            Some(crate::adapter::XBERG_WHOLE_IMAGE_TESSERACT_PSM as i64)
-        );
+        assert_eq!(config.pointer("/ocr/tesseract_config"), None);
     }
 
     #[test]
@@ -3355,20 +3338,15 @@ mod tests {
         assert_eq!(config.pointer("/ocr/language"), Some(&serde_json::json!(["eng"])));
         assert_eq!(
             config
-                .pointer("/ocr/tesseract_config/use_cache")
+                .pointer("/ocr/backend_options/use_cache")
                 .and_then(serde_json::Value::as_bool),
             Some(false)
         );
-        assert_eq!(
-            config
-                .pointer("/ocr/tesseract_config/psm")
-                .and_then(serde_json::Value::as_i64),
-            Some(crate::adapter::XBERG_WHOLE_IMAGE_TESSERACT_PSM as i64)
-        );
+        assert_eq!(config.pointer("/ocr/tesseract_config"), None);
     }
 
     #[test]
-    fn forced_ocr_without_nested_config_leaves_tesseract_config_for_downstream_materialization() {
+    fn forced_ocr_without_nested_config_keeps_tesseract_config_implicit() {
         let args = vec![
             "--config-json".to_string(),
             r#"{"use_cache":false}"#.to_string(),
@@ -3381,10 +3359,8 @@ mod tests {
         assert_eq!(ocr.pointer("/enabled"), Some(&serde_json::json!(true)));
         assert_eq!(ocr.pointer("/backend"), Some(&serde_json::json!("tesseract")));
         // `tesseract_config` must stay absent here: this raw config feeds `build_batch_file_configs`
-        // (via `ocr_uses_tesseract` + `materialize_tesseract_ocr`), which is where the result cache
-        // is genuinely disabled with the PSM matching the effective language. Synthesizing a bare
-        // `{"use_cache": false}` here would deserialize with the Tesseract PSM default (3),
-        // silently defeating xberg's own auto-PSM selection.
+        // (via `ocr_uses_tesseract` + `materialize_tesseract_ocr`), where cache control is added
+        // through backend options without defeating xberg's own auto-PSM selection.
         assert_eq!(ocr.pointer("/tesseract_config"), None);
     }
 
@@ -3442,10 +3418,8 @@ mod tests {
             xberg_ocr_language_args(&args, Some("jpn_vert")),
             Some(["--ocr-language".to_string(), "jpn_vert".to_string()])
         );
-        // No `--config-json` is present, so `apply_tesseract_ocr_override_to_args` has nothing to
-        // rewrite; `effective_ocr_config_from_args`'s CLI-flags-only synthesis leaves
-        // `tesseract_config` absent for the same reason as the batch case (see
-        // `forced_ocr_without_nested_config_leaves_tesseract_config_for_downstream_materialization`).
+        // The raw CLI-only synthesis leaves `tesseract_config` absent. The later cache override
+        // writes through `backend_options`, preserving the same implicit-PSM behavior.
         let ocr = effective_ocr_config_from_args(&args).expect("Tesseract OCR config");
         assert_eq!(ocr.pointer("/tesseract_config"), None);
     }

@@ -15,6 +15,8 @@ use std::borrow::Cow;
 use std::path::Path;
 use std::sync::Arc;
 
+const USE_CACHE_BACKEND_OPTION: &str = "use_cache";
+
 use crate::ocr::types::TesseractConfig as InternalTesseractConfig;
 
 /// Native Tesseract OCR backend.
@@ -93,7 +95,23 @@ impl TesseractBackend {
         }
         internal.tessdata_path = config.tessdata_path.clone();
         internal.source_dpi = Self::source_dpi_from_backend_options(config);
+        if let Some(use_cache) = Self::use_cache_from_backend_options(config) {
+            internal.use_cache = use_cache;
+        }
         internal
+    }
+
+    /// Read the per-call result-cache override from `backend_options`.
+    ///
+    /// This keeps callers that only need a cold Tesseract invocation from
+    /// materializing `tesseract_config`, which would make automatic whole-image
+    /// PSM selection and its sparse-image fallback look explicitly configured.
+    fn use_cache_from_backend_options(config: &OcrConfig) -> Option<bool> {
+        config
+            .backend_options
+            .as_ref()
+            .and_then(|options| options.get(USE_CACHE_BACKEND_OPTION))
+            .and_then(serde_json::Value::as_bool)
     }
 
     /// Read the per-call source-resolution hint out of `backend_options`.
@@ -935,6 +953,34 @@ mod tests {
         };
 
         assert_eq!(backend.config_to_tesseract(&ocr_config).source_dpi, Some(150.0));
+    }
+
+    #[test]
+    fn should_read_result_cache_override_from_backend_options() {
+        let backend = TesseractBackend::new();
+        let ocr_config = OcrConfig {
+            backend: "tesseract".to_string(),
+            backend_options: Some(serde_json::json!({ "use_cache": false })),
+            ..Default::default()
+        };
+
+        assert!(!backend.config_to_tesseract(&ocr_config).use_cache);
+        assert!(ocr_config.tesseract_config.is_none());
+    }
+
+    #[test]
+    fn should_ignore_malformed_result_cache_override() {
+        let backend = TesseractBackend::new();
+        let ocr_config = OcrConfig {
+            backend: "tesseract".to_string(),
+            backend_options: Some(serde_json::json!({ "use_cache": "false" })),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            backend.config_to_tesseract(&ocr_config).use_cache,
+            InternalTesseractConfig::default().use_cache
+        );
     }
 
     /// Callers that do not know their image's resolution — standalone image OCR, plugin callers

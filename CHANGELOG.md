@@ -407,6 +407,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Benchmark Tesseract cache isolation now preserves automatic page-segmentation and sparse-image
+  fallback behavior, preventing valid receipt OCR from being reclassified as zero-overlap output.
 - Windows Ruby gem builds now keep MSVC-only C++ flags out of the MinGW toolchain when compiling
   the vendored WordPerfect extractor.
 - Dense two-column PDF pages with repeated hanging clause numbers now keep the detected gutter to
