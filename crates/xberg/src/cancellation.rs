@@ -41,7 +41,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A lightweight, cloneable, one-shot cancellation token.
 ///
-/// Create one with `CancellationToken::default()`, pass one clone to extraction
+/// Create one with [`CancellationToken::new`], pass one clone to extraction
 /// through `ExtractionConfig::cancel_token`, and retain another clone in the
 /// caller. Calling [`cancel`](Self::cancel) requests cooperative cancellation;
 /// extraction stops when it reaches an existing cancellation checkpoint.
@@ -51,6 +51,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// unrelated extraction operation.
 ///
 /// Cloning is cheap (increments the `Arc` reference count only).
+///
+/// # Example
+///
+/// ```
+/// use xberg::{ExtractionConfig, cancellation::CancellationToken};
+///
+/// let caller_token = CancellationToken::new();
+/// let config = ExtractionConfig {
+///     cancel_token: Some(caller_token.clone()),
+///     ..Default::default()
+/// };
+///
+/// caller_token.cancel();
+/// assert!(config.cancel_token.is_some_and(|token| token.is_cancelled()));
+/// ```
 #[cfg_attr(alef, alef(skip))]
 #[derive(Debug, Clone, Default)]
 pub struct CancellationToken {
@@ -59,8 +74,7 @@ pub struct CancellationToken {
 
 impl CancellationToken {
     /// Create a new, uncancelled token.
-    #[cfg(test)]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 

@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Rust callers can now cooperatively cancel extraction through
+  `CancellationToken::{new, cancel, is_cancelled}` and `ExtractionConfig::cancel_token`. Pre-cancelled
+  single and batch requests stop before cache lookup or extractor dispatch (#1476).
 - `task verify:feature-parity` checks that each per-target Cargo feature aggregate still carries
   every code-bearing feature its superset does. `windows-target` is hand-maintained, the only
   Windows CI job proves it compiles rather than that it is complete, and nothing correlated it with

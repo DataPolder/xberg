@@ -77,6 +77,15 @@ pub(crate) async fn extract(
         fraction: Some(0.0),
     });
 
+    if let Err(error) = ensure_not_cancelled(config) {
+        inner.progress.emit(ProgressEvent {
+            stage: PROGRESS_STAGE_ERROR.to_string(),
+            message: Some(error.to_string()),
+            fraction: None,
+        });
+        return Err(error);
+    }
+
     let cache_key = content_cache_key(&input, config);
     if let Some(key) = cache_key.as_deref()
         && let Some(cached_bytes) = inner.cache.get(key).await
@@ -132,6 +141,13 @@ pub(crate) async fn extract(
     }
 
     result
+}
+
+fn ensure_not_cancelled(config: &ExtractionConfig) -> Result<()> {
+    if config.cancel_token.as_ref().is_some_and(|token| token.is_cancelled()) {
+        return Err(XbergError::Cancelled);
+    }
+    Ok(())
 }
 
 /// The extraction path proper, unwrapped from cache/progress bookkeeping so
@@ -240,6 +256,7 @@ fn record_batch_metrics(elapsed: std::time::Duration, result: &Result<Extraction
 
 #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
 async fn extract_batch_sequential(inputs: Vec<ExtractInput>, config: &ExtractionConfig) -> Result<ExtractionResult> {
+    ensure_not_cancelled(config)?;
     let mut seen = initial_seen_urls(&inputs);
     let seed_hosts = initial_seed_hosts(&inputs);
     let mut output = ExtractionResult {
@@ -276,6 +293,7 @@ async fn extract_batch_concurrent(
     inputs: Vec<ExtractInput>,
     config: &ExtractionConfig,
 ) -> Result<ExtractionResult> {
+    ensure_not_cancelled(config)?;
     let input_count = inputs.len();
     let mut seen = initial_seen_urls(&inputs);
     let seed_hosts = initial_seed_hosts(&inputs);
