@@ -1347,6 +1347,112 @@ fn test_append_ocr_text_for_pptx_images() {
     assert!(rendered.contains("OCR text here"));
 }
 
+#[cfg(all(feature = "ocr", feature = "tokio-runtime"))]
+mod full_page_image_ocr_tests {
+    use bytes::Bytes;
+
+    use super::{image_ocr_positions, should_skip_pdf_image_ocr};
+    use crate::types::ExtractedImage;
+    use crate::types::extraction::BoundingBox;
+    use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
+    use crate::types::ocr_elements::OcrElementLevel;
+    use crate::types::page::{PageInfo, PageStructure, PageUnitType};
+
+    fn pdf_document() -> InternalDocument {
+        let mut document = InternalDocument::new("pdf");
+        document.mime_type = "application/pdf".to_string();
+        document.metadata.pages = Some(PageStructure {
+            total_count: 2,
+            unit_type: PageUnitType::Page,
+            boundaries: None,
+            pages: Some(vec![page_info(1), page_info(2)]),
+        });
+        document
+    }
+
+    fn page_info(number: u32) -> PageInfo {
+        PageInfo {
+            number,
+            title: None,
+            dimensions: Some((100.0, 100.0)),
+            image_count: None,
+            table_count: None,
+            hidden: None,
+            is_blank: None,
+            has_vector_graphics: false,
+        }
+    }
+
+    fn image(image_index: u32, page_number: u32, bounding_box: BoundingBox) -> ExtractedImage {
+        ExtractedImage {
+            data: Bytes::new(),
+            image_index,
+            page_number: Some(page_number),
+            bounding_box: Some(bounding_box),
+            ..Default::default()
+        }
+    }
+
+    fn full_page_box() -> BoundingBox {
+        BoundingBox {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 100.0,
+            y1: 100.0,
+        }
+    }
+
+    #[test]
+    fn should_skip_only_full_page_pdf_images_with_existing_page_text() {
+        let mut document = pdf_document();
+        document.push_element(
+            InternalElement::text(
+                ElementKind::OcrText {
+                    level: OcrElementLevel::Block,
+                },
+                "page-level OCR text",
+                0,
+            )
+            .with_page(1),
+        );
+        document.images = vec![
+            image(0, 1, full_page_box()),
+            image(
+                1,
+                1,
+                BoundingBox {
+                    x0: 10.0,
+                    y0: 10.0,
+                    x1: 40.0,
+                    y1: 40.0,
+                },
+            ),
+            image(2, 2, full_page_box()),
+        ];
+
+        assert_eq!(image_ocr_positions(&document), vec![1, 2]);
+    }
+
+    #[test]
+    fn should_return_no_ocr_work_when_every_image_repeats_page_text() {
+        let mut document = pdf_document();
+        document.push_element(InternalElement::text(ElementKind::Paragraph, "already extracted", 0).with_page(1));
+        document.images = vec![image(0, 1, full_page_box())];
+
+        assert!(image_ocr_positions(&document).is_empty());
+    }
+
+    #[test]
+    fn should_not_apply_pdf_deduplication_to_other_formats() {
+        let mut document = pdf_document();
+        document.source_format = "pptx".to_string();
+        document.push_element(InternalElement::text(ElementKind::Paragraph, "slide text", 0).with_page(1));
+        let full_page_image = image(0, 1, full_page_box());
+
+        assert!(!should_skip_pdf_image_ocr(&document, &full_page_image));
+    }
+}
+
 /// Smoke tests for `apply_output_format_pass`.
 ///
 /// These operate directly on `ExtractedDocument` without invoking the full extractor,

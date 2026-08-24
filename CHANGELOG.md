@@ -406,6 +406,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Skipped image-level OCR for page-sized PDF XObjects when that page already has extracted text,
+  avoiding duplicate OCR work and repeated page content while keeping empty pages eligible (#1479).
 - Allowed bounded high-ratio PDF streams below 32 MiB so legitimate 300-dpi RGB page scans are
   not rejected as decompression bombs; the 100 MiB absolute cap and larger-stream ratio guard
   remain enforced (#1470).
