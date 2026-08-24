@@ -445,6 +445,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - EPUB members declared in a non-UTF-8 encoding or written in UTF-16 are decoded instead of skipped,
   and books with DRM listed in `META-INF/encryption.xml` report one warning instead of blaming the
   encoding or emitting ciphertext as text (#1494).
+- Windows Ruby gem builds now keep generated binding-crate defaults from re-enabling ONNX Runtime
+  on MinGW, which has no compatible prebuilt runtime artifact.
 - Dynamic Tesseract builds no longer compile unused vendoring helpers when system linking takes
   precedence, allowing warnings-as-errors builds while retaining the generated shim declarations.
 - Narrow Rust feature builds no longer compile the API/MCP request-security validator when neither

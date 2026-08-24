@@ -1095,6 +1095,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       RB_SYS_CARGO_PROFILE: release
+      # Alef's target dependency override selects `windows-gnu-target`, but the generated
+      # binding crate's default forwarding features otherwise union ORT back into xberg.
+      # MinGW has no ORT prebuilt, so compile the wrapper with only the cfg-gated APIs that
+      # the Windows GNU surface supports. The target dependency still supplies the complete
+      # `windows-gnu-target` implementation feature set.
+      RB_SYS_EXTRA_CARGO_ARGS: ${{ matrix.ruby_cargo_args }}
     strategy:
       fail-fast: false
       matrix:
@@ -1102,7 +1108,9 @@ jobs:
           - { os: ubuntu-latest, label: linux-x86_64 }
           - { os: ubuntu-24.04-arm, label: linux-aarch64 }
           - { os: macos-15, label: macos-arm64 }
-          - { os: windows-latest, label: windows-x86_64 }
+          - os: windows-latest
+            label: windows-x86_64
+            ruby_cargo_args: --no-default-features --features pdf,markdown-footnotes,url-ingestion
     steps:
       - uses: actions/checkout@v7
         with:
