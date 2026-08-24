@@ -4422,7 +4422,7 @@ path = "../../crates/xberg-wasm/pkg/nodejs"
 CRAWLBERG_ALLOW_PRIVATE_NETWORK = "true"
 
 [crates.e2e.format]
-python = "ruff check --fix {dir} && ruff format {dir}"
+python = "uv run --no-sync ruff check --fix {dir} && uv run --no-sync ruff format {dir}"
 go = "gofmt -w {dir}"
 rust = "(cd {dir} && cargo fmt --all)"
 
