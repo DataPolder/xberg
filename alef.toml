@@ -1,5 +1,5 @@
 [workspace]
-alef_version = "0.67.1"
+alef_version = "0.67.4"
 # -D warnings (emitted into every generated Rust binding as #![allow(...)]).
 extra_clippy_allows = ["redundant_field_names", "collapsible_if", "vec_init_then_push"]
 languages = [
@@ -71,7 +71,27 @@ template_dir = "templates/docs/skills"
 outputs = [".codex/skills", ".agents/skills", ".github/skills", ".claude/skills"]
 
 [workspace.docs.snippets]
-dirs = ["docs-site/src/snippets", "docs-site/src/snippets-generated"]
+dirs = ["docs-site/src/snippets-generated"]
+inline_dirs = ["docs-site/src/snippets"]
+docs_dirs = ["docs-site/src/content/docs", "docs-site/src/components"]
+content_collections = { apiExamples = "docs-site/src/snippets-generated" }
+include_base_paths = ["docs-site/src"]
+required_languages = [
+  "python",
+  "rust",
+  "typescript",
+  "go",
+  "ruby",
+  "elixir",
+  "java",
+  "csharp",
+  "php",
+  "dart",
+  "kotlin",
+  "swift",
+  "zig",
+  "c",
+]
 validation_level = "compile"
 # 600s was sized for typecheck/compile-only validation of individual snippets.
 # It is also the ceiling for every session `before` hook (single global
