@@ -54,6 +54,7 @@ owned_paths = [
   "docs-site/src/snippets-generated/typescript/contract/config_llm_max_concurrency.md",
   "docs-site/src/snippets-generated/wasm/contract/config_llm_max_concurrency.md",
   "docs-site/src/snippets-generated/zig/contract/config_llm_max_concurrency.md",
+  "e2e/java/.mvn/wrapper/maven-wrapper.properties",
   "packages/python/xberg/_xberg.pyi",
   "packages/ruby/sig/types.rbs",
   "test_apps/php/phpunit.xml",
