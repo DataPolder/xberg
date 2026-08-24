@@ -157,6 +157,10 @@ ner-onnx = ["legacy-base", "xberg/ner-onnx"]
 ner-llm = ["legacy-base", "xberg/ner-llm"]
 summarization = ["legacy-base", "xberg/summarization"]
 summarization-llm = ["legacy-base", "xberg/summarization-llm"]
+# Audio transcription is intentionally opt-in because it adds the Whisper/ORT
+# inference stack. The `all` release and container profile enables it so the CLI
+# exposes every capability included by xberg's corresponding full feature set.
+transcription = ["legacy-base", "xberg/transcription"]
 heic = ["legacy-base", "formats", "xberg/heic"]
 # Self-contained static single-file CLI for `cargo binstall xberg-cli`. Every
 # capability here is pure-Rust and statically linkable on musl: document
@@ -200,6 +204,7 @@ all = [
     "ner-llm",
     "summarization",
     "summarization-llm",
+    "transcription",
     # Enables `--pdf-backend pdfium` (#700/#702). The Docker `cli`/`core`/`full`/
     # `musl-build` images stage a runtime libpdfium via PDFIUM_DYNAMIC_LIB_PATH
     # (see docker/Dockerfile.*), so this feature has a real library to load.

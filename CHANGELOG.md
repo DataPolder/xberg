@@ -217,6 +217,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The CLI `all` feature now includes audio transcription, matching the Rust crate's full capability
+  set. Transcription remains opt-in for default and minimal CLI builds because it adds the
+  Whisper/ONNX Runtime inference stack.
+
 - Repinned to alef 0.65.0 and regenerated every binding. Picks up `is_empty` fixes across
   Swift/Elixir/Dart/Kotlin/Java, TypeScript/node internally-tagged enum nesting, C/doc-snippet
   optional-argument sentinel selection, pyo3 snippet imports and streaming stub signatures, C#
