@@ -407,6 +407,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Windows Ruby gem builds now keep MSVC-only C++ flags out of the MinGW toolchain when compiling
+  the vendored WordPerfect extractor.
 - Dense two-column PDF pages with repeated hanging clause numbers now keep the detected gutter to
   the left of the number band, preventing numbered lines from being misclassified as furniture and
   emitted in interleaved row order (#1484).
