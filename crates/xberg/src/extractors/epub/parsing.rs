@@ -31,9 +31,23 @@ pub(super) struct CanonicalHref {
     pub(super) fragment: Option<String>,
 }
 
+/// Parse EPUB packaging XML such as `container.xml` and OPF package documents.
+///
+/// Legacy EPUBs may contain DTD declarations. `roxmltree` does not resolve external
+/// entities, and retains its entity-expansion limits when DTD parsing is enabled.
+pub(super) fn parse_packaging_xml(xml: &str) -> std::result::Result<roxmltree::Document<'_>, roxmltree::Error> {
+    roxmltree::Document::parse_with_options(
+        xml,
+        roxmltree::ParsingOptions {
+            allow_dtd: true,
+            ..Default::default()
+        },
+    )
+}
+
 /// Parse container.xml to find the OPF file path
 pub(super) fn parse_container_xml(xml: &str) -> Result<String> {
-    match roxmltree::Document::parse(xml) {
+    match parse_packaging_xml(xml) {
         Ok(doc) => {
             for node in doc.descendants() {
                 if node.tag_name().name() == "rootfile"
@@ -137,6 +151,58 @@ pub(super) fn resolve_path(base_dir: &str, href: &str) -> Result<CanonicalHref> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_parse_container_with_legacy_packaging_dtd() {
+        let xml = r#"<?xml version="1.0"?>
+            <!DOCTYPE container PUBLIC
+                "-//IDPF//DTD OEB 1.2 Package//EN"
+                "http://openebook.org/dtds/oeb-1.2/oebpkg12.dtd">
+            <container>
+                <rootfiles>
+                    <rootfile full-path="OEBPS/content.opf"/>
+                </rootfiles>
+            </container>"#;
+
+        let path = parse_container_xml(xml).expect("legacy packaging DTD should be accepted");
+
+        assert_eq!(path, "OEBPS/content.opf");
+    }
+
+    #[test]
+    fn should_not_resolve_external_packaging_entities() {
+        let xml = r#"<!DOCTYPE container [
+                <!ENTITY external SYSTEM "file:///etc/passwd">
+            ]>
+            <container>
+                <rootfiles>
+                    <rootfile full-path="&external;"/>
+                </rootfiles>
+            </container>"#;
+
+        let error = parse_container_xml(xml).expect_err("external entities must not be resolved in packaging XML");
+
+        assert!(error.to_string().contains("unknown entity reference"));
+    }
+
+    #[test]
+    fn should_reject_packaging_entity_amplification() {
+        let xml = r#"<!DOCTYPE container [
+                <!ENTITY a "x">
+                <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+                <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">
+                <!ENTITY d "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;">
+            ]>
+            <container>
+                <rootfiles>
+                    <rootfile full-path="&d;"/>
+                </rootfiles>
+            </container>"#;
+
+        let error = parse_container_xml(xml).expect_err("entity amplification must be rejected in packaging XML");
+
+        assert!(error.to_string().contains("entity reference loop"));
+    }
 
     /// A package whose entry name holds a literal `%` is read by the name as
     /// written, after the decoded name misses.

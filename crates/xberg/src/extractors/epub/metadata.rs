@@ -6,7 +6,6 @@
 use crate::Result;
 use crate::extractors::security::SecurityBudget;
 use crate::types::ProcessingWarning;
-use roxmltree;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::parsing::resolve_path;
@@ -116,7 +115,7 @@ pub(super) fn parse_opf(
     opf_dir: &str,
     budget: &mut SecurityBudget,
 ) -> Result<(EpubPackageDocument, Vec<ProcessingWarning>)> {
-    match roxmltree::Document::parse(xml) {
+    match super::parsing::parse_packaging_xml(xml) {
         Ok(doc) => {
             let root = doc.root();
 
@@ -128,11 +127,20 @@ pub(super) fn parse_opf(
                 guide_toc_paths: BTreeSet::new(),
             };
             let mut manifest: BTreeMap<String, ManifestItem> = BTreeMap::new();
+            let mut budget_depth = 0;
 
             for node in root.descendants() {
                 budget.step()?;
                 if node.is_element() {
-                    budget.enter()?;
+                    let node_depth = node.ancestors().filter(|ancestor| ancestor.is_element()).count();
+                    while budget_depth > node_depth {
+                        budget.leave();
+                        budget_depth -= 1;
+                    }
+                    while budget_depth < node_depth {
+                        budget.enter()?;
+                        budget_depth += 1;
+                    }
                     for attr in node.attributes() {
                         budget.check_attr(attr.name(), attr.value())?;
                     }
@@ -282,6 +290,10 @@ pub(super) fn parse_opf(
                     _ => {}
                 }
             }
+            while budget_depth > 0 {
+                budget.leave();
+                budget_depth -= 1;
+            }
 
             let mut cover_item_id = None;
             for node in root.descendants() {
@@ -346,4 +358,48 @@ pub(super) fn build_additional_metadata(epub_metadata: &OepbMetadata) -> BTreeMa
     }
 
     additional_metadata
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::extractors::security::SecurityLimits;
+
+    #[test]
+    fn should_count_opf_siblings_as_equal_depth() {
+        let siblings = (0..100)
+            .map(|index| format!(r#"<item id="item{index}" href="chapter{index}.xhtml"/>"#))
+            .collect::<String>();
+        let xml =
+            format!(r#"<package><metadata><title>Book</title></metadata><manifest>{siblings}</manifest></package>"#);
+        let limits = SecurityLimits {
+            max_nesting_depth: 4,
+            max_xml_depth: 4,
+            ..SecurityLimits::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+
+        let (package, warnings) =
+            parse_opf(&xml, "OEBPS", &mut budget).expect("a shallow OPF with many sibling elements should parse");
+
+        assert_eq!(package.manifest.len(), 100);
+        assert_eq!(package.metadata.title.as_deref(), Some("Book"));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn should_reject_opf_nesting_beyond_security_limit() {
+        let limits = SecurityLimits {
+            max_nesting_depth: 3,
+            max_xml_depth: 3,
+            ..SecurityLimits::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+        let xml = "<package><metadata><wrapper><title>Book</title></wrapper></metadata></package>";
+
+        let error = parse_opf(xml, "OEBPS", &mut budget)
+            .expect_err("an OPF deeper than the configured limit should be rejected");
+
+        assert!(error.to_string().contains("Nesting too deep"));
+    }
 }
