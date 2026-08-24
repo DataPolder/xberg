@@ -316,11 +316,17 @@ impl TesseractAPI {
     ///
     /// # Returns
     ///
-    /// Returns the value of the variable as an integer.
+    /// Returns the value of the variable as an integer, or
+    /// [`TesseractError::GetVariableError`] if no such variable exists.
     pub fn get_int_variable(&self, name: &str) -> Result<i32> {
         let name = CString::new(name).map_err(|_| TesseractError::NullByteInString)?;
         let handle = self.handle.lock().map_err(|_| TesseractError::MutexLockError)?;
-        Ok(unsafe { TessBaseAPIGetIntVariable(*handle, name.as_ptr()) })
+        let mut value: c_int = 0;
+        let found = unsafe { TessBaseAPIGetIntVariable(*handle, name.as_ptr(), &raw mut value) };
+        if found == 0 {
+            return Err(TesseractError::GetVariableError);
+        }
+        Ok(value)
     }
 
     /// Gets a boolean variable.
@@ -331,11 +337,17 @@ impl TesseractAPI {
     ///
     /// # Returns
     ///
-    /// Returns the value of the variable as a boolean.
+    /// Returns the value of the variable as a boolean, or
+    /// [`TesseractError::GetVariableError`] if no such variable exists.
     pub fn get_bool_variable(&self, name: &str) -> Result<bool> {
         let name = CString::new(name).map_err(|_| TesseractError::NullByteInString)?;
         let handle = self.handle.lock().map_err(|_| TesseractError::MutexLockError)?;
-        Ok(unsafe { TessBaseAPIGetBoolVariable(*handle, name.as_ptr()) } != 0)
+        let mut value: c_int = 0;
+        let found = unsafe { TessBaseAPIGetBoolVariable(*handle, name.as_ptr(), &raw mut value) };
+        if found == 0 {
+            return Err(TesseractError::GetVariableError);
+        }
+        Ok(value != 0)
     }
 
     /// Gets a double variable.
@@ -346,11 +358,17 @@ impl TesseractAPI {
     ///
     /// # Returns
     ///
-    /// Returns the value of the variable as a double.
+    /// Returns the value of the variable as a double, or
+    /// [`TesseractError::GetVariableError`] if no such variable exists.
     pub fn get_double_variable(&self, name: &str) -> Result<f64> {
         let name = CString::new(name).map_err(|_| TesseractError::NullByteInString)?;
         let handle = self.handle.lock().map_err(|_| TesseractError::MutexLockError)?;
-        Ok(unsafe { TessBaseAPIGetDoubleVariable(*handle, name.as_ptr()) })
+        let mut value: c_double = 0.0;
+        let found = unsafe { TessBaseAPIGetDoubleVariable(*handle, name.as_ptr(), &raw mut value) };
+        if found == 0 {
+            return Err(TesseractError::GetVariableError);
+        }
+        Ok(value)
     }
 
     /// Sets the page segmentation mode.
@@ -1841,9 +1859,12 @@ ffi_extern! {
     fn TessBaseAPIMeanTextConf(handle: *mut c_void) -> c_int;
     fn TessBaseAPISetVariable(handle: *mut c_void, name: *const c_char, value: *const c_char) -> c_int;
     fn TessBaseAPIGetStringVariable(handle: *mut c_void, name: *const c_char) -> *const c_char;
-    fn TessBaseAPIGetIntVariable(handle: *mut c_void, name: *const c_char) -> c_int;
-    fn TessBaseAPIGetBoolVariable(handle: *mut c_void, name: *const c_char) -> c_int;
-    fn TessBaseAPIGetDoubleVariable(handle: *mut c_void, name: *const c_char) -> c_double;
+    // These three return `BOOL` = "the variable exists" and deliver the value through the
+    // third out-pointer; tesseract's `BOOL` is `int` (capi.h). Omitting the out-pointer
+    // makes tesseract store through an uninitialized argument register. ~keep
+    fn TessBaseAPIGetIntVariable(handle: *mut c_void, name: *const c_char, value: *mut c_int) -> c_int;
+    fn TessBaseAPIGetBoolVariable(handle: *mut c_void, name: *const c_char, value: *mut c_int) -> c_int;
+    fn TessBaseAPIGetDoubleVariable(handle: *mut c_void, name: *const c_char, value: *mut c_double) -> c_int;
     fn TessBaseAPISetPageSegMode(handle: *mut c_void, mode: c_int);
     fn TessBaseAPIGetPageSegMode(handle: *mut c_void) -> c_int;
     #[cfg(any(target_arch = "wasm32", not(feature = "build-tesseract")))]
@@ -2035,6 +2056,50 @@ mod live_engine_tests {
             TessBaseAPIDelete(addr as *mut c_void);
         }
         assert!(!is_registered(addr));
+    }
+
+    /// `TessBaseAPIGet{Bool,Int,Double}Variable` return only *whether the variable
+    /// exists* and deliver the value through a third out-pointer. Declaring them
+    /// without that parameter left the argument register holding whatever the previous
+    /// call had put there, and tesseract stored through it — a wild write that
+    /// corrupted the engine's own `Mutex` and killed the process on `Drop`
+    /// (SIGSEGV on Linux, SIGBUS on macOS). Reading a variable back after flipping it
+    /// pins both halves: the value must be the one that was set, not the constant
+    /// "this variable exists". ~keep
+    #[test]
+    fn get_variable_accessors_return_the_stored_value() {
+        let api = TesseractAPI::new().expect("create engine");
+        if api.init("", "eng").is_err() {
+            return; // no "eng" tessdata available in this environment
+        }
+
+        api.set_variable("hocr_font_info", "1").expect("set hocr_font_info");
+        assert!(api.get_bool_variable("hocr_font_info").expect("read hocr_font_info"));
+        api.set_variable("hocr_font_info", "0").expect("clear hocr_font_info");
+        assert!(!api.get_bool_variable("hocr_font_info").expect("read hocr_font_info"));
+
+        api.set_variable("edges_max_children_per_outline", "17")
+            .expect("set int variable");
+        assert_eq!(
+            api.get_int_variable("edges_max_children_per_outline")
+                .expect("read int variable"),
+            17
+        );
+
+        api.set_variable("classify_min_slope", "0.5")
+            .expect("set double variable");
+        assert!(
+            (api.get_double_variable("classify_min_slope")
+                .expect("read double variable")
+                - 0.5)
+                .abs()
+                < f64::EPSILON
+        );
+
+        assert!(
+            api.get_bool_variable("xberg_no_such_tesseract_variable").is_err(),
+            "an unknown variable must be reported as an error, not silently defaulted"
+        );
     }
 }
 
