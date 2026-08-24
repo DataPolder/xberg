@@ -88,3 +88,8 @@ try {
 finally {
   if (Test-Path $workDir) { Remove-Item -Recurse -Force $workDir }
 }
+
+# This script only uses PowerShell cmdlets, which do not update the automatic
+# $LASTEXITCODE variable. Set the process contract explicitly so callers do not
+# mistake a stale native-command exit code for a vendoring failure.
+exit 0

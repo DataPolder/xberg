@@ -407,6 +407,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Windows Python wheel vendoring now reports an explicit successful exit code after repacking,
+  preventing stale native-command status from failing wheel smoke tests and release builds.
 - Kept adjacent PDF text runs on one baseline together across modest font-size changes, preventing
   chapter numbers from being detached from their headings and later dropped as page furniture
   (#1482).
