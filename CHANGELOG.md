@@ -416,6 +416,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sceptre image benchmarks now use a bounded structured-image diagnostic matrix for ORT, layout,
   auto-rotation, and tract variants; the published release contract retains Sceptre comparisons on
   the compatible OCR-PDF cohort instead of failing on unsupported vertical-Japanese fixtures.
+- Aligned Go, Java, C#, and Zig code generation with the desktop C-FFI feature set, preventing
+  cfg-gated formats and result variants from disappearing from host bindings while remaining
+  present in the linked native library. Desktop FFI now includes the advertised Sceptre backend,
+  and Kotlin Android generation follows the explicit no-ORT `android-target` surface.
 
 - Generated documentation snippet tabs now use Alef target identifiers consistently, so TypeScript
   Node/WASM and Kotlin Android examples render as distinct, stable tabs.

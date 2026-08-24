@@ -1185,14 +1185,26 @@ visitor_callbacks = false
 # zig/java/C consumers who build libxberg_ffi themselves a documented opt-in at
 # zero cost to everyone else. `extra_features` exists only on `[crates.ffi]`
 # and `[crates.wasm]`, so the other bindings have no declare-only key and
-# cannot be given the same opt-in without an alef change. ~keep
-extra_features = ["full-no-heic", "pdf-pdfium"]
+# cannot be given the same opt-in without an alef change.
+#
+# `ocr-wasm` appears in emitted `any(feature = "ocr", feature = "ocr-wasm")`
+# gates. Alef declares every discovered gate and otherwise enables it by default,
+# even though desktop FFI already satisfies those gates through `ocr`. Keep the
+# WASM alternative declared for opt-in builds without pulling it into native
+# artifacts. ~keep
+extra_features = ["full-no-heic", "pdf-pdfium", "ocr-wasm"]
 # Feature list for the desktop `cfg(not(any(android,ios,windows,macos-x86_64)))`
 # core dep. Without this override the FFI crate inherits the global
 # `[[crates]].features`, whose first entry is `full` — that pulls `heic`
 # (`libheif-sys`, no pkg-config cross-compile support) and `candle-*` into the
 # swift-bundle's cross-compiled desktop dep, which broke Swift publishing in
-# v1.0.12. This is the v1.0.11 granular floor: `full` minus heic/candle. ~keep
+# v1.0.12. This is the v1.0.11 granular floor: `full` minus heic/candle.
+#
+# Go, Java, C#, and Zig consume this one native library. Their feature arrays
+# below MUST remain byte-for-byte equivalent to this list: Alef filters each
+# host surface using its own literal feature names and cannot reference a shared
+# TOML array. Language-specific exclusions belong in exclude_types/functions,
+# not in divergent feature lists. ~keep
 features = [
   "pdf",
   # GH#1387: these eight must be listed explicitly here. alef matches the LITERAL
@@ -1211,6 +1223,7 @@ features = [
   "xml",
   "qr-codes",
   "ocr",
+  "sceptre-ocr",
   "paddle-ocr",
   "paddle-ocr-types",
   "layout-detection",
@@ -1224,6 +1237,7 @@ features = [
   "late-interaction",
   "late-interaction-presets",
   "chunking",
+  "chunking-tokenizers",
   "keywords-yake",
   "keywords-rake",
   "language-detection",
@@ -1255,6 +1269,7 @@ features = [
   "heuristics",
   "presets",
   "structured",
+  "url-config-types",
   "url-ingestion",
 ]
 plugin_error_constructor = "xberg::XbergError::Plugin { message: msg, plugin_name: String::new() }"
@@ -1360,6 +1375,68 @@ default_features = false
 [crates.go]
 module = "github.com/xberg-io/xberg/packages/go"
 package_name = "xberg"
+# Must match `[crates.ffi].features`; all four host bindings link the same
+# generated native library, and Alef filters cfg-gated glue by this literal list. ~keep
+features = [
+  "pdf",
+  "excel",
+  "hwp",
+  "hwpx",
+  "iwork",
+  "wordperfect",
+  "mdx",
+  "xml",
+  "qr-codes",
+  "ocr",
+  "sceptre-ocr",
+  "paddle-ocr",
+  "paddle-ocr-types",
+  "layout-detection",
+  "layout-types",
+  "embeddings",
+  "embedding-presets",
+  "reranker",
+  "reranker-presets",
+  "sparse-embeddings",
+  "sparse-embedding-presets",
+  "late-interaction",
+  "late-interaction-presets",
+  "chunking",
+  "chunking-tokenizers",
+  "keywords-yake",
+  "keywords-rake",
+  "language-detection",
+  "html",
+  "tree-sitter",
+  "office",
+  "email",
+  "archives",
+  "stopwords",
+  "auto-rotate",
+  "auto-rotate-types",
+  "tokio-runtime",
+  "api",
+  "api-types",
+  "mcp",
+  "liter-llm",
+  "quality",
+  "svg",
+  "transcription",
+  "transcription-types",
+  "classification",
+  "captioning",
+  "ner-onnx",
+  "ner-llm",
+  "diff",
+  "markdown-footnotes",
+  "redaction",
+  "enrichment",
+  "heuristics",
+  "presets",
+  "structured",
+  "url-config-types",
+  "url-ingestion",
+]
 exclude_functions = [
   "calculate_quality_score",
   "count_tokens",
@@ -1444,10 +1521,19 @@ exclude_types = []
 [crates.java]
 package = "io.xberg"
 ffi_style = "panama"
+# Must match `[crates.ffi].features`; Java binds that exact native ABI. ~keep
 features = [
-  "full",
   "pdf",
+  "excel",
+  "hwp",
+  "hwpx",
+  "iwork",
+  "wordperfect",
+  "mdx",
+  "xml",
+  "qr-codes",
   "ocr",
+  "sceptre-ocr",
   "paddle-ocr",
   "paddle-ocr-types",
   "layout-detection",
@@ -1461,22 +1547,40 @@ features = [
   "late-interaction",
   "late-interaction-presets",
   "chunking",
+  "chunking-tokenizers",
   "keywords-yake",
   "keywords-rake",
   "language-detection",
   "html",
+  "tree-sitter",
   "office",
   "email",
   "archives",
   "stopwords",
   "auto-rotate",
   "auto-rotate-types",
-  "tree-sitter",
   "tokio-runtime",
   "api",
+  "api-types",
   "mcp",
   "liter-llm",
   "quality",
+  "svg",
+  "transcription",
+  "transcription-types",
+  "classification",
+  "captioning",
+  "ner-onnx",
+  "ner-llm",
+  "diff",
+  "markdown-footnotes",
+  "redaction",
+  "enrichment",
+  "heuristics",
+  "presets",
+  "structured",
+  "url-config-types",
+  "url-ingestion",
 ]
 exclude_types = ["OcrBackendType", "ProcessingStage"]
 exclude_functions = [
@@ -1601,7 +1705,75 @@ namespace = "io.xberg"
 artifact_id = "xberg-android"
 group_id = "io.xberg"
 abis = ["arm64-v8a", "x86_64"]
-features = ["full"]
+# Alef matches cfg gates literally and does not expand Cargo aggregates. Keep
+# `android-target` for the actual runtime, then spell out its Android-safe leaf
+# surface so generated Kotlin/JNI glue retains every available DTO and method
+# without exposing desktop ORT-only APIs. ~keep
+features = [
+  "android-target",
+  "no-ort-target",
+  "pdf",
+  "pdf-native",
+  "html",
+  "notebook",
+  "xml",
+  "email",
+  "language-detection",
+  "chunking",
+  "chunking-tokenizers",
+  "quality",
+  "keywords",
+  "keywords-yake",
+  "keywords-rake",
+  "markdown-footnotes",
+  "enrichment",
+  "heuristics",
+  "office",
+  "iwork",
+  "hwp",
+  "mdx",
+  "archives",
+  "stopwords",
+  "embedding-presets",
+  "static-embeddings",
+  "reranker-presets",
+  "sparse-embedding-presets",
+  "late-interaction-presets",
+  "layout-types",
+  "auto-rotate-types",
+  "paddle-ocr-types",
+  "ner",
+  "presets",
+  "redaction",
+  "summarization",
+  "qr-codes",
+  "svg",
+  "image-encode",
+  "transcription-types",
+  "excel",
+  "tree-sitter",
+  "ocr",
+  "ocr-pipeline",
+  "sceptre-ocr-tract",
+  "tract",
+  "auto-rotate-tract",
+  "layout-tract",
+  "paddle-ocr-tract",
+  "api",
+  "api-types",
+  "tower-service",
+  "mcp",
+  "liter-llm",
+  "structured",
+  "hwpx",
+  "diff",
+  "classification",
+  "captioning",
+  "ner-llm",
+  "url-config-types",
+  "url-ingestion",
+  "tokio-runtime",
+]
 exclude_types = []
 exclude_functions = [
   "embed_texts_async",
@@ -1806,6 +1978,67 @@ default_features = false
 namespace = "Xberg"
 package_id = "XbergIo.Xberg"
 project_file = "packages/csharp/Xberg/Xberg.csproj"
+# Must match `[crates.ffi].features`; C# binds that exact native ABI. ~keep
+features = [
+  "pdf",
+  "excel",
+  "hwp",
+  "hwpx",
+  "iwork",
+  "wordperfect",
+  "mdx",
+  "xml",
+  "qr-codes",
+  "ocr",
+  "sceptre-ocr",
+  "paddle-ocr",
+  "paddle-ocr-types",
+  "layout-detection",
+  "layout-types",
+  "embeddings",
+  "embedding-presets",
+  "reranker",
+  "reranker-presets",
+  "sparse-embeddings",
+  "sparse-embedding-presets",
+  "late-interaction",
+  "late-interaction-presets",
+  "chunking",
+  "chunking-tokenizers",
+  "keywords-yake",
+  "keywords-rake",
+  "language-detection",
+  "html",
+  "tree-sitter",
+  "office",
+  "email",
+  "archives",
+  "stopwords",
+  "auto-rotate",
+  "auto-rotate-types",
+  "tokio-runtime",
+  "api",
+  "api-types",
+  "mcp",
+  "liter-llm",
+  "quality",
+  "svg",
+  "transcription",
+  "transcription-types",
+  "classification",
+  "captioning",
+  "ner-onnx",
+  "ner-llm",
+  "diff",
+  "markdown-footnotes",
+  "redaction",
+  "enrichment",
+  "heuristics",
+  "presets",
+  "structured",
+  "url-config-types",
+  "url-ingestion",
+]
 exclude_functions = [
   "calculate_quality_score",
   "count_tokens",
@@ -1828,6 +2061,67 @@ exclude_functions = [
 
 [crates.zig]
 module_name = "xberg"
+# Must match `[crates.ffi].features`; Zig binds that exact native ABI. ~keep
+features = [
+  "pdf",
+  "excel",
+  "hwp",
+  "hwpx",
+  "iwork",
+  "wordperfect",
+  "mdx",
+  "xml",
+  "qr-codes",
+  "ocr",
+  "sceptre-ocr",
+  "paddle-ocr",
+  "paddle-ocr-types",
+  "layout-detection",
+  "layout-types",
+  "embeddings",
+  "embedding-presets",
+  "reranker",
+  "reranker-presets",
+  "sparse-embeddings",
+  "sparse-embedding-presets",
+  "late-interaction",
+  "late-interaction-presets",
+  "chunking",
+  "chunking-tokenizers",
+  "keywords-yake",
+  "keywords-rake",
+  "language-detection",
+  "html",
+  "tree-sitter",
+  "office",
+  "email",
+  "archives",
+  "stopwords",
+  "auto-rotate",
+  "auto-rotate-types",
+  "tokio-runtime",
+  "api",
+  "api-types",
+  "mcp",
+  "liter-llm",
+  "quality",
+  "svg",
+  "transcription",
+  "transcription-types",
+  "classification",
+  "captioning",
+  "ner-onnx",
+  "ner-llm",
+  "diff",
+  "markdown-footnotes",
+  "redaction",
+  "enrichment",
+  "heuristics",
+  "presets",
+  "structured",
+  "url-config-types",
+  "url-ingestion",
+]
 exclude_functions = [
   "calculate_quality_score",
   "count_tokens",
