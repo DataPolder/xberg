@@ -67,11 +67,11 @@ const renderedEntries = await Promise.all(
     <em>No generated example available for `{topic}` yet.</em>
   </p>
 ) : (
-  <Tabs syncKey="lang">
-    {renderedEntries.map(({ target, label, rendered }) => (
-      <TabItem label={label} key={target}>
-        <rendered.Content />
-      </TabItem>
-    ))}
-  </Tabs>
-)}
+   <Tabs syncKey="lang">
+     {renderedEntries.map(({ target, label, rendered }) => (
+       <TabItem label={label} key={target}>
+         <rendered.Content />
+       </TabItem>
+     ))}
+   </Tabs>
+ )}

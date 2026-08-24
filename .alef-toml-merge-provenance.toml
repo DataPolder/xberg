@@ -34,7 +34,6 @@ values = [
   "test_documents/**",
   "**/vendor/**",
   "**/Cargo.toml",
-  "docs-site/src/snippets/**",
   "docs-site/src/snippets-generated/**",
   "docs-site/src/snippets/**",
   "**/_generated/**",
@@ -72,7 +71,7 @@ values = [
 [[entries]]
 relative_path = "poly.toml"
 key_path = "fmt.markdown.rumdl.disable"
-values = ["MD012", "MD013", "MD024", "MD033", "MD036", "MD041", "MD046", "MD051", "MD076"]
+values = ["MD012", "MD013", "MD024", "MD033", "MD036", "MD041", "MD046", "MD051", "MD076", "MD025"]
 
 [[entries]]
 relative_path = "poly.toml"
@@ -103,7 +102,6 @@ values = [
   "test_documents/**",
   "**/vendor/**",
   "**/Cargo.toml",
-  "docs-site/src/snippets/**",
   "docs-site/src/snippets-generated/**",
   "docs-site/src/snippets/**",
   "**/_generated/**",
@@ -162,7 +160,6 @@ values = [
   "test_documents/**",
   "**/vendor/**",
   "**/Cargo.toml",
-  "docs-site/src/snippets/**",
   "docs-site/src/snippets-generated/**",
   "docs-site/src/snippets/**",
   "**/_generated/**",
@@ -221,7 +218,6 @@ values = [
   "test_documents/**",
   "**/vendor/**",
   "**/Cargo.toml",
-  "docs-site/src/snippets/**",
   "docs-site/src/snippets-generated/**",
   "docs-site/src/snippets/**",
   "**/_generated/**",

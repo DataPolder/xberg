@@ -17735,9 +17735,12 @@ sealed class XbergError with _$XbergError {
     required PlatformInt64 limitMs,
   }) = XbergError_Timeout;
 
-  /// The extraction was cancelled. Reachable today only via the REST async-jobs API
-  /// (`DELETE /jobs/{id}`); no binding exposes an in-process way to cancel an
-  /// extraction.
+  /// The extraction stopped after a cooperative cancellation request.
+  ///
+  /// Rust callers can request cancellation through
+  /// `CancellationToken`. The REST async-jobs API uses the
+  /// same mechanism. Generated language bindings do not currently expose
+  /// in-process cancellation.
   const factory XbergError.cancelled() = XbergError_Cancelled;
 
   /// A security policy was violated (e.g. zip bomb, oversized archive).
