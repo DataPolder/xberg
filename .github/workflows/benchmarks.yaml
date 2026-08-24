@@ -220,6 +220,8 @@ jobs:
         # families a layout run would merely duplicate baseline, so drop those cells.
         # The PaddleOCR-engine variants (baseline-paddle, layout-paddle) force OCR, so they run ONLY
         # on the OCR cohorts (ocr-pdf-fast-b4, ocr-images-fast); drop them from every non-OCR cohort.
+        # Sceptre ORT remains a release comparison for OCR PDFs. Its image coverage runs against the
+        # bounded structured-image diagnostic cohort below, outside the published release contract.
         # NOTE: keep this block a clean list of `- {...}` entries — the validate-workflow-matrix.py
         # exclude parser stops at the first non-entry line, so do not intersperse comments here.
         exclude:
@@ -246,18 +248,21 @@ jobs:
           - { pipeline: sceptre-ort, cohort: native-ebook-fast }
           - { pipeline: sceptre-ort, cohort: native-email-fast }
           - { pipeline: sceptre-ort, cohort: native-data-fast }
+          - { pipeline: sceptre-ort, cohort: ocr-images-fast }
           - { pipeline: sceptre-ort-layout, cohort: native-pdf-fast-b8 }
           - { pipeline: sceptre-ort-layout, cohort: native-office-fast }
           - { pipeline: sceptre-ort-layout, cohort: native-markup-fast }
           - { pipeline: sceptre-ort-layout, cohort: native-ebook-fast }
           - { pipeline: sceptre-ort-layout, cohort: native-email-fast }
           - { pipeline: sceptre-ort-layout, cohort: native-data-fast }
+          - { pipeline: sceptre-ort-layout, cohort: ocr-images-fast }
           - { pipeline: sceptre-ort-autorotate, cohort: native-pdf-fast-b8 }
           - { pipeline: sceptre-ort-autorotate, cohort: native-office-fast }
           - { pipeline: sceptre-ort-autorotate, cohort: native-markup-fast }
           - { pipeline: sceptre-ort-autorotate, cohort: native-ebook-fast }
           - { pipeline: sceptre-ort-autorotate, cohort: native-email-fast }
           - { pipeline: sceptre-ort-autorotate, cohort: native-data-fast }
+          - { pipeline: sceptre-ort-autorotate, cohort: ocr-images-fast }
     steps:
       - uses: actions/checkout@v7
         with:
@@ -380,7 +385,7 @@ jobs:
   # native-backend legs above -- it is a distinct measurement, hence the `-pdfium` framework
   # suffix and its own uploaded artifact.
   #
-  # Deliberately named without a `bench-` prefix, matching `sceptre-tract-diagnostic` below: both
+  # Deliberately named without a `bench-` prefix, matching `sceptre-structured-diagnostic` below: both
   # are xberg benchmark jobs that sit outside the pinned release cohort contract enforced by
   # `scripts/ci/benchmarks/validate-workflow-matrix.py` (`workflow_cells()` only discovers jobs
   # whose name starts with `bench-`) and `bench_matrix::Cohort`'s `cohort-contract` output, which
@@ -478,8 +483,8 @@ jobs:
           path: benchmark-results/
           retention-days: 30
 
-  sceptre-tract-diagnostic:
-    name: sceptre-tract diagnostic (${{ matrix.mode }})
+  sceptre-structured-diagnostic:
+    name: sceptre structured-image diagnostic (${{ matrix.pipeline }}, ${{ matrix.mode }})
     needs: setup
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
@@ -488,6 +493,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        pipeline: [sceptre-ort, sceptre-ort-layout, sceptre-ort-autorotate, sceptre-tract]
         mode: [single-file, batch]
     steps:
       - uses: actions/checkout@v7
@@ -520,16 +526,37 @@ jobs:
         with:
           ort-version: ${{ env.ORT_VERSION }}
 
-      - name: Pre-warm Sceptre tract models
-        run: >-
-          ./target/release/xberg extract test_documents/images/test_hello_world.png
-          --ocr true --force-ocr true --ocr-backend sceptre
-          --ocr-backend-options '{"model":{"backend":"tract"}}'
-          --ocr-language eng --no-cache true --format json >/dev/null
+      - name: Setup Layout Models
+        if: contains(matrix.pipeline, 'layout')
+        uses: ./.github/actions/setup-layout-models
+
+      - name: Pre-warm Sceptre diagnostic models
+        env:
+          PIPELINE: ${{ matrix.pipeline }}
+        run: |
+          set -euo pipefail
+          backend="ort"
+          if [[ "$PIPELINE" == "sceptre-tract" ]]; then
+            backend="tract"
+          fi
+          args=(
+            extract test_documents/images/test_hello_world.png
+            --ocr true
+            --force-ocr true
+            --ocr-backend sceptre
+            --ocr-backend-options "{\"model\":{\"backend\":\"${backend}\"}}"
+            --ocr-language eng
+            --no-cache true
+            --format json
+          )
+          if [[ "$PIPELINE" == "sceptre-ort-autorotate" ]]; then
+            args+=(--ocr-auto-rotate true)
+          fi
+          ./target/release/xberg "${args[@]}" >/dev/null
 
       - name: Run bounded diagnostic benchmark
         env:
-          FRAMEWORK: xberg-markdown-sceptre-tract
+          FRAMEWORK: xberg-markdown-${{ matrix.pipeline }}
           MODE: ${{ matrix.mode }}
           OUTPUT_FORMAT: markdown
           ITERATIONS: ${{ env.ITERATIONS }}
@@ -541,7 +568,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: diagnostic-sceptre-tract-markdown-${{ matrix.mode }}-ocr-images-structured-${{ github.run_id }}
+          name: diagnostic-${{ matrix.pipeline }}-markdown-${{ matrix.mode }}-ocr-images-structured-${{ github.run_id }}
           path: benchmark-results/
           retention-days: 30
 

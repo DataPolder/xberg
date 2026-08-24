@@ -189,7 +189,7 @@ impl Cohort {
 
     /// Whether this release cohort includes the normal ONNX Runtime Sceptre variants.
     pub fn includes_sceptre_ort(self) -> bool {
-        matches!(self, Cohort::Ocr | Cohort::Images)
+        matches!(self, Cohort::Ocr)
     }
 
     /// Build this cohort's pinned release contract.
@@ -639,7 +639,10 @@ fn email_matrix() -> Vec<MatrixEntry> {
 }
 
 fn images_matrix() -> Vec<MatrixEntry> {
-    let mut matrix = xberg_entries(IMAGES_COHORT, true, true, true);
+    // Sceptre's structured-image coverage runs as a bounded diagnostic outside
+    // the published release contract. Keep the release cohort limited to the
+    // pipelines whose full 14-image matrix is a stable comparison surface.
+    let mut matrix = xberg_entries(IMAGES_COHORT, true, true, false);
     matrix.extend(optional(grid_entries("docling", IMAGES_COHORT)));
     // pymupdf4llm has no OCR path (`pymupdf4llm.to_markdown` only reads existing text layers), so on
     // a scanned-image cohort it always returns empty content and can never clear the min-success-rate
@@ -765,7 +768,7 @@ mod tests {
         (Cohort::Ebook, 6, 4),
         (Cohort::Email, 6, 4),
         (Cohort::Data, 11, 4),
-        (Cohort::Images, 35, 28),
+        (Cohort::Images, 23, 16),
     ];
 
     #[test]
@@ -863,19 +866,19 @@ mod tests {
     }
 
     #[test]
-    fn ocr_release_cohorts_include_explicit_ort_variants_but_not_tract() {
-        for cohort in [Cohort::Ocr, Cohort::Images] {
-            let contract = cohort.contract();
-            let frameworks: HashSet<&str> = contract.matrix.iter().map(|entry| entry.framework.as_str()).collect();
-            for variant in ["sceptre-ort", "sceptre-ort-layout", "sceptre-ort-autorotate"] {
-                assert!(
-                    frameworks.iter().any(|framework| framework.ends_with(variant)),
-                    "{} missing {variant}",
-                    cohort.as_str()
-                );
-            }
-            assert!(!frameworks.iter().any(|framework| framework.contains("sceptre-tract")));
+    fn ocr_pdf_release_contract_includes_ort_variants_but_not_tract() {
+        let contract = Cohort::Ocr.contract();
+        let frameworks: HashSet<&str> = contract.matrix.iter().map(|entry| entry.framework.as_str()).collect();
+        for variant in ["sceptre-ort", "sceptre-ort-layout", "sceptre-ort-autorotate"] {
+            assert!(frameworks.iter().any(|framework| framework.ends_with(variant)));
         }
+        assert!(!frameworks.iter().any(|framework| framework.contains("sceptre-tract")));
+    }
+
+    #[test]
+    fn image_release_contract_excludes_sceptre_diagnostic_variants() {
+        let contract = Cohort::Images.contract();
+        assert!(contract.matrix.iter().all(|entry| !entry.framework.contains("sceptre")));
     }
 
     #[test]

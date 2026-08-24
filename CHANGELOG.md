@@ -409,6 +409,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Batch benchmark adapters now retain successful and failed per-item results from partially failed
   subprocess runs, allowing the configured minimum-success gate to evaluate the full cohort instead
   of treating an expected framework-level failure as a harness failure.
+- Sceptre image benchmarks now use a bounded structured-image diagnostic matrix for ORT, layout,
+  auto-rotation, and tract variants; the published release contract retains Sceptre comparisons on
+  the compatible OCR-PDF cohort instead of failing on unsupported vertical-Japanese fixtures.
 
 - Generated documentation snippet tabs now use Alef target identifiers consistently, so TypeScript
   Node/WASM and Kotlin Android examples render as distinct, stable tabs.

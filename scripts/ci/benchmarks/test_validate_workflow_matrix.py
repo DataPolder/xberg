@@ -17,9 +17,9 @@ class TestWorkflowMatrixValidation(unittest.TestCase):
     def test_expands_every_exact_contract_cell_once(self) -> None:
         cells = VALIDATOR.workflow_cells(WORKFLOW)
 
-        assert len(cells) == 140
-        assert len({VALIDATOR.cell_key(cell) for cell in cells}) == 140
-        assert sum(not cell["optional"] for cell in cells) == 104
+        assert len(cells) == 128
+        assert len({VALIDATOR.cell_key(cell) for cell in cells}) == 128
+        assert sum(not cell["optional"] for cell in cells) == 92
 
     def test_framework_env_drift_changes_cell_even_when_artifact_name_is_unchanged(self) -> None:
         mutated = WORKFLOW.replace("FRAMEWORK: docling", "FRAMEWORK: docling-wrong", 1)
