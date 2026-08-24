@@ -4055,10 +4055,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(results.len(), 3);
-        assert_eq!(results[0].success, true);
+        assert!(results[0].success);
         assert_eq!(results[0].error_message, None);
         assert_eq!(results[0].error_kind, ErrorKind::None);
-        assert_eq!(results[1].success, false);
+        assert!(!results[1].success);
         assert_eq!(
             results[1].error_message.as_deref(),
             Some(
@@ -4066,7 +4066,7 @@ mod tests {
             )
         );
         assert_eq!(results[1].error_kind, ErrorKind::HarnessError);
-        assert_eq!(results[2].success, false);
+        assert!(!results[2].success);
         assert_eq!(results[2].error_message.as_deref(), Some("explicit item error"));
         assert_eq!(results[2].error_kind, ErrorKind::FrameworkError);
     }
