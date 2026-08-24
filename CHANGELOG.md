@@ -445,6 +445,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - EPUB members declared in a non-UTF-8 encoding or written in UTF-16 are decoded instead of skipped,
   and books with DRM listed in `META-INF/encryption.xml` report one warning instead of blaming the
   encoding or emitting ciphertext as text (#1494).
+- Narrow Rust feature builds no longer compile the API/MCP request-security validator when neither
+  server feature is enabled, preventing dead-code warnings from failing warnings-as-errors builds.
 - Benchmark Tesseract cache isolation now preserves automatic page-segmentation and sparse-image
   fallback behavior, preventing valid receipt OCR from being reclassified as zero-overlap output.
 - Windows Ruby gem builds now keep MSVC-only C++ flags out of the MinGW toolchain when compiling
