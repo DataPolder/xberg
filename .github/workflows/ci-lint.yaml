@@ -339,6 +339,16 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
+      # The rust validator compiles its snippets against xberg, which reaches
+      # heic -> xberg-libheif -> libheif-sys. That build script shells out to
+      # `pkg-config libheif >= 1.21` and Ubuntu Noble ships only 1.17.6, so every
+      # one of the 91 rust snippets failed with `The system library libheif
+      # required by crate libheif-sys was not found` -- one build-script failure
+      # attributed to all 91. This action builds and caches libheif 1.23.0 into
+      # /usr/local with its .pc file, and is the same remedy the `validate` job
+      # below applies via the reusable workflow's `install-system-deps`. ~keep
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
       # `task docs:snippets:all` (audit + gaps + syntax-validate) is described
       # as the "canonical docs:snippets gate" in .task/tools/docs.yml, but
       # nothing invoked it -- a broken or orphaned snippet could land
