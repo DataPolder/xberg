@@ -107,10 +107,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through it. The read-only XFA analysis it contained is retained. Tests that had built their
   fixtures by writing a PDF now use committed fixture bytes instead.
 
-## [1.1.0] - 2026-08-21
+## [1.1.0] - Unreleased
 
 ### Added
 
+- Rust callers can open a `PdfRenderSession` once, query its page count, and render arbitrary pages
+  without reparsing or reauthenticating the PDF for each page. The native PDF engine remains an
+  implementation detail, and the existing one-shot rendering helpers are unchanged (#1485).
+- The new `tesseract-dynamic` Cargo feature lets `ocr` link host-provided Tesseract and Leptonica
+  without fetching or compiling vendored sources, providing the native dependency path required by
+  network-isolated and distribution-package builds (#1407).
+- Rust callers can now cooperatively cancel extraction through
+  `CancellationToken::{new, cancel, is_cancelled}` and `ExtractionConfig::cancel_token`. Pre-cancelled
+  single and batch requests stop before cache lookup or extractor dispatch (#1476).
 - `task verify:feature-parity` checks that each per-target Cargo feature aggregate still carries
   every code-bearing feature its superset does. `windows-target` is hand-maintained, the only
   Windows CI job proves it compiles rather than that it is complete, and nothing correlated it with
@@ -314,6 +323,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The CLI `all` feature now includes audio transcription, matching the Rust crate's full capability
+  set. Transcription remains opt-in for default and minimal CLI builds because it adds the
+  Whisper/ONNX Runtime inference stack.
+- Alef now parity-checks the generated documentation snippet corpus while separately
+  compile-validating curated operational examples. Summarization, quickstart batch extraction, and
+  plugin-registry management examples now render from generated cross-language snippet groups,
+  while operational recipes and full custom-plugin implementations remain curated for readability.
+
 - Repinned to alef 0.65.0 and regenerated every binding. Picks up `is_empty` fixes across
   Swift/Elixir/Dart/Kotlin/Java, TypeScript/node internally-tagged enum nesting, C/doc-snippet
   optional-argument sentinel selection, pyo3 snippet imports and streaming stub signatures, C#
@@ -443,6 +460,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   coordinate space: pixels of the rendered page image at the OCR render DPI (base 150, reduced
   automatically for very large pages), not the previously claimed 300 DPI (#1385).
 
+- Clarified that `StructuredInput::{page_count, text_coverage, embedded_image_count}` and
+  `StructuredThresholds::{scan_max_coverage, digital_min_coverage}` are Rust-only extension
+  signals for custom `StructuredPolicy` implementations. The built-in `choose_call_mode` policy
+  intentionally ignores them and keeps PDF routing text-first (#1472).
+
 ### Removed
 
 - The unused batch and object-pooling stacks: `BatchProcessor`, `batch_optimizations`,
@@ -457,13 +479,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixtures by writing a PDF now use committed fixture bytes instead.
 
 - **Breaking (bindings):** `ExtractedDocument.formatted_content` / `formattedContent` is no longer
-  exposed by any language binding (Python, Node, Ruby, PHP, Go, Java, C#, Elixir, Dart, Swift,
-  Kotlin, Zig, WASM, C FFI), and the C symbol `xberg_extracted_document_formatted_content` is gone.
-  The field is pipeline-internal scratch space: `apply_output_format` moves it into `content` as the
-  last pipeline step, so every document a binding could ever observe carried `null` there. Read the
-  rendering from `content` — it is already in the configured `output_format`. The field remains
-  `pub` on the Rust type, where extractor and post-processor plugins legitimately use it.
-
   exposed by any language binding (Python, Node, Ruby, PHP, Go, Java, C#, Elixir, Dart, Swift,
   Kotlin, Zig, WASM, C FFI), and the C symbol `xberg_extracted_document_formatted_content` is gone.
   The field is pipeline-internal scratch space: `apply_output_format` moves it into `content` as the
@@ -497,6 +512,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so no C, Swift, Go or Zig consumer can have been calling them.
 
 ### Fixed
+
+- Benchmark Tesseract cache isolation now preserves automatic page-segmentation and sparse-image
+  fallback behavior, preventing valid receipt OCR from being reclassified as zero-overlap output.
+- Windows Ruby gem builds now keep MSVC-only C++ flags out of the MinGW toolchain when compiling
+  the vendored WordPerfect extractor.
+- Dense two-column PDF pages with repeated hanging clause numbers now keep the detected gutter to
+  the left of the number band, preventing numbered lines from being misclassified as furniture and
+  emitted in interleaved row order (#1484).
+- Windows Python wheel vendoring now reports an explicit successful exit code after repacking,
+  preventing stale native-command status from failing wheel smoke tests and release builds.
+- Kept adjacent PDF text runs on one baseline together across modest font-size changes, preventing
+  chapter numbers from being detached from their headings and later dropped as page furniture
+  (#1482).
+- Batch benchmark adapters now retain successful and failed per-item results from partially failed
+  subprocess runs, preserve process-level timeout/crash errors on implicit failures, and let the
+  configured minimum-success gate evaluate the full cohort instead of treating an expected
+  framework-level failure as a harness failure.
+- Sceptre image benchmarks now use a bounded structured-image diagnostic matrix for ORT, layout,
+  auto-rotation, and tract variants; the published release contract retains Sceptre comparisons on
+  the compatible OCR-PDF cohort instead of failing on unsupported vertical-Japanese fixtures.
+- Aligned Go, Java, C#, and Zig code generation with the desktop C-FFI feature set, preventing
+  cfg-gated formats and result variants from disappearing from host bindings while remaining
+  present in the linked native library. Desktop FFI now includes the advertised Sceptre backend,
+  and Kotlin Android generation follows the explicit no-ORT `android-target` surface.
+- Kotlin Android development builds now use the debug-only Gradle assembly task, avoiding release
+  native-library validation before Android ABI artifacts have been staged.
+
+- Generated documentation snippet tabs now use Alef target identifiers consistently, so TypeScript
+  Node/WASM and Kotlin Android examples render as distinct, stable tabs.
+
+- Made the CLI container image-size gate compare exact bytes and report the same boundary it
+  enforces, avoiding contradictory rounded 200 MiB pass/fail results in Docker CI.
+
+- Skipped image-level OCR for page-sized PDF XObjects when that page already has extracted text,
+  avoiding duplicate OCR work and repeated page content while keeping empty pages eligible (#1479).
+- Allowed bounded high-ratio PDF streams below 32 MiB so legitimate 300-dpi RGB page scans are
+  not rejected as decompression bombs; the 100 MiB absolute cap and larger-stream ratio guard
+  remain enforced (#1470).
+- Decoded CCITT image XObjects into 8-bit grayscale samples before exposing `PdfImage::data`,
+  while preserving codec metadata and image polarity (#1470).
+- Clamped deeply nested XML heading levels before narrowing the depth value, preventing invalid
+  heading levels or debug-build panics before configured security limits apply (#1474).
+- Fixed EPUB packaging XML parsing to count actual OPF nesting depth and safely accept legacy DTD
+  declarations without resolving external or amplified entities (#1477, #1478).
+- Preserved named and numeric XML references in PDF XMP scalar and sequence metadata instead of
+  dropping text fragments split around entity boundaries (#1475).
 
 - The musl smoke-test images (C#, Java, Node, Elixir) now bundle the FULL transitive shared-lib
   closure of the vendored ONNX Runtime, not a hand-picked allowlist. `libonnxruntime.so.1` on
@@ -1286,6 +1347,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- REST and MCP extraction requests can no longer override LLM credentials, provider registrations,
+  custom endpoints, headers, environment loading, or managed credential providers. Validation covers
+  request-level and per-input configurations before trusted server defaults are merged, while Rust
+  embedders and operator-owned server configuration retain the full `LlmConfig` surface. The async
+  REST path now also applies the same local-file URI restrictions as the synchronous path.
 - `biblib` moves from the exact pin `=0.4.3` to `0.8`, taking the citation parser off `quick-xml`
   0.37 and onto 0.41. That clears RUSTSEC-2026-0194 (quadratic duplicate-attribute checking) and
   RUSTSEC-2026-0195 (unbounded namespace-declaration allocation), both scored 7.5, which reached
@@ -1294,12 +1360,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matching is now unconditional `regex-lite` — and its RIS parser keeps records that earlier
   versions rejected, so RIS input that used to fail to parse now yields a citation.
 
-  0.37 and onto 0.41. That clears RUSTSEC-2026-0194 (quadratic duplicate-attribute checking) and
-  RUSTSEC-2026-0195 (unbounded namespace-declaration allocation), both scored 7.5, which reached
-  every downstream consumer of the `office` feature. The old pin existed because biblib 0.4.4 called
-  a `quick-xml` API that had been removed; 0.8 no longer does. Its `regex` feature is gone —
-  matching is now unconditional `regex-lite` — and its RIS parser keeps records that earlier
-  versions rejected, so RIS input that used to fail to parse now yields a citation.
 - Zip-bomb accounting no longer overflows or skips entries. Declared entry sizes are read from the
   central directory, where a ZIP64 extended field can carry a full eight-byte value, and were summed
   with an unchecked addition, so two crafted entries could wrap the accumulator to zero and pass a
@@ -1330,9 +1390,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - The `Cancelled` error variants no longer document a cancellation API that callers cannot reach.
-  Nothing in any language binding can construct or fire a cancellation token; the only way to
-  cancel an extraction in progress is the REST async-jobs API (`DELETE /jobs/{id}`).
-
   Nothing in any language binding can construct or fire a cancellation token; the only way to
   cancel an extraction in progress is the REST async-jobs API (`DELETE /jobs/{id}`).
 
