@@ -3,6 +3,7 @@ title: "Quick Start"
 ---
 
 import { Tabs, TabItem } from "@astrojs/starlight/components";
+import ApiSnippetGroup from "../../../components/ApiSnippetGroup.astro";
 import { Content as Snip_c_api_extract } from "../../../snippets/c/api/extract.md";
 import { Content as Snip_csharp_extract } from "../../../snippets/csharp/extract.md";
 import { Content as Snip_dart_api_extract } from "../../../snippets/dart/api/extract.md";
@@ -47,20 +48,6 @@ import { Content as Snip_typescript_ocr_ocr_extraction } from "../../../snippets
 import { Content as Snip_wasm_ocr_ocr_extraction } from "../../../snippets/wasm/ocr/ocr_extraction.md";
 import { Content as Snip_zig_ocr_ocr_extraction } from "../../../snippets/zig/ocr/ocr_extraction.md";
 import { Content as Snip_cli_ocr_basic } from "../../../snippets/cli/ocr_basic.md";
-import { Content as Snip_c_api_extract_batch } from "../../../snippets/c/api/extract_batch.md";
-import { Content as Snip_csharp_extract_batch } from "../../../snippets/csharp/extract_batch.md";
-import { Content as Snip_dart_api_extract_batch } from "../../../snippets/dart/api/extract_batch.md";
-import { Content as Snip_go_api_extract_batch } from "../../../snippets/go/api/extract_batch.md";
-import { Content as Snip_java_api_extract_batch } from "../../../snippets/java/api/extract_batch.md";
-import { Content as Snip_kotlin_api_extract_batch } from "../../../snippets/kotlin/api/extract_batch.md";
-import { Content as Snip_python_api_extract_batch } from "../../../snippets/python/api/extract_batch.md";
-import { Content as Snip_ruby_api_extract_batch } from "../../../snippets/ruby/api/extract_batch.md";
-import { Content as Snip_rust_api_extract_batch } from "../../../snippets/rust/api/extract_batch.md";
-import { Content as Snip_swift_api_extract_batch } from "../../../snippets/swift/api/extract_batch.md";
-import { Content as Snip_elixir_core_extract_batch_exs } from "../../../snippets/elixir/core/extract_batch.md";
-import { Content as Snip_typescript_getting_started_extract_batch } from "../../../snippets/typescript/getting-started/extract_batch.md";
-import { Content as Snip_wasm_getting_started_extract_batch } from "../../../snippets/wasm/getting-started/extract_batch.md";
-import { Content as Snip_zig_api_extract_batch } from "../../../snippets/zig/api/extract_batch.md";
 import { Content as Snip_cli_batch_basic } from "../../../snippets/cli/batch_basic.md";
 import { Content as Snip_c_metadata_metadata } from "../../../snippets/c/metadata/metadata.md";
 import { Content as Snip_csharp_metadata } from "../../../snippets/csharp/metadata.md";
@@ -343,86 +330,14 @@ You can also force OCR on any document:
 
 ## Process Multiple Inputs
 
-Pass a list of `ExtractInput` values to `extract_batch`. Mix `kind = "uri"` and
-`kind = "bytes"` inputs when needed:
+Pass a list of document URIs to `extract_batch`. Use `extract_batch_bytes` for in-memory data;
+`ExtractInput` variants can combine URI and byte inputs when a binding exposes the unified API.
 
-<Tabs syncKey="lang">
-<TabItem label="C">
+<ApiSnippetGroup topic="batch/extract_batch_uri_basic" />
 
-<Snip_c_api_extract_batch />
-
-</TabItem>
-<TabItem label="C#">
-
-<Snip_csharp_extract_batch />
-
-</TabItem>
-<TabItem label="Dart">
-
-<Snip_dart_api_extract_batch />
-
-</TabItem>
-<TabItem label="Go">
-
-<Snip_go_api_extract_batch />
-
-</TabItem>
-<TabItem label="Java">
-
-<Snip_java_api_extract_batch />
-
-</TabItem>
-<TabItem label="Kotlin">
-
-<Snip_kotlin_api_extract_batch />
-
-</TabItem>
-<TabItem label="Python">
-
-<Snip_python_api_extract_batch />
-
-</TabItem>
-<TabItem label="Ruby">
-
-<Snip_ruby_api_extract_batch />
-
-</TabItem>
-<TabItem label="Rust">
-
-<Snip_rust_api_extract_batch />
-
-</TabItem>
-<TabItem label="Swift">
-
-<Snip_swift_api_extract_batch />
-
-</TabItem>
-<TabItem label="Elixir">
-
-<Snip_elixir_core_extract_batch_exs />
-
-</TabItem>
-<TabItem label="TypeScript">
-
-<Snip_typescript_getting_started_extract_batch />
-
-</TabItem>
-<TabItem label="Wasm">
-
-<Snip_wasm_getting_started_extract_batch />
-
-</TabItem>
-<TabItem label="Zig">
-
-<Snip_zig_api_extract_batch />
-
-</TabItem>
-<TabItem label="CLI">
+For command-line batches:
 
 <Snip_cli_batch_basic />
-
-</TabItem>
-</Tabs>
 
 ## Read Document Metadata
 
