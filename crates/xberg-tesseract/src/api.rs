@@ -2065,40 +2065,71 @@ mod live_engine_tests {
     /// corrupted the engine's own `Mutex` and killed the process on `Drop`
     /// (SIGSEGV on Linux, SIGBUS on macOS). Reading a variable back after flipping it
     /// pins both halves: the value must be the one that was set, not the constant
-    /// "this variable exists". ~keep
+    /// "this variable exists".
+    ///
+    /// Tesseract's parameter vectors are populated by the `TessBaseAPI` constructor, so
+    /// every assertion below holds on an engine that was never `init`ed. That matters:
+    /// gating this test on loadable `eng` tessdata made it exit before its first
+    /// assertion on any machine without a trained-data file, which is the one way it
+    /// could pass while the bug was present. ~keep
     #[test]
     fn get_variable_accessors_return_the_stored_value() {
+        /// `set_variable` writes a decimal string; the parsed double must round-trip
+        /// exactly, so this only absorbs a formatting difference, never a wrong value. ~keep
+        const DOUBLE_TOLERANCE: f64 = 1e-12;
+        const EXPECTED_INT: i32 = 17;
+        const EXPECTED_DOUBLE: f64 = 0.5;
+
         let api = TesseractAPI::new().expect("create engine");
-        if api.init("", "eng").is_err() {
-            return; // no "eng" tessdata available in this environment
-        }
 
+        // A bool variable must track both states. The pre-fix code returned the C
+        // "this variable exists" flag, which is 1 for both, so only the `false` leg
+        // distinguishes a real read from that constant. ~keep
         api.set_variable("hocr_font_info", "1").expect("set hocr_font_info");
-        assert!(api.get_bool_variable("hocr_font_info").expect("read hocr_font_info"));
+        assert!(
+            api.get_bool_variable("hocr_font_info").expect("read hocr_font_info"),
+            "hocr_font_info was set to 1 and must read back as true"
+        );
         api.set_variable("hocr_font_info", "0").expect("clear hocr_font_info");
-        assert!(!api.get_bool_variable("hocr_font_info").expect("read hocr_font_info"));
+        assert!(
+            !api.get_bool_variable("hocr_font_info").expect("read hocr_font_info"),
+            "hocr_font_info was set to 0 and must read back as false, not the existence flag"
+        );
 
-        api.set_variable("edges_max_children_per_outline", "17")
+        // 17 is neither 0 nor 1, so it cannot be confused with the existence flag. ~keep
+        api.set_variable("edges_max_children_per_outline", &EXPECTED_INT.to_string())
             .expect("set int variable");
         assert_eq!(
             api.get_int_variable("edges_max_children_per_outline")
                 .expect("read int variable"),
-            17
+            EXPECTED_INT,
+            "the int accessor must yield the stored value, not the existence flag"
         );
 
-        api.set_variable("classify_min_slope", "0.5")
+        api.set_variable("classify_min_slope", &EXPECTED_DOUBLE.to_string())
             .expect("set double variable");
+        let read_double = api
+            .get_double_variable("classify_min_slope")
+            .expect("read double variable");
         assert!(
-            (api.get_double_variable("classify_min_slope")
-                .expect("read double variable")
-                - 0.5)
-                .abs()
-                < f64::EPSILON
+            (read_double - EXPECTED_DOUBLE).abs() < DOUBLE_TOLERANCE,
+            "the double accessor must yield {EXPECTED_DOUBLE}, got {read_double}"
         );
 
+        // An absent variable has no value to report, so each accessor must surface the
+        // miss rather than hand back a default that reads as real data. ~keep
+        let missing = "xberg_no_such_tesseract_variable";
         assert!(
-            api.get_bool_variable("xberg_no_such_tesseract_variable").is_err(),
-            "an unknown variable must be reported as an error, not silently defaulted"
+            matches!(api.get_bool_variable(missing), Err(TesseractError::GetVariableError)),
+            "an unknown bool variable must be GetVariableError, not a silent default"
+        );
+        assert!(
+            matches!(api.get_int_variable(missing), Err(TesseractError::GetVariableError)),
+            "an unknown int variable must be GetVariableError, not a silent default"
+        );
+        assert!(
+            matches!(api.get_double_variable(missing), Err(TesseractError::GetVariableError)),
+            "an unknown double variable must be GetVariableError, not a silent default"
         );
     }
 }
