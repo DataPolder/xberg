@@ -1541,6 +1541,7 @@ const PARAGRAPH_GAP_HEIGHT_FACTOR: f32 = 1.5;
 const PARAGRAPH_BREAK_LEADING_MULTIPLE: f32 = 1.5;
 const INLINE_STYLE_BASELINE_TOLERANCE: f32 = 0.5;
 const INLINE_STYLE_MAX_FORWARD_GAP_FONT_FACTOR: f32 = 1.0;
+const INLINE_FONT_SIZE_MAX_FORWARD_GAP_FONT_FACTOR: f32 = 1.5;
 const INLINE_STYLE_MAX_OVERLAP_FONT_FACTOR: f32 = 0.15;
 
 /// Multiple of font size within which two consecutive lines' right edges must
@@ -1718,10 +1719,21 @@ fn blocks_to_paragraphs(
             false
         } else {
             let prev = current_lines.last().unwrap();
-            let font_change = (line.font_size - prev.font_size).abs() > 1.5;
+            let font_change = (line.font_size - prev.font_size).abs() > 1.5
+                && !is_inline_style_transition(
+                    current_is_single_visual_line,
+                    prev,
+                    line,
+                    INLINE_FONT_SIZE_MAX_FORWARD_GAP_FONT_FACTOR,
+                );
             let role_change = line.assigned_role != prev.assigned_role;
-            let bold_change =
-                line.is_bold != prev.is_bold && !is_inline_style_transition(current_is_single_visual_line, prev, line);
+            let bold_change = line.is_bold != prev.is_bold
+                && !is_inline_style_transition(
+                    current_is_single_visual_line,
+                    prev,
+                    line,
+                    INLINE_STYLE_MAX_FORWARD_GAP_FONT_FACTOR,
+                );
             let rotation_change = !line.has_same_rotation(prev);
             let starts_new_line = rotation_change
                 || (line.upright_baseline() - prev.upright_baseline()).abs() > INLINE_STYLE_BASELINE_TOLERANCE;
@@ -1814,7 +1826,12 @@ fn blocks_to_paragraphs(
 ///
 /// PDF glyph runs can overlap slightly because of font metrics. Larger
 /// overlaps, reverse ordering, and wide gaps remain structural boundaries.
-fn is_inline_style_transition(current_is_single_visual_line: bool, previous: &SegmentData, next: &SegmentData) -> bool {
+fn is_inline_style_transition(
+    current_is_single_visual_line: bool,
+    previous: &SegmentData,
+    next: &SegmentData,
+    max_forward_gap_font_factor: f32,
+) -> bool {
     if !current_is_single_visual_line
         || previous.is_monospace
         || next.is_monospace
@@ -1850,7 +1867,7 @@ fn is_inline_style_transition(current_is_single_visual_line: bool, previous: &Se
     let advance_gap = next_start - previous_end;
     next_start >= previous_start
         && advance_gap >= -(font_size * INLINE_STYLE_MAX_OVERLAP_FONT_FACTOR)
-        && advance_gap <= font_size * INLINE_STYLE_MAX_FORWARD_GAP_FONT_FACTOR
+        && advance_gap <= font_size * max_forward_gap_font_factor
 }
 
 /// Whether `line` reads as the wrapped continuation of the numbered-heading
@@ -7299,6 +7316,46 @@ mod tests {
             .expect("inline bold annotation should be preserved");
         assert_eq!(element.text, "plain bold tail");
         assert_eq!((bold.start, bold.end), (6, 10));
+    }
+
+    #[test]
+    fn same_baseline_font_size_transition_stays_in_one_paragraph() {
+        let mut chapter_number = inline_seg("13.", 28.35, 803.043, false);
+        chapter_number.width = 17.58;
+        chapter_number.font_size = 14.0;
+        let mut title = inline_seg("Productkaart vlgs. bijlage IV", 64.35, 803.043, false);
+        title.width = 248.03;
+
+        let paragraphs = blocks_to_paragraphs(vec![chapter_number, title], &[], &[]);
+
+        assert_eq!(paragraphs.len(), 1);
+        assert_eq!(paragraph_text(&paragraphs[0]), "13. Productkaart vlgs. bijlage IV");
+    }
+
+    #[test]
+    fn distant_same_baseline_font_size_transition_remains_a_boundary() {
+        let mut heading = inline_seg("Heading", 10.0, 100.0, false);
+        heading.font_size = 14.0;
+        let body = inline_seg("body", 100.0, 100.0, false);
+
+        let paragraphs = blocks_to_paragraphs(vec![heading, body], &[], &[]);
+
+        assert_eq!(paragraphs.len(), 2);
+        assert_eq!(paragraph_text(&paragraphs[0]), "Heading");
+        assert_eq!(paragraph_text(&paragraphs[1]), "body");
+    }
+
+    #[test]
+    fn different_baseline_font_size_transition_remains_a_boundary() {
+        let mut heading = inline_seg("Heading", 10.0, 100.0, false);
+        heading.font_size = 14.0;
+        let body = inline_seg("body", 10.0, 80.0, false);
+
+        let paragraphs = blocks_to_paragraphs(vec![heading, body], &[], &[]);
+
+        assert_eq!(paragraphs.len(), 2);
+        assert_eq!(paragraph_text(&paragraphs[0]), "Heading");
+        assert_eq!(paragraph_text(&paragraphs[1]), "body");
     }
 
     #[test]

@@ -406,6 +406,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Kept adjacent PDF text runs on one baseline together across modest font-size changes, preventing
+  chapter numbers from being detached from their headings and later dropped as page furniture
+  (#1482).
 - Batch benchmark adapters now retain successful and failed per-item results from partially failed
   subprocess runs, preserve process-level timeout/crash errors on implicit failures, and let the
   configured minimum-success gate evaluate the full cohort instead of treating an expected
