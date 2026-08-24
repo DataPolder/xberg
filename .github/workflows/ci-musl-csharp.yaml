@@ -16,7 +16,7 @@ name: CI Musl C# Native
 # backstop against Alpine package drift the path filter cannot see.
 on:
   push:
-    branches: [main]
+    branches: [main, chore/alef-fixes]
     paths: &musl-csharp-paths
       - "docker/Dockerfile.musl-ffi"
       - "scripts/ci/smoke-test-musl-csharp-ffi.sh"

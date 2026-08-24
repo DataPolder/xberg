@@ -3562,6 +3562,14 @@ fn transform_ocr_elements_to_render_space(
 /// heading heuristic back toward today's behavior for that call path only; the
 /// ratio-based term, which dominates in practice, is scale-invariant and unaffected.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+// Both readers are the OCR-document assembly blocks in `extract_with_ocr_for_page` -- one
+// gated on `layout-detection` *with* `ocr`/`ocr-wasm`, the other on `not(layout-detection)`.
+// `layout-detection` without either OCR frontend (the `formula-recognition,pdf` CI leg)
+// compiles both out while `ocr-pipeline` still brings this function in. ~keep
+#[cfg_attr(
+    all(feature = "layout-detection", not(feature = "ocr"), not(feature = "ocr-wasm")),
+    allow(dead_code)
+)]
 fn ocr_points_per_pixel(
     #[cfg(feature = "pdf")] lazy_pdf_render_state: Option<&(xberg_native_pdf::PdfDocument, usize, Vec<u32>)>,
     page_idx: usize,
@@ -4052,6 +4060,11 @@ async fn extract_with_ocr_for_page(
     use image::ImageEncoder;
     use image::codecs::png::PngEncoder;
     use std::io::Cursor;
+
+    // Same slice as `ocr_points_per_pixel`'s suppression above: the only two readers of
+    // `points_per_pixel_override` are compiled out, but every caller still passes it. ~keep
+    #[cfg(all(feature = "layout-detection", not(feature = "ocr"), not(feature = "ocr-wasm")))]
+    let _ = points_per_pixel_override;
 
     let default_ocr_config = crate::core::config::OcrConfig::default();
     let base_ocr_config = config.ocr.as_ref().unwrap_or(&default_ocr_config);
@@ -5984,12 +5997,12 @@ mod tests {
         };
         let mut result = crate::types::ExtractedDocument {
             tables: vec![crate::types::Table {
-                bounding_box: Some(region.clone()),
+                bounding_box: Some(region),
                 ..Default::default()
             }],
             formulas: vec![crate::types::Formula {
                 latex: "x^2".to_string(),
-                bbox: Some(region.clone()),
+                bbox: Some(region),
                 page: Some(1),
             }],
             ..Default::default()
@@ -5999,11 +6012,9 @@ mod tests {
 
         let table_bbox = result.tables[0]
             .bounding_box
-            .clone()
             .expect("the table bbox must survive the correction");
         let formula_bbox = result.formulas[0]
             .bbox
-            .clone()
             .expect("the formula bbox must survive the correction");
 
         assert_ne!(
@@ -12322,7 +12333,7 @@ Name: ___
 mod recognition_noise_tests {
     use super::{
         NativeTextStats, accept_or_reject_ocr_page, is_dictionary_invalid_noise, is_ocr_recognition_noise,
-        ocr_output_stats, repair_ocr_list_markers,
+        repair_ocr_list_markers,
     };
     use crate::core::config::OcrQualityThresholds;
 
@@ -12483,9 +12494,8 @@ approval of the rezoning request; and";
             stats.word_count >= thresholds.min_words_for_ocr_output_check,
             "fixture must clear the word-count guard so the ratio is what is tested"
         );
-        assert_eq!(
-            is_ocr_recognition_noise(transcript_page, &thresholds),
-            false,
+        assert!(
+            !is_ocr_recognition_noise(transcript_page, &thresholds),
             "a transcript's dividers and line numbers must not read as fragmented words"
         );
     }
@@ -12506,9 +12516,8 @@ approval of the rezoning request; and";
             stats.word_count >= thresholds.min_words_for_ocr_output_check,
             "fixture must clear the word-count guard so the ratio is what is tested"
         );
-        assert_eq!(
+        assert!(
             is_ocr_recognition_noise(diagram_noise, &thresholds),
-            true,
             "genuine alphabetic-fragment noise must still be vetoed"
         );
     }

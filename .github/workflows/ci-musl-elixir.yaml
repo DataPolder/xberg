@@ -18,7 +18,7 @@ name: CI Musl Elixir NIF
 # backstop against Alpine package drift the path filter cannot see.
 on:
   push:
-    branches: [main]
+    branches: [main, chore/alef-fixes]
     paths: &musl-elixir-paths
       - "docker/Dockerfile.musl-rustler"
       - "scripts/ci/smoke-test-musl-elixir-nif.sh"
@@ -84,4 +84,4 @@ jobs:
       # continue-on-error: a broken NIF must fail this job, not merely warn.
       - name: Smoke-test musl Elixir NIF (real extraction, not just load)
         run: |
-          bash scripts/ci/smoke-test-musl-elixir-nif.sh build-output/libxberg_nif.so
+          bash scripts/ci/smoke-test-musl-elixir-nif.sh build-output

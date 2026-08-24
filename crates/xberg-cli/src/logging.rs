@@ -13,6 +13,12 @@ use tracing_subscriber::EnvFilter;
 /// already contain a per-target rule for any of these crates it takes precedence,
 /// so the user can still do `RUST_LOG=ureq=debug` to restore full transport logs.
 static QUIET_DIRECTIVES: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+    // The only mutation below (`directives.push`) is behind `#[cfg(feature = "pdf-surface")]`,
+    // so a build with that feature disabled (e.g. the core-cli leg) never mutates `directives`
+    // and clippy correctly flags `mut` as unused there; a build with the feature enabled needs
+    // it. Silence the lint only for the configuration where it doesn't apply, rather than
+    // dropping `mut` and breaking the other one.
+    #[cfg_attr(not(feature = "pdf-surface"), allow(unused_mut))]
     let mut directives: Vec<String> = [
         "ureq=warn",
         "ureq_proto=warn",

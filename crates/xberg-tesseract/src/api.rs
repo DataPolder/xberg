@@ -316,11 +316,17 @@ impl TesseractAPI {
     ///
     /// # Returns
     ///
-    /// Returns the value of the variable as an integer.
+    /// Returns the value of the variable as an integer, or
+    /// [`TesseractError::GetVariableError`] if no such variable exists.
     pub fn get_int_variable(&self, name: &str) -> Result<i32> {
         let name = CString::new(name).map_err(|_| TesseractError::NullByteInString)?;
         let handle = self.handle.lock().map_err(|_| TesseractError::MutexLockError)?;
-        Ok(unsafe { TessBaseAPIGetIntVariable(*handle, name.as_ptr()) })
+        let mut value: c_int = 0;
+        let found = unsafe { TessBaseAPIGetIntVariable(*handle, name.as_ptr(), &raw mut value) };
+        if found == 0 {
+            return Err(TesseractError::GetVariableError);
+        }
+        Ok(value)
     }
 
     /// Gets a boolean variable.
@@ -331,11 +337,17 @@ impl TesseractAPI {
     ///
     /// # Returns
     ///
-    /// Returns the value of the variable as a boolean.
+    /// Returns the value of the variable as a boolean, or
+    /// [`TesseractError::GetVariableError`] if no such variable exists.
     pub fn get_bool_variable(&self, name: &str) -> Result<bool> {
         let name = CString::new(name).map_err(|_| TesseractError::NullByteInString)?;
         let handle = self.handle.lock().map_err(|_| TesseractError::MutexLockError)?;
-        Ok(unsafe { TessBaseAPIGetBoolVariable(*handle, name.as_ptr()) } != 0)
+        let mut value: c_int = 0;
+        let found = unsafe { TessBaseAPIGetBoolVariable(*handle, name.as_ptr(), &raw mut value) };
+        if found == 0 {
+            return Err(TesseractError::GetVariableError);
+        }
+        Ok(value != 0)
     }
 
     /// Gets a double variable.
@@ -346,11 +358,17 @@ impl TesseractAPI {
     ///
     /// # Returns
     ///
-    /// Returns the value of the variable as a double.
+    /// Returns the value of the variable as a double, or
+    /// [`TesseractError::GetVariableError`] if no such variable exists.
     pub fn get_double_variable(&self, name: &str) -> Result<f64> {
         let name = CString::new(name).map_err(|_| TesseractError::NullByteInString)?;
         let handle = self.handle.lock().map_err(|_| TesseractError::MutexLockError)?;
-        Ok(unsafe { TessBaseAPIGetDoubleVariable(*handle, name.as_ptr()) })
+        let mut value: c_double = 0.0;
+        let found = unsafe { TessBaseAPIGetDoubleVariable(*handle, name.as_ptr(), &raw mut value) };
+        if found == 0 {
+            return Err(TesseractError::GetVariableError);
+        }
+        Ok(value)
     }
 
     /// Sets the page segmentation mode.
@@ -1841,9 +1859,12 @@ ffi_extern! {
     fn TessBaseAPIMeanTextConf(handle: *mut c_void) -> c_int;
     fn TessBaseAPISetVariable(handle: *mut c_void, name: *const c_char, value: *const c_char) -> c_int;
     fn TessBaseAPIGetStringVariable(handle: *mut c_void, name: *const c_char) -> *const c_char;
-    fn TessBaseAPIGetIntVariable(handle: *mut c_void, name: *const c_char) -> c_int;
-    fn TessBaseAPIGetBoolVariable(handle: *mut c_void, name: *const c_char) -> c_int;
-    fn TessBaseAPIGetDoubleVariable(handle: *mut c_void, name: *const c_char) -> c_double;
+    // These three return `BOOL` = "the variable exists" and deliver the value through the
+    // third out-pointer; tesseract's `BOOL` is `int` (capi.h). Omitting the out-pointer
+    // makes tesseract store through an uninitialized argument register. ~keep
+    fn TessBaseAPIGetIntVariable(handle: *mut c_void, name: *const c_char, value: *mut c_int) -> c_int;
+    fn TessBaseAPIGetBoolVariable(handle: *mut c_void, name: *const c_char, value: *mut c_int) -> c_int;
+    fn TessBaseAPIGetDoubleVariable(handle: *mut c_void, name: *const c_char, value: *mut c_double) -> c_int;
     fn TessBaseAPISetPageSegMode(handle: *mut c_void, mode: c_int);
     fn TessBaseAPIGetPageSegMode(handle: *mut c_void) -> c_int;
     #[cfg(any(target_arch = "wasm32", not(feature = "build-tesseract")))]
@@ -2036,6 +2057,81 @@ mod live_engine_tests {
         }
         assert!(!is_registered(addr));
     }
+
+    /// `TessBaseAPIGet{Bool,Int,Double}Variable` return only *whether the variable
+    /// exists* and deliver the value through a third out-pointer. Declaring them
+    /// without that parameter left the argument register holding whatever the previous
+    /// call had put there, and tesseract stored through it — a wild write that
+    /// corrupted the engine's own `Mutex` and killed the process on `Drop`
+    /// (SIGSEGV on Linux, SIGBUS on macOS). Reading a variable back after flipping it
+    /// pins both halves: the value must be the one that was set, not the constant
+    /// "this variable exists".
+    ///
+    /// Tesseract's parameter vectors are populated by the `TessBaseAPI` constructor, so
+    /// every assertion below holds on an engine that was never `init`ed. That matters:
+    /// gating this test on loadable `eng` tessdata made it exit before its first
+    /// assertion on any machine without a trained-data file, which is the one way it
+    /// could pass while the bug was present. ~keep
+    #[test]
+    fn get_variable_accessors_return_the_stored_value() {
+        /// `set_variable` writes a decimal string; the parsed double must round-trip
+        /// exactly, so this only absorbs a formatting difference, never a wrong value. ~keep
+        const DOUBLE_TOLERANCE: f64 = 1e-12;
+        const EXPECTED_INT: i32 = 17;
+        const EXPECTED_DOUBLE: f64 = 0.5;
+
+        let api = TesseractAPI::new().expect("create engine");
+
+        // A bool variable must track both states. The pre-fix code returned the C
+        // "this variable exists" flag, which is 1 for both, so only the `false` leg
+        // distinguishes a real read from that constant. ~keep
+        api.set_variable("hocr_font_info", "1").expect("set hocr_font_info");
+        assert!(
+            api.get_bool_variable("hocr_font_info").expect("read hocr_font_info"),
+            "hocr_font_info was set to 1 and must read back as true"
+        );
+        api.set_variable("hocr_font_info", "0").expect("clear hocr_font_info");
+        assert!(
+            !api.get_bool_variable("hocr_font_info").expect("read hocr_font_info"),
+            "hocr_font_info was set to 0 and must read back as false, not the existence flag"
+        );
+
+        // 17 is neither 0 nor 1, so it cannot be confused with the existence flag. ~keep
+        api.set_variable("edges_max_children_per_outline", &EXPECTED_INT.to_string())
+            .expect("set int variable");
+        assert_eq!(
+            api.get_int_variable("edges_max_children_per_outline")
+                .expect("read int variable"),
+            EXPECTED_INT,
+            "the int accessor must yield the stored value, not the existence flag"
+        );
+
+        api.set_variable("classify_min_slope", &EXPECTED_DOUBLE.to_string())
+            .expect("set double variable");
+        let read_double = api
+            .get_double_variable("classify_min_slope")
+            .expect("read double variable");
+        assert!(
+            (read_double - EXPECTED_DOUBLE).abs() < DOUBLE_TOLERANCE,
+            "the double accessor must yield {EXPECTED_DOUBLE}, got {read_double}"
+        );
+
+        // An absent variable has no value to report, so each accessor must surface the
+        // miss rather than hand back a default that reads as real data. ~keep
+        let missing = "xberg_no_such_tesseract_variable";
+        assert!(
+            matches!(api.get_bool_variable(missing), Err(TesseractError::GetVariableError)),
+            "an unknown bool variable must be GetVariableError, not a silent default"
+        );
+        assert!(
+            matches!(api.get_int_variable(missing), Err(TesseractError::GetVariableError)),
+            "an unknown int variable must be GetVariableError, not a silent default"
+        );
+        assert!(
+            matches!(api.get_double_variable(missing), Err(TesseractError::GetVariableError)),
+            "an unknown double variable must be GetVariableError, not a silent default"
+        );
+    }
 }
 
 #[cfg(all(test, any(feature = "build-tesseract", feature = "build-tesseract-wasm")))]
@@ -2103,7 +2199,7 @@ mod set_image_validation_tests {
         let height = 1;
         let bytes_per_pixel = 100_000;
         let bytes_per_line = 1;
-        let data = vec![0u8; 1];
+        let data = [0u8; 1];
 
         let result = validate_image_buffer(data.len(), width, height, bytes_per_pixel, bytes_per_line);
         assert!(matches!(result, Err(TesseractError::InvalidBytesPerLine)));

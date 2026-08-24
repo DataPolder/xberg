@@ -21,7 +21,7 @@ name: CI Musl Python Wheel
 #     with no repo change at all.
 on:
   push:
-    branches: [main]
+    branches: [main, chore/alef-fixes]
     paths: &musl-python-paths
       - "docker/Dockerfile.musl-python"
       - "scripts/ci/vendor-native-closure.sh"

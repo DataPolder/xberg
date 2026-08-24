@@ -240,13 +240,11 @@ fn collect_run(reader: &mut Reader<&[u8]>, budget: &mut SecurityBudget) -> Resul
                     _ => {}
                 }
             }
-            Ok(Event::Text(ref e)) => {
-                if in_text {
-                    let t = e.xml10_content();
-                    budget.check_entity(&t)?;
-                    budget.account_text(t.len())?;
-                    text.push_str(&t);
-                }
+            Ok(Event::Text(ref e)) if in_text => {
+                let t = e.xml10_content();
+                budget.check_entity(&t)?;
+                budget.account_text(t.len())?;
+                text.push_str(&t);
             }
             Ok(Event::GeneralRef(ref e)) if in_text => {
                 let t = crate::utils::xml_utils::resolve_general_ref(e);

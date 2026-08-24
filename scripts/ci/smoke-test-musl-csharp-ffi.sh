@@ -17,6 +17,10 @@ die() { log "$*"; exit 1; }
 
 NATIVE_DIR="${1:?usage: $0 <dir-containing-libxberg_ffi.so-and-vendored-.so-closure>}"
 [ -d "$NATIVE_DIR" ] || die "native asset directory not found: $NATIVE_DIR"
+# `docker -v` rejects a relative source as a volume NAME ("includes invalid
+# characters for a local volume name"), so this must be absolute before the
+# mount below. Matches smoke-test-musl-python-wheel.sh, which already does it. ~keep
+NATIVE_DIR="$(cd "$NATIVE_DIR" && pwd)"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIXTURE="$REPO_ROOT/scripts/ci/fixtures/musl-python-smoke.pdf"

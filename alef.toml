@@ -1,5 +1,5 @@
 [workspace]
-alef_version = "0.62.6"
+alef_version = "0.67.1"
 # -D warnings (emitted into every generated Rust binding as #![allow(...)]).
 extra_clippy_allows = ["redundant_field_names", "collapsible_if", "vec_init_then_push"]
 languages = [
@@ -722,11 +722,12 @@ roots = ["crawlberg::CrawlConfig", "crawlberg::MapResult"]
 
 [[crates.source_crates]]
 name = "html-to-markdown-rs"
-sources = [
-  "../html-to-markdown/crates/html-to-markdown/src/options/conversion.rs",
-  "../html-to-markdown/crates/html-to-markdown/src/options/preprocessing.rs",
-  "../html-to-markdown/crates/html-to-markdown/src/options/validation.rs",
-]
+# Read from the vendored registry copy, not a sibling checkout. html-to-markdown-rs is a
+# plain registry dependency, so `../html-to-markdown/...` only resolves in a developer
+# checkout that happens to sit next to that repo — it is absent on CI and in any git
+# worktree, where it aborts the run with "failed to compute sources hash". ~keep
+from_registry = true
+sources = ["src/options/conversion.rs", "src/options/preprocessing.rs", "src/options/validation.rs"]
 roots = ["html_to_markdown_rs::ConversionOptions"]
 
 [crates.extra_dependencies]

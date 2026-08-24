@@ -2,7 +2,7 @@ name: CI Lint
 
 on:
   push:
-    branches: [main]
+    branches: [main, chore/alef-fixes]
     paths:
       - "crates/**"
       - "packages/**"
@@ -304,7 +304,7 @@ jobs:
         env:
           RUSTFLAGS: ""
       # Most per-language snippet validators (rust/python/typescript/go/ruby/php/
-      # csharp/java/kotlin/swift/c) are covered for free -- the ubuntu-latest runner
+      # csharp/kotlin/swift/c) are covered for free -- the ubuntu-latest runner
       # image ships those toolchains preinstalled, so `which tsc`/`which swiftc`/etc.
       # already succeed with no setup step here. Dart, Elixir, and Zig are not on that
       # image, so their validators (which::which("dart"/"mix"/"zig")) always reported
@@ -327,6 +327,28 @@ jobs:
         uses: xberg-io/actions/setup-zig@v1
         with:
           version: "0.16.0"
+      # Java is the one preinstalled toolchain that is not usable as shipped: the
+      # ubuntu-latest image's default JRE is 17 (`class file versions up to 61.0`), and
+      # the java validator runs maven against packages/java, whose checkstyle plugin
+      # carries class file version 65.0. Without this the job died on
+      # `UnsupportedClassVersionError` for every one of the 139 java snippets. 25 matches
+      # packages/java/pom.xml `<maven.compiler.release>` and the `validate` job below,
+      # which already sets the same version for the same reason. ~keep
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      # The rust validator compiles its snippets against xberg, which reaches
+      # heic -> xberg-libheif -> libheif-sys. That build script shells out to
+      # `pkg-config libheif >= 1.21` and Ubuntu Noble ships only 1.17.6, so every
+      # one of the 91 rust snippets failed with `The system library libheif
+      # required by crate libheif-sys was not found` -- one build-script failure
+      # attributed to all 91. This action builds and caches libheif 1.23.0 into
+      # /usr/local with its .pc file, and is the same remedy the `validate` job
+      # below applies via the reusable workflow's `install-system-deps`. ~keep
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
       # `task docs:snippets:all` (audit + gaps + syntax-validate) is described
       # as the "canonical docs:snippets gate" in .task/tools/docs.yml, but
       # nothing invoked it -- a broken or orphaned snippet could land

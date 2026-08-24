@@ -44,7 +44,9 @@ const FOOTER_MIN_ALPHA_PERCENT: usize = 70;
 #[cfg(feature = "pdf")]
 use super::hierarchy::SegmentData;
 
-/// Convert a PDF `SegmentData` to an `HocrWord` for table reconstruction.
+/// Convert a PDF `SegmentData` to an `HocrWord` for table reconstruction, adding
+/// `advance_offset`/`top_offset` to the segment's upright-frame position before
+/// clamping to the unsigned `HocrWord` fields.
 ///
 /// `SegmentData` uses PDF coordinates (y=0 at bottom, increases upward).
 /// `HocrWord` uses image coordinates (y=0 at top, increases downward).
@@ -59,17 +61,9 @@ use super::hierarchy::SegmentData;
 /// clustering downstream in `native::table::cluster_words_into_vertical_regions`
 /// operates on the table's actual advance/cross axes instead of the page's.
 ///
-/// Standalone calls (no sibling segments) always use `(0.0, 0.0)` offsets: a
+/// Standalone calls (no sibling segments) always pass `(0.0, 0.0)` offsets: a
 /// single segment can never be lifted relative to a run it isn't part of.
 /// Only [`segments_to_words`] computes a real offset, from the whole page.
-#[cfg(feature = "pdf")]
-pub(crate) fn segment_to_hocr_word(seg: &SegmentData, page_height: f32) -> HocrWord {
-    segment_to_hocr_word_lifted(seg, page_height, 0.0, 0.0)
-}
-
-/// Like [`segment_to_hocr_word`], but adds `advance_offset`/`top_offset` to
-/// the segment's upright-frame position before clamping to the unsigned
-/// `HocrWord` fields.
 ///
 /// GH#1358: a rotated run's advance/cross can be negative for every word on
 /// the page (e.g. `-90` gives `advance == -y`; `180` gives `advance == -x` and
@@ -102,11 +96,11 @@ fn segment_to_hocr_word_lifted(seg: &SegmentData, page_height: f32, advance_offs
 /// shared baseline + font). For table cell matching, each word needs its own
 /// bounding box so it can be assigned to the correct column/cell.
 ///
-/// Single-word segments use `segment_to_hocr_word` directly (fast path).
+/// Single-word segments use `segment_to_hocr_word_lifted` directly (fast path).
 /// Multi-word segments get proportional bbox estimation per word based on
 /// byte offset within the segment text.
 ///
-/// See [`segment_to_hocr_word`] for why a standalone call always lifts by
+/// See [`segment_to_hocr_word_lifted`] for why a standalone call always lifts by
 /// `(0.0, 0.0)`.
 #[cfg(feature = "pdf")]
 pub(crate) fn split_segment_to_words(seg: &SegmentData, page_height: f32) -> Vec<HocrWord> {
@@ -142,7 +136,7 @@ fn split_segment_to_words_lifted(
         return Vec::new();
     }
 
-    // See `segment_to_hocr_word` for why the segment's own upright frame
+    // See `segment_to_hocr_word_lifted` for why the segment's own upright frame
     // (rather than raw page-space x/y) is used here: `advance` is the
     // position along the run's reading axis, which per-word interpolation
     // below advances along via `frac_start * seg.width` — consistent
@@ -583,7 +577,7 @@ fn post_process_table_inner(
         return None;
     }
 
-    prune_spurious_interior_column(&mut processed, layout_guided, column_positions.as_deref_mut());
+    prune_spurious_interior_column(&mut processed, layout_guided, column_positions);
 
     let data_row_count = processed.len() - 1;
     if data_row_count > 0 {

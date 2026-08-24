@@ -15,6 +15,10 @@ die() { log "$*"; exit 1; }
 
 STAGED_DIR="${1:?usage: $0 <staged-platform-dir-containing-.node-and-.so-files>}"
 [ -d "$STAGED_DIR" ] || die "staged platform directory not found: $STAGED_DIR"
+# `docker -v` rejects a relative source as a volume NAME ("includes invalid
+# characters for a local volume name"), so this must be absolute before the
+# mount below. Matches smoke-test-musl-python-wheel.sh, which already does it. ~keep
+STAGED_DIR="$(cd "$STAGED_DIR" && pwd)"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIXTURE="$REPO_ROOT/scripts/ci/fixtures/musl-python-smoke.pdf"
@@ -41,5 +45,12 @@ docker run --rm \
   -e EXPECTED_TEXT="$EXPECTED_TEXT" \
   alpine:3.22 sh -euc '
     apk add --no-cache nodejs >/dev/null
+    # Same libstdc++ skew the Elixir gate hits: the vendored libonnxruntime.so.1 comes
+    # from Alpine edge (docker/Dockerfile.musl-node upgrades libstdc++ before compiling)
+    # and relocates against symbols GCC 15 added. Node links libstdc++ itself, so the
+    # process already has 3.22 14.2.0 mapped under that soname before the addon is
+    # dlopened and the $ORIGIN copy beside the .node is never consulted. ~keep
+    apk add --no-cache --upgrade libstdc++ \
+      --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main >/dev/null
     node /smoke/smoke_test_node_binding.js /smoke/index.js /fixture.pdf "${EXPECTED_TEXT}"
   '

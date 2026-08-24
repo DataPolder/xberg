@@ -1344,7 +1344,7 @@ fn extract_xlsx_revisions_from_archive<R: Read + Seek>(
     const HEADERS_PATH: &str = "xl/revisions/revisionHeaders.xml";
 
     let xml_bytes = {
-        let mut entry = match archive.by_name(HEADERS_PATH) {
+        let entry = match archive.by_name(HEADERS_PATH) {
             Ok(e) => e,
             Err(zip::result::ZipError::FileNotFound) => return None,
             Err(e) => {
@@ -1464,7 +1464,7 @@ fn extract_xlsx_comments_from_archive<R: Read + Seek>(archive: &mut zip::ZipArch
     let mut entries = Vec::new();
     for part in comment_parts {
         let xml_bytes = {
-            let mut entry = match archive.by_name(&part) {
+            let entry = match archive.by_name(&part) {
                 Ok(e) => e,
                 Err(_) => continue,
             };

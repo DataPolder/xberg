@@ -87,10 +87,10 @@ fn negative_w_field_does_not_panic_and_yields_no_entries() {
 /// vulnerable subtraction.
 ///
 /// This assertion gates the debug/fuzz build only: `overflow-checks` are on
-/// by default in debug, so `file_len - offset` panics there whenever `offset
-/// > file_len`. In release, the same subtraction wraps to a huge `usize`
-/// that the caller's `.min(256 * 1024)` clamps back down to a normal read
-/// size, so nothing crashes there even without the fix — it just reads
+/// by default in debug, so `file_len - offset` panics there whenever
+/// `offset > file_len`. In release, the same subtraction wraps to a huge
+/// `usize` that the caller's `.min(256 * 1024)` clamps back down to a normal
+/// read size, so nothing crashes there even without the fix — it just reads
 /// unrelated bytes and fails to parse a valid xref stream, which is the
 /// graceful `Err` this test observes (silently, since a bad `/XRefStm` is
 /// logged and skipped rather than propagated) with the fix applied.

@@ -1057,7 +1057,6 @@ mod tests {
         );
     }
 
-
     #[tokio::test]
     async fn test_embedded_objects_fall_back_to_default_max_files_in_archive_when_unset() {
         // `security_limits: None` must mean "the `SecurityLimits` default", not "no limit".

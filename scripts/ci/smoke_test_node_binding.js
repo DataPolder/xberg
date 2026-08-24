@@ -25,12 +25,31 @@ function fail(message) {
   process.exitCode = 1;
 }
 
+// NAPI-RS's index.js reports every load failure as the same generic "Cannot find native
+// binding ... npm has a bug related to optional dependencies" string and hangs the real
+// reason -- an unresolvable shared library, a relocation error against a too-old system
+// libstdc++, a wrong-arch build -- off `error.cause`. Interpolating the error alone prints
+// only that generic line, which is exactly wrong for a gate whose whole purpose is naming
+// which dependency broke. ~keep
+function describeError(error) {
+  const parts = [];
+  for (let current = error; current; current = current.cause) {
+    parts.push(current.stack || String(current));
+    if (Array.isArray(current.errors)) {
+      for (const nested of current.errors) {
+        parts.push(`  [aggregated] ${nested.stack || String(nested)}`);
+      }
+    }
+  }
+  return parts.join("\n  caused by: ");
+}
+
 async function run(indexPath, fixturePath, expectedSubstring) {
   let extract;
   try {
     ({ extract } = require(path.resolve(indexPath)));
   } catch (err) {
-    fail(`could not load the xberg native binding via ${indexPath}: ${err}`);
+    fail(`could not load the xberg native binding via ${indexPath}: ${describeError(err)}`);
     return;
   }
 
@@ -43,7 +62,7 @@ async function run(indexPath, fixturePath, expectedSubstring) {
   try {
     result = await extract({ kind: "uri", uri: path.resolve(fixturePath) }, undefined);
   } catch (err) {
-    fail(`extract() rejected for fixture ${fixturePath}: ${err}`);
+    fail(`extract() rejected for fixture ${fixturePath}: ${describeError(err)}`);
     return;
   }
 
