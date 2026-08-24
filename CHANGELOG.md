@@ -346,6 +346,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   coordinate space: pixels of the rendered page image at the OCR render DPI (base 150, reduced
   automatically for very large pages), not the previously claimed 300 DPI (#1385).
 
+- Clarified that `StructuredInput::{page_count, text_coverage, embedded_image_count}` and
+  `StructuredThresholds::{scan_max_coverage, digital_min_coverage}` are Rust-only extension
+  signals for custom `StructuredPolicy` implementations. The built-in `choose_call_mode` policy
+  intentionally ignores them and keeps PDF routing text-first (#1472).
+
 ### Removed
 
 - The unused batch and object-pooling stacks: `BatchProcessor`, `batch_optimizations`,
