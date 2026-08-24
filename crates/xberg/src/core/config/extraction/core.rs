@@ -431,17 +431,17 @@ pub struct ExtractionConfig {
     #[cfg_attr(feature = "alef-meta", alef(since = "1.0.0"))]
     pub qr_codes: Option<bool>,
 
-    /// Internal cancellation handle (None = no external cancellation).
+    /// Cooperative cancellation handle (`None` = no caller-initiated cancellation).
     ///
-    /// Set from two places, neither of them user-facing. The REST async-jobs code path
-    /// (`crate::api::jobs::JobStore`) registers a token per job and fires it from
-    /// `DELETE /jobs/{job_id}`. Otherwise [`Self::ensure_cancel_token`] installs an
-    /// internal one whenever `extraction_timeout_secs` is set, so the `token.cancel()`
-    /// call that accompanies every timeout has something to signal. There is no public
-    /// API, in any language binding, to construct or fire this token; it is not a
-    /// user-facing configuration value.
+    /// Rust callers may supply a [`crate::cancellation::CancellationToken`], retain a
+    /// clone, and call [`crate::cancellation::CancellationToken::cancel`] to request
+    /// that extraction stop at its next cancellation checkpoint. Cancellation is
+    /// cooperative rather than immediate, so latency depends on the extractor and
+    /// operation currently in progress.
     ///
-    /// The field is excluded from serialization for the same reason.
+    /// Xberg also installs and uses cancellation tokens internally for extraction
+    /// timeouts and REST async jobs. This field remains excluded from serialization
+    /// and Alef-generated language bindings.
     #[serde(skip)]
     #[cfg_attr(alef, alef(skip))]
     pub cancel_token: Option<crate::cancellation::CancellationToken>,
@@ -597,23 +597,23 @@ impl ExtractionConfig {
     /// caller supplied one.
     ///
     /// `extraction_timeout_secs` fires `token.cancel()` at every timeout call site
-    /// (`core/extractor/{file,bytes,batch}.rs`, `engine/extract_impl.rs`), but every
-    /// binding-driven and CLI-driven call leaves `cancel_token` `None` — only the
-    /// REST job store (`crate::api::jobs::JobStore`, wired in `api/handlers.rs`)
-    /// ever supplies one. Without this, `token.cancel()` has nothing to signal: the
-    /// timeout stops *waiting* and returns `XbergError::Timeout`, but the spawned
-    /// extraction work keeps running to completion, burning a thread.
+    /// (`core/extractor/{file,bytes,batch}.rs`, `engine/extract_impl.rs`). Binding-
+    /// driven and CLI-driven calls generally leave `cancel_token` as `None` unless
+    /// a Rust caller explicitly supplies one. Without this fallback, `token.cancel()`
+    /// has nothing to signal: the timeout stops *waiting* and returns
+    /// `XbergError::Timeout`, but spawned extraction work can continue running to
+    /// completion and consume a worker thread.
     ///
-    /// A caller-supplied token (the REST cancel path, `DELETE /jobs/{id}`) is
-    /// always left untouched, so it keeps working exactly as before.
+    /// A caller-supplied token is always left untouched, so Rust callers and the
+    /// REST cancellation path continue observing the same shared token.
     ///
-    /// No-op when `extraction_timeout_secs` is `None`: without a timeout nothing
-    /// can ever call `cancel()`, so installing a token would be dead weight.
+    /// No-op when `extraction_timeout_secs` is `None`: without an internal timeout
+    /// path there is no need to allocate a fallback token. Callers may still supply
+    /// their own token for explicit cancellation.
     ///
-    /// Unconditional on target/feature: [`crate::cancellation::CancellationToken`]'s
-    /// `Default` impl and this field are compiled on every target including
-    /// wasm32 — only [`crate::cancellation::CancellationToken::cancel`] itself is
-    /// gated to `not(wasm32)`, at the call sites that invoke it.
+    /// Unconditional on target/feature: the token and its atomic operations are
+    /// available on every target, including wasm32. Timeout call sites remain gated
+    /// independently where runtime support requires it.
     pub(crate) fn ensure_cancel_token(&mut self) {
         if self.extraction_timeout_secs.is_some() && self.cancel_token.is_none() {
             self.cancel_token = Some(crate::cancellation::CancellationToken::default());
@@ -978,8 +978,8 @@ mod tests {
     /// Regression test for task #709: without an internal fallback token, the
     /// `token.cancel()` calls at every `extraction_timeout_secs` call site
     /// (`core/extractor/{file,bytes,batch}.rs`, `engine/extract_impl.rs`) have nothing
-    /// to signal on any binding-driven or CLI-driven call, because `cancel_token` is
-    /// `None` there — only the REST job store ever supplies one.
+    /// to signal on calls that do not explicitly supply a token. A Rust caller or the
+    /// REST job store may provide one; other paths still require the internal fallback.
     #[test]
     fn ensure_cancel_token_installs_a_token_when_a_timeout_is_configured_and_none_was_supplied() {
         let mut config = ExtractionConfig {
@@ -994,9 +994,10 @@ mod tests {
         );
     }
 
-    /// A caller-supplied token (the REST cancel path, `DELETE /jobs/{id}`) must survive
-    /// unchanged — `ensure_cancel_token` must never replace it with a different token,
-    /// or the REST cancel handle would stop being the token extractors observe.
+    /// A caller-supplied token, whether retained by a Rust caller or the REST job
+    /// cancellation path, must survive unchanged. `ensure_cancel_token` must never
+    /// replace it with a different token or the retained handle would stop observing
+    /// the token extractors poll.
     #[test]
     fn ensure_cancel_token_preserves_a_caller_supplied_token() {
         let supplied = crate::cancellation::CancellationToken::new();
@@ -1015,8 +1016,8 @@ mod tests {
         );
     }
 
-    /// No timeout means nothing can ever call `cancel()`, so installing a token would be
-    /// dead weight; `cancel_token` must stay `None`.
+    /// Without a configured timeout, no internal timeout path needs an automatically
+    /// installed token. A caller may still supply its own explicit cancellation token.
     #[test]
     fn ensure_cancel_token_is_a_noop_without_a_configured_timeout() {
         let mut config = ExtractionConfig {
@@ -1027,7 +1028,7 @@ mod tests {
         config.ensure_cancel_token();
         assert!(
             config.cancel_token.is_none(),
-            "no timeout means no token is ever needed"
+            "no timeout means no internal fallback token is needed"
         );
     }
 

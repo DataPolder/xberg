@@ -2,8 +2,8 @@
 //!
 //! Provides a lightweight, FFI-friendly cancellation primitive based on
 //! `Arc<AtomicBool>`. The token can be cloned and shared across threads;
-//! any holder can cancel the operation and all other holders will observe
-//! the cancellation on their next check.
+//! any holder can request cancellation and all other holders will observe
+//! the request on their next check.
 //!
 //! # Design
 //!
@@ -15,6 +15,14 @@
 //! - The token wraps an `Arc<AtomicBool>` and can be stored in
 //!   `ExtractionConfig` without layout surprises.
 //!
+//! # Rust callers
+//!
+//! Rust callers may place one clone in `ExtractionConfig::cancel_token` and
+//! retain another clone in the application layer. Calling [`CancellationToken::cancel`]
+//! requests that extraction stop when the active pipeline reaches its next
+//! cancellation checkpoint. Cancellation is cooperative rather than immediate,
+//! so latency depends on the extractor and operation currently in progress.
+//!
 //! # FFI and bindings
 //!
 //! No binding exposes cancellation today. `crates/xberg-ffi` emits no
@@ -24,23 +32,23 @@
 //! so codegen can never emit one — any binding surface would have to be
 //! hand-written and hand-maintained.
 //!
-//! The token is driven entirely in-process: `cancel` and `is_cancelled` are
-//! `pub(crate)`, so even a downstream Rust crate can construct a token but
-//! cannot fire or observe it. The only live consumer is the REST job store
-//! (`crate::api::jobs::JobStore`), which registers a token per job and fires it
-//! from `DELETE /jobs/{job_id}`.
+//! Xberg also uses the same token internally for extraction timeouts and the
+//! REST async-job cancellation path (`DELETE /jobs/{job_id}`).
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// A lightweight, cloneable cancellation token.
+/// A lightweight, cloneable, one-shot cancellation token.
 ///
-/// Create one with `CancellationToken::default()`, pass clones to the extraction
-/// call (via `ExtractionConfig::cancel_token`) and to the caller. Call
-/// `cancel` from the caller side when the operation should be aborted.
-/// The extraction code polls `is_cancelled` at safe checkpoints and returns
-/// a cancellation error if set.
+/// Create one with `CancellationToken::default()`, pass one clone to extraction
+/// through `ExtractionConfig::cancel_token`, and retain another clone in the
+/// caller. Calling [`cancel`](Self::cancel) requests cooperative cancellation;
+/// extraction stops when it reaches an existing cancellation checkpoint.
+///
+/// A token cannot be reset. Once cancellation has been requested, all current
+/// and future clones continue to report that request. Create a new token for an
+/// unrelated extraction operation.
 ///
 /// Cloning is cheap (increments the `Arc` reference count only).
 #[cfg_attr(alef, alef(skip))]
@@ -56,25 +64,27 @@ impl CancellationToken {
         Self::default()
     }
 
-    /// Signal cancellation.
+    /// Request cooperative cancellation.
     ///
-    /// All clones of this token will observe [`is_cancelled`] returning `true`
-    /// on their next check. This operation is idempotent.
+    /// All clones of this token will observe [`is_cancelled`](Self::is_cancelled)
+    /// returning `true` on their next check. This operation is idempotent and
+    /// the token remains cancelled permanently.
     ///
-    /// Gated `not(target_arch = "wasm32")` to match the only call sites
-    /// (`run_timed_extraction` in `batch.rs`, the timeout block in `bytes.rs`):
-    /// `tokio-runtime` is enabled transitively on wasm32 via `layout-tract`
-    /// inside `wasm-target`, so gating on the feature alone leaves this method
-    /// compiled-but-uncalled (dead code) on that target.
-    #[cfg(any(all(feature = "tokio-runtime", not(target_arch = "wasm32")), test))]
+    /// This method does not forcibly interrupt the currently executing parser,
+    /// native call, or model invocation. Extraction stops when the active path
+    /// reaches an existing cancellation checkpoint, so no maximum cancellation
+    /// latency is implied.
     #[inline]
-    pub(crate) fn cancel(&self) {
+    pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
     }
 
-    /// Returns `true` if [`cancel`] has been called on any clone of this token.
+    /// Returns `true` if cancellation has been requested on any clone.
+    ///
+    /// This reports the token's request flag. It does not prove that a particular
+    /// extraction terminated because cancellation can race with normal completion.
     #[inline]
-    pub(crate) fn is_cancelled(&self) -> bool {
+    pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Relaxed)
     }
 }

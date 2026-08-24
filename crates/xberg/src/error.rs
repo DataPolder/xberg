@@ -228,9 +228,12 @@ pub enum XbergError {
         limit_ms: u64,
     },
 
-    /// The extraction was cancelled. Reachable today only via the REST async-jobs API
-    /// (`DELETE /jobs/{id}`); no binding exposes an in-process way to cancel an
-    /// extraction.
+    /// The extraction stopped after a cooperative cancellation request.
+    ///
+    /// Rust callers can request cancellation through
+    /// [`crate::cancellation::CancellationToken`]. The REST async-jobs API uses the
+    /// same mechanism. Generated language bindings do not currently expose
+    /// in-process cancellation.
     #[error("Extraction cancelled")]
     #[cfg_attr(alef, alef(error_code = 1015))]
     Cancelled,
