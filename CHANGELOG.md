@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Rust callers can open a `PdfRenderSession` once, query its page count, and render arbitrary pages
+  without reparsing or reauthenticating the PDF for each page. The native PDF engine remains an
+  implementation detail, and the existing one-shot rendering helpers are unchanged (#1485).
 - The new `tesseract-dynamic` Cargo feature lets `ocr` link host-provided Tesseract and Leptonica
   without fetching or compiling vendored sources, providing the native dependency path required by
   network-isolated and distribution-package builds (#1407).

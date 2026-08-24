@@ -56,3 +56,5 @@ pub(crate) mod xref_revisions;
 pub use crate::core::config::HierarchyConfig;
 #[cfg(feature = "pdf")]
 pub use error::PdfError;
+#[cfg(feature = "pdf")]
+pub use render::PdfRenderSession;

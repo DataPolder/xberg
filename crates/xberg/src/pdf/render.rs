@@ -802,6 +802,58 @@ pub(crate) fn render_open_pdf_page_to_png(
     Ok(rendered.data)
 }
 
+/// An open PDF document that can render multiple pages without reparsing the file.
+///
+/// This Rust-only session keeps the native PDF engine private while exposing the
+/// efficient open-once rendering path. Use [`render_pdf_page_to_png`] for a single
+/// page and this type when rendering several pages from the same document.
+#[cfg_attr(alef, alef(skip))]
+pub struct PdfRenderSession {
+    document: xberg_native_pdf::PdfDocument,
+    page_count: usize,
+}
+
+#[cfg_attr(alef, alef(skip))]
+impl PdfRenderSession {
+    /// Open and optionally authenticate a PDF document.
+    ///
+    /// # Errors
+    ///
+    /// Returns `XbergError::Parsing` if the PDF cannot be opened, authenticated,
+    /// or its page count cannot be read.
+    pub fn open(pdf_bytes: &[u8], password: Option<&str>) -> Result<Self> {
+        let document = open_pdf_document(pdf_bytes, password)?;
+        let page_count = document_page_count(&document)?;
+        Ok(Self { document, page_count })
+    }
+
+    /// Return the number of pages in the open document.
+    #[must_use]
+    pub fn page_count(&self) -> usize {
+        self.page_count
+    }
+
+    /// Render a zero-based page index to PNG bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `XbergError::Parsing` if `page_index` is out of range or the page
+    /// cannot be rendered.
+    pub fn render_page_to_png(&self, page_index: usize, dpi: Option<i32>) -> Result<Vec<u8>> {
+        if page_index >= self.page_count {
+            return Err(XbergError::Parsing {
+                message: format!(
+                    "Page index {page_index} out of range (document has {} pages)",
+                    self.page_count
+                ),
+                source: None,
+            });
+        }
+
+        render_open_pdf_page_to_png(&self.document, page_index, dpi)
+    }
+}
+
 /// Render a single PDF page to PNG bytes.
 ///
 /// Returns raw PNG-encoded bytes for the specified page at the given DPI.
@@ -828,17 +880,7 @@ pub fn render_pdf_page_to_png(
     dpi: Option<i32>,
     password: Option<&str>,
 ) -> Result<Vec<u8>> {
-    let doc = open_pdf_document(pdf_bytes, password)?;
-
-    let page_count = document_page_count(&doc)?;
-    if page_index >= page_count {
-        return Err(XbergError::Parsing {
-            message: format!("Page index {page_index} out of range (document has {page_count} pages)"),
-            source: None,
-        });
-    }
-
-    render_open_pdf_page_to_png(&doc, page_index, dpi)
+    PdfRenderSession::open(pdf_bytes, password)?.render_page_to_png(page_index, dpi)
 }
 
 /// Count the pages in a PDF without rendering any of them.
@@ -857,22 +899,7 @@ pub fn render_pdf_page_to_png(
 /// Returns `XbergError::Parsing` if the PDF cannot be opened, authenticated,
 /// or its page count read.
 pub fn pdf_page_count(pdf_bytes: &[u8], password: Option<&str>) -> Result<usize> {
-    let doc = xberg_native_pdf::PdfDocument::from_bytes(pdf_bytes.to_vec()).map_err(|e| XbergError::Parsing {
-        message: format!("Failed to open PDF: {e}"),
-        source: None,
-    })?;
-
-    if let Some(pwd) = password {
-        doc.authenticate(pwd.as_bytes()).map_err(|e| XbergError::Parsing {
-            message: format!("Failed to authenticate PDF: {e}"),
-            source: None,
-        })?;
-    }
-
-    doc.page_count().map_err(|e| XbergError::Parsing {
-        message: format!("Failed to read page count: {e}"),
-        source: None,
-    })
+    Ok(PdfRenderSession::open(pdf_bytes, password)?.page_count())
 }
 
 /// Build a minimal valid single-page PDF with the given MediaBox (in points).
@@ -1084,6 +1111,26 @@ mod tests {
         let pdf = build_minimal_pdf_with_mediabox(612.0, 792.0);
         let count = pdf_page_count(&pdf, None).expect("page count should succeed for a valid PDF");
         assert_eq!(count, 1, "minimal single-page PDF must report 1 page");
+    }
+
+    #[test]
+    fn pdf_render_session_reports_count_and_renders_without_reopening() {
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        assert_send_sync::<PdfRenderSession>();
+        let pdf = build_minimal_pdf_with_mediabox(612.0, 792.0);
+        let session = PdfRenderSession::open(&pdf, None).expect("valid PDF should open");
+
+        assert_eq!(session.page_count(), 1);
+        let png = session
+            .render_page_to_png(0, Some(72))
+            .expect("open session should render its page");
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+
+        let error = session
+            .render_page_to_png(1, Some(72))
+            .expect_err("out-of-range page must fail");
+        assert!(error.to_string().contains("document has 1 pages"));
     }
 
     #[test]
