@@ -44,7 +44,8 @@ RUN mkdir -p /build/pdfium && \
         "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/${PDFIUM_VERSION}/pdfium-linux-musl-${PDFIUM_ARCH}.tgz" \
         -o /build/pdfium.tgz && \
     tar -xzf /build/pdfium.tgz -C /build/pdfium && \
-    rm /build/pdfium.tgz
+    rm /build/pdfium.tgz && \
+    strip --strip-unneeded /build/pdfium/lib/libpdfium.so
 
 COPY Cargo.toml Cargo.lock ./
 COPY crates/xberg/ crates/xberg/

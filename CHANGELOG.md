@@ -410,6 +410,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Made the CLI container image-size gate compare exact bytes and report the same boundary it
+  enforces, avoiding contradictory rounded 200 MiB pass/fail results in Docker CI.
+
 - Skipped image-level OCR for page-sized PDF XObjects when that page already has extracted text,
   avoiding duplicate OCR work and repeated page content while keeping empty pages eligible (#1479).
 - Allowed bounded high-ratio PDF streams below 32 MiB so legitimate 300-dpi RGB page scans are

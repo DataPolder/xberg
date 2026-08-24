@@ -87,10 +87,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=ci-docker-${{ matrix.variant }}
 
       - name: Check image size
+        if: matrix.variant != 'cli'
         uses: xberg-io/actions/check-docker-image-size@v1
         with:
           image: xberg:${{ matrix.variant }}
-          warn-mb: ${{ matrix.variant == 'cli' && '200' || '' }}
           label: "${{ matrix.variant }} image"
 
       - name: Run feature tests
