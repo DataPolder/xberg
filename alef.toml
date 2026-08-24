@@ -25,6 +25,16 @@ languages = [
 python_package_manager = "uv"
 node_package_manager = "pnpm"
 
+# Alef currently has two Kotlin Android defaults: its resolved config uses the
+# variant-scoped assemble tasks, while the CLI fallback uses umbrella `gradle
+# build`, which also runs release validation before Android ABI libraries have
+# been staged. Keep local builds on the debug variant; publishing stages native
+# libraries before invoking the release task. ~keep
+[workspace.build_commands.kotlin_android]
+precondition = "command -v gradle >/dev/null 2>&1"
+build = "cd packages/kotlin-android && gradle assembleDebug"
+build_release = "cd packages/kotlin-android && gradle assembleRelease"
+
 
 [workspace.dto]
 python = "dataclass"

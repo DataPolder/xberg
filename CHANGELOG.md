@@ -420,6 +420,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cfg-gated formats and result variants from disappearing from host bindings while remaining
   present in the linked native library. Desktop FFI now includes the advertised Sceptre backend,
   and Kotlin Android generation follows the explicit no-ORT `android-target` surface.
+- Kotlin Android development builds now use the debug-only Gradle assembly task, avoiding release
+  native-library validation before Android ABI artifacts have been staged.
 
 - Generated documentation snippet tabs now use Alef target identifiers consistently, so TypeScript
   Node/WASM and Kotlin Android examples render as distinct, stable tabs.
