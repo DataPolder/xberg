@@ -2189,7 +2189,7 @@ jobs:
       # continue-on-error: a broken NIF must fail this job, not merely warn.
       - name: Smoke-test musl Elixir NIF (real extraction, not just load)
         run: |
-          bash scripts/ci/smoke-test-musl-elixir-nif.sh build-output/libxberg_nif.so
+          bash scripts/ci/smoke-test-musl-elixir-nif.sh build-output
 
       - name: Package NIF as RustlerPrecompiled tarball
         env:

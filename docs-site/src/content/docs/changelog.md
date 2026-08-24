@@ -513,6 +513,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Musl Elixir publish smoke tests now pass the complete native asset directory, allowing the test
+  to load the NIF together with its vendored shared-library closure.
 - Alef E2E freshness checks now use pinned uv and Ruff versions, fail when a configured formatter
   is unavailable, and keep Python prerelease resolution consistent with the workspace lockfile.
 - Windows Ruby gem builds now keep generated binding-crate defaults from re-enabling ONNX Runtime
