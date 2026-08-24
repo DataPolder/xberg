@@ -60,8 +60,9 @@ pub struct PdfImage {
     /// Every rescale leaves it: mapping a non-default `/Decode` into the
     /// buffer, expanding an Indexed image to palette RGB, unpacking a
     /// sub-byte sample to the 8-bit range, and collapsing a 16-bit sample to
-    /// its high byte. A CCITT buffer stays raw, with its `/Decode` polarity
-    /// carried separately in `ccitt_params`.
+    /// its high byte. Extracted CCITT images are expanded to grayscale samples;
+    /// caller-constructed CCITT buffers may remain raw, with their `/Decode`
+    /// polarity carried separately in `ccitt_params`.
     #[serde(skip)]
     samples_are_raw: bool,
     /// Whether a non-default `/Decode` array is already mapped into `data`.
@@ -1032,6 +1033,27 @@ pub fn extract_image_from_xobject(
 
     let is_ccitt = filter_names.iter().any(|n| n.eq_ignore_ascii_case("CCITTFaxDecode"));
 
+    let ccitt_params = if is_ccitt {
+        let mut params = crate::object::extract_ccitt_params_with_width(dict.get("DecodeParms"), Some(width))
+            .unwrap_or(crate::decoders::CcittParams {
+                columns: width,
+                rows: Some(height),
+                ..crate::decoders::CcittParams::default()
+            });
+        if params.rows.is_none() {
+            params.rows = Some(height);
+        }
+        // ISO 32000-1 7.4.6 /BlackIs1 and 8.9.5.2 Table 90 /Decode both
+        // independently invert the bilevel sample polarity. Fold them into
+        // the decoder's single polarity flag; two inversions cancel out.
+        if decode_array_inverts_1bpc(dict.get("Decode")) {
+            params.black_is_1 = !params.black_is_1;
+        }
+        Some(params)
+    } else {
+        None
+    };
+
     // Bit depth of the buffer actually stored: raised to 8 when a transform
     // below (sub-byte unpack, /Decode application, 16-bit reduction) rewrites
     // the samples as one byte per component. ~keep
@@ -1056,6 +1078,30 @@ pub fn extract_image_from_xobject(
             xobject.decode_stream_data()?
         };
         ImageData::Jpeg(decoded)
+    } else if let Some(params) = ccitt_params.as_ref() {
+        let compressed = if let (Some(d), Some(ref_id)) = (doc.as_ref(), obj_ref) {
+            d.decode_stream_with_encryption(xobject, ref_id)?
+        } else {
+            xobject.decode_stream_data()?
+        };
+        let packed = ccitt_bilevel::decompress_ccitt(&compressed, params)?;
+        let pixels = ccitt_bilevel::bilevel_to_grayscale(&packed, width, height);
+        let expected_len = (width as usize)
+            .checked_mul(height as usize)
+            .ok_or_else(|| Error::Decode(format!("CCITT image dimensions overflow: {width} x {height}")))?;
+        if pixels.len() != expected_len {
+            return Err(Error::Decode(format!(
+                "CCITT image decoded to {} grayscale samples, expected {expected_len} for {width} x {height}",
+                pixels.len()
+            )));
+        }
+        stored_bpc = 8;
+        samples_are_raw = false;
+        decode_folded_in = decode_array_inverts_1bpc(dict.get("Decode"));
+        ImageData::Raw {
+            pixels,
+            format: PixelFormat::Grayscale,
+        }
     } else {
         let decoded_data = if let (Some(d), Some(ref_id)) = (doc.as_ref(), obj_ref) {
             d.decode_stream_with_encryption(xobject, ref_id)?
@@ -1138,11 +1184,11 @@ pub fn extract_image_from_xobject(
             // instead: `bits_per_component` stays sub-byte, which is exactly
             // what every consumer already checks before reading samples. ~keep
             let representable = ncomp == pixel_format.bytes_per_pixel();
-            // CCITT keeps its packed stream — decompression happens lazily
-            // and /Decode is folded into `black_is_1` below. Lab samples are
-            // not confined to [0, 1], so the linear-to-byte mapping does not
-            // apply to them. ~keep
-            let keep_raw = is_ccitt || color_space == ColorSpace::Lab || !representable;
+            // Lab samples are not confined to [0, 1], so the linear-to-byte
+            // mapping does not apply to them. Unrepresentable multi-ink
+            // colour spaces likewise stay packed. CCITT has already taken
+            // the eager bilevel-to-grayscale branch above. ~keep
+            let keep_raw = color_space == ColorSpace::Lab || !representable;
             let ranges =
                 decode_ranges(dict.get("Decode"), ncomp).filter(|r| r.iter().any(|&(lo, hi)| (lo, hi) != (0.0, 1.0)));
 
@@ -1181,13 +1227,12 @@ pub fn extract_image_from_xobject(
         }
     };
 
-    // JBIG2 decode produces 8-bit-per-channel pixels regardless of the
-    // XObject's BitsPerComponent (which is 1).  Override to 8 so that
-    // to_dynamic_image() does not try to CCITT-decompress the output.
-    // 16-bit samples were collapsed to their high byte above (and an Indexed
-    // base always expands to 8-bit RGB), so the stored pixels are 8-bit per
-    // component in those cases too. ~keep
-    let effective_bpc = if is_jbig2 || bits_per_component == 16 {
+    // JBIG2 and CCITT decode produce 8-bit-per-channel pixels regardless of
+    // the XObject's BitsPerComponent (which is 1). 16-bit samples were
+    // collapsed to their high byte above (and an Indexed base always expands
+    // to 8-bit RGB), so the stored pixels are 8-bit per component in those
+    // cases too. ~keep
+    let effective_bpc = if is_jbig2 || is_ccitt || bits_per_component == 16 {
         8
     } else {
         stored_bpc
@@ -1216,26 +1261,7 @@ pub fn extract_image_from_xobject(
     }
     image.set_rendering_intent(rendering_intent);
 
-    if bits_per_component == 1
-        && image.color_space == ColorSpace::DeviceGray
-        && is_ccitt
-        && let Some(mut ccitt_params) =
-            crate::object::extract_ccitt_params_with_width(dict.get("DecodeParms"), Some(width))
-    {
-        if ccitt_params.rows.is_none() {
-            ccitt_params.rows = Some(height);
-        }
-        // ISO 32000-1 7.4.6 /BlackIs1 and 8.9.5.2 Table 90 /Decode both
-        // flip which sample bit means "black" for a 1-bit DeviceGray
-        // image, and they are independent, composable mechanisms: a
-        // producer that wants inverted polarity may set /BlackIs1 true
-        // *or* write /Decode [1 0] on the image XObject instead (both
-        // are seen in real-world scanned PDFs). Fold /Decode into the
-        // same inversion flag decompress_ccitt already honors so either
-        // one alone inverts and both together cancel out. ~keep
-        if decode_array_inverts_1bpc(dict.get("Decode")) {
-            ccitt_params.black_is_1 = !ccitt_params.black_is_1;
-        }
+    if let Some(ccitt_params) = ccitt_params {
         image.set_ccitt_params(ccitt_params);
     }
 
@@ -3910,6 +3936,28 @@ mod ccitt_decode_array_polarity_tests {
     fn decode_0_1_is_a_no_op() {
         let (white, black) = white_black_counts(&ccitt_xobject(Some([0, 1])));
         assert_eq!((white, black), white_black_counts(&ccitt_xobject(None)));
+    }
+
+    #[test]
+    fn extracted_ccitt_data_contains_decoded_grayscale_samples() {
+        let image = extract_image_from_xobject(None, &ccitt_xobject(None), None, None)
+            .expect("decode hand-built CCITT test image");
+
+        assert_eq!(image.bits_per_component(), 8);
+        assert!(image.ccitt_params().is_some(), "CCITT codec metadata must be preserved");
+        match image.data() {
+            ImageData::Raw { pixels, format } => {
+                assert_eq!(*format, PixelFormat::Grayscale);
+                assert_eq!(
+                    pixels.len(),
+                    24,
+                    "8 x 3 image must expose one byte per grayscale sample"
+                );
+                assert_eq!(pixels.iter().filter(|&&sample| sample == 0x00).count(), 22);
+                assert_eq!(pixels.iter().filter(|&&sample| sample == 0xFF).count(), 2);
+            }
+            other => panic!("expected decoded raw grayscale samples, got {other:?}"),
+        }
     }
 }
 

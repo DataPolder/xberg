@@ -406,6 +406,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Decoded CCITT image XObjects into 8-bit grayscale samples before exposing `PdfImage::data`,
+  while preserving codec metadata and image polarity (#1470).
 - Clamped deeply nested XML heading levels before narrowing the depth value, preventing invalid
   heading levels or debug-build panics before configured security limits apply (#1474).
 - Fixed EPUB packaging XML parsing to count actual OPF nesting depth and safely accept legacy DTD
