@@ -811,6 +811,19 @@ const MIN_DENSE_COLUMN_CONTENT_WIDTH_PTS: f32 = 200.0;
 const MIN_DENSE_COLUMN_GUTTER_FRACTION: f32 = 0.02;
 const MIN_DENSE_COLUMN_GUTTER_PTS: f32 = 10.0;
 const MIN_DENSE_COLUMN_SPANS_PER_SIDE: usize = 6;
+// Hanging clause numbers and list labels occupy a narrow x-band beside the
+// column body. If the median gutter estimate lands inside that band, snapping
+// to its left edge restores the true gutter. Six percent covers the 18-23pt
+// labels observed on A4/Letter pages while excluding body prose and wide furniture.
+const MAX_DENSE_COLUMN_SPLIT_SNAP_SPAN_FRACTION: f32 = 0.06;
+// Repeated hanging labels share a left edge modulo sub-point PDF transform and
+// font-positioning noise. Requiring an aligned population prevents one-off
+// narrow gutter-crossing furniture from moving the page-wide split.
+const DENSE_COLUMN_SPLIT_SNAP_X_TOLERANCE_PTS: f32 = 1.0;
+// A label can be emitted as overlapping fragments, where moving the split out
+// of one fragment reveals another straddler immediately to its left. Bound the
+// fixed-point search so malformed geometry cannot make this pass unbounded.
+const MAX_DENSE_COLUMN_SPLIT_SNAP_PASSES: usize = 4;
 // A full-width furniture span (running header/footer, page-wide rule,
 // full-width title) spans nearly the entire printable width regardless of
 // the two-column layout beneath it, whereas a genuine column is bounded by
@@ -963,6 +976,62 @@ fn detect_split_x(spans: &[xberg_native_pdf::layout::TextSpan], lines: &[SpanLin
     } else {
         midpoints[mid]
     })
+}
+
+/// Move a gutter estimate out of a repeated hanging-label band.
+///
+/// A single narrow straddler remains a boundary line. Snapping requires the
+/// same independent evidence count used to trust the dense-column split, so a
+/// one-off centred label or rule cannot erase a legitimate band boundary.
+fn snap_split_left_of_hanging_labels(
+    spans: &[xberg_native_pdf::layout::TextSpan],
+    lines: &[SpanLine],
+    page_width: f32,
+    mut split_x: f32,
+) -> f32 {
+    let max_snap_width = page_width * MAX_DENSE_COLUMN_SPLIT_SNAP_SPAN_FRACTION;
+    for _ in 0..MAX_DENSE_COLUMN_SPLIT_SNAP_PASSES {
+        let Some(left_edge) = aligned_hanging_label_left_edge(spans, lines, max_snap_width, split_x) else {
+            break;
+        };
+        split_x = left_edge;
+    }
+    split_x
+}
+
+fn aligned_hanging_label_left_edge(
+    spans: &[xberg_native_pdf::layout::TextSpan],
+    lines: &[SpanLine],
+    max_snap_width: f32,
+    split_x: f32,
+) -> Option<f32> {
+    let mut left_edges = lines
+        .iter()
+        .filter_map(|line| {
+            line.iter()
+                .filter_map(|&index| {
+                    let bbox = &spans[index].bbox;
+                    (bbox.width > 0.0
+                        && bbox.width <= max_snap_width
+                        && bbox.left() < split_x
+                        && bbox.right() > split_x)
+                        .then_some(bbox.left())
+                })
+                .min_by(f32::total_cmp)
+        })
+        .collect::<Vec<_>>();
+    left_edges.sort_by(f32::total_cmp);
+
+    for (start, &left_edge) in left_edges.iter().enumerate() {
+        let aligned_count = left_edges[start..]
+            .iter()
+            .take_while(|&&candidate| candidate - left_edge <= DENSE_COLUMN_SPLIT_SNAP_X_TOLERANCE_PTS)
+            .count();
+        if aligned_count >= MIN_DENSE_COLUMN_SPLIT_LINES {
+            return Some(left_edge);
+        }
+    }
+    None
 }
 
 /// A page region between two consecutive boundary (furniture) lines, in
@@ -1133,9 +1202,10 @@ pub(crate) fn reorder_dense_two_column_page(spans: &mut [xberg_native_pdf::layou
 
     let order = spans_sorted_top_to_bottom(spans);
     let lines = group_into_lines(spans, &order);
-    let Some(split_x) = detect_split_x(spans, &lines, page_width) else {
+    let Some(detected_split_x) = detect_split_x(spans, &lines, page_width) else {
         return false;
     };
+    let split_x = snap_split_left_of_hanging_labels(spans, &lines, page_width, detected_split_x);
 
     let furniture_width = page_width * FULL_WIDTH_FURNITURE_FRACTION;
     let bands = build_bands(spans, &lines, furniture_width, split_x);
@@ -1807,6 +1877,152 @@ mod tests {
                 "additional citations appear in the appendix",
                 "for readers seeking further detail here",
             ]
+        );
+    }
+
+    const GH1484_PAGE_WIDTH: f32 = 595.0;
+    const GH1484_RIGHT_NUMBER_X: f32 = 304.87;
+
+    fn dense_two_column_hanging_number_spans() -> Vec<TextSpan> {
+        const LEFT_NUMBER_X: f32 = 36.0;
+        const LEFT_TEXT_X: f32 = 64.34;
+        const LEFT_TEXT_WIDTH: f32 = 226.8;
+        const RIGHT_TEXT_X: f32 = 333.19;
+        const ROW_COUNT: usize = 12;
+
+        let mut spans = Vec::new();
+        for row in 0..ROW_COUNT {
+            let y = 816.0 - row as f32 * 14.0;
+            if row.is_multiple_of(2) {
+                spans.push(span_with_width(
+                    &format!("15.{}", row / 2 + 1),
+                    LEFT_NUMBER_X,
+                    y,
+                    17.84,
+                    11.0,
+                    11.0,
+                ));
+            }
+            spans.push(span_with_width(
+                &format!("The left clause line {row} continues with ordinary agreement terms"),
+                LEFT_TEXT_X,
+                y,
+                LEFT_TEXT_WIDTH,
+                11.0,
+                11.0,
+            ));
+            if row.is_multiple_of(2) {
+                spans.push(span_with_width(
+                    &format!("16.{}", row / 2 + 5),
+                    GH1484_RIGHT_NUMBER_X,
+                    y,
+                    17.84,
+                    11.0,
+                    11.0,
+                ));
+            }
+            spans.push(span_with_width(
+                &format!("The right clause line {row} continues with ordinary agreement terms"),
+                RIGHT_TEXT_X,
+                y,
+                220.0,
+                11.0,
+                11.0,
+            ));
+        }
+        spans
+    }
+
+    /// GH#1484: alternating numbered and continuation lines yield two gutter-midpoint
+    /// populations. Their median lands just inside the right column's hanging-number
+    /// band, so every numbered line used to become a boundary and starve the content
+    /// bands below the dense-column population gate.
+    #[test]
+    fn dense_two_column_hanging_numbers_reorder_by_column() {
+        let mut spans = dense_two_column_hanging_number_spans();
+        let expected = spans
+            .iter()
+            .filter(|span| span.bbox.x < GH1484_RIGHT_NUMBER_X)
+            .chain(spans.iter().filter(|span| span.bbox.x >= GH1484_RIGHT_NUMBER_X))
+            .map(|span| span.text.clone())
+            .collect::<Vec<_>>();
+
+        let order = spans_sorted_top_to_bottom(&spans);
+        let lines = group_into_lines(&spans, &order);
+        let detected_split = detect_split_x(&spans, &lines, GH1484_PAGE_WIDTH).expect("numbered page has a gutter");
+        assert!(detected_split > GH1484_RIGHT_NUMBER_X && detected_split < GH1484_RIGHT_NUMBER_X + 17.84);
+        assert_eq!(
+            snap_split_left_of_hanging_labels(&spans, &lines, GH1484_PAGE_WIDTH, detected_split),
+            GH1484_RIGHT_NUMBER_X
+        );
+
+        assert!(reorder_dense_two_column_page(&mut spans, GH1484_PAGE_WIDTH));
+
+        assert_eq!(
+            spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
+            expected.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn dense_two_column_unnumbered_control_keeps_detected_split() {
+        const PAGE_WIDTH: f32 = 612.0;
+        let spans = dense_two_column_spans();
+        let order = spans_sorted_top_to_bottom(&spans);
+        let lines = group_into_lines(&spans, &order);
+        let detected_split = detect_split_x(&spans, &lines, PAGE_WIDTH).expect("control has a gutter");
+
+        assert_eq!(
+            snap_split_left_of_hanging_labels(&spans, &lines, PAGE_WIDTH, detected_split),
+            detected_split
+        );
+    }
+
+    #[test]
+    fn dense_column_split_does_not_snap_to_furniture_or_one_off_label() {
+        const PAGE_WIDTH: f32 = 595.0;
+        const SPLIT_X: f32 = 300.0;
+        let mut furniture = (0..MIN_DENSE_COLUMN_SPLIT_LINES)
+            .map(|row| span_with_width("centred furniture", 250.0, 800.0 - row as f32 * 14.0, 100.0, 11.0, 11.0))
+            .collect::<Vec<_>>();
+        furniture.push(span_with_width("note", 295.0, 700.0, 20.0, 11.0, 11.0));
+        let order = spans_sorted_top_to_bottom(&furniture);
+        let lines = group_into_lines(&furniture, &order);
+
+        assert_eq!(
+            snap_split_left_of_hanging_labels(&furniture, &lines, PAGE_WIDTH, SPLIT_X),
+            SPLIT_X
+        );
+    }
+
+    #[test]
+    fn dense_column_split_repeats_when_first_snap_reveals_another_fragment() {
+        const PAGE_WIDTH: f32 = 595.0;
+        const INITIAL_SPLIT_X: f32 = 305.64;
+        const FIRST_FRAGMENT_LEFT: f32 = 304.87;
+        const SECOND_FRAGMENT_LEFT: f32 = 300.0;
+
+        let mut spans = Vec::new();
+        for row in 0..MIN_DENSE_COLUMN_SPLIT_LINES {
+            let y = 800.0 - row as f32 * 14.0;
+            spans.push(span_with_width("prefix", SECOND_FRAGMENT_LEFT, y, 5.2, 11.0, 11.0));
+            spans.push(span_with_width("number", FIRST_FRAGMENT_LEFT, y, 17.84, 11.0, 11.0));
+        }
+        let order = spans_sorted_top_to_bottom(&spans);
+        let lines = group_into_lines(&spans, &order);
+        let max_snap_width = PAGE_WIDTH * MAX_DENSE_COLUMN_SPLIT_SNAP_SPAN_FRACTION;
+
+        assert_eq!(
+            aligned_hanging_label_left_edge(&spans, &lines, max_snap_width, INITIAL_SPLIT_X),
+            Some(FIRST_FRAGMENT_LEFT)
+        );
+        assert_eq!(
+            aligned_hanging_label_left_edge(&spans, &lines, max_snap_width, FIRST_FRAGMENT_LEFT),
+            Some(SECOND_FRAGMENT_LEFT)
+        );
+        assert_eq!(
+            snap_split_left_of_hanging_labels(&spans, &lines, PAGE_WIDTH, INITIAL_SPLIT_X),
+            SECOND_FRAGMENT_LEFT
         );
     }
 

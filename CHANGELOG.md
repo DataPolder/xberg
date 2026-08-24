@@ -407,6 +407,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Dense two-column PDF pages with repeated hanging clause numbers now keep the detected gutter to
+  the left of the number band, preventing numbered lines from being misclassified as furniture and
+  emitted in interleaved row order (#1484).
 - Windows Python wheel vendoring now reports an explicit successful exit code after repacking,
   preventing stale native-command status from failing wheel smoke tests and release builds.
 - Kept adjacent PDF text runs on one baseline together across modest font-size changes, preventing
