@@ -13,6 +13,11 @@ use async_trait::async_trait;
 
 /// `ProcessingWarning::source` used for every degradation reported by this extractor.
 const XML_WARNING_SOURCE: &str = "xml";
+const MAX_XML_HEADING_LEVEL: u16 = 6;
+
+fn heading_level(depth: u16) -> u8 {
+    depth.saturating_add(1).min(MAX_XML_HEADING_LEVEL) as u8
+}
 
 /// Whether the caller actually asked for the recovered diagram, i.e. the
 /// request's output format resolves to the `dot` renderer.
@@ -79,7 +84,7 @@ fn build_internal_document(content: &[u8], mime_type: &str, budget: &mut Securit
                     }
                 }
 
-                let level = ((depth as u8) + 1).min(6);
+                let level = heading_level(depth);
                 let mut elem =
                     InternalElement::text(ElementKind::Heading { level }, &name_owned, depth).with_index(index);
                 if !attrs.is_empty() {
@@ -130,7 +135,7 @@ fn build_internal_document(content: &[u8], mime_type: &str, budget: &mut Securit
                     }
                 }
 
-                let level = ((depth as u8) + 1).min(6);
+                let level = heading_level(depth);
                 let mut elem = InternalElement::text(ElementKind::Heading { level }, &name, depth).with_index(index);
                 if !attrs.is_empty() {
                     elem = elem.with_attributes(attrs);
@@ -296,6 +301,88 @@ impl InternalDocumentExtractor for XmlExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn nested_xml(start_elements: usize, empty_leaf: bool) -> Vec<u8> {
+        let mut xml = String::new();
+        for _ in 0..start_elements {
+            xml.push_str("<node>");
+        }
+        if empty_leaf {
+            xml.push_str("<leaf/>");
+        }
+        for _ in 0..start_elements {
+            xml.push_str("</node>");
+        }
+        xml.into_bytes()
+    }
+
+    fn assert_valid_heading_levels(doc: &InternalDocument) {
+        for element in &doc.elements {
+            let ElementKind::Heading { level } = element.kind else {
+                continue;
+            };
+            assert!(
+                (1..=MAX_XML_HEADING_LEVEL as u8).contains(&level),
+                "heading level must stay in 1..=6, got {level} at depth {}",
+                element.depth
+            );
+        }
+    }
+
+    #[test]
+    fn deeply_nested_start_elements_clamp_heading_level_before_narrowing() {
+        let content = nested_xml(256, false);
+        let mut budget = SecurityBudget::with_defaults();
+
+        let doc = build_internal_document(&content, "application/xml", &mut budget)
+            .expect("depths within the default security limit must extract without overflow");
+
+        assert_eq!(doc.elements.len(), 256);
+        assert_eq!(doc.elements.last().map(|element| element.depth), Some(255));
+        assert_eq!(
+            doc.elements.last().map(|element| &element.kind),
+            Some(&ElementKind::Heading { level: 6 })
+        );
+        assert_valid_heading_levels(&doc);
+    }
+
+    #[test]
+    fn deeply_nested_empty_element_clamps_heading_level_before_narrowing() {
+        let content = nested_xml(255, true);
+        let mut budget = SecurityBudget::with_defaults();
+
+        let doc = build_internal_document(&content, "application/xml", &mut budget)
+            .expect("an empty element within the default security limit must not overflow");
+
+        assert_eq!(doc.elements.len(), 256);
+        assert_eq!(doc.elements.last().map(|element| element.depth), Some(255));
+        assert_eq!(
+            doc.elements.last().map(|element| &element.kind),
+            Some(&ElementKind::Heading { level: 6 })
+        );
+        assert_valid_heading_levels(&doc);
+    }
+
+    #[test]
+    fn deeply_nested_xml_still_respects_configured_security_limit() {
+        let content = nested_xml(256, false);
+        let limits = crate::extractors::security::SecurityLimits {
+            max_xml_depth: 255,
+            max_nesting_depth: 255,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+
+        let error = build_internal_document(&content, "application/xml", &mut budget)
+            .expect_err("depth beyond the configured limit must be rejected");
+
+        match error {
+            crate::XbergError::Security { message, .. } => {
+                assert_eq!(message, "Nesting too deep: 256 levels (max: 255)");
+            }
+            other => panic!("expected a security error, got {other:?}"),
+        }
+    }
 
     #[tokio::test]
     async fn test_xml_extractor() {

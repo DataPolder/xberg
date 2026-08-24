@@ -406,6 +406,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Clamped deeply nested XML heading levels before narrowing the depth value, preventing invalid
+  heading levels or debug-build panics before configured security limits apply (#1474).
 - Fixed EPUB packaging XML parsing to count actual OPF nesting depth and safely accept legacy DTD
   declarations without resolving external or amplified entities (#1477, #1478).
 - Preserved named and numeric XML references in PDF XMP scalar and sequence metadata instead of
