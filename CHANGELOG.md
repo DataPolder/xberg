@@ -378,13 +378,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   last pipeline step, so every document a binding could ever observe carried `null` there. Read the
   rendering from `content` — it is already in the configured `output_format`. The field remains
   `pub` on the Rust type, where extractor and post-processor plugins legitimately use it.
-
-  exposed by any language binding (Python, Node, Ruby, PHP, Go, Java, C#, Elixir, Dart, Swift,
-  Kotlin, Zig, WASM, C FFI), and the C symbol `xberg_extracted_document_formatted_content` is gone.
-  The field is pipeline-internal scratch space: `apply_output_format` moves it into `content` as the
-  last pipeline step, so every document a binding could ever observe carried `null` there. Read the
-  rendering from `content` — it is already in the configured `output_format`. The field remains
-  `pub` on the Rust type, where extractor and post-processor plugins legitimately use it.
 - The troff, mdoc, POD and DokuWiki MIME types are no longer advertised as supported. They were
   claimed by the plain-text extractor, which produced silently wrong output; each needs a full macro
   or host-language parser, and an honest rejection is better than plausible-looking wrong text.
@@ -1234,12 +1227,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matching is now unconditional `regex-lite` — and its RIS parser keeps records that earlier
   versions rejected, so RIS input that used to fail to parse now yields a citation.
 
-  0.37 and onto 0.41. That clears RUSTSEC-2026-0194 (quadratic duplicate-attribute checking) and
-  RUSTSEC-2026-0195 (unbounded namespace-declaration allocation), both scored 7.5, which reached
-  every downstream consumer of the `office` feature. The old pin existed because biblib 0.4.4 called
-  a `quick-xml` API that had been removed; 0.8 no longer does. Its `regex` feature is gone —
-  matching is now unconditional `regex-lite` — and its RIS parser keeps records that earlier
-  versions rejected, so RIS input that used to fail to parse now yields a citation.
 - Zip-bomb accounting no longer overflows or skips entries. Declared entry sizes are read from the
   central directory, where a ZIP64 extended field can carry a full eight-byte value, and were summed
   with an unchecked addition, so two crafted entries could wrap the accumulator to zero and pass a
