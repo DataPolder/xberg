@@ -210,6 +210,34 @@ fn parse_batch_output(stdout: &str) -> Result<ParsedBatchOutput> {
     })
 }
 
+fn validate_batch_item(item: &serde_json::Value) -> (bool, Option<String>, ErrorKind) {
+    if let Some(error_value) = item.get("error") {
+        let error_message = error_value.as_str().unwrap_or("unknown error");
+        if !error_message.is_empty() {
+            let kind = if error_message.contains("timed out") {
+                ErrorKind::Timeout
+            } else {
+                ErrorKind::FrameworkError
+            };
+            return (false, Some(error_message.to_string()), kind);
+        }
+    }
+
+    match item.get("content").and_then(serde_json::Value::as_str) {
+        Some(content) if !content.trim().is_empty() => (true, None, ErrorKind::None),
+        Some(_) => (
+            false,
+            Some("Framework returned empty content".to_string()),
+            ErrorKind::EmptyContent,
+        ),
+        None => (
+            false,
+            Some("No content extracted (unsupported format or empty result)".to_string()),
+            ErrorKind::EmptyContent,
+        ),
+    }
+}
+
 /// Check if verbose benchmark debugging is enabled via BENCHMARK_DEBUG env var.
 fn is_debug_enabled() -> bool {
     std::env::var("BENCHMARK_DEBUG").is_ok()
@@ -1979,18 +2007,29 @@ impl FrameworkAdapter for SubprocessAdapter {
             error,
             ..
         } = execution;
-        if let Some(error) = error {
-            let results = file_paths
-                .iter()
-                .map(|file_path| {
-                    let file_size = std::fs::metadata(file_path).map_or(0, |metadata| metadata.len());
-                    self.build_failure_result(file_path, file_size, duration, &resource_stats, &error, output_format)
-                })
-                .collect();
-            return Ok(results);
-        }
-
-        let parsed_batch = parse_batch_output(&stdout)?;
+        let parsed_batch = match parse_batch_output(&stdout) {
+            Ok(parsed_batch) => parsed_batch,
+            Err(parse_error) => {
+                let Some(process_error) = error.as_ref() else {
+                    return Err(parse_error);
+                };
+                let results = file_paths
+                    .iter()
+                    .map(|file_path| {
+                        let file_size = std::fs::metadata(file_path).map_or(0, |metadata| metadata.len());
+                        self.build_failure_result(
+                            file_path,
+                            file_size,
+                            duration,
+                            &resource_stats,
+                            process_error,
+                            output_format,
+                        )
+                    })
+                    .collect();
+                return Ok(results);
+            }
+        };
 
         if parsed_batch.items.len() != file_paths.len() {
             return Err(Error::Benchmark(format!(
@@ -2006,10 +2045,18 @@ impl FrameworkAdapter for SubprocessAdapter {
                 file_paths.len()
             )));
         }
+        let batch_validations: Vec<(bool, Option<String>, ErrorKind)> =
+            parsed_batch.items.iter().map(validate_batch_item).collect();
+
         if batch_capability.per_item_timing {
-            if parsed_batch.per_file_durations.iter().any(Option::is_none) {
+            if parsed_batch
+                .per_file_durations
+                .iter()
+                .zip(&batch_validations)
+                .any(|(duration, validation)| validation.0 && duration.is_none())
+            {
                 return Err(Error::Benchmark(format!(
-                    "framework '{}' declares per-item batch timing but returned unavailable timing values",
+                    "framework '{}' declares per-item batch timing but returned unavailable timing for a successful item",
                     self.name
                 )));
             }
@@ -2048,48 +2095,24 @@ impl FrameworkAdapter for SubprocessAdapter {
             .map(|item| item.get("content").and_then(|value| value.as_str()).map(str::to_string))
             .collect();
 
-        let batch_validations: Vec<(bool, Option<String>, ErrorKind)> = parsed_batch
-            .items
-            .iter()
-            .map(|item| {
-                if let Some(error_val) = item.get("error") {
-                    let error_msg = error_val.as_str().unwrap_or("unknown error");
-                    if !error_msg.is_empty() {
-                        let kind = if error_msg.contains("timed out") {
-                            ErrorKind::Timeout
-                        } else {
-                            ErrorKind::FrameworkError
-                        };
-                        return (false, Some(error_msg.to_string()), kind);
-                    }
-                }
-                match item.get("content").and_then(|value| value.as_str()) {
-                    Some(content) if !content.trim().is_empty() => (true, None, ErrorKind::None),
-                    Some(_) => (
-                        false,
-                        Some("Framework returned empty content".to_string()),
-                        ErrorKind::EmptyContent,
-                    ),
-                    None => (
-                        false,
-                        Some("No content extracted (unsupported format or empty result)".to_string()),
-                        ErrorKind::EmptyContent,
-                    ),
-                }
-            })
-            .collect();
-
-        if let Some((index, (_, error, _))) = batch_validations
-            .iter()
-            .enumerate()
-            .find(|(_, validation)| !validation.0)
+        if let Some(process_error) = error.as_ref()
+            && batch_validations.iter().all(|validation| validation.0)
         {
-            return Err(Error::Benchmark(format!(
-                "framework '{}' returned a partial batch failure for {}: {}",
-                self.name,
-                file_paths[index].display(),
-                error.as_deref().unwrap_or("unspecified extraction failure")
-            )));
+            let results = file_paths
+                .iter()
+                .map(|file_path| {
+                    let file_size = std::fs::metadata(file_path).map_or(0, |metadata| metadata.len());
+                    self.build_failure_result(
+                        file_path,
+                        file_size,
+                        duration,
+                        &resource_stats,
+                        process_error,
+                        output_format,
+                    )
+                })
+                .collect();
+            return Ok(results);
         }
 
         let successful_bytes: u64 = file_paths
@@ -3973,22 +3996,23 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn partial_batch_item_failure_rejects_entire_batch() {
+    async fn partial_batch_item_failure_returns_accountable_result_rows() {
         let adapter = SubprocessAdapter::with_batch_capability(
             "test",
             "sh",
             vec![
                 "-c".to_string(),
-                "printf '[{\"content\":\"ok\"},{\"error\":\"failed item\"}]'".to_string(),
+                "printf '{\"results\":[{\"content\":\"ok\"},{\"error\":\"failed item\"}],\"total_ms\":10,\"per_file_ms\":[5,null]}'; exit 1"
+                    .to_string(),
             ],
             vec![],
             vec!["pdf".to_string()],
-            test_batch_capability(false),
+            test_batch_capability(true),
         );
         let first = tempfile::NamedTempFile::new().unwrap();
         let second = tempfile::NamedTempFile::new().unwrap();
 
-        let error = adapter
+        let results = adapter
             .extract_batch(
                 &[first.path(), second.path()],
                 Duration::from_secs(1),
@@ -3997,10 +4021,17 @@ mod tests {
                 OutputFormat::Markdown,
             )
             .await
-            .unwrap_err();
+            .unwrap();
 
-        assert!(error.to_string().contains("partial batch failure"));
-        assert!(error.to_string().contains("failed item"));
+        assert_eq!(results.len(), 2);
+        assert!(results[0].success);
+        assert_eq!(results[0].error_kind, ErrorKind::None);
+        assert!(!results[1].success);
+        assert_eq!(results[1].error_kind, ErrorKind::FrameworkError);
+        assert_eq!(results[1].error_message.as_deref(), Some("failed item"));
+        assert_eq!(results[1].extracted_text, None);
+        assert_eq!(results[0].extraction_duration, Some(Duration::from_millis(5)));
+        assert_eq!(results[1].extraction_duration, None);
     }
 
     #[cfg(unix)]

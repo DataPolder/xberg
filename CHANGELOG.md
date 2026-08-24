@@ -406,6 +406,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Batch benchmark adapters now retain successful and failed per-item results from partially failed
+  subprocess runs, allowing the configured minimum-success gate to evaluate the full cohort instead
+  of treating an expected framework-level failure as a harness failure.
+
 - Generated documentation snippet tabs now use Alef target identifiers consistently, so TypeScript
   Node/WASM and Kotlin Android examples render as distinct, stable tabs.
 

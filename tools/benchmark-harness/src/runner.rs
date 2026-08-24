@@ -909,18 +909,8 @@ impl BenchmarkRunner {
                 )));
             }
 
-            if let Some(failed) = batch_results.iter().find(|result| !result.success) {
-                return Err(Error::Benchmark(format!(
-                    "framework '{}' returned a partial batch failure for {}: {}",
-                    adapter.name(),
-                    failed.file_path.display(),
-                    failed
-                        .error_message
-                        .as_deref()
-                        .unwrap_or("unspecified extraction failure")
-                )));
-            }
-
+            // Per-item framework failures are accountable benchmark rows, not harness failures.
+            // Retain them so aggregation and the minimum-success gate evaluate the full cohort.
             let has_timeout = batch_results.iter().any(|r| r.error_kind == ErrorKind::Timeout);
 
             if iteration >= warmup_iterations || has_timeout {
@@ -2816,7 +2806,7 @@ mod tests {
             calls: AtomicUsize::new(0),
         });
 
-        let error = BenchmarkRunner::run_batch_iterations_static(
+        let results = BenchmarkRunner::run_batch_iterations_static(
             vec![file.path().to_path_buf()],
             adapter,
             &config,
@@ -2826,9 +2816,14 @@ mod tests {
             OutputFormat::Markdown,
         )
         .await
-        .unwrap_err();
+        .unwrap();
 
-        assert!(error.to_string().contains("partial batch failure"));
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].success);
+        assert_eq!(results[0].error_kind, ErrorKind::FrameworkError);
+        assert_eq!(results[0].error_message.as_deref(), Some("measured iteration failed"));
+        assert_eq!(results[0].extracted_text.as_deref(), Some("successful payload"));
+        assert_eq!(results[0].iterations.len(), 2);
     }
 
     #[test]
