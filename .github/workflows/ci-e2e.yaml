@@ -440,6 +440,10 @@ jobs:
       - name: Install Task
         uses: xberg-io/actions/install-task@v1
 
+      - name: Install wasm-pack
+        if: matrix.lang == 'wasm'
+        run: task demo:dev:setup:wasm-pack
+
       - name: Install alef CLI
         uses: xberg-io/actions/install-alef@v1
         # alef is a third-party tool. The job-wide `-D warnings` turns its own

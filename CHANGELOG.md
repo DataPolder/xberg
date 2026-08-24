@@ -445,6 +445,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - EPUB members declared in a non-UTF-8 encoding or written in UTF-16 are decoded instead of skipped,
   and books with DRM listed in `META-INF/encryption.xml` report one warning instead of blaming the
   encoding or emitting ciphertext as text (#1494).
+- Dart E2E setup now installs the Flutter Rust Bridge 2.13.0 generator used by the committed
+  bindings, and WASM E2E setup installs its pinned `wasm-pack` before Alef checks prerequisites.
 - Musl Elixir publish smoke tests now pass the complete native asset directory, allowing the test
   to load the NIF together with its vendored shared-library closure.
 - Alef E2E freshness checks now use pinned uv and Ruff versions, fail when a configured formatter
