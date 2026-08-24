@@ -859,7 +859,9 @@ impl SubprocessAdapter {
                 if !stdout.is_empty() && stdout.len() < 500 {
                     message.push_str(&format!("\nstdout: {stdout}"));
                 }
-                error = Some(Error::Benchmark(message));
+                if error.is_none() {
+                    error = Some(Error::Benchmark(message));
+                }
             }
             stdout
         });
@@ -2045,8 +2047,22 @@ impl FrameworkAdapter for SubprocessAdapter {
                 file_paths.len()
             )));
         }
-        let batch_validations: Vec<(bool, Option<String>, ErrorKind)> =
+        let mut batch_validations: Vec<(bool, Option<String>, ErrorKind)> =
             parsed_batch.items.iter().map(validate_batch_item).collect();
+        if let Some(process_error) = error.as_ref() {
+            let process_error_kind = error_to_error_kind(process_error);
+            let process_error_message = process_error.to_string();
+            for (item, validation) in parsed_batch.items.iter().zip(&mut batch_validations) {
+                let has_explicit_error = item
+                    .get("error")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|message| !message.is_empty());
+                if !validation.0 && !has_explicit_error {
+                    validation.1 = Some(process_error_message.clone());
+                    validation.2 = process_error_kind;
+                }
+            }
+        }
 
         if batch_capability.per_item_timing {
             if parsed_batch
@@ -4036,6 +4052,53 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn mixed_batch_process_failure_applies_global_error_only_to_implicit_failure() {
+        let adapter = SubprocessAdapter::with_batch_capability(
+            "test",
+            "sh",
+            vec![
+                "-c".to_string(),
+                "printf '{\"results\":[{\"content\":\"ok\"},{\"error\":\"\"},{\"error\":\"explicit item error\"}],\"total_ms\":10,\"per_file_ms\":[5,null,null]}'; printf 'global process error' >&2; exit 1"
+                    .to_string(),
+            ],
+            vec![],
+            vec!["pdf".to_string()],
+            test_batch_capability(true),
+        );
+        let first = tempfile::NamedTempFile::new().unwrap();
+        let second = tempfile::NamedTempFile::new().unwrap();
+        let third = tempfile::NamedTempFile::new().unwrap();
+
+        let results = adapter
+            .extract_batch(
+                &[first.path(), second.path(), third.path()],
+                Duration::from_secs(1),
+                &[false, false, false],
+                &[None, None, None],
+                OutputFormat::Markdown,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].success, true);
+        assert_eq!(results[0].error_message, None);
+        assert_eq!(results[0].error_kind, ErrorKind::None);
+        assert_eq!(results[1].success, false);
+        assert_eq!(
+            results[1].error_message.as_deref(),
+            Some(
+                "Benchmark error: Batch subprocess failed with exit code Some(1)\nstderr: global process error\nstdout: {\"results\":[{\"content\":\"ok\"},{\"error\":\"\"},{\"error\":\"explicit item error\"}],\"total_ms\":10,\"per_file_ms\":[5,null,null]}"
+            )
+        );
+        assert_eq!(results[1].error_kind, ErrorKind::HarnessError);
+        assert_eq!(results[2].success, false);
+        assert_eq!(results[2].error_message.as_deref(), Some("explicit item error"));
+        assert_eq!(results[2].error_kind, ErrorKind::FrameworkError);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn batch_rejects_envelope_timing_cardinality_mismatch() {
         let adapter = SubprocessAdapter::with_batch_capability(
             "test",
@@ -4237,6 +4300,34 @@ mod tests {
         assert!(execution.resource_stats.baseline_memory_bytes > 0);
         assert!(execution.resource_stats.peak_memory_bytes >= execution.resource_stats.baseline_memory_bytes);
         assert!(execution.resource_stats.sample_count > 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn measured_nonzero_exit_preserves_existing_timeout_error() {
+        let mut cmd = SubprocessAdapter::measured_command("sh");
+        cmd.args(["-c", "sleep 0.02; exit 7"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        SubprocessAdapter::configure_measured_stdin(&mut cmd);
+        SubprocessAdapter::configure_child_process(&mut cmd);
+
+        let mut measured = SubprocessAdapter::execute_measured_command(
+            &mut cmd,
+            Duration::from_secs(1),
+            "failing command",
+            Duration::from_millis(1),
+        )
+        .await
+        .unwrap();
+        measured.error = Some(Error::Timeout("original timeout".to_string()));
+
+        let execution = SubprocessAdapter::finish_measured_command(measured, "Failing command");
+
+        assert!(matches!(
+            execution.error,
+            Some(Error::Timeout(message)) if message == "original timeout"
+        ));
     }
 
     #[test]

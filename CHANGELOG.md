@@ -407,8 +407,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Batch benchmark adapters now retain successful and failed per-item results from partially failed
-  subprocess runs, allowing the configured minimum-success gate to evaluate the full cohort instead
-  of treating an expected framework-level failure as a harness failure.
+  subprocess runs, preserve process-level timeout/crash errors on implicit failures, and let the
+  configured minimum-success gate evaluate the full cohort instead of treating an expected
+  framework-level failure as a harness failure.
 - Sceptre image benchmarks now use a bounded structured-image diagnostic matrix for ORT, layout,
   auto-rotation, and tract variants; the published release contract retains Sceptre comparisons on
   the compatible OCR-PDF cohort instead of failing on unsupported vertical-Japanese fixtures.
