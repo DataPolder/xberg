@@ -406,6 +406,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Allowed bounded high-ratio PDF streams below 32 MiB so legitimate 300-dpi RGB page scans are
+  not rejected as decompression bombs; the 100 MiB absolute cap and larger-stream ratio guard
+  remain enforced (#1470).
 - Decoded CCITT image XObjects into 8-bit grayscale samples before exposing `PdfImage::data`,
   while preserving codec metadata and image polarity (#1470).
 - Clamped deeply nested XML heading levels before narrowing the depth value, preventing invalid

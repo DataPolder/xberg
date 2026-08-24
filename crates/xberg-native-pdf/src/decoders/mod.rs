@@ -61,12 +61,12 @@ const DEFAULT_MAX_DECOMPRESSED_SIZE: usize = 100 * 1024 * 1024;
 /// gating the ratio check on absolute size does not weaken it against real
 /// attacks.
 ///
-/// Set to 10 MiB: comfortably above the ~4 MB a legitimate single-page RGB
-/// scan decompresses to (leaving headroom for larger/higher-DPI scans), and
+/// Set to 32 MiB: comfortably above the ~26 MB produced by an A4 RGB scan at
+/// 300 dpi (leaving headroom for predictor bytes and nearby page sizes), and
 /// well below `DEFAULT_MAX_DECOMPRESSED_SIZE` (100 MB) so the ratio check
 /// still has a meaningful window in which to catch a bomb that would
 /// otherwise sneak in just under the absolute cap.
-const MIN_SIZE_FOR_RATIO_CHECK: usize = 10 * 1024 * 1024;
+const MIN_SIZE_FOR_RATIO_CHECK: usize = 32 * 1024 * 1024;
 
 /// PDF stream filter types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -429,17 +429,41 @@ mod tests {
         );
     }
 
+    /// A 2480 x 3506 RGB raster is an A4 page at roughly 300 dpi. Mostly-white
+    /// scans of this size legitimately exceed the default 100:1 ratio, but the
+    /// decoded allocation is bounded and must not be mistaken for a bomb.
+    #[test]
+    fn a4_rgb_scan_decodes_despite_ratio_over_limit() {
+        const WIDTH: usize = 2480;
+        const HEIGHT: usize = 3506;
+        const RGB_COMPONENTS: usize = 3;
+        const DECOMPRESSED_LEN: usize = WIDTH * HEIGHT * RGB_COMPONENTS;
+        const { assert!(DECOMPRESSED_LEN < MIN_SIZE_FOR_RATIO_CHECK) };
+
+        let original = vec![0xFFu8; DECOMPRESSED_LEN];
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&original).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let ratio = DECOMPRESSED_LEN as u64 / compressed.len().max(1) as u64;
+        assert!(ratio > DEFAULT_MAX_DECOMPRESSION_RATIO as u64);
+
+        let filters = vec!["FlateDecode".to_string()];
+        let result = decode_stream_with_options(&compressed, &filters, None, None)
+            .expect("a bounded 300-dpi RGB scan must not be rejected as a decompression bomb");
+        assert_eq!(result.len(), DECOMPRESSED_LEN);
+    }
+
     /// A genuine decompression bomb — high ratio AND an absolute output large enough to
     /// matter — must still be rejected. This is the guardrail test: a fix that merely
     /// raised or removed the ratio limit would pass the test above while leaving actual
-    /// bombs unguarded. The output here (20 MB) sits comfortably above
-    /// `MIN_SIZE_FOR_RATIO_CHECK` (10 MB) and comfortably below
+    /// bombs unguarded. The output here (64 MB) sits comfortably above
+    /// `MIN_SIZE_FOR_RATIO_CHECK` (32 MB) and comfortably below
     /// `DEFAULT_MAX_DECOMPRESSED_SIZE` (100 MB), so rejection can only come from the ratio
     /// check, not the absolute-size cap — proving the ratio guard itself still fires once
     /// output clears the floor, rather than having been disabled altogether.
     #[test]
     fn genuine_bomb_above_floor_and_below_absolute_cap_is_rejected_by_ratio_check() {
-        const DECOMPRESSED_LEN: usize = 20 * 1024 * 1024;
+        const DECOMPRESSED_LEN: usize = 64 * 1024 * 1024;
         const { assert!(DECOMPRESSED_LEN > MIN_SIZE_FOR_RATIO_CHECK) };
         const { assert!(DECOMPRESSED_LEN < DEFAULT_MAX_DECOMPRESSED_SIZE) };
 
