@@ -410,6 +410,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Generated documentation snippet tabs now use Alef target identifiers consistently, so TypeScript
+  Node/WASM and Kotlin Android examples render as distinct, stable tabs.
+
 - Made the CLI container image-size gate compare exact bytes and report the same boundary it
   enforces, avoiding contradictory rounded 200 MiB pass/fail results in Docker CI.
 

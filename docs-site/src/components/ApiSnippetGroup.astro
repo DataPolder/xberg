@@ -20,9 +20,10 @@ interface Props {
 // TypeScript source) and are distinguished only by `target: node` vs `target: wasm`, so keying
 // on language collapses two distinct bindings into one tab. Likewise `kotlin-android/` carries
 // `language: kotlin`, `target: kotlin_android`. `target` is exactly uniform across the tree --
-// 15 values x 89 topics -- which makes it the correct discriminator; `language` has 14 values
-// with typescript appearing twice. Display labels/order mirror astro.config.mjs's API_LANGUAGES
-// list so tab order stays consistent with the per-language API reference pages.
+// 15 values across every generated topic -- which makes it the correct discriminator;
+// `language` has 14 values with typescript appearing twice. Display labels/order mirror
+// astro.config.mjs's API_LANGUAGES list so tab order stays consistent with the per-language API
+// reference pages.
 const TARGET_LABELS: Record<string, string> = {
   python: "Python",
   node: "TypeScript / Node.js",
@@ -67,11 +68,11 @@ const renderedEntries = await Promise.all(
     <em>No generated example available for `{topic}` yet.</em>
   </p>
 ) : (
-   <Tabs syncKey="lang">
-     {renderedEntries.map(({ language, label, rendered }) => (
-       <TabItem label={label} key={language}>
-         <rendered.Content />
-       </TabItem>
-     ))}
-   </Tabs>
- )}
+  <Tabs syncKey="lang">
+    {renderedEntries.map(({ target, label, rendered }) => (
+      <TabItem label={label} key={target}>
+        <rendered.Content />
+      </TabItem>
+    ))}
+  </Tabs>
+)}
