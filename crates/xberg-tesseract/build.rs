@@ -4,11 +4,17 @@
 
 #![allow(clippy::uninlined_format_args)]
 
-#[cfg(any(feature = "build-tesseract", feature = "build-tesseract-wasm"))]
+#[cfg(any(
+    feature = "build-tesseract-wasm",
+    all(feature = "build-tesseract", not(feature = "dynamic-linking"))
+))]
 #[path = "build_support/source_cache.rs"]
 mod source_cache;
 
-#[cfg(any(feature = "build-tesseract", feature = "build-tesseract-wasm"))]
+#[cfg(any(
+    feature = "build-tesseract-wasm",
+    all(feature = "build-tesseract", not(feature = "dynamic-linking"))
+))]
 mod build_tesseract {
     use crate::source_cache::{PreparedSourceTree, prepare_source_tree, source_tree_is_complete};
     use cmake::Config;

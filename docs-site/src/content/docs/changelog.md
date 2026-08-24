@@ -513,6 +513,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Dynamic Tesseract builds no longer compile unused vendoring helpers when system linking takes
+  precedence, allowing warnings-as-errors builds while retaining the generated shim declarations.
 - Narrow Rust feature builds no longer compile the API/MCP request-security validator when neither
   server feature is enabled, preventing dead-code warnings from failing warnings-as-errors builds.
 - Benchmark Tesseract cache isolation now preserves automatic page-segmentation and sparse-image
