@@ -220,9 +220,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The CLI `all` feature now includes audio transcription, matching the Rust crate's full capability
   set. Transcription remains opt-in for default and minimal CLI builds because it adds the
   Whisper/ONNX Runtime inference stack.
-- Alef 0.67.4 now parity-checks the generated documentation snippet corpus while separately
-  compile-validating curated operational examples. The summarization guide is the first page moved
-  from per-language handwritten snippets to Alef-generated snippet groups.
+- Alef now parity-checks the generated documentation snippet corpus while separately
+  compile-validating curated operational examples. Summarization and plugin-registry management
+  examples now render from generated cross-language snippet groups, while operational recipes and
+  full custom-plugin implementations remain curated for readability.
 
 - Repinned to alef 0.65.0 and regenerated every binding. Picks up `is_empty` fixes across
   Swift/Elixir/Dart/Kotlin/Java, TypeScript/node internally-tagged enum nesting, C/doc-snippet
