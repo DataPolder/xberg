@@ -1734,10 +1734,13 @@ mod tests {
         let mut budget = SecurityBudget::with_defaults();
         let internal = build_docbook_internal_document(docbook, false, &mut budget).expect("prefixed DocBook parses");
 
-        let text = internal.content();
         assert!(
-            text.contains("Prefixed text."),
-            "prefixed elements must reach the text: {text}"
+            internal
+                .elements
+                .iter()
+                .any(|element| element.text.contains("Prefixed text.")),
+            "prefixed elements must reach the extracted elements: {:?}",
+            internal.elements
         );
     }
 
