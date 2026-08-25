@@ -863,6 +863,9 @@ default_features = false
 
 [crates.ruby]
 gem_name = "xberg"
+# Keep HEIC out of generated wrapper defaults and the core dependency so the
+# MinGW target override cannot be widened back to the unsupported full set.
+excluded_default_features = ["heic"]
 exclude_functions = [
   "calculate_quality_score",
   "count_tokens",
@@ -2988,7 +2991,6 @@ module = "xberg"
 
 [crates.e2e.calls.clear_ocr_backends.overrides.go]
 function = "ClearOCRBackends"
-module = "xberg"
 
 [crates.e2e.calls.clear_ocr_backends.overrides.ruby]
 function = "clear_ocr_backends"
@@ -3000,7 +3002,6 @@ module = "Xberg"
 
 [crates.e2e.calls.clear_ocr_backends.overrides.java]
 function = "clearOcrBackends"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.clear_ocr_backends.overrides.csharp]
 function = "ClearOcrBackends"
@@ -3054,7 +3055,6 @@ module = "xberg"
 
 [crates.e2e.calls.clear_post_processors.overrides.go]
 function = "ClearPostProcessors"
-module = "xberg"
 
 [crates.e2e.calls.clear_post_processors.overrides.ruby]
 function = "clear_post_processors"
@@ -3066,7 +3066,6 @@ module = "Xberg"
 
 [crates.e2e.calls.clear_post_processors.overrides.java]
 function = "clearPostProcessors"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.clear_post_processors.overrides.csharp]
 function = "ClearPostProcessors"
@@ -3120,7 +3119,6 @@ module = "xberg"
 
 [crates.e2e.calls.clear_validators.overrides.go]
 function = "ClearValidators"
-module = "xberg"
 
 [crates.e2e.calls.clear_validators.overrides.ruby]
 function = "clear_validators"
@@ -3132,7 +3130,6 @@ module = "Xberg"
 
 [crates.e2e.calls.clear_validators.overrides.java]
 function = "clearValidators"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.clear_validators.overrides.csharp]
 function = "ClearValidators"
@@ -3186,7 +3183,6 @@ module = "xberg"
 
 [crates.e2e.calls.unregister_ocr_backend.overrides.go]
 function = "UnregisterOCRBackend"
-module = "xberg"
 
 [crates.e2e.calls.unregister_ocr_backend.overrides.ruby]
 function = "unregister_ocr_backend"
@@ -3198,7 +3194,6 @@ module = "Xberg"
 
 [crates.e2e.calls.unregister_ocr_backend.overrides.java]
 function = "unregisterOcrBackend"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.unregister_ocr_backend.overrides.csharp]
 function = "UnregisterOcrBackend"
@@ -3252,7 +3247,6 @@ module = "xberg"
 
 [crates.e2e.calls.unregister_post_processor.overrides.go]
 function = "UnregisterPostProcessor"
-module = "xberg"
 
 [crates.e2e.calls.unregister_post_processor.overrides.ruby]
 function = "unregister_post_processor"
@@ -3264,7 +3258,6 @@ module = "Xberg"
 
 [crates.e2e.calls.unregister_post_processor.overrides.java]
 function = "unregisterPostProcessor"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.unregister_post_processor.overrides.csharp]
 function = "UnregisterPostProcessor"
@@ -3318,7 +3311,6 @@ module = "xberg"
 
 [crates.e2e.calls.unregister_validator.overrides.go]
 function = "UnregisterValidator"
-module = "xberg"
 
 [crates.e2e.calls.unregister_validator.overrides.ruby]
 function = "unregister_validator"
@@ -3330,7 +3322,6 @@ module = "Xberg"
 
 [crates.e2e.calls.unregister_validator.overrides.java]
 function = "unregisterValidator"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.unregister_validator.overrides.csharp]
 function = "UnregisterValidator"
@@ -3384,7 +3375,6 @@ module = "xberg"
 
 [crates.e2e.calls.register_ocr_backend.overrides.go]
 function = "RegisterOCRBackend"
-module = "xberg"
 
 [crates.e2e.calls.register_ocr_backend.overrides.ruby]
 function = "register_ocr_backend"
@@ -3396,7 +3386,6 @@ module = "Xberg"
 
 [crates.e2e.calls.register_ocr_backend.overrides.java]
 function = "registerOcrBackend"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.register_ocr_backend.overrides.csharp]
 function = "RegisterOcrBackend"
@@ -3451,7 +3440,6 @@ module = "xberg"
 
 [crates.e2e.calls.register_post_processor.overrides.go]
 function = "RegisterPostProcessor"
-module = "xberg"
 
 [crates.e2e.calls.register_post_processor.overrides.ruby]
 function = "register_post_processor"
@@ -3463,7 +3451,6 @@ module = "Xberg"
 
 [crates.e2e.calls.register_post_processor.overrides.java]
 function = "registerPostProcessor"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.register_post_processor.overrides.csharp]
 function = "RegisterPostProcessor"
@@ -3518,7 +3505,6 @@ module = "xberg"
 
 [crates.e2e.calls.register_validator.overrides.go]
 function = "RegisterValidator"
-module = "xberg"
 
 [crates.e2e.calls.register_validator.overrides.ruby]
 function = "register_validator"
@@ -3530,7 +3516,6 @@ module = "Xberg"
 
 [crates.e2e.calls.register_validator.overrides.java]
 function = "registerValidator"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.register_validator.overrides.csharp]
 function = "RegisterValidator"
@@ -3585,7 +3570,6 @@ module = "xberg"
 
 [crates.e2e.calls.register_embedding_backend.overrides.go]
 function = "RegisterEmbeddingBackend"
-module = "xberg"
 
 [crates.e2e.calls.register_embedding_backend.overrides.ruby]
 function = "register_embedding_backend"
@@ -3597,7 +3581,6 @@ module = "Xberg"
 
 [crates.e2e.calls.register_embedding_backend.overrides.java]
 function = "registerEmbeddingBackend"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.register_embedding_backend.overrides.csharp]
 function = "RegisterEmbeddingBackend"
@@ -3652,7 +3635,6 @@ module = "xberg"
 
 [crates.e2e.calls.unregister_embedding_backend.overrides.go]
 function = "UnregisterEmbeddingBackend"
-module = "xberg"
 
 [crates.e2e.calls.unregister_embedding_backend.overrides.ruby]
 function = "unregister_embedding_backend"
@@ -3664,7 +3646,6 @@ module = "Xberg"
 
 [crates.e2e.calls.unregister_embedding_backend.overrides.java]
 function = "unregisterEmbeddingBackend"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.unregister_embedding_backend.overrides.csharp]
 function = "UnregisterEmbeddingBackend"
@@ -3718,7 +3699,6 @@ module = "xberg"
 
 [crates.e2e.calls.clear_embedding_backends.overrides.go]
 function = "ClearEmbeddingBackends"
-module = "xberg"
 
 [crates.e2e.calls.clear_embedding_backends.overrides.ruby]
 function = "clear_embedding_backends"
@@ -3730,7 +3710,6 @@ module = "Xberg"
 
 [crates.e2e.calls.clear_embedding_backends.overrides.java]
 function = "clearEmbeddingBackends"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.clear_embedding_backends.overrides.csharp]
 function = "ClearEmbeddingBackends"
@@ -3785,7 +3764,6 @@ module = "xberg"
 
 [crates.e2e.calls.register_reranker_backend.overrides.go]
 function = "RegisterRerankerBackend"
-module = "xberg"
 
 [crates.e2e.calls.register_reranker_backend.overrides.ruby]
 function = "register_reranker_backend"
@@ -3797,7 +3775,6 @@ module = "Xberg"
 
 [crates.e2e.calls.register_reranker_backend.overrides.java]
 function = "registerRerankerBackend"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.register_reranker_backend.overrides.csharp]
 function = "RegisterRerankerBackend"
@@ -3852,7 +3829,6 @@ module = "xberg"
 
 [crates.e2e.calls.unregister_reranker_backend.overrides.go]
 function = "UnregisterRerankerBackend"
-module = "xberg"
 
 [crates.e2e.calls.unregister_reranker_backend.overrides.ruby]
 function = "unregister_reranker_backend"
@@ -3864,7 +3840,6 @@ module = "Xberg"
 
 [crates.e2e.calls.unregister_reranker_backend.overrides.java]
 function = "unregisterRerankerBackend"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.unregister_reranker_backend.overrides.csharp]
 function = "UnregisterRerankerBackend"
@@ -3918,7 +3893,6 @@ module = "xberg"
 
 [crates.e2e.calls.clear_reranker_backends.overrides.go]
 function = "ClearRerankerBackends"
-module = "xberg"
 
 [crates.e2e.calls.clear_reranker_backends.overrides.ruby]
 function = "clear_reranker_backends"
@@ -3930,7 +3904,6 @@ module = "Xberg"
 
 [crates.e2e.calls.clear_reranker_backends.overrides.java]
 function = "clearRerankerBackends"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.clear_reranker_backends.overrides.csharp]
 function = "ClearRerankerBackends"
@@ -3985,7 +3958,6 @@ module = "xberg"
 
 [crates.e2e.calls.register_tokenizer_backend.overrides.go]
 function = "RegisterTokenizerBackend"
-module = "xberg"
 
 [crates.e2e.calls.register_tokenizer_backend.overrides.ruby]
 function = "register_tokenizer_backend"
@@ -3997,7 +3969,6 @@ module = "Xberg"
 
 [crates.e2e.calls.register_tokenizer_backend.overrides.java]
 function = "registerTokenizerBackend"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.register_tokenizer_backend.overrides.csharp]
 function = "RegisterTokenizerBackend"
@@ -4052,7 +4023,6 @@ module = "xberg"
 
 [crates.e2e.calls.unregister_tokenizer_backend.overrides.go]
 function = "UnregisterTokenizerBackend"
-module = "xberg"
 
 [crates.e2e.calls.unregister_tokenizer_backend.overrides.ruby]
 function = "unregister_tokenizer_backend"
@@ -4064,7 +4034,6 @@ module = "Xberg"
 
 [crates.e2e.calls.unregister_tokenizer_backend.overrides.java]
 function = "unregisterTokenizerBackend"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.unregister_tokenizer_backend.overrides.csharp]
 function = "UnregisterTokenizerBackend"
@@ -4118,7 +4087,6 @@ module = "xberg"
 
 [crates.e2e.calls.clear_tokenizer_backends.overrides.go]
 function = "ClearTokenizerBackends"
-module = "xberg"
 
 [crates.e2e.calls.clear_tokenizer_backends.overrides.ruby]
 function = "clear_tokenizer_backends"
@@ -4130,7 +4098,6 @@ module = "Xberg"
 
 [crates.e2e.calls.clear_tokenizer_backends.overrides.java]
 function = "clearTokenizerBackends"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.clear_tokenizer_backends.overrides.csharp]
 function = "ClearTokenizerBackends"
@@ -4184,7 +4151,6 @@ module = "xberg"
 
 [crates.e2e.calls.register_renderer.overrides.go]
 function = "RegisterRenderer"
-module = "xberg"
 
 [crates.e2e.calls.register_renderer.overrides.ruby]
 function = "register_renderer"
@@ -4196,7 +4162,6 @@ module = "Xberg"
 
 [crates.e2e.calls.register_renderer.overrides.java]
 function = "registerRenderer"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.register_renderer.overrides.csharp]
 function = "RegisterRenderer"
@@ -4251,7 +4216,6 @@ module = "xberg"
 
 [crates.e2e.calls.unregister_renderer.overrides.go]
 function = "UnregisterRenderer"
-module = "xberg"
 
 [crates.e2e.calls.unregister_renderer.overrides.ruby]
 function = "unregister_renderer"
@@ -4263,7 +4227,6 @@ module = "Xberg"
 
 [crates.e2e.calls.unregister_renderer.overrides.java]
 function = "unregisterRenderer"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.unregister_renderer.overrides.csharp]
 function = "UnregisterRenderer"
@@ -4317,7 +4280,6 @@ module = "xberg"
 
 [crates.e2e.calls.clear_renderers.overrides.go]
 function = "ClearRenderers"
-module = "xberg"
 
 [crates.e2e.calls.clear_renderers.overrides.ruby]
 function = "clear_renderers"
@@ -4329,7 +4291,6 @@ module = "Xberg"
 
 [crates.e2e.calls.clear_renderers.overrides.java]
 function = "clearRenderers"
-module = "io.xberg.Xberg"
 
 [crates.e2e.calls.clear_renderers.overrides.csharp]
 function = "ClearRenderers"
