@@ -1506,9 +1506,9 @@ dependencies = [
 
 [[package]]
 name = "crawlberg"
-version = "1.3.3"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af1a2a5cc2327d1e047277c081c53922bfa76cabd2d80a0181de708ed6bf5d8d"
+checksum = "cd756a90c129c58039e58485ecd1a054940305a5f7a374d5a522421cf597c878"
 dependencies = [
  "ahash 0.8.12",
  "aho-corasick",
@@ -1531,7 +1531,7 @@ dependencies = [
  "notify",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
- "quick-xml 0.41.0",
+ "quick-xml 0.42.0",
  "regex",
  "reqwest",
  "serde",
@@ -4595,9 +4595,9 @@ dependencies = [
 
 [[package]]
 name = "nom-exif"
-version = "3.6.2"
+version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7626860345adaf20c0d82b185ec8fc6285707c9fad9b4299c5ffa1581f6b009"
+checksum = "47a28872847c2602f03d141629a212d7a8c3b6bd8983f518862c51aa474594f8"
 dependencies = [
  "bytes",
  "chrono",
@@ -6223,7 +6223,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffbe87d9e8db95652c25ded2418150e00b08c2fde09e23ec15896d2c470c6631"
 dependencies = [
  "g2p",
- "image 0.24.9",
+ "image 0.25.10",
  "lru",
 ]
 
@@ -9213,6 +9213,7 @@ dependencies = [
  "hayro-jpeg2000",
  "hex",
  "hf-hub",
+ "html-escape",
  "html-to-markdown-rs",
  "icu_provider",
  "icu_segmenter",

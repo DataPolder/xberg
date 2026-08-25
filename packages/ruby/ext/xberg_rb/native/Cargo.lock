@@ -1313,7 +1313,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1544,9 +1544,9 @@ dependencies = [
 
 [[package]]
 name = "crawlberg"
-version = "1.3.3"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af1a2a5cc2327d1e047277c081c53922bfa76cabd2d80a0181de708ed6bf5d8d"
+checksum = "cd756a90c129c58039e58485ecd1a054940305a5f7a374d5a522421cf597c878"
 dependencies = [
  "ahash 0.8.12",
  "aho-corasick",
@@ -1569,7 +1569,7 @@ dependencies = [
  "notify",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
- "quick-xml 0.41.0",
+ "quick-xml 0.42.0",
  "regex",
  "reqwest",
  "serde",
@@ -1965,7 +1965,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2120,7 +2120,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4672,9 +4672,9 @@ dependencies = [
 
 [[package]]
 name = "nom-exif"
-version = "3.6.2"
+version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7626860345adaf20c0d82b185ec8fc6285707c9fad9b4299c5ffa1581f6b009"
+checksum = "47a28872847c2602f03d141629a212d7a8c3b6bd8983f518862c51aa474594f8"
 dependencies = [
  "bytes",
  "chrono",
@@ -4733,7 +4733,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5701,7 +5701,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6330,7 +6330,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffbe87d9e8db95652c25ded2418150e00b08c2fde09e23ec15896d2c470c6631"
 dependencies = [
  "g2p",
- "image 0.24.9",
+ "image 0.25.10",
  "lru",
 ]
 
@@ -6390,7 +6390,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6449,7 +6449,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7533,7 +7533,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8926,7 +8926,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9306,6 +9306,7 @@ dependencies = [
  "hayro-jpeg2000",
  "hex",
  "hf-hub",
+ "html-escape",
  "html-to-markdown-rs",
  "icu_provider",
  "icu_segmenter",
