@@ -555,13 +555,7 @@ pub fn derive_extraction_result(
     // element tree, so `render_plain` yields nothing. Its already-extracted text lives in
     // `pre_rendered_content` and must be returned verbatim rather than dropped. Only the
     // empty rendering falls back, so a document that does have elements always wins.
-    let mut content = if doc.source_format == "epub" && doc.metadata.output_format.as_deref() == Some("plain") {
-        doc.pre_rendered_content
-            .clone()
-            .unwrap_or_else(|| crate::rendering::render_plain(&doc))
-    } else {
-        crate::rendering::render_plain(&doc)
-    };
+    let mut content = crate::rendering::render_plain(&doc);
     if content.is_empty()
         && let Some(pre_rendered) = doc.pre_rendered_content.as_ref()
     {
@@ -613,32 +607,25 @@ pub fn derive_extraction_result(
             }
         }
         crate::core::config::OutputFormat::Custom(ref name) => {
-            if doc.source_format == "epub"
-                && doc.pre_rendered_content.is_some()
-                && doc.metadata.output_format.as_deref() == Some(name.as_str())
-            {
-                doc.pre_rendered_content.take()
-            } else {
-                let registry = crate::plugins::registry::get_renderer_registry();
-                let registry = registry.read();
-                match registry.render(name, &doc) {
-                    Ok(rendered) => Some(rendered),
-                    Err(e) => {
-                        tracing::warn!(renderer = %name, error = %e, "Custom renderer failed, falling back to plain");
-                        // #208: `tracing::warn!` is invisible to API/binding consumers — the
-                        // only channel they can observe is `processing_warnings`. Without
-                        // this, a typo'd or unregistered custom format silently produced
-                        // plain text with no way for the caller to detect the fallback. ~keep
-                        crate::core::diagnostics::push_warning(
-                            &mut doc.processing_warnings,
-                            "output-format",
-                            format!(
-                                "requested output format '{name}' has no registered renderer ({e}); \
+            let registry = crate::plugins::registry::get_renderer_registry();
+            let registry = registry.read();
+            match registry.render(name, &doc) {
+                Ok(rendered) => Some(rendered),
+                Err(e) => {
+                    tracing::warn!(renderer = %name, error = %e, "Custom renderer failed, falling back to plain");
+                    // #208: `tracing::warn!` is invisible to API/binding consumers — the
+                    // only channel they can observe is `processing_warnings`. Without
+                    // this, a typo'd or unregistered custom format silently produced
+                    // plain text with no way for the caller to detect the fallback. ~keep
+                    crate::core::diagnostics::push_warning(
+                        &mut doc.processing_warnings,
+                        "output-format",
+                        format!(
+                            "requested output format '{name}' has no registered renderer ({e}); \
                              returned plain text instead"
-                            ),
-                        );
-                        None
-                    }
+                        ),
+                    );
+                    None
                 }
             }
         }
@@ -1565,30 +1552,6 @@ mod tests {
         assert!(result.document.is_none());
     }
 
-    #[test]
-    fn should_use_format_matched_epub_plain_pre_render() {
-        let mut document = make_doc("epub");
-        document.push_element(InternalElement::text(ElementKind::Paragraph, "element text", 0));
-        document.pre_rendered_content = Some("bounded EPUB text".to_string());
-        document.metadata.output_format = Some("plain".to_string());
-
-        let result = derive_extraction_result(document, false, crate::core::config::OutputFormat::Plain);
-
-        assert_eq!(result.content, "bounded EPUB text");
-    }
-
-    #[test]
-    fn should_keep_elements_authoritative_for_non_epub_plain_documents() {
-        let mut document = make_doc("markdown");
-        document.push_element(InternalElement::text(ElementKind::Paragraph, "element text", 0));
-        document.pre_rendered_content = Some("unrelated pre-render".to_string());
-        document.metadata.output_format = Some("plain".to_string());
-
-        let result = derive_extraction_result(document, false, crate::core::config::OutputFormat::Plain);
-
-        assert_eq!(result.content, "element text");
-    }
-
     /// `OutputFormat::DocTags` must produce the same output as the always-registered
     /// built-in "doctags" renderer (`plugins::registry::renderer::DocTagsRenderer`),
     /// via its own first-class match arm rather than falling through to the
@@ -1635,6 +1598,55 @@ mod tests {
             "warning must name the requested format: {}",
             result.processing_warnings[0].message
         );
+    }
+
+    #[test]
+    fn should_not_mask_epub_custom_renderer_failure_with_pre_rendered_content() {
+        let mut document = make_doc("epub");
+        document.push_element(InternalElement::text(ElementKind::Paragraph, "element text", 0));
+        document.pre_rendered_content = Some("stale custom output".to_string());
+        document.metadata.output_format = Some("missing-epub-renderer".to_string());
+
+        let result = derive_extraction_result(
+            document,
+            false,
+            crate::core::config::OutputFormat::Custom("missing-epub-renderer".to_string()),
+        );
+
+        assert!(result.formatted_content.is_none());
+        assert!(
+            result
+                .processing_warnings
+                .iter()
+                .any(|warning| warning.message.contains("missing-epub-renderer"))
+        );
+    }
+
+    #[test]
+    fn should_keep_elements_authoritative_for_non_epub_plain_documents() {
+        let mut document = make_doc("markdown");
+        document.push_element(InternalElement::text(ElementKind::Paragraph, "element text", 0));
+        document.pre_rendered_content = Some("unrelated pre-render".to_string());
+        document.metadata.output_format = Some("plain".to_string());
+
+        let result = derive_extraction_result(document, false, crate::core::config::OutputFormat::Plain);
+
+        assert_eq!(result.content, "element text");
+    }
+
+    #[test]
+    fn should_render_epub_json_and_html_without_truncating_syntax() {
+        let mut document = make_doc("epub");
+        document.push_element(InternalElement::text(ElementKind::Paragraph, "bounded text", 0));
+
+        let json = derive_extraction_result(document.clone(), false, crate::core::config::OutputFormat::Json);
+        let html = derive_extraction_result(document, false, crate::core::config::OutputFormat::Html);
+
+        serde_json::from_str::<serde_json::Value>(json.formatted_content.as_deref().expect("JSON output"))
+            .expect("EPUB JSON output must remain valid");
+        let html = html.formatted_content.expect("HTML output");
+        assert!(html.contains("bounded text"));
+        assert!(html.contains("</p>"));
     }
 
     /// A custom output format with a registered renderer must produce no

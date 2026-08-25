@@ -464,6 +464,24 @@ impl StringGrowthValidator {
     pub(crate) fn remaining_capacity(&self) -> usize {
         self.max_size.saturating_sub(self.current_size)
     }
+
+    fn rollback(&mut self, checkpoint: GrowthCheckpoint) {
+        self.current_size = checkpoint.current_size;
+    }
+
+    fn reserve_prefix(&mut self, text: &str) -> usize {
+        let mut accepted = self.remaining_capacity().min(text.len());
+        while accepted > 0 && !text.is_char_boundary(accepted) {
+            accepted -= 1;
+        }
+        self.current_size = self.current_size.saturating_add(accepted);
+        accepted
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GrowthCheckpoint {
+    current_size: usize,
 }
 
 /// Helper struct for capping iteration counts in parser loops.
@@ -713,6 +731,28 @@ impl SecurityBudget {
     /// once total output exceeds `max_content_size`.
     pub(crate) fn account_text(&mut self, len: usize) -> Result<(), SecurityError> {
         self.growth.check_append(len)
+    }
+
+    pub(crate) fn growth_checkpoint(&self) -> GrowthCheckpoint {
+        GrowthCheckpoint {
+            current_size: self.growth.current_size,
+        }
+    }
+
+    pub(crate) fn growth_exceeded_since(&self, checkpoint: GrowthCheckpoint) -> bool {
+        checkpoint.current_size <= self.growth.max_size && self.growth.exceeded_limit()
+    }
+
+    pub(crate) fn remaining_content_capacity(&self) -> usize {
+        self.growth.remaining_capacity()
+    }
+
+    pub(crate) fn rollback_growth(&mut self, checkpoint: GrowthCheckpoint) {
+        self.growth.rollback(checkpoint);
+    }
+
+    pub(crate) fn reserve_text_prefix(&mut self, text: &str) -> usize {
+        self.growth.reserve_prefix(text)
     }
 
     /// Validate an XML / HTML attribute value against `max_entity_length`.
@@ -968,6 +1008,21 @@ mod tests {
     fn test_string_growth_validator_saturates_on_overflow() {
         let mut v = StringGrowthValidator::new(usize::MAX - 10);
         assert!(v.check_append(usize::MAX).is_err(), "saturating add cannot wrap");
+    }
+
+    #[test]
+    fn should_reserve_utf8_prefix_and_restore_growth_checkpoint() {
+        let limits = SecurityLimits {
+            max_content_size: 3,
+            ..SecurityLimits::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+        let checkpoint = budget.growth_checkpoint();
+
+        assert_eq!(budget.reserve_text_prefix("éclair"), 3);
+        assert_eq!(budget.remaining_content_capacity(), 0);
+        budget.rollback_growth(checkpoint);
+        assert_eq!(budget.remaining_content_capacity(), 3);
     }
 
     #[test]
