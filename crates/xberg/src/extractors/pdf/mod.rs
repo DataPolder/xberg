@@ -3976,7 +3976,8 @@ mod tests {
     /// Proves the `pdf-pdfium` engine (#702) actually extracts text and metadata
     /// through pdfium rather than reusing `xberg_native_pdf` output. `multi_page.pdf` is a
     /// 5-page document whose first page's text is known ahead of time (verified
-    /// with `pdftotext` against the fixture).
+    /// with `pdftotext` against the fixture). Four requests run concurrently to
+    /// regression-test serialization of Pdfium's process-global C API.
     ///
     /// Requires a real `libpdfium` on the system library search path (or
     /// `PDFIUM_DYNAMIC_LIB_PATH` pointing at one) -- this repository provisions
@@ -3998,7 +3999,7 @@ mod tests {
     /// down never run against unfixed code.
     #[tokio::test]
     #[cfg(all(feature = "pdf", feature = "pdf-pdfium"))]
-    async fn pdfium_engine_extracts_real_text_when_the_library_is_available() {
+    async fn pdfium_engine_serializes_concurrent_extractions_when_the_library_is_available() {
         // Skip-on-absence is right for a developer without the bucket-fetched corpus, but it must
         // never be how CI passes. `XBERG_REQUIRE_PDFIUM` (set by the `pdfium-engine` job) turns
         // every skip in this test into a failure, following the same truthy-env convention as
@@ -4031,16 +4032,16 @@ mod tests {
             ..Default::default()
         });
 
-        let result = extractor.extract_content(&content, "application/pdf", &config).await;
+        let (first, second, third, fourth) = tokio::join!(
+            extractor.extract_content(&content, "application/pdf", &config),
+            extractor.extract_content(&content, "application/pdf", &config),
+            extractor.extract_content(&content, "application/pdf", &config),
+            extractor.extract_content(&content, "application/pdf", &config),
+        );
+        let results = [first, second, third, fourth];
 
-        let doc = match result {
-            Ok(doc) => doc,
-            Err(err) => {
-                assert!(
-                    matches!(err, crate::XbergError::MissingDependency(_)),
-                    "expected a MissingDependency error (pdfium library not found on this \
-                     machine) if extraction fails at all, got a different error variant: {err:?}"
-                );
+        if let Some(err) = results.iter().find_map(|result| result.as_ref().err()) {
+            if matches!(err, crate::XbergError::MissingDependency(_)) {
                 assert!(
                     !require_pdfium,
                     "XBERG_REQUIRE_PDFIUM is set, so a real libpdfium was supposed to be loadable, \
@@ -4049,27 +4050,34 @@ mod tests {
                 );
                 return;
             }
-        };
 
-        let result =
-            crate::extraction::derive::derive_extraction_result(doc, true, crate::core::config::OutputFormat::Plain);
+            panic!("concurrent pdfium extraction failed: {err:?}");
+        }
 
-        assert!(
-            result.content.contains("The Evolution of the Word Processor"),
-            "expected the fixture's real first-page heading in pdfium output, got: {:?}",
-            result.content
-        );
-        assert!(
-            result.content.contains("Christopher Latham Sholes"),
-            "expected real body text from the fixture in pdfium output, got: {:?}",
-            result.content
-        );
+        for document in results.into_iter().flatten() {
+            let result = crate::extraction::derive::derive_extraction_result(
+                document,
+                true,
+                crate::core::config::OutputFormat::Plain,
+            );
 
-        let page_count = result.metadata.format.as_ref().and_then(|format| match format {
-            crate::types::FormatMetadata::Pdf(pdf) => pdf.page_count,
-            _ => None,
-        });
-        assert_eq!(page_count, Some(5), "multi_page.pdf has 5 pages");
+            assert!(
+                result.content.contains("The Evolution of the Word Processor"),
+                "expected the fixture's real first-page heading in pdfium output, got: {:?}",
+                result.content
+            );
+            assert!(
+                result.content.contains("Christopher Latham Sholes"),
+                "expected real body text from the fixture in pdfium output, got: {:?}",
+                result.content
+            );
+
+            let page_count = result.metadata.format.as_ref().and_then(|format| match format {
+                crate::types::FormatMetadata::Pdf(pdf) => pdf.page_count,
+                _ => None,
+            });
+            assert_eq!(page_count, Some(5), "multi_page.pdf has 5 pages");
+        }
     }
 
     #[tokio::test]

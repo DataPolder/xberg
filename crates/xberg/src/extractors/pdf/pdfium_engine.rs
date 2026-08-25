@@ -45,6 +45,7 @@
 
 use once_cell::sync::OnceCell;
 use pdfium_render::prelude::*;
+use std::sync::Mutex;
 
 use crate::Result;
 use crate::core::config::ExtractionConfig;
@@ -59,6 +60,11 @@ use crate::types::{ExtractionMethod, Metadata, PageBoundary, PageStructure, Page
 /// (which would misreport a real failure as
 /// `PdfiumLibraryBindingsAlreadyInitialized`).
 static BIND_OUTCOME: OnceCell<std::result::Result<(), String>> = OnceCell::new();
+
+/// Pdfium's public C API is process-global and does not support concurrent calls.
+/// Keep the guard for the complete document lifetime, including `PdfDocument::drop()`,
+/// so page/text handles cannot overlap another extraction's allocation and cleanup.
+static PDFIUM_OPERATION_LOCK: Mutex<()> = Mutex::new(());
 
 /// Binds the pdfium FFI library exactly once per process. See the module doc
 /// comment for why this must not be attempted more than once, and why the two
@@ -166,6 +172,14 @@ fn open_document<'a>(pdfium: &'a Pdfium, content: &'a [u8], passwords: &[String]
 /// there is no OCR/layout/table stage downstream of this backend (yet) that
 /// would need them.
 fn extract_blocking(content: &[u8], mime_type: &str, passwords: &[String]) -> Result<InternalDocument> {
+    let _operation_guard = PDFIUM_OPERATION_LOCK
+        .lock()
+        .map_err(|_| XbergError::parsing("pdfium operation lock was poisoned by an earlier extraction panic"))?;
+
+    extract_blocking_serialized(content, mime_type, passwords)
+}
+
+fn extract_blocking_serialized(content: &[u8], mime_type: &str, passwords: &[String]) -> Result<InternalDocument> {
     let pdfium = Pdfium;
     let document = open_document(&pdfium, content, passwords)?;
 
