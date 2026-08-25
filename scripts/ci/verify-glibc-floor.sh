@@ -33,8 +33,8 @@ verify_tree() {
   while IFS= read -r lib; do
     found=1
     check_lib "$lib" "$root"
-  done < <(find "$root" \( -name 'libxberg_*.so' -o -name '_xberg*.so' -o -name 'php_xberg.so' -o -name '*.node' \) -type f)
-  [ "$found" = 1 ] || die "no xberg native library found under $root"
+  done < <(find "$root" \( -name '*.so' -o -name '*.so.*' -o -name '*.node' \) -type f)
+  [ "$found" = 1 ] || die "no native library found under $root"
 }
 
 main() {

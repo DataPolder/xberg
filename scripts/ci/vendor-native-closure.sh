@@ -41,7 +41,7 @@ trap 'log "ERROR: exit $? at line ${LINENO} (function: ${FUNCNAME[0]:-main}): ${
 # supply at a compatible version, so they -- and the openssl pair, which a
 # host is expected to patch on its own schedule -- stay unbundled.
 #
-# libstdc++/libgcc_s are deliberately NOT in this list. The musl images build
+# libstdc++/libgcc_s are deliberately bundled only on musl. The musl images build
 # against Alpine *edge* packages (see the --repository flags in
 # docker/Dockerfile.musl-*), so the vendored libonnxruntime.so.1 carries
 # undefined references that only edge's libstdc++ 6.0.34 defines -- notably
@@ -53,9 +53,16 @@ trap 'log "ERROR: exit $? at line ${LINENO} (function: ${FUNCNAME[0]:-main}): ${
 # base image happened to carry a new enough libstdc++. Bundling the C++
 # runtime beside the artifact under $ORIGIN is what auditwheel already does
 # for the musl Python wheel in this repo -- the one artifact of the five that
-# was unaffected. ~keep
+# was unaffected. On glibc, manylinux supplies the C++ runtime and bundling the
+# runner's copy can raise the artifact's effective glibc floor. ~keep
+IS_MUSL=0
+if compgen -G '/lib/ld-musl-*.so.1' >/dev/null; then
+  IS_MUSL=1
+fi
+
 is_base_lib() {
   case "$1" in
+  libstdc++.so* | libgcc_s.so*) [ "$IS_MUSL" = 0 ] ;;
   ld-linux* | ld-musl* | libc.so* | libc.musl* | libc-*.so* | libm.so* | libmvec.so* | \
     libdl.so* | librt.so* | libpthread.so* | libresolv.so* | \
     libssl.so* | libcrypto.so*) return 0 ;;
