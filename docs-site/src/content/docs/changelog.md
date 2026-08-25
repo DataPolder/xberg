@@ -513,6 +513,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pdfium benchmarks now preserve the existing native-library search path instead of dropping ONNX
+  Runtime, and subprocess failures report terminating signals rather than `exit code None`.
 - Dart E2E setup now installs the Flutter Rust Bridge 2.13.0 generator used by the committed
   bindings, and WASM E2E setup installs its pinned `wasm-pack` before Alef checks prerequisites.
 - Musl Elixir publish smoke tests now pass the complete native asset directory, allowing the test

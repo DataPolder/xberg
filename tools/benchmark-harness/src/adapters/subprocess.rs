@@ -853,7 +853,7 @@ impl SubprocessAdapter {
             let stdout = extract_json_from_stdout(&raw_stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             if !output.status.success() {
-                let mut message = format!("{operation} failed with exit code {:?}", output.status.code());
+                let mut message = format!("{operation} failed with {}", output.status);
                 if !stderr.is_empty() {
                     message.push_str(&format!("\nstderr: {stderr}"));
                 }
@@ -2626,10 +2626,36 @@ mod tests {
     /// exception: `Error extracting with Docling: Unsupported configuration: ...`.
     #[test]
     fn test_error_to_error_kind_framework_crash_stderr_is_framework_error() {
-        let msg = "Subprocess failed with exit code Some(1)\nstderr: Error extracting with Docling: \
+        let msg = "Subprocess failed with exit status: 1\nstderr: Error extracting with Docling: \
                     Unsupported configuration: torch.PP-OCRv6.det.small"
             .to_string();
         assert_eq!(error_to_error_kind(&Error::Benchmark(msg)), ErrorKind::FrameworkError);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signaled_subprocess_error_reports_signal() {
+        let output = std::process::Command::new("sh")
+            .args(["-c", "kill -TERM $$"])
+            .output()
+            .expect("signal test subprocess should start");
+        let measured = MeasuredCommandOutcome {
+            output: Some(output),
+            duration: Duration::ZERO,
+            resource_stats: ResourceStats::default(),
+            error: None,
+        };
+
+        let execution = SubprocessAdapter::finish_measured_command(measured, "Batch subprocess");
+        let message = execution
+            .error
+            .expect("signaled subprocess should report an error")
+            .to_string();
+        let expected_signal = format!("signal: {}", libc::SIGTERM);
+        assert!(
+            message.contains(&expected_signal),
+            "unexpected subprocess error: {message}"
+        );
     }
 
     /// A genuine harness-side failure (e.g. we failed to spawn the subprocess at all) must stay
@@ -4062,7 +4088,7 @@ mod tests {
         assert_eq!(
             results[1].error_message.as_deref(),
             Some(
-                "Benchmark error: Batch subprocess failed with exit code Some(1)\nstderr: global process error\nstdout: {\"results\":[{\"content\":\"ok\"},{\"error\":\"\"},{\"error\":\"explicit item error\"}],\"total_ms\":10,\"per_file_ms\":[5,null,null]}"
+                "Benchmark error: Batch subprocess failed with exit status: 1\nstderr: global process error\nstdout: {\"results\":[{\"content\":\"ok\"},{\"error\":\"\"},{\"error\":\"explicit item error\"}],\"total_ms\":10,\"per_file_ms\":[5,null,null]}"
             )
         );
         assert_eq!(results[1].error_kind, ErrorKind::HarnessError);

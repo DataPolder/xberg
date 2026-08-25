@@ -472,7 +472,7 @@ jobs:
           TIMEOUT: ${{ github.event.inputs.timeout }}
           COHORT: tools/benchmark-harness/cohorts/native-pdf-fast-b8.json
           PDFIUM_DYNAMIC_LIB_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
-          LD_LIBRARY_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib
+          LD_LIBRARY_PATH: ${{ env.XBERG_PDFIUM_PREBUILT }}/lib:${{ env.LD_LIBRARY_PATH }}
         run: scripts/benchmarks/run-benchmark.sh
 
       - name: Upload artifacts
