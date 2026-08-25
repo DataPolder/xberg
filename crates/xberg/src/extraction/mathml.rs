@@ -163,7 +163,10 @@ fn collect_nth_child(parent: Node, index: usize, budget: &mut SecurityBudget) ->
 /// Collect a single MathML element into an `MmlNode`, dispatching on tag name.
 fn collect_node(node: Node, budget: &mut SecurityBudget) -> Result<MmlNode, SecurityError> {
     budget.step()?;
-    budget.enter()?;
+    if let Err(error) = budget.enter() {
+        budget.leave();
+        return Err(error);
+    }
     let result = collect_node_inner(node, budget);
     budget.leave();
     result
@@ -1537,5 +1540,24 @@ mod tests {
         let mut budget = SecurityBudget::with_defaults();
         let latex = convert_mathml_node_to_latex(doc.root_element(), &mut budget).expect("conversion ok");
         assert_eq!(latex, "x");
+    }
+
+    #[test]
+    fn test_depth_failure_does_not_leak_mathml_budget_depth() {
+        let limits = crate::extractors::security::SecurityLimits {
+            max_nesting_depth: 1,
+            max_xml_depth: 1,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+        let nested = roxmltree::Document::parse("<math><mrow><mi>x</mi></mrow></math>").expect("parse nested MathML");
+
+        assert!(convert_mathml_node_to_latex(nested.root_element(), &mut budget).is_err());
+
+        let shallow = roxmltree::Document::parse("<mi>x</mi>").expect("parse shallow MathML");
+        assert_eq!(
+            convert_mathml_node_to_latex(shallow.root_element(), &mut budget).expect("depth should be restored"),
+            "x"
+        );
     }
 }
