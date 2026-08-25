@@ -199,6 +199,10 @@ impl Object {
         self.decode_stream_data_with_decryption(None, 0, 0)
     }
 
+    pub(crate) fn decode_image_stream_data(&self, expected_filter_output_size: usize) -> Result<Vec<u8>> {
+        self.decode_stream_data_with_decryption_and_expected_size(None, 0, 0, Some(expected_filter_output_size))
+    }
+
     /// Decode stream data with optional decryption.
     ///
     /// PDF Spec: Section 7.6.2 - General Encryption Algorithm states that streams
@@ -218,6 +222,16 @@ impl Object {
         decryption_fn: Option<&dyn Fn(&[u8]) -> Result<Vec<u8>>>,
         obj_num: u32,
         gen_num: u32,
+    ) -> Result<Vec<u8>> {
+        self.decode_stream_data_with_decryption_and_expected_size(decryption_fn, obj_num, gen_num, None)
+    }
+
+    pub(crate) fn decode_stream_data_with_decryption_and_expected_size(
+        &self,
+        decryption_fn: Option<&dyn Fn(&[u8]) -> Result<Vec<u8>>>,
+        obj_num: u32,
+        gen_num: u32,
+        expected_filter_output_size: Option<usize>,
     ) -> Result<Vec<u8>> {
         match self {
             Object::Stream { dict, data } => {
@@ -271,7 +285,16 @@ impl Object {
                     // PDF Spec: ISO 32000-1:2008, Section 7.4.2 - DecodeParms ~keep
                     let decode_params = extract_decode_params(dict.get("DecodeParms"));
 
-                    crate::decoders::decode_stream_with_params(&decrypted_data, &filters, decode_params.as_ref())
+                    if let Some(expected_size) = expected_filter_output_size {
+                        crate::decoders::decode_stream_with_params_and_expected_size(
+                            &decrypted_data,
+                            &filters,
+                            decode_params.as_ref(),
+                            expected_size,
+                        )
+                    } else {
+                        crate::decoders::decode_stream_with_params(&decrypted_data, &filters, decode_params.as_ref())
+                    }
                 }
             }
             Object::Dictionary(dict) => {
@@ -321,7 +344,7 @@ fn extract_filter_names(filter_obj: &Object) -> Vec<String> {
 /// - Null or absent (no parameters)
 ///
 /// This function extracts predictor parameters used for PNG/TIFF encoding.
-fn extract_decode_params(params_obj: Option<&Object>) -> Option<crate::decoders::DecodeParams> {
+pub(crate) fn extract_decode_params(params_obj: Option<&Object>) -> Option<crate::decoders::DecodeParams> {
     let dict = match params_obj? {
         Object::Dictionary(d) => d,
         Object::Array(arr) => arr.iter().filter_map(|obj| obj.as_dict()).next()?,

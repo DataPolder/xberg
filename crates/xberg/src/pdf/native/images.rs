@@ -815,6 +815,26 @@ mod tests {
         );
     }
 
+    /// A high-resolution grayscale scan can compress far beyond the generic
+    /// stream ratio limit without being a decompression bomb. The image XObject
+    /// in this fixture expands to exactly its declared 4960 x 7016 x 8-bit
+    /// raster and must remain available to the native OCR fallback.
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_recover_dimension_bounded_high_ratio_ocr_image() {
+        let pdf_path = test_documents_dir().join("pdf/ocr_test.pdf");
+        assert!(pdf_path.exists(), "OCR regression fixture must exist");
+
+        let bytes = std::fs::read(&pdf_path).expect("read OCR regression fixture");
+        let doc = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("open OCR regression fixture");
+        let recovered = page_ocr_fallback_image_bytes(&doc.doc, 0);
+
+        let image = recovered.first().expect("recover the scanned page image for OCR");
+        let decoded = image::load_from_memory(&image.bytes).expect("decode recovered OCR image");
+        assert_eq!(decoded.width(), 4960);
+        assert_eq!(decoded.height(), 7016);
+    }
+
     /// Issue #62: a tagged PDF's `Figure` structure element carries `/Alt "officeArt
     /// object"` on page 1 for the image XObject painted there. Before the fix,
     /// `description` was hardcoded to `None` for every extracted image, so this

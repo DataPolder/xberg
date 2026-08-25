@@ -872,6 +872,59 @@ fn samples_to_decoded_bytes(
     Some(out)
 }
 
+fn expected_image_filter_output_size(
+    dict: &std::collections::HashMap<String, crate::object::Object>,
+    width: u32,
+    height: u32,
+    components: usize,
+    bits_per_component: u8,
+) -> Result<Option<usize>> {
+    if components == 0 || bits_per_component == 0 {
+        return Ok(None);
+    }
+
+    let row_bits = (width as usize)
+        .checked_mul(components)
+        .and_then(|samples| samples.checked_mul(bits_per_component as usize))
+        .ok_or_else(|| Error::Decode("image raster dimensions overflow".to_string()))?;
+    let row_bytes = row_bits.div_ceil(8);
+    let raster_bytes = row_bytes
+        .checked_mul(height as usize)
+        .ok_or_else(|| Error::Decode("image raster byte count overflow".to_string()))?;
+
+    let Some(params) = crate::object::extract_decode_params(dict.get("DecodeParms")) else {
+        return Ok(Some(raster_bytes));
+    };
+    if params.predictor == 1 {
+        return Ok(Some(raster_bytes));
+    }
+    if params.checked_pixel_bytes_per_row()? != row_bytes {
+        return Ok(None);
+    }
+
+    let encoded_bytes = params
+        .checked_bytes_per_row()?
+        .checked_mul(height as usize)
+        .ok_or_else(|| Error::Decode("predictor-framed image byte count overflow".to_string()))?;
+    Ok(Some(encoded_bytes))
+}
+
+fn decode_dimension_bounded_image_stream(
+    doc: Option<&crate::document::PdfDocument>,
+    xobject: &crate::object::Object,
+    obj_ref: Option<ObjectRef>,
+    expected_filter_output_size: Option<usize>,
+) -> Result<Vec<u8>> {
+    match (doc, obj_ref, expected_filter_output_size) {
+        (Some(document), Some(reference), Some(expected_size)) => {
+            document.decode_image_stream_with_encryption(xobject, reference, expected_size)
+        }
+        (Some(document), Some(reference), None) => document.decode_stream_with_encryption(xobject, reference),
+        (_, _, Some(expected_size)) => xobject.decode_image_stream_data(expected_size),
+        (_, _, None) => xobject.decode_stream_data(),
+    }
+}
+
 /// Extract an image from an XObject stream.
 pub fn extract_image_from_xobject(
     doc: Option<&crate::document::PdfDocument>,
@@ -1103,11 +1156,9 @@ pub fn extract_image_from_xobject(
             format: PixelFormat::Grayscale,
         }
     } else {
-        let decoded_data = if let (Some(d), Some(ref_id)) = (doc.as_ref(), obj_ref) {
-            d.decode_stream_with_encryption(xobject, ref_id)?
-        } else {
-            xobject.decode_stream_data()?
-        };
+        let expected_filter_output_size =
+            expected_image_filter_output_size(dict, width, height, color_space.components(), bits_per_component)?;
+        let decoded_data = decode_dimension_bounded_image_stream(doc, xobject, obj_ref, expected_filter_output_size)?;
         if let Some(ir) = indexed_resolution.as_ref() {
             let transform = ir
                 .base_profile

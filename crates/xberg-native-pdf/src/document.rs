@@ -1235,6 +1235,24 @@ impl PdfDocument {
     ///
     /// ISO 32000-1:2008, Section 7.6.2 - Streams must be decrypted BEFORE applying filters.
     pub(crate) fn decode_stream_with_encryption(&self, stream_obj: &Object, obj_ref: ObjectRef) -> Result<Vec<u8>> {
+        self.decode_stream_with_encryption_and_expected_size(stream_obj, obj_ref, None)
+    }
+
+    pub(crate) fn decode_image_stream_with_encryption(
+        &self,
+        stream_obj: &Object,
+        obj_ref: ObjectRef,
+        expected_filter_output_size: usize,
+    ) -> Result<Vec<u8>> {
+        self.decode_stream_with_encryption_and_expected_size(stream_obj, obj_ref, Some(expected_filter_output_size))
+    }
+
+    fn decode_stream_with_encryption_and_expected_size(
+        &self,
+        stream_obj: &Object,
+        obj_ref: ObjectRef,
+        expected_filter_output_size: Option<usize>,
+    ) -> Result<Vec<u8>> {
         if matches!(stream_obj, Object::Null) {
             return Ok(Vec::new());
         }
@@ -1256,15 +1274,26 @@ impl PdfDocument {
         if let Some(handler) = handler_ref.as_ref() {
             if is_unencrypted_stream_type {
                 drop(handler_ref);
-                return stream_obj.decode_stream_data();
+                return match expected_filter_output_size {
+                    Some(expected_size) => stream_obj.decode_image_stream_data(expected_size),
+                    None => stream_obj.decode_stream_data(),
+                };
             }
             let decrypt_fn = |data: &[u8]| -> Result<Vec<u8>> {
                 handler.decrypt_stream(data, obj_ref.id, obj_ref.generation as u32)
             };
-            stream_obj.decode_stream_data_with_decryption(Some(&decrypt_fn), obj_ref.id, obj_ref.generation as u32)
+            stream_obj.decode_stream_data_with_decryption_and_expected_size(
+                Some(&decrypt_fn),
+                obj_ref.id,
+                obj_ref.generation as u32,
+                expected_filter_output_size,
+            )
         } else {
             drop(handler_ref);
-            stream_obj.decode_stream_data()
+            match expected_filter_output_size {
+                Some(expected_size) => stream_obj.decode_image_stream_data(expected_size),
+                None => stream_obj.decode_stream_data(),
+            }
         }
     }
 
