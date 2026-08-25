@@ -11,13 +11,23 @@ cleanup() { [ -n "${WORKDIR:-}" ] && rm -rf "$WORKDIR"; }
 gt() { [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ] && [ "$1" != "$2" ]; }
 
 check_lib() {
-  local lib="$1" root="$2" name bad highest
+  local lib="$1" root="$2" name symbols bad highest
   name="$(basename "$lib")"
 
-  bad="$(objdump -T "$lib" 2>/dev/null | grep -oE '__isoc23[a-z_]*|__libc_single_threaded' | sort -u || true)"
+  if ! symbols="$(objdump -T "$lib" 2>&1)"; then
+    die "$name is not a readable native library: $symbols"
+  fi
+
+  bad="$(printf '%s\n' "$symbols" | grep -oE '__isoc23[a-z_]*|__libc_single_threaded' | sort -u || true)"
   [ -z "$bad" ] || die "$name references too-new symbols: $(echo "$bad" | tr '\n' ' ')"
 
-  highest="$(objdump -T "$lib" 2>/dev/null | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sed 's/GLIBC_//' | sort -V | tail -1)"
+  highest="$(
+    printf '%s\n' "$symbols" |
+      grep -oE 'GLIBC_[0-9]+\.[0-9]+' |
+      sed 's/GLIBC_//' |
+      sort -V |
+      tail -1 || true
+  )"
   if [ -n "$highest" ] && gt "$highest" "$MAX_GLIBC"; then
     die "$name requires glibc $highest > floor $MAX_GLIBC"
   fi
