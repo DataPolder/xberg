@@ -200,6 +200,7 @@ try {
     exit 1
   }
   Write-Log "artifact passes the Windows DLL closure gate"
+  exit 0
 }
 finally {
   if ($workDir -and (Test-Path $workDir)) { Remove-Item -Recurse -Force $workDir }
