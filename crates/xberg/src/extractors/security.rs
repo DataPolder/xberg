@@ -857,6 +857,56 @@ fn is_drive_or_unc_prefixed(path: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "office")]
+    fn archive_with_compressible_entry(entry_size: usize) -> zip::ZipArchive<std::io::Cursor<Vec<u8>>> {
+        use std::io::{Cursor, Write};
+        use zip::write::SimpleFileOptions;
+
+        const STORED_BALLAST_SIZE: usize = 4 * 1024 * 1024;
+
+        let mut bytes = Vec::new();
+        {
+            let mut writer = zip::ZipWriter::new(Cursor::new(&mut bytes));
+            let stored = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            writer.start_file("ballast.bin", stored).expect("start stored entry");
+            writer
+                .write_all(&vec![0x5a; STORED_BALLAST_SIZE])
+                .expect("write stored ballast");
+
+            let deflated = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            writer
+                .start_file("compact.bin", deflated)
+                .expect("start deflated entry");
+            writer.write_all(&vec![0; entry_size]).expect("write compact entry");
+            writer.finish().expect("finish ZIP");
+        }
+        zip::ZipArchive::new(Cursor::new(bytes)).expect("open ZIP")
+    }
+
+    #[cfg(feature = "office")]
+    #[test]
+    fn zip_ratio_allows_small_highly_compressible_entry() {
+        let mut archive = archive_with_compressible_entry(337 * 1024);
+
+        assert!(
+            ZipBombValidator::new(SecurityLimits::default())
+                .validate(&mut archive)
+                .is_ok()
+        );
+    }
+
+    #[cfg(feature = "office")]
+    #[test]
+    fn zip_ratio_rejects_large_highly_compressible_entry() {
+        let mut archive = archive_with_compressible_entry(4 * 1024 * 1024);
+
+        assert!(matches!(
+            ZipBombValidator::new(SecurityLimits::default()).validate(&mut archive),
+            Err(SecurityError::ZipBombDetected { uncompressed_size, .. })
+                if uncompressed_size == 4 * 1024 * 1024
+        ));
+    }
+
     #[test]
     fn test_default_limits() {
         let limits = SecurityLimits::default();
