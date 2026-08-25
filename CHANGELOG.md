@@ -445,6 +445,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - EPUB members declared in a non-UTF-8 encoding or written in UTF-16 are decoded instead of skipped,
   and books with DRM listed in `META-INF/encryption.xml` report one warning instead of blaming the
   encoding or emitting ciphertext as text (#1494).
+- The n8n integration now uses the generated Node binding's `max_chars` and `max_overlap`
+  chunking fields, restoring its TypeScript build.
 - Pdfium benchmarks now preserve the existing native-library search path instead of dropping ONNX
   Runtime, and subprocess failures report terminating signals rather than `exit code None`.
 - Dart E2E setup now installs the Flutter Rust Bridge 2.13.0 generator used by the committed
