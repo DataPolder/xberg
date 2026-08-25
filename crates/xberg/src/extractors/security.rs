@@ -460,6 +460,10 @@ impl StringGrowthValidator {
     pub(crate) fn exceeded_limit(&self) -> bool {
         self.current_size > self.max_size
     }
+
+    pub(crate) fn remaining_capacity(&self) -> usize {
+        self.max_size.saturating_sub(self.current_size)
+    }
 }
 
 /// Helper struct for capping iteration counts in parser loops.
