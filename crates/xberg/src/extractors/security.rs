@@ -456,6 +456,10 @@ impl StringGrowthValidator {
             Ok(())
         }
     }
+
+    pub(crate) fn exceeded_limit(&self) -> bool {
+        self.current_size > self.max_size
+    }
 }
 
 /// Helper struct for capping iteration counts in parser loops.
