@@ -5,6 +5,7 @@ description = 'Rust document intelligence library with active Python, TypeScript
 gitignore = true
 presets = ["claude", "codex"]
 builtins = [
+  '!git-workflow',
   'rust',
   'python',
   'go',

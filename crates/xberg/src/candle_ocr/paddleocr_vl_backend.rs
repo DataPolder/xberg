@@ -22,7 +22,7 @@
 //! `backend_options.model_path`, when present, always wins (offline / custom weights).
 //! Otherwise the backend auto-downloads `backend_options.model_id` (default
 //! `xberg-io/paddleocr-vl-1.6`, a checksum-pinned mirror of
-//! `PaddlePaddle/PaddleOCR-VL-1.6`) through [`super::model_stager`].
+//! `PaddlePaddle/PaddleOCR-VL-1.6`) through the internal `model_stager` module.
 
 use async_trait::async_trait;
 use std::borrow::Cow;
@@ -33,6 +33,9 @@ use ahash::AHashMap;
 use parking_lot::{Mutex, RwLock};
 
 use crate::Result;
+use crate::candle_ocr::config::{
+    PaddleOcrVlBackendOptions, PaddleOcrVlTaskKind, parse_backend_options, validate_optional_non_empty,
+};
 use crate::core::config::OcrConfig;
 use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
 use crate::types::ExtractedDocument;
@@ -130,7 +133,8 @@ const DEFAULT_MODEL_ID: &str = "xberg-io/paddleocr-vl-1.6";
 /// }
 /// ```
 ///
-/// - `task` (string): `"ocr"` (default), `"table"`, `"formula"`, `"chart"`
+/// - `task` (string, optional): per-call override for `"ocr"`, `"table"`, `"formula"`, or `"chart"`.
+///   When omitted, the task selected when constructing the backend is used.
 /// - `device` (string): `"auto"`, `"cpu"`, `"cuda"`, `"metal"`
 /// - `model_id` (string): HuggingFace repo id to auto-download weights from. Defaults to
 ///   `xberg-io/paddleocr-vl-1.6`, a checksum-pinned mirror of
@@ -147,6 +151,7 @@ pub struct PaddleOcrVlBackend {
     task: PaddleOcrVlTask,
 }
 
+#[derive(Debug)]
 struct PaddleOcrVlOptions {
     task: PaddleOcrVlTask,
     model_path: Option<String>,
@@ -174,47 +179,32 @@ impl PaddleOcrVlBackend {
     ///
     /// `model_id` defaults to [`DEFAULT_MODEL_ID`] and is only consulted when
     /// `model_path` is absent.
-    fn parse_options(config: &OcrConfig) -> PaddleOcrVlOptions {
-        let mut task = PaddleOcrVlTask::default();
-        let mut model_path: Option<String> = None;
-        let mut model_id = DEFAULT_MODEL_ID.to_string();
-        let mut hf_revision = None;
-        let mut cache_dir = None;
-
-        if let Some(opts) = &config.backend_options {
-            if let Some(t) = opts.get("task").and_then(|v| v.as_str()) {
-                task = match t {
-                    "table" => PaddleOcrVlTask::Table,
-                    "formula" => PaddleOcrVlTask::Formula,
-                    "chart" => PaddleOcrVlTask::Chart,
-                    _ => PaddleOcrVlTask::Ocr,
-                };
-            }
-            if let Some(p) = opts.get("model_path").and_then(|v| v.as_str()) {
-                model_path = Some(p.to_string());
-            }
-            if let Some(id) = opts.get("model_id").and_then(|v| v.as_str()) {
-                model_id = id.to_string();
-            }
-            hf_revision = opts
-                .get("hf_revision")
-                .or_else(|| opts.get("revision"))
-                .and_then(|value| value.as_str())
-                .map(str::to_string);
-            cache_dir = opts
-                .get("cache_dir")
-                .and_then(|value| value.as_str())
-                .map(PathBuf::from);
+    fn parse_options(&self, config: &OcrConfig) -> Result<PaddleOcrVlOptions> {
+        let options: PaddleOcrVlBackendOptions =
+            parse_backend_options(config.backend_options.as_ref(), "candle-paddleocr-vl")?;
+        for (field, value) in [
+            ("model_path", options.model_path.as_deref()),
+            ("model_id", options.model_id.as_deref()),
+            ("hf_revision", options.hf_revision.as_deref()),
+            ("cache_dir", options.cache_dir.as_deref()),
+        ] {
+            validate_optional_non_empty(value, "candle-paddleocr-vl", field)?;
         }
-
-        PaddleOcrVlOptions {
+        let task = match options.task {
+            Some(PaddleOcrVlTaskKind::Ocr) => PaddleOcrVlTask::Ocr,
+            Some(PaddleOcrVlTaskKind::Table) => PaddleOcrVlTask::Table,
+            Some(PaddleOcrVlTaskKind::Formula) => PaddleOcrVlTask::Formula,
+            Some(PaddleOcrVlTaskKind::Chart) => PaddleOcrVlTask::Chart,
+            None => self.task,
+        };
+        Ok(PaddleOcrVlOptions {
             task,
-            model_path,
-            model_id,
-            hf_revision,
-            cache_dir,
-            device: super::resolve_device_preference(config),
-        }
+            model_path: options.model_path,
+            model_id: options.model_id.unwrap_or_else(|| DEFAULT_MODEL_ID.to_string()),
+            hf_revision: options.hf_revision,
+            cache_dir: options.cache_dir.map(PathBuf::from),
+            device: super::resolve_device_preference(config, options.device),
+        })
     }
 }
 
@@ -243,7 +233,7 @@ impl Plugin for PaddleOcrVlBackend {
 ///
 /// It was previously suspected that this backend simply *forgot* to read the
 /// `backend_options["page_rotation_degrees"]` hint the way
-/// [`crate::paddle_ocr::backend::PaddleOcrBackend`] does. That comparison does not transfer,
+/// The native PaddleOCR backend does. That comparison does not transfer,
 /// for two independent reasons, and copying it here would introduce a real defect:
 ///
 /// 1. **No block list to reorder.** `PaddleOcrBackend`'s fix
@@ -281,7 +271,7 @@ impl OcrBackend for PaddleOcrVlBackend {
     /// Returns [`crate::XbergError::Ocr`] if weight download, device selection,
     /// engine initialisation, or inference fails.
     async fn process_image(&self, image_bytes: &[u8], config: &OcrConfig) -> Result<ExtractedDocument> {
-        let options = Self::parse_options(config);
+        let options = self.parse_options(config)?;
 
         if image_bytes.is_empty() {
             return Err(crate::XbergError::Validation {
@@ -379,6 +369,10 @@ impl OcrBackend for PaddleOcrVlBackend {
 mod tests {
     use super::*;
 
+    fn parse_default_options(config: &OcrConfig) -> Result<PaddleOcrVlOptions> {
+        PaddleOcrVlBackend::default_task().parse_options(config)
+    }
+
     #[test]
     fn test_paddleocr_vl_backend_creation() {
         let backend = PaddleOcrVlBackend::default_task();
@@ -414,7 +408,7 @@ mod tests {
     #[test]
     fn test_parse_options_defaults() {
         let config = OcrConfig::default();
-        let options = PaddleOcrVlBackend::parse_options(&config);
+        let options = parse_default_options(&config).unwrap();
         assert_eq!(options.task, PaddleOcrVlTask::Ocr);
         assert!(options.model_path.is_none());
         assert_eq!(options.model_id, DEFAULT_MODEL_ID);
@@ -431,8 +425,33 @@ mod tests {
             })),
             ..Default::default()
         };
-        let options = PaddleOcrVlBackend::parse_options(&config);
+        let options = parse_default_options(&config).unwrap();
         assert_eq!(options.task, PaddleOcrVlTask::Table);
+    }
+
+    #[test]
+    fn should_use_constructor_task_when_backend_options_omit_task() {
+        let backend = PaddleOcrVlBackend::new(PaddleOcrVlTask::Table);
+
+        let options = backend.parse_options(&OcrConfig::default()).unwrap();
+
+        assert_eq!(options.task, backend.task);
+    }
+
+    #[test]
+    fn should_prefer_explicit_task_over_constructor_task() {
+        let backend = PaddleOcrVlBackend::new(PaddleOcrVlTask::Chart);
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({
+                "task": "formula"
+            })),
+            ..Default::default()
+        };
+
+        let options = backend.parse_options(&config).unwrap();
+
+        assert_eq!(backend.task, PaddleOcrVlTask::Chart);
+        assert_eq!(options.task, PaddleOcrVlTask::Formula);
     }
 
     #[test]
@@ -443,7 +462,7 @@ mod tests {
             })),
             ..Default::default()
         };
-        let options = PaddleOcrVlBackend::parse_options(&config);
+        let options = parse_default_options(&config).unwrap();
         assert_eq!(options.device, DevicePreference::Cpu);
     }
 
@@ -455,7 +474,7 @@ mod tests {
             })),
             ..Default::default()
         };
-        let options = PaddleOcrVlBackend::parse_options(&config);
+        let options = parse_default_options(&config).unwrap();
         assert_eq!(options.model_path.as_deref(), Some("/models/paddleocr-vl"));
     }
 
@@ -467,7 +486,7 @@ mod tests {
             })),
             ..Default::default()
         };
-        let options = PaddleOcrVlBackend::parse_options(&config);
+        let options = parse_default_options(&config).unwrap();
         assert!(options.model_path.is_none());
         assert_eq!(options.model_id, "some-org/custom-paddleocr-vl");
     }
@@ -481,24 +500,19 @@ mod tests {
             })),
             ..Default::default()
         };
-        let options = PaddleOcrVlBackend::parse_options(&config);
+        let options = parse_default_options(&config).unwrap();
         assert_eq!(options.hf_revision.as_deref(), Some("0123456789abcdef"));
         assert_eq!(options.cache_dir.as_deref(), Some(Path::new("/tmp/hf-hub")));
     }
 
     #[test]
-    fn test_parse_options_non_object_json_returns_defaults() {
+    fn test_parse_options_non_object_json_returns_contextual_error() {
         let config = OcrConfig {
             backend_options: Some(serde_json::json!(false)),
             ..Default::default()
         };
-        let options = PaddleOcrVlBackend::parse_options(&config);
-        assert_eq!(options.task, PaddleOcrVlTask::Ocr);
-        assert!(options.model_path.is_none());
-        assert_eq!(options.model_id, DEFAULT_MODEL_ID);
-        assert!(options.hf_revision.is_none());
-        assert!(options.cache_dir.is_none());
-        assert_eq!(options.device, DevicePreference::Auto);
+        let error = parse_default_options(&config).unwrap_err().to_string();
+        assert!(error.contains("candle-paddleocr-vl backend_options"));
     }
 
     #[test]
@@ -507,7 +521,7 @@ mod tests {
             backend_options: Some(serde_json::json!({})),
             ..Default::default()
         };
-        let options = PaddleOcrVlBackend::parse_options(&config);
+        let options = parse_default_options(&config).unwrap();
         assert_eq!(options.task, PaddleOcrVlTask::Ocr);
         assert!(options.model_path.is_none());
         assert_eq!(options.model_id, DEFAULT_MODEL_ID);

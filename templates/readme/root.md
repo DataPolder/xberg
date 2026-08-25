@@ -36,7 +36,7 @@ Point Xberg at anything — a PDF, a spreadsheet, a scanned image, an audio file
 | **Embeddings & search** | Local (ONNX) or provider-hosted embeddings (165 providers via liter-llm), sparse and late-interaction, cross-encoder reranking. |
 | **Enrichment** | NER, keyword extraction (YAKE/RAKE), summarization, translation, redaction, page classification, QR detection, language detection, token reduction (TOON). |
 | **Structured extraction** | Schema-driven JSON straight from any document via local (Ollama, LM Studio, vLLM) or hosted LLMs — no prompt engineering. |
-| **6 output formats** | Plain text, Markdown, Djot, HTML, JSON tree, or Structured (same text as Plain, tagged with a `structured` metadata label). |
+| **6 output formats** | Plain text, Markdown, Djot, HTML, JSON tree, or Docling DocTags. |
 | **Runs anywhere** | Library, CLI (12 commands), REST API (`xberg serve`), MCP server, Docker, Helm — CPU by default, no GPU required. Content-hash caching, parallel batch, per-file timeouts. |
 
 > Capabilities marked *requires a feature* are Cargo feature flags on the core crate (`url-ingestion`, `transcription`, `reranker`, layout/ORT). Prebuilt language packages and the Docker image bundle the common set; a from-source build enables only what you select.
@@ -436,7 +436,7 @@ Powered by [tree-sitter-language-pack](https://github.com/xberg-io/tree-sitter-l
 | **Djot** | Modern lightweight markup | Similar to Markdown but stricter |
 | **HTML** | Styled, browser-ready | `<h1>Chapter 1</h1>` |
 | **JSON** | Machine-readable tree structure | Hierarchical sections with heading levels |
-| **Structured** | Same plain-text content as **Plain**, distinguished only by its `structured` output-format metadata label | Byte-identical to Plain output |
+| **DocTags** | Docling-compatible tag stream for document elements and tables | `<text>Chapter 1</text>` |
 
 ### Deployment Modes
 

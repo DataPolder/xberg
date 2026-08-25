@@ -1351,9 +1351,11 @@ fn assemble_mixed_ocr_page_document(
     page_number: u32,
     page_height: u32,
     geometry_points_per_pixel: f32,
+    margins: crate::pdf::native::text::PageMarginFractions,
 ) -> (
     crate::types::internal::InternalDocument,
     Vec<crate::pdf::structure::types::PdfParagraph>,
+    OcrMarginFilterOutcome,
 ) {
     // `doc.elements[].bbox` is already in PDF points by the time this runs (the caller
     // rescales it via `rescale_ocr_bboxes_to_page_points` before calling this), and
@@ -1366,7 +1368,8 @@ fn assemble_mixed_ocr_page_document(
     // `pdf::structure::adapters::OcrFontSizeScale` for why these can't share one scalar.
     let font_size_scale =
         crate::pdf::structure::adapters::OcrFontSizeScale::bbox_already_in_points(geometry_points_per_pixel);
-    let paragraphs = crate::pdf::structure::adapters::ocr_doc_to_paragraphs(&doc, page_height, font_size_scale);
+    let mut paragraphs = crate::pdf::structure::adapters::ocr_doc_to_paragraphs(&doc, page_height, font_size_scale);
+    let outcome = filter_ocr_paragraphs_by_page_margins(&mut paragraphs, page_height as f32, margins);
     if !paragraphs.is_empty() {
         let mut assembled = crate::pdf::structure::assemble_internal_document(
             vec![paragraphs.clone()],
@@ -1379,7 +1382,7 @@ fn assemble_mixed_ocr_page_document(
     }
 
     normalize_mixed_ocr_document_page(&mut doc, page_number);
-    (doc, paragraphs)
+    (doc, paragraphs, outcome)
 }
 
 /// Flat OCR-text document for a page whose backend produced tables or OCR elements
@@ -1624,17 +1627,27 @@ fn undo_auto_rotate_document_bboxes(
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 fn build_mixed_ocr_page_document(
     result: &mut crate::types::ExtractedDocument,
+    public_ocr_config: &crate::core::config::OcrConfig,
     page_number: u32,
     image_width_px: u32,
     image_height_px: u32,
     page_width_pt: f32,
     page_height_pt: f32,
+    margins: crate::pdf::native::text::PageMarginFractions,
 ) -> Option<(
     crate::types::internal::InternalDocument,
     Vec<crate::pdf::structure::types::PdfParagraph>,
 )> {
     let mut backend_tables = std::mem::take(&mut result.tables);
-    let backend_elements = result.ocr_elements.take().unwrap_or_default();
+    let mut raw_backend_elements = result.ocr_elements.take().unwrap_or_default();
+    let (_, element_layout_height) = resolved_ocr_layout_dimensions(&result.metadata, image_width_px, image_height_px);
+    let (backend_elements, element_margin_outcome) = public_ocr_elements_for_pdf_page(
+        &mut raw_backend_elements,
+        public_ocr_config,
+        page_number,
+        element_layout_height,
+        margins,
+    );
     let mut doc = match result.ocr_internal_document.take() {
         Some(doc) => doc,
         None if backend_tables.is_empty() && backend_elements.is_empty() => return None,
@@ -1655,8 +1668,29 @@ fn build_mixed_ocr_page_document(
     // bug this rescale fixes.
     let page_height_rounded_pt = page_height_pt.max(0.0).round() as u32;
     let geometry_points_per_pixel = mixed_route_geometry_points_per_pixel(page_height_pt, image_height_px);
-    let (mut assembled, paragraphs) =
-        assemble_mixed_ocr_page_document(doc, page_number, page_height_rounded_pt, geometry_points_per_pixel);
+    let (mut assembled, paragraphs, outcome) = assemble_mixed_ocr_page_document(
+        doc,
+        page_number,
+        page_height_rounded_pt,
+        geometry_points_per_pixel,
+        margins,
+    );
+    if outcome.removed {
+        result.content = ocr_paragraphs_plain_text(&paragraphs);
+    }
+    if (outcome.missing_geometry || (paragraphs.is_empty() && !result.content.trim().is_empty()))
+        && (margins.top != 0.0 || margins.bottom != 0.0)
+    {
+        assembled
+            .processing_warnings
+            .push(ocr_margin_filter_capability_warning());
+    }
+    if element_margin_outcome.missing_geometry && !backend_elements.is_empty() {
+        crate::core::diagnostics::push_warning_deduped(
+            &mut assembled.processing_warnings,
+            ocr_margin_filter_capability_warning(),
+        );
+    }
     attach_page_ocr_payload(&mut assembled, Vec::new(), backend_elements, page_number);
     Some((assembled, paragraphs))
 }
@@ -1855,6 +1889,7 @@ pub(crate) async fn extract_mixed_ocr_native(
     Vec<crate::types::LlmUsage>,
     Option<Vec<crate::types::ExtractedImage>>,
     Vec<crate::types::Formula>,
+    ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata>,
     Vec<crate::types::ProcessingWarning>,
 )> {
     let ocr_set: std::collections::HashSet<u32> = ocr_page_numbers
@@ -1878,6 +1913,7 @@ pub(crate) async fn extract_mixed_ocr_native(
             Vec::new(),
             None,
             Vec::new(),
+            ahash::AHashMap::new(),
             Vec::new(),
         ));
     }
@@ -1894,6 +1930,7 @@ pub(crate) async fn extract_mixed_ocr_native(
             Vec::new(),
             None,
             Vec::new(),
+            ahash::AHashMap::new(),
             Vec::new(),
         ));
     }
@@ -2057,6 +2094,8 @@ pub(crate) async fn extract_mixed_ocr_native(
         }
     }
     let mut captured_rasters: Vec<crate::types::ExtractedImage> = Vec::new();
+    let mut preprocessing_by_page: ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata> =
+        ahash::AHashMap::new();
 
     for batch_start in (0..total).step_by(batch_size) {
         let batch_end = (batch_start + batch_size).min(total);
@@ -2136,10 +2175,23 @@ pub(crate) async fn extract_mixed_ocr_native(
                         message: format!("OCR pipeline task panicked: {}", e),
                         plugin_name: "ocr".to_string(),
                     })?;
-                    let (text, tables, elements, doc, usage, page_texts, _rasters, formulas, mut page_raw_paragraphs) =
-                        result?;
+                    let (
+                        text,
+                        tables,
+                        elements,
+                        doc,
+                        usage,
+                        page_texts,
+                        _rasters,
+                        formulas,
+                        mut page_raw_paragraphs,
+                        preprocessing,
+                    ) = result?;
                     accumulated_llm_usage.extend(usage);
                     let page_number = (page_idx + 1) as u32;
+                    if let Some(metadata) = preprocessing.into_values().next() {
+                        preprocessing_by_page.insert(page_number, metadata);
+                    }
                     // `run_ocr_pipeline_for_page` drove exactly one detached image
                     // (`std::slice::from_ref` above), so its own per-page paragraph vec has
                     // at most one entry -- this page's own, still bare/unclassified because
@@ -2207,22 +2259,35 @@ pub(crate) async fn extract_mixed_ocr_native(
                     #[cfg(feature = "layout-detection")]
                     let page_detection: Option<&crate::layout::DetectionResult> =
                         detection_for_mixed_route_page(layout_detections_for_mixed.as_deref(), *page_idx);
-                    let (text, tables, elements, doc, usage, page_texts, _rasters, formulas, mut page_raw_paragraphs) =
-                        Box::pin(run_ocr_pipeline_for_page(
-                            None,
-                            Some(std::slice::from_ref(image.as_ref())),
-                            #[cfg(feature = "layout-detection")]
-                            page_detection.map(std::slice::from_ref),
-                            config,
-                            pipeline,
-                            None,
-                            page_rotation_degrees,
-                            true,
-                            points_per_pixel_override,
-                        ))
-                        .await?;
+                    let (
+                        text,
+                        tables,
+                        elements,
+                        doc,
+                        usage,
+                        page_texts,
+                        _rasters,
+                        formulas,
+                        mut page_raw_paragraphs,
+                        preprocessing,
+                    ) = Box::pin(run_ocr_pipeline_for_page(
+                        None,
+                        Some(std::slice::from_ref(image.as_ref())),
+                        #[cfg(feature = "layout-detection")]
+                        page_detection.map(std::slice::from_ref),
+                        config,
+                        pipeline,
+                        None,
+                        page_rotation_degrees,
+                        true,
+                        points_per_pixel_override,
+                    ))
+                    .await?;
                     accumulated_llm_usage.extend(usage);
                     let page_number = (*page_idx + 1) as u32;
+                    if let Some(metadata) = preprocessing.into_values().next() {
+                        preprocessing_by_page.insert(page_number, metadata);
+                    }
                     if let Some(paragraphs) = page_raw_paragraphs.pop().filter(|p| !p.is_empty()) {
                         ocr_page_paragraphs.insert(page_number, paragraphs);
                     }
@@ -2353,6 +2418,9 @@ pub(crate) async fn extract_mixed_ocr_native(
                         plugin_name: "ocr".to_string(),
                     })?;
                 let mut extraction_result = result?;
+                if let Some(metadata) = extraction_result.metadata.image_preprocessing.clone() {
+                    preprocessing_by_page.insert((page_idx + 1) as u32, metadata);
+                }
                 undo_upright_raster_correction(
                     &mut extraction_result,
                     correction_degrees,
@@ -2392,11 +2460,13 @@ pub(crate) async fn extract_mixed_ocr_native(
                 let (page_width_pt, page_height_pt) = page_dimensions_pt(&render_doc, page_idx);
                 if let Some((mut page_doc, paragraphs)) = build_mixed_ocr_page_document(
                     &mut extraction_result,
+                    &ocr_config_resolved,
                     (page_idx + 1) as u32,
                     width,
                     height,
                     page_width_pt,
                     page_height_pt,
+                    crate::pdf::native::text::PageMarginFractions::from_extraction_config(Some(config)),
                 ) {
                     crate::core::diagnostics::dedup_extend_warnings(
                         &mut accumulated_warnings,
@@ -2425,6 +2495,9 @@ pub(crate) async fn extract_mixed_ocr_native(
                 let mut extraction_result = backend
                     .process_image(upright_data.as_slice(), config_for_page.as_ref())
                     .await?;
+                if let Some(metadata) = extraction_result.metadata.image_preprocessing.clone() {
+                    preprocessing_by_page.insert((*page_idx + 1) as u32, metadata);
+                }
                 undo_upright_raster_correction(
                     &mut extraction_result,
                     correction_degrees,
@@ -2453,11 +2526,13 @@ pub(crate) async fn extract_mixed_ocr_native(
                 let (page_width_pt, page_height_pt) = page_dimensions_pt(&render_doc, *page_idx);
                 if let Some((mut page_doc, paragraphs)) = build_mixed_ocr_page_document(
                     &mut extraction_result,
+                    &ocr_config_resolved,
                     (*page_idx + 1) as u32,
                     *width,
                     *height,
                     page_width_pt,
                     page_height_pt,
+                    crate::pdf::native::text::PageMarginFractions::from_extraction_config(Some(config)),
                 ) {
                     crate::core::diagnostics::dedup_extend_warnings(
                         &mut accumulated_warnings,
@@ -2567,6 +2642,7 @@ pub(crate) async fn extract_mixed_ocr_native(
 
     let accepted_replacements = accepted_ocr_page_replacements(native_text, boundaries, &ocr_results);
     structured_ocr_pages.retain(|page, _| accepted_replacements.contains_key(page));
+    retain_ocr_formulas_for_accepted_pages(&mut accumulated_formulas, &accepted_replacements);
 
     // Document-global heading/list heuristic (same font-clustering pass the OCR-only
     // route runs via `extract_with_ocr_for_page`, previously unreachable from this mixed
@@ -2593,9 +2669,17 @@ pub(crate) async fn extract_mixed_ocr_native(
             .collect();
         let mut ocr_page_numbers: Vec<u32> = structured_ocr_pages.keys().copied().collect();
         ocr_page_numbers.sort_unstable();
-        let mut split_pages = heuristically_restructured_ocr_pages(&pages_for_heuristic, &tables_for_heuristic, config)
-            .map(|combined_doc| split_document_global_ocr_structure_by_page(combined_doc, &ocr_page_numbers))
-            .unwrap_or_default();
+        let page_heights_for_heuristic = (0..page_count)
+            .map(|page_index| page_dimensions_pt(&render_doc, page_index).1)
+            .collect::<Vec<_>>();
+        let mut split_pages = heuristically_restructured_ocr_pages(
+            &pages_for_heuristic,
+            &page_heights_for_heuristic,
+            &tables_for_heuristic,
+            config,
+        )
+        .map(|combined_doc| split_document_global_ocr_structure_by_page(combined_doc, &ocr_page_numbers))
+        .unwrap_or_default();
         for page_number in &ocr_page_numbers {
             let Some(existing) = structured_ocr_pages.get(page_number) else {
                 continue;
@@ -2659,6 +2743,7 @@ pub(crate) async fn extract_mixed_ocr_native(
         accumulated_llm_usage,
         if capture_rasters { Some(captured_rasters) } else { None },
         accumulated_formulas,
+        preprocessing_by_page,
         accumulated_warnings,
     ))
 }
@@ -3503,9 +3588,19 @@ fn transform_ocr_geometry_to_render(
             }
         }
         crate::types::OcrBoundingGeometry::Quadrilateral { points } => {
-            let points = points.map(|point| {
-                transform_ocr_point_to_render(point, correction_degrees, pre_rotation_dimensions, render_dimensions)
-            });
+            let points = points
+                .iter()
+                .copied()
+                .map(|point| {
+                    transform_ocr_point_to_render(
+                        point.into(),
+                        correction_degrees,
+                        pre_rotation_dimensions,
+                        render_dimensions,
+                    )
+                    .into()
+                })
+                .collect();
             crate::types::OcrBoundingGeometry::Quadrilateral { points }
         }
     }
@@ -3644,6 +3739,169 @@ fn assemble_ocr_page_paragraphs(
     crate::pdf::structure::adapters::ocr_doc_to_paragraphs(doc, page_height, font_size_scale)
 }
 
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+#[derive(Debug, Default, PartialEq, Eq)]
+struct OcrMarginFilterOutcome {
+    removed: bool,
+    missing_geometry: bool,
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn filter_ocr_paragraphs_by_page_margins(
+    paragraphs: &mut Vec<crate::pdf::structure::types::PdfParagraph>,
+    page_height: f32,
+    margins: crate::pdf::native::text::PageMarginFractions,
+) -> OcrMarginFilterOutcome {
+    if margins.top == 0.0 && margins.bottom == 0.0 {
+        return OcrMarginFilterOutcome::default();
+    }
+
+    let original_len = paragraphs.len();
+    let mut missing_geometry = original_len == 0;
+    paragraphs.retain(|paragraph| {
+        let Some((_, baseline_y, _, _)) = paragraph.block_bbox else {
+            missing_geometry = true;
+            return true;
+        };
+        crate::pdf::native::text::baseline_is_inside_page_margins(baseline_y, 0.0, page_height, margins)
+    });
+
+    OcrMarginFilterOutcome {
+        removed: paragraphs.len() != original_len,
+        missing_geometry,
+    }
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn filter_ocr_elements_by_page_margins(
+    elements: &mut Vec<crate::types::OcrElement>,
+    page_height: u32,
+    margins: crate::pdf::native::text::PageMarginFractions,
+) -> OcrMarginFilterOutcome {
+    if margins.top == 0.0 && margins.bottom == 0.0 {
+        return OcrMarginFilterOutcome::default();
+    }
+    if page_height == 0 {
+        return OcrMarginFilterOutcome {
+            removed: false,
+            missing_geometry: !elements.is_empty(),
+        };
+    }
+
+    let original_len = elements.len();
+    let mut missing_geometry = false;
+    elements.retain(|element| {
+        let bottom_y = match &element.geometry {
+            crate::types::OcrBoundingGeometry::Rectangle { top, width, height, .. } if *width > 0 && *height > 0 => {
+                top.saturating_add(*height)
+            }
+            crate::types::OcrBoundingGeometry::Quadrilateral { points } if points.len() == 4 => {
+                let min_x = points.iter().map(|point| point.x).min().unwrap_or(0);
+                let max_x = points.iter().map(|point| point.x).max().unwrap_or(0);
+                let min_y = points.iter().map(|point| point.y).min().unwrap_or(0);
+                let max_y = points.iter().map(|point| point.y).max().unwrap_or(0);
+                if min_x == max_x || min_y == max_y {
+                    missing_geometry = true;
+                    return true;
+                }
+                max_y
+            }
+            _ => {
+                missing_geometry = true;
+                return true;
+            }
+        };
+        let baseline_y = page_height.saturating_sub(bottom_y.min(page_height)) as f32;
+        crate::pdf::native::text::baseline_is_inside_page_margins(baseline_y, 0.0, page_height as f32, margins)
+    });
+
+    OcrMarginFilterOutcome {
+        removed: elements.len() != original_len,
+        missing_geometry,
+    }
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn public_ocr_elements_for_pdf_page(
+    elements: &mut [crate::types::OcrElement],
+    config: &crate::core::config::ocr::OcrConfig,
+    page_number: u32,
+    page_height: u32,
+    margins: crate::pdf::native::text::PageMarginFractions,
+) -> (Vec<crate::types::OcrElement>, OcrMarginFilterOutcome) {
+    for element in elements.iter_mut() {
+        element.page_number = page_number;
+    }
+    let mut public_elements = filter_public_ocr_elements(elements, config);
+    let outcome = filter_ocr_elements_by_page_margins(&mut public_elements, page_height, margins);
+    if outcome.removed {
+        public_elements = filter_public_ocr_elements(&public_elements, config);
+    }
+    (public_elements, outcome)
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn should_use_document_processing(
+    supports_document_processing: bool,
+    path_available: bool,
+    margins: crate::pdf::native::text::PageMarginFractions,
+) -> bool {
+    supports_document_processing && path_available && margins.top == 0.0 && margins.bottom == 0.0
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn ocr_paragraphs_plain_text(paragraphs: &[crate::pdf::structure::types::PdfParagraph]) -> String {
+    paragraphs
+        .iter()
+        .map(|paragraph| {
+            if !paragraph.text.is_empty() {
+                return paragraph.text.clone();
+            }
+            paragraph
+                .lines
+                .iter()
+                .map(|line| {
+                    line.segments
+                        .iter()
+                        .map(|segment| segment.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .filter(|text| !text.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn ocr_margin_filter_capability_warning() -> crate::types::ProcessingWarning {
+    crate::types::ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("ocr"),
+        message: std::borrow::Cow::Borrowed(
+            "Configured PDF page margins could not be applied to some OCR text because the backend did not return \
+             text geometry; that OCR text was preserved unfiltered.",
+        ),
+    }
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn apply_ocr_layout_content_filter(
+    paragraphs: &mut [crate::pdf::structure::types::PdfParagraph],
+    config: &ExtractionConfig,
+) {
+    let Some(filter) = config.content_filter.as_ref() else {
+        return;
+    };
+    crate::pdf::structure::pipeline::un_mark_layout_furniture_per_config(
+        paragraphs,
+        filter.include_headers,
+        filter.include_footers,
+        filter.include_footnotes,
+    );
+}
+
 /// Fill in `is_list_item` for paragraphs the OCR layout route left unclassified,
 /// and OVERRIDE a layout classification that disagrees with an unambiguous text
 /// list marker.
@@ -3751,18 +4009,33 @@ fn fill_unstructured_ocr_pages(
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn heuristically_restructured_ocr_pages(
     pages: &[Vec<crate::pdf::structure::types::PdfParagraph>],
+    page_heights: &[f32],
     collected_tables: &[crate::types::Table],
     config: &ExtractionConfig,
 ) -> Option<crate::types::internal::InternalDocument> {
-    if config.output_format == crate::core::config::OutputFormat::Plain {
+    if config.output_format == crate::core::config::OutputFormat::Plain && config.content_filter.is_none() {
         return None;
     }
+    let strip_repeating_text = config
+        .content_filter
+        .as_ref()
+        .is_some_and(|filter| filter.strip_repeating_text);
     let already_structured = pages
         .iter()
         .flatten()
         .any(|paragraph| paragraph.heading_level.is_some() || paragraph.is_list_item);
     if already_structured {
-        return None;
+        if !strip_repeating_text {
+            return None;
+        }
+        let mut filtered_pages = pages.to_vec();
+        crate::pdf::structure::pipeline::strip_repeating_text_from_pages(&mut filtered_pages, page_heights);
+        return Some(crate::pdf::structure::assemble_internal_document(
+            filtered_pages,
+            collected_tables,
+            None,
+            &[],
+        ));
     }
 
     let all_page_segments = crate::pdf::structure::adapters::segments_from_ocr_pages(pages);
@@ -3771,7 +4044,20 @@ fn heuristically_restructured_ocr_pages(
         .as_ref()
         .and_then(|opts| opts.hierarchy.as_ref())
         .map(|hierarchy| hierarchy.k_clusters)
-        .unwrap_or(4);
+        .unwrap_or_else(|| crate::core::config::HierarchyConfig::default().k_clusters);
+    let (strip_repeating_text, include_headers, include_footers, include_footnotes, include_watermarks) = config
+        .content_filter
+        .as_ref()
+        .map(|filter| {
+            (
+                filter.strip_repeating_text,
+                filter.include_headers,
+                filter.include_footers,
+                filter.include_footnotes,
+                filter.include_watermarks,
+            )
+        })
+        .unwrap_or((false, false, false, false, false));
 
     let result = crate::pdf::structure::extract_document_structure_from_segments(
         all_page_segments,
@@ -3779,10 +4065,11 @@ fn heuristically_restructured_ocr_pages(
             k_clusters,
             tables: collected_tables,
             outline_entries: &[],
-            strip_repeating_text: false,
-            include_headers: false,
-            include_footers: false,
-            include_footnotes: false,
+            strip_repeating_text,
+            include_headers,
+            include_footers,
+            include_footnotes,
+            include_watermarks,
             used_structure_tree: false,
             image_positions: &[],
             images: None,
@@ -3978,22 +4265,43 @@ pub(crate) async fn extract_with_ocr(
     Vec<String>,
     Option<Vec<crate::types::ExtractedImage>>,
     Vec<crate::types::Formula>,
+    ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata>,
 )> {
-    let (text, mean_conf, tables, elements, doc, usage, page_texts, rasters, formulas, _raw_page_paragraphs) =
-        Box::pin(extract_with_ocr_for_page(
-            content,
-            images,
-            #[cfg(feature = "layout-detection")]
-            layout_detections,
-            config,
-            path,
-            0,
-            false,
-            None,
-        ))
-        .await?;
+    let (
+        text,
+        mean_conf,
+        tables,
+        elements,
+        doc,
+        usage,
+        page_texts,
+        rasters,
+        formulas,
+        _raw_page_paragraphs,
+        preprocessing,
+    ) = Box::pin(extract_with_ocr_for_page(
+        content,
+        images,
+        #[cfg(feature = "layout-detection")]
+        layout_detections,
+        config,
+        path,
+        0,
+        false,
+        None,
+    ))
+    .await?;
     Ok((
-        text, mean_conf, tables, elements, doc, usage, page_texts, rasters, formulas,
+        text,
+        mean_conf,
+        tables,
+        elements,
+        doc,
+        usage,
+        page_texts,
+        rasters,
+        formulas,
+        preprocessing,
     ))
 }
 
@@ -4055,6 +4363,7 @@ async fn extract_with_ocr_for_page(
     Option<Vec<crate::types::ExtractedImage>>,
     Vec<crate::types::Formula>,
     Vec<Vec<crate::pdf::structure::types::PdfParagraph>>,
+    ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata>,
 )> {
     use crate::plugins::registry::get_ocr_backend_registry;
     use image::ImageEncoder;
@@ -4117,13 +4426,24 @@ async fn extract_with_ocr_for_page(
     #[cfg(feature = "layout-detection")]
     let supports_doc = backend.supports_document_processing() && layout_detections.is_none();
 
+    #[cfg(feature = "pdf")]
+    let page_margins = crate::pdf::native::text::PageMarginFractions::from_extraction_config(Some(config));
+    #[cfg(not(feature = "pdf"))]
     let use_document_processing = supports_doc && path.is_some();
+    #[cfg(feature = "pdf")]
+    let use_document_processing = should_use_document_processing(supports_doc, path.is_some(), page_margins);
 
     if let Some(doc_path) = path
         && use_document_processing
     {
         tracing::debug!(backend = %ocr_config.backend, "Using document-level OCR processing");
         let result = backend.process_document(doc_path, ocr_config).await?;
+        let preprocessing = result
+            .metadata
+            .image_preprocessing
+            .clone()
+            .map(|metadata| ahash::AHashMap::from([(1, metadata)]))
+            .unwrap_or_default();
         let mean_conf = backend_confidence_scale.and_then(|scale_max| {
             result
                 .metadata
@@ -4155,10 +4475,13 @@ async fn extract_with_ocr_for_page(
             // paragraph geometry, so there is nothing for the document-global heuristic to
             // cluster over here.
             Vec::new(),
+            preprocessing,
         ));
     }
     let capture_rasters = config.images.as_ref().is_some_and(|c| c.include_page_rasters);
     let mut captured_rasters: Vec<crate::types::ExtractedImage> = Vec::new();
+    let mut preprocessing_by_page: ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata> =
+        ahash::AHashMap::new();
 
     #[cfg(feature = "pdf")]
     let lazy_pdf_render_state = if !use_document_processing && images.is_none() {
@@ -4226,6 +4549,7 @@ async fn extract_with_ocr_for_page(
     // paragraphs of a rejected page must be dropped along with its text.
     let mut rejected_pages = vec![false; total_pages];
     let mut all_page_paragraphs: Vec<Option<Vec<crate::pdf::structure::types::PdfParagraph>>> = vec![None; total_pages];
+    let mut ocr_page_heights = vec![0.0_f32; total_pages];
     #[allow(unused_mut)]
     let mut collected_tables: Vec<crate::types::Table> = Vec::new();
     let mut all_ocr_elements: Vec<crate::types::OcrElement> = Vec::new();
@@ -4246,6 +4570,9 @@ async fn extract_with_ocr_for_page(
     // recovered still returns an error.
     let mut page_backend_errors: Vec<(usize, String)> = Vec::new();
     let mut page_failure_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
+
+    #[cfg(feature = "pdf")]
+    let mut margin_filter_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
 
     // Opened on first blank page only; see `fallback_render_document`.
     #[cfg(feature = "pdf")]
@@ -4465,6 +4792,9 @@ async fn extract_with_ocr_for_page(
         for offset in 0..batch_count {
             let page_idx = batch_start + offset;
             let mut ocr_result = batch_ocr_results[offset].take().expect("OCR result missing for page");
+            if let Some(metadata) = ocr_result.metadata.image_preprocessing.clone() {
+                preprocessing_by_page.insert((page_idx + 1) as u32, metadata);
+            }
             #[cfg(feature = "pdf")]
             {
                 let (correction_degrees, upright_width, upright_height) = batch_upright_correction[offset];
@@ -4488,10 +4818,36 @@ async fn extract_with_ocr_for_page(
             }
 
             if let Some(ref mut elems) = ocr_result.ocr_elements {
-                for elem in elems.iter_mut() {
-                    elem.page_number = (page_idx + 1) as u32;
-                }
-                all_ocr_elements.extend(filter_public_ocr_elements(elems, base_ocr_config));
+                #[cfg(feature = "pdf")]
+                let public_elements = {
+                    let (_, layout_height) = resolved_ocr_layout_dimensions(
+                        &ocr_result.metadata,
+                        encoded_batch[offset].2,
+                        encoded_batch[offset].3,
+                    );
+                    let (public_elements, outcome) = public_ocr_elements_for_pdf_page(
+                        elems,
+                        base_ocr_config,
+                        (page_idx + 1) as u32,
+                        layout_height,
+                        page_margins,
+                    );
+                    if outcome.missing_geometry && !public_elements.is_empty() {
+                        crate::core::diagnostics::push_warning_deduped(
+                            &mut margin_filter_warnings,
+                            ocr_margin_filter_capability_warning(),
+                        );
+                    }
+                    public_elements
+                };
+                #[cfg(not(feature = "pdf"))]
+                let public_elements = {
+                    for elem in elems.iter_mut() {
+                        elem.page_number = (page_idx + 1) as u32;
+                    }
+                    filter_public_ocr_elements(elems, base_ocr_config)
+                };
+                all_ocr_elements.extend(public_elements);
             }
 
             for mut formula in ocr_result.formulas {
@@ -4565,6 +4921,11 @@ async fn extract_with_ocr_for_page(
                 page_backend_errors.push((page_idx, error));
             }
 
+            #[cfg(feature = "pdf")]
+            let mut margin_filtered_content: Option<String> = None;
+            #[cfg(feature = "pdf")]
+            let mut margin_filter_complete = false;
+
             #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
             if ocr_result.ocr_internal_document.is_some()
                 || ocr_result
@@ -4581,6 +4942,7 @@ async fn extract_with_ocr_for_page(
                     detection.map(|det| scale_detection_to_dimensions(det, ocr_render_width, ocr_render_height));
                 let (_, ocr_layout_height) =
                     resolved_ocr_layout_dimensions(&ocr_result.metadata, ocr_render_width, ocr_render_height);
+                ocr_page_heights[page_idx] = ocr_layout_height as f32;
                 let points_per_pixel = points_per_pixel_override.unwrap_or_else(|| {
                     ocr_points_per_pixel(
                         #[cfg(feature = "pdf")]
@@ -4652,13 +5014,26 @@ async fn extract_with_ocr_for_page(
                     };
                     #[cfg(not(feature = "pdf"))]
                     let page_rotation_degrees: u32 = 0;
-                    let paragraphs = assemble_ocr_page_paragraphs(
+                    let mut paragraphs = assemble_ocr_page_paragraphs(
                         ocr_doc,
                         ocr_layout_height,
                         ocr_scaled_detection.as_ref(),
                         points_per_pixel,
                         page_rotation_degrees,
                     );
+                    apply_ocr_layout_content_filter(&mut paragraphs, config);
+                    #[cfg(feature = "pdf")]
+                    {
+                        let outcome = filter_ocr_paragraphs_by_page_margins(
+                            &mut paragraphs,
+                            ocr_layout_height as f32,
+                            page_margins,
+                        );
+                        margin_filter_complete = !outcome.missing_geometry;
+                        if outcome.removed {
+                            margin_filtered_content = Some(ocr_paragraphs_plain_text(&paragraphs));
+                        }
+                    }
 
                     tracing::debug!(
                         page = page_idx + 1,
@@ -4680,9 +5055,23 @@ async fn extract_with_ocr_for_page(
                     .additional
                     .get(crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY)
                     .and_then(|v| v.as_f64());
+                #[cfg(feature = "pdf")]
+                if (page_margins.top != 0.0 || page_margins.bottom != 0.0)
+                    && !margin_filter_complete
+                    && !ocr_result.content.trim().is_empty()
+                {
+                    crate::core::diagnostics::push_warning_deduped(
+                        &mut margin_filter_warnings,
+                        ocr_margin_filter_capability_warning(),
+                    );
+                }
+                #[cfg(feature = "pdf")]
+                let page_content = margin_filtered_content.unwrap_or(ocr_result.content);
+                #[cfg(not(feature = "pdf"))]
+                let page_content = ocr_result.content;
                 let (page_text, page_rejected) = accept_or_reject_ocr_page(
                     page_idx,
-                    ocr_result.content,
+                    page_content,
                     &ocr_output_thresholds,
                     &mut recognition_noise_warnings,
                     dict_invalid_word_ratio,
@@ -4698,6 +5087,7 @@ async fn extract_with_ocr_for_page(
                 let ocr_render_height = encoded_batch[offset].3;
                 let (_, ocr_layout_height) =
                     resolved_ocr_layout_dimensions(&ocr_result.metadata, ocr_render_width, ocr_render_height);
+                ocr_page_heights[page_idx] = ocr_layout_height as f32;
                 let points_per_pixel = points_per_pixel_override.unwrap_or_else(|| {
                     ocr_points_per_pixel(
                         #[cfg(feature = "pdf")]
@@ -4709,8 +5099,18 @@ async fn extract_with_ocr_for_page(
                 // `ocr_doc`'s bbox AND ocr_geometry are both still raw OCR raster pixels here
                 // (same pure-OCR-route reasoning as `assemble_ocr_page_paragraphs` above).
                 let font_size_scale = crate::pdf::structure::adapters::OcrFontSizeScale::uniform(points_per_pixel);
-                let paragraphs =
+                let mut paragraphs =
                     crate::pdf::structure::adapters::ocr_doc_to_paragraphs(ocr_doc, ocr_layout_height, font_size_scale);
+                apply_ocr_layout_content_filter(&mut paragraphs, config);
+                #[cfg(feature = "pdf")]
+                {
+                    let outcome =
+                        filter_ocr_paragraphs_by_page_margins(&mut paragraphs, ocr_layout_height as f32, page_margins);
+                    margin_filter_complete = !outcome.missing_geometry;
+                    if outcome.removed {
+                        margin_filtered_content = Some(ocr_paragraphs_plain_text(&paragraphs));
+                    }
+                }
                 all_page_paragraphs[page_idx] = Some(paragraphs);
             }
 
@@ -4725,9 +5125,23 @@ async fn extract_with_ocr_for_page(
                 .additional
                 .get(crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY)
                 .and_then(|v| v.as_f64());
+            #[cfg(feature = "pdf")]
+            if (page_margins.top != 0.0 || page_margins.bottom != 0.0)
+                && !margin_filter_complete
+                && !ocr_result.content.trim().is_empty()
+            {
+                crate::core::diagnostics::push_warning_deduped(
+                    &mut margin_filter_warnings,
+                    ocr_margin_filter_capability_warning(),
+                );
+            }
+            #[cfg(feature = "pdf")]
+            let page_content = margin_filtered_content.unwrap_or(ocr_result.content);
+            #[cfg(not(feature = "pdf"))]
+            let page_content = ocr_result.content;
             let (page_text, page_rejected) = accept_or_reject_ocr_page(
                 page_idx,
-                ocr_result.content,
+                page_content,
                 &ocr_output_thresholds,
                 &mut recognition_noise_warnings,
                 dict_invalid_word_ratio,
@@ -4794,6 +5208,8 @@ async fn extract_with_ocr_for_page(
             all_page_paragraphs[page_idx] = None;
         }
     }
+    discard_ocr_elements_from_rejected_pages(&mut all_ocr_elements, &rejected_pages);
+    discard_rejected_ocr_page_payloads(&mut collected_tables, &mut accumulated_formulas, &rejected_pages);
 
     fill_unstructured_ocr_pages(&mut all_page_paragraphs, &page_texts);
 
@@ -4831,7 +5247,7 @@ async fn extract_with_ocr_for_page(
                     &[],
                 ))
             } else {
-                match heuristically_restructured_ocr_pages(&pages, &collected_tables, config) {
+                match heuristically_restructured_ocr_pages(&pages, &ocr_page_heights, &collected_tables, config) {
                     Some(doc) => Some(doc),
                     None => {
                         // The document-global heading/list heuristic declined to run (Plain
@@ -4890,6 +5306,7 @@ async fn extract_with_ocr_for_page(
         let mut warnings = image_fallback_warnings;
         warnings.extend(recognition_noise_warnings);
         warnings.extend(page_failure_warnings);
+        warnings.extend(margin_filter_warnings);
         attach_ocr_fallback_warnings(ocr_doc, &result, warnings)
     };
     // Without `pdf` there is no page renderer, so no page-level OCR runs and the vector is
@@ -4908,6 +5325,7 @@ async fn extract_with_ocr_for_page(
         if capture_rasters { Some(captured_rasters) } else { None },
         accumulated_formulas,
         raw_page_paragraphs,
+        preprocessing_by_page,
     ))
 }
 
@@ -5279,8 +5697,9 @@ pub(crate) async fn run_ocr_pipeline(
     Vec<String>,
     Option<Vec<crate::types::ExtractedImage>>,
     Vec<crate::types::Formula>,
+    ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata>,
 )> {
-    let (text, tables, elements, doc, usage, page_texts, rasters, formulas, _raw_page_paragraphs) =
+    let (text, tables, elements, doc, usage, page_texts, rasters, formulas, _raw_page_paragraphs, preprocessing) =
         Box::pin(run_ocr_pipeline_for_page(
             content,
             images,
@@ -5294,7 +5713,17 @@ pub(crate) async fn run_ocr_pipeline(
             None,
         ))
         .await?;
-    Ok((text, tables, elements, doc, usage, page_texts, rasters, formulas))
+    Ok((
+        text,
+        tables,
+        elements,
+        doc,
+        usage,
+        page_texts,
+        rasters,
+        formulas,
+        preprocessing,
+    ))
 }
 
 /// Same as [`run_ocr_pipeline`], but `page_rotation_degrees` -- the page's known PDF
@@ -5340,6 +5769,7 @@ async fn run_ocr_pipeline_for_page(
     Option<Vec<crate::types::ExtractedImage>>,
     Vec<crate::types::Formula>,
     Vec<Vec<crate::pdf::structure::types::PdfParagraph>>,
+    ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata>,
 )> {
     use crate::plugins::registry::get_ocr_backend_registry;
 
@@ -5389,6 +5819,7 @@ async fn run_ocr_pipeline_for_page(
         Option<Vec<crate::types::ExtractedImage>>,
         Vec<crate::types::Formula>,
         Vec<Vec<crate::pdf::structure::types::PdfParagraph>>,
+        ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata>,
     )> = None;
 
     let mut accumulated_usage: Vec<crate::types::LlmUsage> = Vec::new();
@@ -5448,6 +5879,7 @@ async fn run_ocr_pipeline_for_page(
                 stage_rasters,
                 stage_formulas,
                 stage_raw_paragraphs,
+                stage_preprocessing,
             )) => {
                 let text_score = compute_quality_score(&text, &pipeline.quality_thresholds);
                 let score = pipeline_stage_score(text_score, mean_conf);
@@ -5478,6 +5910,7 @@ async fn run_ocr_pipeline_for_page(
                         stage_rasters,
                         stage_formulas,
                         stage_raw_paragraphs,
+                        stage_preprocessing,
                     ));
                 }
 
@@ -5505,6 +5938,7 @@ async fn run_ocr_pipeline_for_page(
                         stage_rasters,
                         stage_formulas,
                         stage_raw_paragraphs,
+                        stage_preprocessing,
                     ));
                 }
             }
@@ -5520,7 +5954,18 @@ async fn run_ocr_pipeline_for_page(
     }
 
     match best_result {
-        Some((text, score, tables, elements, doc, page_texts, rasters, formulas, raw_page_paragraphs)) => {
+        Some((
+            text,
+            score,
+            tables,
+            elements,
+            doc,
+            page_texts,
+            rasters,
+            formulas,
+            raw_page_paragraphs,
+            preprocessing,
+        )) => {
             let threshold = pipeline.quality_thresholds.pipeline_min_quality;
             tracing::warn!(
                 score,
@@ -5567,6 +6012,7 @@ async fn run_ocr_pipeline_for_page(
                 rasters,
                 formulas,
                 raw_page_paragraphs,
+                preprocessing,
             ))
         }
         None => {
@@ -5594,6 +6040,7 @@ async fn run_ocr_pipeline_for_page(
                     if capture_rasters { Some(recovered_images) } else { None },
                     Vec::new(),
                     Vec::new(),
+                    ahash::AHashMap::new(),
                 ));
             }
 
@@ -5643,18 +6090,56 @@ fn filter_public_ocr_elements(
     elements: &[crate::types::OcrElement],
     config: &crate::core::config::ocr::OcrConfig,
 ) -> Vec<crate::types::OcrElement> {
-    let Some(element_config) = config.element_config.as_ref().filter(|config| config.include_elements) else {
+    let Some(element_config) = config.element_config.as_ref() else {
         return Vec::new();
     };
+    element_config.select_elements(elements)
+}
 
-    let minimum_rank = ocr_element_level_rank(element_config.min_level);
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn discard_ocr_elements_from_rejected_pages(elements: &mut Vec<crate::types::OcrElement>, rejected_pages: &[bool]) {
+    elements.retain(|element| {
+        element
+            .page_number
+            .checked_sub(1)
+            .and_then(|index| rejected_pages.get(index as usize))
+            .is_none_or(|rejected| !rejected)
+    });
+}
 
-    elements
-        .iter()
-        .filter(|element| element.confidence.recognition >= element_config.min_confidence)
-        .filter(|element| ocr_element_level_rank(element.level) >= minimum_rank)
-        .cloned()
-        .collect()
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn ocr_page_is_rejected(page_number: u32, rejected_pages: &[bool]) -> bool {
+    page_number
+        .checked_sub(1)
+        .and_then(|index| rejected_pages.get(index as usize))
+        .copied()
+        .unwrap_or(false)
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn discard_rejected_ocr_page_payloads(
+    tables: &mut Vec<crate::types::Table>,
+    formulas: &mut Vec<crate::types::Formula>,
+    rejected_pages: &[bool],
+) {
+    tables.retain(|table| !ocr_page_is_rejected(table.page_number, rejected_pages));
+    formulas.retain(|formula| {
+        formula
+            .page
+            .is_none_or(|page_number| !ocr_page_is_rejected(page_number, rejected_pages))
+    });
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn retain_ocr_formulas_for_accepted_pages(
+    formulas: &mut Vec<crate::types::Formula>,
+    accepted_pages: &ahash::AHashMap<u32, String>,
+) {
+    formulas.retain(|formula| {
+        formula
+            .page
+            .is_none_or(|page_number| accepted_pages.contains_key(&page_number))
+    });
 }
 
 /// Inject a page's PDF `/Rotate` value into `OcrConfig.backend_options` so a
@@ -5875,20 +6360,11 @@ fn undo_ocr_element_geometry(
         }
         OcrBoundingGeometry::Quadrilateral { points } => {
             for point in points.iter_mut() {
-                let (x, y) = undo_point(f64::from(point.0), f64::from(point.1));
-                *point = (x.round().max(0.0) as u32, y.round().max(0.0) as u32);
+                let (x, y) = undo_point(f64::from(point.x), f64::from(point.y));
+                point.x = x.round().max(0.0) as u32;
+                point.y = y.round().max(0.0) as u32;
             }
         }
-    }
-}
-
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-fn ocr_element_level_rank(level: crate::types::OcrElementLevel) -> u8 {
-    match level {
-        crate::types::OcrElementLevel::Word => 0,
-        crate::types::OcrElementLevel::Line => 1,
-        crate::types::OcrElementLevel::Block => 2,
-        crate::types::OcrElementLevel::Page => 3,
     }
 }
 
@@ -6059,7 +6535,10 @@ mod tests {
                 },
                 OcrElement {
                     geometry: OcrBoundingGeometry::Quadrilateral {
-                        points: [(0, 0), (50, 0), (50, 20), (0, 20)],
+                        points: [(0, 0), (50, 0), (50, 20), (0, 20)]
+                            .into_iter()
+                            .map(Into::into)
+                            .collect(),
                     },
                     ..Default::default()
                 },
@@ -6083,7 +6562,10 @@ mod tests {
         assert_eq!(
             elements[1].geometry,
             OcrBoundingGeometry::Quadrilateral {
-                points: [(0, 200), (0, 150), (20, 150), (20, 200)],
+                points: [(0, 200), (0, 150), (20, 150), (20, 200)]
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
             },
             "the quad's points must be mapped through the fixed 90-degree arm, not left in the upright raster"
         );
@@ -6235,6 +6717,111 @@ mod tests {
             block_bbox: None,
             word_count: text.split_whitespace().count(),
         }
+    }
+
+    #[cfg(feature = "pdf")]
+    fn disabled_page_margins() -> crate::pdf::native::text::PageMarginFractions {
+        crate::pdf::native::text::PageMarginFractions { top: 0.0, bottom: 0.0 }
+    }
+
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[test]
+    fn should_filter_positioned_ocr_paragraphs_by_pdf_page_margins() {
+        let mut header = ocr_paragraph("header");
+        header.block_bbox = Some((20.0, 950.0, 300.0, 970.0));
+        let mut body = ocr_paragraph("body");
+        body.block_bbox = Some((20.0, 400.0, 300.0, 420.0));
+        let mut footer = ocr_paragraph("footer");
+        footer.block_bbox = Some((20.0, 20.0, 300.0, 40.0));
+        let mut paragraphs = vec![header, body, footer];
+
+        let outcome = filter_ocr_paragraphs_by_page_margins(
+            &mut paragraphs,
+            1000.0,
+            crate::pdf::native::text::PageMarginFractions {
+                top: 0.10,
+                bottom: 0.10,
+            },
+        );
+
+        assert!(outcome.removed);
+        assert!(!outcome.missing_geometry);
+        assert_eq!(ocr_paragraphs_plain_text(&paragraphs), "body");
+    }
+
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[test]
+    fn should_preserve_unpositioned_ocr_text_and_report_missing_geometry() {
+        let mut paragraphs = vec![ocr_paragraph("text-only backend output")];
+
+        let outcome = filter_ocr_paragraphs_by_page_margins(
+            &mut paragraphs,
+            1000.0,
+            crate::pdf::native::text::PageMarginFractions {
+                top: 0.10,
+                bottom: 0.10,
+            },
+        );
+
+        assert!(!outcome.removed);
+        assert!(outcome.missing_geometry);
+        assert_eq!(ocr_paragraphs_plain_text(&paragraphs), "text-only backend output");
+    }
+
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[test]
+    fn should_treat_all_positioned_ocr_paragraphs_removed_as_complete_filtering() {
+        let mut header = ocr_paragraph("header only");
+        header.block_bbox = Some((20.0, 950.0, 300.0, 970.0));
+        let mut paragraphs = vec![header];
+
+        let outcome = filter_ocr_paragraphs_by_page_margins(
+            &mut paragraphs,
+            1000.0,
+            crate::pdf::native::text::PageMarginFractions { top: 0.10, bottom: 0.0 },
+        );
+
+        assert!(outcome.removed);
+        assert!(!outcome.missing_geometry);
+        assert!(paragraphs.is_empty());
+    }
+
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[test]
+    fn should_report_missing_geometry_when_structured_ocr_paragraphs_are_empty() {
+        let mut paragraphs = Vec::new();
+
+        let outcome = filter_ocr_paragraphs_by_page_margins(
+            &mut paragraphs,
+            1000.0,
+            crate::pdf::native::text::PageMarginFractions {
+                top: 0.10,
+                bottom: 0.10,
+            },
+        );
+
+        assert!(!outcome.removed);
+        assert!(outcome.missing_geometry);
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_preserve_layout_header_when_ocr_content_filter_includes_headers() {
+        let mut header = ocr_paragraph("header");
+        header.is_page_furniture = true;
+        header.layout_class = Some(crate::pdf::structure::types::LayoutHintClass::PageHeader);
+        let mut paragraphs = vec![header];
+        let config = ExtractionConfig {
+            content_filter: Some(crate::core::config::ContentFilterConfig {
+                include_headers: true,
+                ..crate::core::config::ContentFilterConfig::default()
+            }),
+            ..ExtractionConfig::default()
+        };
+
+        apply_ocr_layout_content_filter(&mut paragraphs, &config);
+
+        assert!(!paragraphs[0].is_page_furniture);
     }
 
     /// Issue #695: on the OCR + `--layout` route, `ocr_doc_to_layout_paragraphs`
@@ -8025,6 +8612,11 @@ mod tests {
                 backend: "mock".to_string(),
                 ..Default::default()
             }),
+            content_filter: Some(crate::core::config::ContentFilterConfig {
+                include_headers: true,
+                include_footers: true,
+                ..Default::default()
+            }),
             ..Default::default()
         };
 
@@ -8043,10 +8635,129 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(called.load(Ordering::SeqCst), "process_document was not called");
-        let (_, _, _, _, _, llm_usage, _, _, _) = result.unwrap();
+        let (_, _, _, _, _, llm_usage, _, _, _, _) = result.unwrap();
         assert!(llm_usage.is_empty(), "No LLM usage expected for mock backend");
 
         crate::plugins::unregister_ocr_backend("mock").unwrap();
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_filter_public_ocr_elements_by_effective_pdf_margins() {
+        use crate::core::config::OcrConfig;
+        use crate::types::{OcrBoundingGeometry, OcrElement, OcrElementConfig, OcrPoint};
+
+        let element_at = |text: &str, top: u32| OcrElement {
+            text: text.to_string(),
+            geometry: OcrBoundingGeometry::Rectangle {
+                left: 10,
+                top,
+                width: 100,
+                height: 20,
+            },
+            ..Default::default()
+        };
+        let mut elements = vec![
+            element_at("header", 10),
+            element_at("body", 400),
+            OcrElement {
+                text: "footer".to_string(),
+                geometry: OcrBoundingGeometry::Quadrilateral {
+                    points: vec![
+                        OcrPoint { x: 10, y: 950 },
+                        OcrPoint { x: 110, y: 950 },
+                        OcrPoint { x: 110, y: 980 },
+                        OcrPoint { x: 10, y: 980 },
+                    ],
+                },
+                ..Default::default()
+            },
+        ];
+
+        let config = OcrConfig {
+            element_config: Some(OcrElementConfig {
+                include_elements: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (elements, outcome) = public_ocr_elements_for_pdf_page(
+            &mut elements,
+            &config,
+            7,
+            1000,
+            crate::pdf::native::text::PageMarginFractions {
+                top: 0.10,
+                bottom: 0.10,
+            },
+        );
+
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0].text, "body");
+        assert_eq!(elements[0].page_number, 7);
+        assert!(outcome.removed);
+        assert!(!outcome.missing_geometry);
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_preserve_public_ocr_elements_when_page_height_is_unknown() {
+        use crate::core::config::OcrConfig;
+        use crate::types::{OcrBoundingGeometry, OcrElement, OcrElementConfig};
+
+        let mut elements = vec![OcrElement {
+            text: "unknown position".to_string(),
+            geometry: OcrBoundingGeometry::Rectangle {
+                left: 10,
+                top: 10,
+                width: 100,
+                height: 20,
+            },
+            ..Default::default()
+        }];
+        let config = OcrConfig {
+            element_config: Some(OcrElementConfig {
+                include_elements: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let (elements, outcome) = public_ocr_elements_for_pdf_page(
+            &mut elements,
+            &config,
+            1,
+            0,
+            crate::pdf::native::text::PageMarginFractions {
+                top: 0.10,
+                bottom: 0.10,
+            },
+        );
+
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0].text, "unknown position");
+        assert!(!outcome.removed);
+        assert!(outcome.missing_geometry);
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_use_per_page_ocr_only_when_effective_margins_are_nonzero() {
+        assert!(!should_use_document_processing(
+            true,
+            true,
+            crate::pdf::native::text::PageMarginFractions::default(),
+        ));
+        assert!(should_use_document_processing(
+            true,
+            true,
+            crate::pdf::native::text::PageMarginFractions { top: 0.0, bottom: 0.0 },
+        ));
+        assert!(!should_use_document_processing(
+            true,
+            false,
+            crate::pdf::native::text::PageMarginFractions { top: 0.0, bottom: 0.0 },
+        ));
     }
 
     /// Verifies that `llm_usage` entries returned by a VLM OCR backend are
@@ -8142,7 +8853,7 @@ mod tests {
 
         crate::plugins::unregister_ocr_backend("vlm-mock").unwrap();
 
-        let (_, _, _, _, _, llm_usage, _, _, _) = result.expect("extract_with_ocr should succeed");
+        let (_, _, _, _, _, llm_usage, _, _, _, _) = result.expect("extract_with_ocr should succeed");
         assert_eq!(
             llm_usage.len(),
             2,
@@ -8305,7 +9016,7 @@ mod tests {
         crate::plugins::unregister_ocr_backend(FAILED_BACKEND).unwrap();
         crate::plugins::unregister_ocr_backend(FALLBACK_BACKEND).unwrap();
 
-        let (text, _, _, doc, _, _, _, _) = result.expect("fallback stage must be accepted");
+        let (text, _, _, doc, _, _, _, _, _) = result.expect("fallback stage must be accepted");
         assert_eq!(text, FALLBACK_TEXT);
         let warnings = doc
             .expect("accepted fallback diagnostics require an internal document")
@@ -8751,7 +9462,7 @@ Buffers:           50000 kB
         let result = extract_mixed_ocr_native(native_text, &boundaries, &[1], &pdf, &config, None)
             .await
             .unwrap();
-        let warnings = result.6;
+        let warnings = result.7;
 
         assert!(
             !warnings.is_empty(),
@@ -8879,7 +9590,7 @@ Buffers:           50000 kB
 
         crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
 
-        let (text, _, _, doc, _, _, _, _) = result.expect("pipeline run must succeed");
+        let (text, _, _, doc, _, _, _, _, _) = result.expect("pipeline run must succeed");
         assert_eq!(
             text, RECOVERED_TEXT,
             "recovered fallback text must replace the blank OCR result in the pipeline route"
@@ -8995,7 +9706,7 @@ Buffers:           50000 kB
 
         crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
 
-        let (text, _, _, doc, _, _, _, _) = result.expect("pipeline run must succeed");
+        let (text, _, _, doc, _, _, _, _, _) = result.expect("pipeline run must succeed");
         assert_eq!(text, "", "a page with no recoverable images must not fabricate content");
         assert!(
             doc.is_none(),
@@ -9092,7 +9803,7 @@ Buffers:           50000 kB
 
         crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
 
-        let (text, _, _, doc, _, _, _, _) = result.expect("pipeline run must succeed");
+        let (text, _, _, doc, _, _, _, _, _) = result.expect("pipeline run must succeed");
         assert_eq!(
             text, "",
             "an unrecovered blank page must not fabricate content even though the warning fires"
@@ -9214,7 +9925,7 @@ Buffers:           50000 kB
 
         crate::plugins::unregister_ocr_backend("formula-mock-mixed-ocr").unwrap();
 
-        let (_, _, _, _, _, _, _, _, formulas) = result.expect("extract_with_ocr should succeed");
+        let (_, _, _, _, _, _, _, _, formulas, _) = result.expect("extract_with_ocr should succeed");
 
         assert_eq!(formulas.len(), 2, "one formula per page, got {}", formulas.len());
 
@@ -10107,9 +10818,25 @@ Name: ___
             }]),
             ..Default::default()
         };
+        let public_config = crate::core::config::OcrConfig {
+            element_config: Some(crate::types::OcrElementConfig {
+                include_elements: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
 
-        let (page_doc, _paragraphs) = build_mixed_ocr_page_document(&mut result, 3, 1000, 1000, 1000.0, 1000.0)
-            .expect("a backend result with tables must produce a page document");
+        let (page_doc, _paragraphs) = build_mixed_ocr_page_document(
+            &mut result,
+            &public_config,
+            3,
+            1000,
+            1000,
+            1000.0,
+            1000.0,
+            disabled_page_margins(),
+        )
+        .expect("a backend result with tables must produce a page document");
 
         assert_eq!(page_doc.tables.len(), 1, "backend table must be kept");
         assert_eq!(page_doc.tables[0].markdown, "| x | y |");
@@ -10136,7 +10863,19 @@ Name: ___
             ..Default::default()
         };
 
-        assert!(build_mixed_ocr_page_document(&mut result, 3, 1000, 1000, 1000.0, 1000.0).is_none());
+        assert!(
+            build_mixed_ocr_page_document(
+                &mut result,
+                &crate::core::config::OcrConfig::default(),
+                3,
+                1000,
+                1000,
+                1000.0,
+                1000.0,
+                disabled_page_margins(),
+            )
+            .is_none()
+        );
     }
 
     /// #633 — a backend that auto-rotated its input image (`OcrConfig::auto_rotate`)
@@ -10388,8 +11127,17 @@ Name: ___
         };
 
         // 1700x2200px raster of a 612x792pt (US Letter) page.
-        let (page_doc, _paragraphs) = build_mixed_ocr_page_document(&mut result, 1, 1700, 2200, 612.0, 792.0)
-            .expect("an OCR document with a text element must produce a page document");
+        let (page_doc, _paragraphs) = build_mixed_ocr_page_document(
+            &mut result,
+            &crate::core::config::OcrConfig::default(),
+            1,
+            1700,
+            2200,
+            612.0,
+            792.0,
+            disabled_page_margins(),
+        )
+        .expect("an OCR document with a text element must produce a page document");
 
         let hello_element = page_doc
             .elements
@@ -10473,7 +11221,10 @@ Name: ___
         // skew-robustness behavior `test_ocr_doc_uses_quad_edge_height_not_skewed_aabb_height_for_font_size`
         // (`pdf::structure::adapters`) already covers.
         element.ocr_geometry = Some(crate::types::OcrBoundingGeometry::Quadrilateral {
-            points: [(100, 200), (500, 200), (500, 300), (100, 300)],
+            points: [(100, 200), (500, 200), (500, 300), (100, 300)]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         });
         ocr_doc.push_element(element);
 
@@ -10483,8 +11234,17 @@ Name: ___
             ..Default::default()
         };
 
-        let (_page_doc, paragraphs) = build_mixed_ocr_page_document(&mut result, 1, 1700, 2200, 612.0, 792.0)
-            .expect("an OCR document with a quad-geometry text element must produce a page document");
+        let (_page_doc, paragraphs) = build_mixed_ocr_page_document(
+            &mut result,
+            &crate::core::config::OcrConfig::default(),
+            1,
+            1700,
+            2200,
+            612.0,
+            792.0,
+            disabled_page_margins(),
+        )
+        .expect("an OCR document with a quad-geometry text element must produce a page document");
 
         assert_eq!(paragraphs.len(), 1);
         assert!(
@@ -11497,7 +12257,7 @@ Name: ___
         let mut config = ExtractionConfig::default();
         config.output_format = crate::core::config::OutputFormat::Markdown;
 
-        let doc = heuristically_restructured_ocr_pages(&pages, &[], &config)
+        let doc = heuristically_restructured_ocr_pages(&pages, &[1000.0, 1000.0], &[], &config)
             .expect("font-size variation and list markers should produce a restructured document");
 
         assert!(
@@ -11529,7 +12289,19 @@ Name: ___
         let config = ExtractionConfig::default();
         assert_eq!(config.output_format, crate::core::config::OutputFormat::Plain);
 
-        assert!(heuristically_restructured_ocr_pages(&pages, &[], &config).is_none());
+        assert!(heuristically_restructured_ocr_pages(&pages, &[1000.0, 1000.0], &[], &config).is_none());
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn heuristically_restructured_ocr_pages_applies_explicit_content_filter_to_plain_output() {
+        let pages = heading_and_list_ocr_pages();
+        let config = ExtractionConfig {
+            content_filter: Some(crate::core::config::ContentFilterConfig::default()),
+            ..ExtractionConfig::default()
+        };
+
+        assert!(heuristically_restructured_ocr_pages(&pages, &[1000.0, 1000.0], &[], &config).is_some());
     }
 
     /// Pins the ML-layout precedence: when `ocr_doc_to_layout_paragraphs` (or
@@ -11547,7 +12319,21 @@ Name: ___
         let mut config = ExtractionConfig::default();
         config.output_format = crate::core::config::OutputFormat::Markdown;
 
-        assert!(heuristically_restructured_ocr_pages(&pages, &[], &config).is_none());
+        assert!(heuristically_restructured_ocr_pages(&pages, &[1000.0, 1000.0], &[], &config).is_none());
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn heuristically_restructured_ocr_pages_filters_already_classified_pages_when_requested() {
+        let mut pages = heading_and_list_ocr_pages();
+        pages[0][0].heading_level = Some(1);
+        let config = ExtractionConfig {
+            output_format: crate::core::config::OutputFormat::Markdown,
+            content_filter: Some(crate::core::config::ContentFilterConfig::default()),
+            ..ExtractionConfig::default()
+        };
+
+        assert!(heuristically_restructured_ocr_pages(&pages, &[1000.0, 1000.0], &[], &config).is_some());
     }
 
     /// Closes the gap this session's fix targets: before it,
@@ -11962,7 +12748,7 @@ Name: ___
 
         crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
 
-        let (text, _, _, _, doc, _, _, _, _) =
+        let (text, _, _, _, doc, _, _, _, _, _) =
             result.expect("a per-page backend failure must degrade to the XObject fallback, not abort the document");
         assert_eq!(
             text, XOBJECT_RECOVERED_TEXT,
@@ -12077,7 +12863,7 @@ Name: ___
 
         crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
 
-        let (text, _, _, _, _, _, _, _, _) = result.expect("OCR must succeed");
+        let (text, _, _, _, _, _, _, _, _, _) = result.expect("OCR must succeed");
         assert_eq!(
             text, XOBJECT_RECOVERED_TEXT,
             "a description of a blank raster must not be accepted as that page's transcription"
@@ -12186,7 +12972,7 @@ Name: ___
 
         crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
 
-        let (text, _, _, doc, _, _, _, _) =
+        let (text, _, _, doc, _, _, _, _, _) =
             result.expect("the pipeline must try the pages' embedded images before reporting total failure");
         assert_eq!(text, XOBJECT_RECOVERED_TEXT);
         assert_eq!(
@@ -12332,8 +13118,9 @@ Name: ___
 #[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline")))]
 mod recognition_noise_tests {
     use super::{
-        NativeTextStats, accept_or_reject_ocr_page, is_dictionary_invalid_noise, is_ocr_recognition_noise,
-        repair_ocr_list_markers,
+        NativeTextStats, accept_or_reject_ocr_page, discard_ocr_elements_from_rejected_pages,
+        discard_rejected_ocr_page_payloads, is_dictionary_invalid_noise, is_ocr_recognition_noise,
+        repair_ocr_list_markers, retain_ocr_formulas_for_accepted_pages,
     };
     use crate::core::config::OcrQualityThresholds;
 
@@ -12387,6 +13174,70 @@ approval of the rezoning request; and";
         let (blank, blank_rejected) = accept_or_reject_ocr_page(1, String::new(), &thresholds, &mut warnings, None);
         assert!(!blank_rejected, "an empty page is blank, not rejected");
         assert!(blank.is_empty());
+    }
+
+    #[test]
+    fn should_discard_public_ocr_elements_from_rejected_pages() {
+        let element = |page_number| crate::types::OcrElement {
+            text: format!("page {page_number}"),
+            page_number,
+            ..Default::default()
+        };
+        let mut elements = vec![element(1), element(2), element(3)];
+
+        discard_ocr_elements_from_rejected_pages(&mut elements, &[false, true, false]);
+
+        assert_eq!(
+            elements.iter().map(|element| element.page_number).collect::<Vec<_>>(),
+            [1, 3]
+        );
+    }
+
+    #[test]
+    fn should_discard_tables_and_formulas_from_rejected_full_ocr_pages() {
+        let mut tables = [1, 2, 3]
+            .into_iter()
+            .map(|page_number| crate::types::Table {
+                page_number,
+                ..Default::default()
+            })
+            .collect();
+        let mut formulas = [1, 2, 3]
+            .into_iter()
+            .map(|page| crate::types::Formula {
+                latex: format!("page {page}"),
+                bbox: None,
+                page: Some(page),
+            })
+            .collect();
+
+        discard_rejected_ocr_page_payloads(&mut tables, &mut formulas, &[false, true, false]);
+
+        assert_eq!(tables.iter().map(|table| table.page_number).collect::<Vec<_>>(), [1, 3]);
+        assert_eq!(
+            formulas.iter().filter_map(|formula| formula.page).collect::<Vec<_>>(),
+            [1, 3]
+        );
+    }
+
+    #[test]
+    fn should_discard_formulas_from_unaccepted_mixed_ocr_pages() {
+        let mut formulas = [1, 2, 3]
+            .into_iter()
+            .map(|page| crate::types::Formula {
+                latex: format!("page {page}"),
+                bbox: None,
+                page: Some(page),
+            })
+            .collect();
+        let accepted_pages = ahash::AHashMap::from([(1, "accepted".to_string()), (3, "accepted".to_string())]);
+
+        retain_ocr_formulas_for_accepted_pages(&mut formulas, &accepted_pages);
+
+        assert_eq!(
+            formulas.iter().filter_map(|formula| formula.page).collect::<Vec<_>>(),
+            [1, 3]
+        );
     }
 
     #[test]

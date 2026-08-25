@@ -225,7 +225,6 @@ pub mod embedding_backend {
 }
 /// Re-exports for the reranker backend plugin type, used by alef-generated bindings.
 ///
-/// Since v5.0.0.
 pub mod reranker_backend {
     pub use super::{
         RerankerBackend, clear_reranker_backends, list_reranker_backends, register_reranker_backend,

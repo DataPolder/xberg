@@ -198,7 +198,9 @@ pub(crate) fn render_markdown(doc: &InternalDocument) -> String {
         output = s;
     }
 
-    output = strip_arxiv_watermark_noise(output);
+    if !doc.include_watermarks {
+        output = strip_arxiv_watermark_noise(output);
+    }
 
     if let Some(annotations) = doc.annotations.as_deref() {
         let block = render_annotations_markdown(annotations);
@@ -517,6 +519,39 @@ mod tests {
             !rendered.contains("[TABLE:"),
             "no anchor should appear without a table_id: {rendered}"
         );
+    }
+
+    #[test]
+    fn render_markdown_strips_arxiv_watermark_by_default() {
+        let mut builder = InternalDocumentBuilder::new("pdf");
+        builder.push_paragraph(
+            "Research title 7 arXiv:2401.12345v2 [cs.CL] 9 Jan 2024",
+            vec![],
+            None,
+            None,
+        );
+        let document = builder.build();
+
+        let rendered = render_markdown(&document);
+
+        assert!(!rendered.contains("arXiv:2401.12345v2"));
+    }
+
+    #[test]
+    fn render_markdown_preserves_arxiv_watermark_when_enabled() {
+        let mut builder = InternalDocumentBuilder::new("pdf");
+        builder.push_paragraph(
+            "Research title 7 arXiv:2401.12345v2 [cs.CL] 9 Jan 2024",
+            vec![],
+            None,
+            None,
+        );
+        let mut document = builder.build();
+        document.include_watermarks = true;
+
+        let rendered = render_markdown(&document);
+
+        assert!(rendered.contains("arXiv:2401.12345v2 [cs.CL] 9 Jan 2024"));
     }
 
     #[test]

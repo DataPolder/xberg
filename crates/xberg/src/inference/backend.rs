@@ -13,7 +13,6 @@
 //!   be shared across threads (page-parallel layout), matching how xberg's ORT
 //!   sessions are used today.
 //!
-//! Since v5.0.0 (issue #1275).
 
 use std::path::Path;
 

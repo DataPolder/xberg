@@ -129,6 +129,7 @@ pub(crate) async fn process_images_with_ocr(
                 // Recursion guard: OCR output must never carry nested images, or an
                 // archive/recursive consumer would extract images out of OCR output.
                 ocr_document.images = None;
+                ocr_config.apply_public_element_policy(&mut ocr_document);
                 images[idx].ocr_result = Some(Box::new(ocr_document));
             }
             Err(e) => {
@@ -164,6 +165,7 @@ mod tests {
     use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
 
     const BACKEND_NAME: &str = "thread-budget-concurrency-test-backend";
+    const POLICY_BACKEND_NAME: &str = "embedded-image-element-policy-test-backend";
 
     struct RegistrationGuard;
 
@@ -185,6 +187,49 @@ mod tests {
     struct GatedBackend {
         calls: Arc<AtomicUsize>,
         gate: Arc<Notify>,
+    }
+
+    struct PolicyIgnoringBackend;
+
+    impl Plugin for PolicyIgnoringBackend {
+        fn name(&self) -> &str {
+            POLICY_BACKEND_NAME
+        }
+
+        fn version(&self) -> String {
+            "1.0.0".to_string()
+        }
+
+        fn initialize(&self) -> crate::Result<()> {
+            Ok(())
+        }
+
+        fn shutdown(&self) -> crate::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl OcrBackend for PolicyIgnoringBackend {
+        async fn process_image(&self, _image_bytes: &[u8], _config: &OcrConfig) -> crate::Result<ExtractedDocument> {
+            Ok(ExtractedDocument {
+                content: "embedded OCR".to_string(),
+                ocr_elements: Some(vec![crate::types::OcrElement {
+                    text: "backend element".to_string(),
+                    page_number: 1,
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            })
+        }
+
+        fn supports_language(&self, _lang: &str) -> bool {
+            true
+        }
+
+        fn backend_type(&self) -> OcrBackendType {
+            OcrBackendType::Custom
+        }
     }
 
     impl Plugin for GatedBackend {
@@ -285,5 +330,33 @@ mod tests {
             "expected the general thread budget (2), not the larger VLM max_concurrency (6), \
              to bound the number of image OCR tasks started concurrently"
         );
+    }
+
+    #[tokio::test]
+    async fn custom_backend_cannot_bypass_embedded_image_element_policy() {
+        crate::plugins::register_ocr_backend(Arc::new(PolicyIgnoringBackend))
+            .expect("register policy-ignoring OCR backend");
+        let config = crate::core::config::ExtractionConfig {
+            ocr: Some(OcrConfig {
+                backend: POLICY_BACKEND_NAME.to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let images = vec![ExtractedImage {
+            data: Bytes::from_static(b"image"),
+            ..Default::default()
+        }];
+        let mut warnings = Vec::new();
+
+        let images = process_images_with_ocr(images, &config, &mut warnings)
+            .await
+            .expect("embedded-image OCR must succeed");
+        let nested = images[0].ocr_result.as_ref().expect("OCR result must be preserved");
+
+        assert_eq!(nested.content, "embedded OCR");
+        assert!(nested.ocr_elements.is_none());
+        assert!(warnings.is_empty());
+        crate::plugins::unregister_ocr_backend(POLICY_BACKEND_NAME).unwrap();
     }
 }

@@ -451,7 +451,9 @@ fn line_to_element(line: &TextLine) -> OcrElement {
             points: line
                 .quad
                 .points
-                .map(|point| (pixel_coordinate(point.x), pixel_coordinate(point.y))),
+                .into_iter()
+                .map(|point| (pixel_coordinate(point.x), pixel_coordinate(point.y)).into())
+                .collect(),
         },
         confidence: OcrConfidence {
             detection: None,
@@ -682,10 +684,10 @@ fn geometry_bounds(geometry: &OcrBoundingGeometry) -> Option<BoundingBox> {
     let OcrBoundingGeometry::Quadrilateral { points } = geometry else {
         return None;
     };
-    let x0 = points.iter().map(|(x, _)| *x).min()?;
-    let y0 = points.iter().map(|(_, y)| *y).min()?;
-    let x1 = points.iter().map(|(x, _)| *x).max()?;
-    let y1 = points.iter().map(|(_, y)| *y).max()?;
+    let x0 = points.iter().map(|point| point.x).min()?;
+    let y0 = points.iter().map(|point| point.y).min()?;
+    let x1 = points.iter().map(|point| point.x).max()?;
+    let y1 = points.iter().map(|point| point.y).max()?;
     Some(BoundingBox {
         x0: f64::from(x0),
         y0: f64::from(y0),
@@ -696,14 +698,7 @@ fn geometry_bounds(geometry: &OcrBoundingGeometry) -> Option<BoundingBox> {
 
 fn select_output_elements(elements: &[OcrElement], config: &OcrConfig) -> Option<Vec<OcrElement>> {
     let options = config.element_config.as_ref()?;
-    if !options.include_elements || !matches!(options.min_level, OcrElementLevel::Word | OcrElementLevel::Line) {
-        return None;
-    }
-    let selected: Vec<OcrElement> = elements
-        .iter()
-        .filter(|element| element.confidence.recognition >= options.min_confidence)
-        .cloned()
-        .collect();
+    let selected = options.select_elements(elements);
     (!selected.is_empty()).then_some(selected)
 }
 
@@ -1229,6 +1224,9 @@ mod tests {
             element.geometry,
             OcrBoundingGeometry::Quadrilateral {
                 points: [(10, 20), (111, 20), (111, 43), (10, 43)]
+                    .into_iter()
+                    .map(Into::into)
+                    .collect()
             }
         );
     }

@@ -316,7 +316,13 @@ fn process_node(
                 builder.push_formula(text.as_str(), None, None);
             }
             crate::types::NodeContent::MetadataBlock { entries } => {
-                builder.push_metadata_block(entries, None);
+                builder.push_metadata_block(
+                    &entries
+                        .iter()
+                        .map(|entry| (entry.key.clone(), entry.value.clone()))
+                        .collect::<Vec<_>>(),
+                    None,
+                );
             }
             crate::types::NodeContent::Quote => {
                 builder.push_quote_start();

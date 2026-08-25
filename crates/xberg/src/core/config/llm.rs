@@ -86,7 +86,7 @@ pub struct LlmConfig {
     /// parameter like `temperature`/`max_tokens` above, not a client-level
     /// setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub top_p: Option<f64>,
 
     /// Stop sequence(s) that halt token generation, applied to individual requests
@@ -99,9 +99,9 @@ pub struct LlmConfig {
     /// single, FFI-friendly shape across every language binding instead of a
     /// single-or-list union type. Converted to liter-llm's
     /// `StopSequence::Multiple` at each request-building call site; see
-    /// [`crate::llm::client::to_stop_sequence`].
+    /// `llm::client::to_stop_sequence`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub stop: Option<Vec<String>>,
 
     /// Random seed for reproducible outputs, applied to individual requests built
@@ -109,7 +109,7 @@ pub struct LlmConfig {
     ///
     /// Mirrors liter-llm's `ChatCompletionRequest::seed`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub seed: Option<i64>,
 
     /// Presence penalty for generation tasks, applied to individual requests
@@ -119,7 +119,7 @@ pub struct LlmConfig {
     ///
     /// Mirrors liter-llm's `ChatCompletionRequest::presence_penalty`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub presence_penalty: Option<f64>,
 
     /// Frequency penalty for generation tasks, applied to individual requests
@@ -129,7 +129,7 @@ pub struct LlmConfig {
     ///
     /// Mirrors liter-llm's `ChatCompletionRequest::frequency_penalty`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub frequency_penalty: Option<f64>,
 
     /// Reasoning effort level for extended-thinking models, applied to individual
@@ -142,7 +142,7 @@ pub struct LlmConfig {
     /// `"minimal"`, `"max"` (case-insensitive; liter-llm's own
     /// `#[serde(rename_all = "lowercase")]` spelling) — rather than importing
     /// liter-llm's enum, because this module compiles even when the `liter-llm`
-    /// feature is disabled. See [`crate::llm::client::parse_reasoning_effort`] for the
+    /// feature is disabled. See `llm::client::parse_reasoning_effort` for the
     /// conversion into `liter_llm::ReasoningEffort`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
@@ -264,18 +264,9 @@ pub struct LlmConfig {
     /// round-trips through TOML/JSON/YAML and every language binding like the rest of
     /// `LlmConfig`.
     ///
-    /// Inert on `wasm32`: `crate::llm` (the module that reads this field —
-    /// [`crate::llm::client::build_credential_provider`] and friends) is compiled out
-    /// entirely on that target, via the crate-root `#[cfg(all(feature = "liter-llm",
-    /// not(target_arch = "wasm32")))] pub mod llm;` gate in `lib.rs`. Every variant needs
-    /// liter-llm's `native-http`-backed auth modules, and wasm32 builds request only
-    /// `wasm-http` (see the `liter-llm` dependency comment in Cargo.toml), so there is no
-    /// code path left on that target to construct a provider from this field, or to reject
-    /// it. This type (`core::config::llm`) has no `liter-llm` dependency itself and compiles
-    /// on every target, so setting this field on a wasm32 build is accepted by serde and
-    /// silently ignored — a plain no-op, not a [`crate::XbergError::Validation`]. Reject a
-    /// wasm32 build that sets this field yourself if that silence is a problem for your use
-    /// case; xberg does not do it for you.
+    /// Managed credential providers are unavailable on `wasm32`, where liter-llm uses
+    /// browser HTTP rather than its native authentication modules. [`LlmConfig::validate`]
+    /// rejects a configured provider on that target instead of silently ignoring it.
     ///
     /// GitHub Copilot's device-flow provider has no variant here: it takes no configuration at
     /// all (`liter_llm::auth::github_copilot::GithubCopilotCredentialProvider::new` accepts only
@@ -312,7 +303,7 @@ pub struct LlmConfig {
     /// This field is intentionally last to preserve positional constructor
     /// compatibility in generated language bindings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "alef-meta", alef(since = "1.2.0"))]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub max_concurrency: Option<usize>,
 }
 
@@ -322,10 +313,17 @@ impl LlmConfig {
     /// `[-2.0, 2.0]`, matching liter-llm's/OpenAI's semantics). An unset field is
     /// always valid — silence in config should never be rejected.
     ///
-    /// Called from [`crate::llm::client::build_client_config`] before a liter-llm
+    /// Called from `llm::client::build_client_config` before a liter-llm
     /// client is built from this config, alongside the existing
     /// `validate_cache_backend` check in that function.
     pub fn validate(&self) -> crate::Result<()> {
+        self.validate_sampling_parameters()?;
+        #[cfg(target_arch = "wasm32")]
+        validate_wasm_credential_provider(self.credential_provider.as_deref())?;
+        Ok(())
+    }
+
+    fn validate_sampling_parameters(&self) -> crate::Result<()> {
         if let Some(top_p) = self.top_p {
             validate_sampling_range("top_p", top_p, TOP_P_MIN, TOP_P_MAX)?;
         }
@@ -337,6 +335,26 @@ impl LlmConfig {
         }
         Ok(())
     }
+
+    #[cfg(test)]
+    pub(crate) fn validate_for_wasm_target(&self) -> crate::Result<()> {
+        self.validate_sampling_parameters()?;
+        validate_wasm_credential_provider(self.credential_provider.as_deref())
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+const WASM_CREDENTIAL_PROVIDER_ERROR: &str =
+    "credential_provider is not supported on wasm32 targets; use api_key or browser-compatible authentication";
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn validate_wasm_credential_provider(provider: Option<&CredentialProviderConfig>) -> crate::Result<()> {
+    if provider.is_some() {
+        return Err(crate::XbergError::validation(
+            WASM_CREDENTIAL_PROVIDER_ERROR.to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Reject a request-time sampling parameter outside its documented `[min, max]` range,
@@ -714,7 +732,7 @@ impl StructuredExtractionConfig {
 /// How a structured-extraction preset is dispatched to the model.
 ///
 /// This is the preset-facing call mode (the `preferred_call_mode` field of a
-/// [`crate::presets::Preset`]). The structured pipeline has a richer
+/// `Preset`). The structured pipeline has a richer
 /// runtime-only decision enum with skip and fallback states; this 3-variant
 /// type is the stable, serializable surface presets and bindings depend on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -751,6 +769,23 @@ pub enum MergeMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_reject_credential_provider_for_wasm_validation() {
+        let config = LlmConfig {
+            credential_provider: Some(Box::new(CredentialProviderConfig::VertexAdc { scope: None })),
+            ..Default::default()
+        };
+
+        let error = validate_wasm_credential_provider(config.credential_provider.as_deref())
+            .expect_err("managed credential providers must not be silently ignored on wasm32");
+        match error {
+            crate::XbergError::Validation { message, .. } => {
+                assert_eq!(message, WASM_CREDENTIAL_PROVIDER_ERROR)
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
+    }
 
     /// Regression test for https://github.com/xberg-io/xberg/issues/716
     ///

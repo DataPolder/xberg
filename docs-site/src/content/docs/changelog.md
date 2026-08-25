@@ -43,14 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added reusable Rust PDF render sessions for querying page counts and rendering multiple pages
   without reopening the document (#1485).
-- Added cooperative cancellation for single and batch extraction through `CancellationToken` and
-  `ExtractionConfig::cancel_token` (#1476).
+- Added cooperative cancellation for single and batch extraction (#1476).
 - Added dynamic system linking for Tesseract and Leptonica through the `tesseract-dynamic` feature
   (#1407).
-- Added managed Azure AD, Google Vertex AI, and AWS STS credential providers to `LlmConfig`, with
-  credential values redacted from debug output.
-- Added `reasoning_effort`, provider-specific `extra_body` parameters, and Bedrock configuration to
-  `LlmConfig`.
+- Added managed Azure AD, Google Vertex AI, and AWS STS credential providers, with credential values
+  redacted from debug output.
+- Added reasoning-effort, provider-specific request-body, and Bedrock configuration for LLM
+  extraction.
 - Added `xberg doctor` and the Rust `doctor()` API for checking OCR, layout-detection, and cache
   configuration. `xberg doctor --clean` removes stray files only from Xberg-owned caches (#1347).
 - Added the Sceptre EasyOCR Gen2 backend for desktop, mobile, and WebAssembly.
@@ -75,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `ContentFilterConfig.include_footnotes` for retaining footnotes classified as page furniture.
 - Added a public `render_heading_breadcrumb` helper for retrieval-oriented chunk content (#1393).
 - Added structured-output merge, citation, and vision-fallback helpers for Rust embedders.
+- Added a Tower-compatible extraction service, request type, and builder for Rust applications.
+- Added typed configuration for TrOCR, PaddleOCR-VL, GLM-OCR, and DeepSeek-OCR backends.
+- Added `classify_chunks_owned` for classifying and returning an owned document.
+- Exposed chunk-classification and LLM concurrency, provider, cache, budget, and rate-limit configuration
+  types at the Rust crate root.
 
 ### Changed
 
@@ -99,9 +103,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI text output now includes the extraction envelope with warnings, timings, and metadata.
 - CLI JSON output now reports peak resident memory.
 - Windows builds now include the same supported feature set as other desktop builds.
+- **Breaking:** Rust element identifiers now use `String` directly; the `ElementId` wrapper has been
+  removed.
+- **Breaking:** Public tuple fields for ranges, coordinates, dimensions, links, code blocks, and attributes now
+  use named Rust structs. Existing JSON arrays remain accepted and emitted; named JSON objects are also accepted.
+- **Breaking:** removed the duplicate `xberg::llm::region_extractor::RegionKind`; import `xberg::RegionKind`
+  instead.
+- Parsing and configuration deserialization now reject invalid region, redaction, and reranker values.
 
 ### Removed
 
+- **Breaking:** removed the inert `ChunkingConfig::prepend_heading_context`, `breadcrumb_target`,
+  `BreadcrumbTarget`, and corresponding CLI and environment options; use chunk metadata or
+  `render_heading_breadcrumb` when a retrieval index needs headings inline.
+- **Breaking:** removed `OutputFormat::Structured`; use `Plain` for unrendered content or `Json` for a structured
+  content tree.
 - **Breaking:** removed `ExtractedDocument.formatted_content` from language bindings; use `content`
   or select the desired output format during extraction.
 - Removed advertised support for troff, mdoc, POD, and DokuWiki because they did not have structural
@@ -112,6 +128,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the nonfunctional `wasm-threads` feature.
 - Removed PDF writing, editing, building, and XFA conversion APIs from the native PDF crate; read-only
   XFA analysis remains available.
+- **Breaking:** removed the inert `Engine` structured-policy, preset-resolver, LLM-client, and model-provider
+  injection methods.
+- **Breaking:** removed the inert transcription field from `EnrichmentConfig`; configure transcription during
+  extraction instead.
+- **Breaking:** embedding, reranking, sparse-embedding, late-interaction, and preset APIs are now exposed only
+  when their required features are enabled.
+- **Breaking:** `core::batch_mode`, `core::formats`, and `core::io` are now crate-private, and the public
+  `DocumentStructureBuilder` has been removed.
 
 ### Fixed
 
@@ -123,20 +147,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed EPUB metadata, EPUB 2/3 cover selection, DRM detection, and font-obfuscation handling (#1492,
   #1494).
 - Fixed PDF OCR and rendering for highly compressed scans, CCITT images, CFF fonts, maximum-size font
-  tables, malformed embedded fonts, rotated text, rotated tables, and missing glyph warnings.
+  tables, malformed embedded fonts, rotated content, missing glyph warnings, and concurrent Pdfium
+  extraction.
 - Fixed PDF reading order for dense two-column layouts, hanging clause numbers, split list markers,
   and modest font-size changes on one baseline.
 - Fixed PDF table extraction so multi-word cells, rule-less prose regions, OCR-derived tables, and
   page-local table failures are handled correctly (#688, #1358).
 - Fixed PDF Markdown and Djot output so native text is retained when structured conversion is
   incomplete.
-- Fixed OCR-backed PDFs so rejected OCR text is not rendered, successful page results survive other
-  page failures, and formulas, lists, tables, and bounding boxes are preserved (#1444).
+- Fixed PDF configuration so metadata suppression and header/footer settings are honored by every
+  backend; invalid or unsupported PDF and OCR settings now return configuration errors.
+- Fixed OCR-backed PDFs so filtering, confidence thresholds, hierarchy, tables, formulas, lists,
+  bounding boxes, page boundaries, and partial page results are preserved consistently across output
+  formats and OCR backends (#1444).
 - Fixed Tesseract caching, configuration, preprocessing, page segmentation, and font-size extraction.
+- OCR element hierarchy output now honors `build_hierarchy` and contains only resolvable parent
+  references.
 - Fixed Sceptre and PaddleOCR line grouping, region ordering, per-page resizing, table validation,
   and font-size reporting.
 - Fixed DOCX extraction for nested tables, VML images, text boxes, comments, fields, headings,
-  hyperlinks, headers, footers, table-of-contents entries, and nested lists (#1452, #1460).
+  hyperlinks, headers, footers, table-of-contents entries, nested lists, and page attribution;
+  element output now preserves explicit page breaks and single-page documents report page metadata
+  consistently (#1452, #1460, #1503).
 - Fixed PPTX extraction for malformed relationships, nested image paths, equations, fallback shapes,
   comments, metadata, and security limits.
 - Fixed spreadsheet extraction for hyperlinks, formulas, names, comments, hidden state, dates, and
@@ -149,20 +181,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed MIME routing so HTML is detected before the generic XML fallback and supported-format lists
   reflect the active extractor registry.
 - Fixed post-processing, chunking, enrichment, translation, NER, QR codes, captions, and caching so
-  structured fields are preserved consistently.
+  extracted structure is preserved consistently.
+- Fixed chunking presets so standalone and pipeline APIs apply the documented size and overlap while
+  preserving unrelated chunking settings.
 - Fixed extraction timeout handling so timed-out work is cancelled.
 - Fixed configuration merging so changing one CLI option no longer erases sibling settings.
 - Fixed cache keys to reflect only settings that affect the corresponding extraction or OCR result.
+- Fixed model caching so OCR, embedding, and reranking settings no longer reuse incompatible models.
 - Fixed Node.js native-library loading, Swift iOS resolution, Windows DirectML packaging, and
   `cargo install xberg-cli` (#1456).
 - Fixed Docker image builds and reduced the CLI image to runtime dependencies.
-- Fixed Python, PHP, Dart, Go, Java, C#, Kotlin, Elixir, Ruby, Zig, and C binding generation and
-  packaging issues.
-- Fixed crashes during concurrent Pdfium extraction.
+- Fixed API and packaging defects in the Python, PHP, Dart, Go, Java, C#, Kotlin, Elixir, Ruby, Zig,
+  and C packages.
 - Fixed Windows wheel and gem packaging, manylinux compatibility, musl smoke tests, and dynamic
   Tesseract builds (#1495, #1497).
 - Fixed archive and ZIP validation for small compressed entries and impossible declared sizes
   (#1496).
+- Fixed batch extraction so configured caches are used and progress callbacks report completed items.
+- Fixed extraction configuration validation so invalid nested values, including OCR quality and
+  scanned-page thresholds, are rejected consistently by every public entry point.
+- Fixed error classification so callers can distinguish all documented extraction failure categories.
+- Fixed owned document classification so detected labels are written back to the returned document.
+- Fixed `ContentFilterConfig.include_watermarks` so enabling it retains watermark content.
+- Fixed `JsonExtractionConfig.flatten_nested_objects` so disabling it preserves nested objects instead of
+  flattening them.
+- Fixed standalone-image and OCR-backed PDF results so preprocessing scale, dimensions, and DPI are retained.
+- Fixed Candle OCR configuration so supported backend options are validated and applied.
+- Fixed PaddleOCR-VL so the task selected when constructing the backend is honored unless a request
+  explicitly overrides it.
+- Fixed keyword extraction so invalid n-gram ranges return an error instead of silently producing
+  empty results.
+- Fixed builds that enable only the `api` or `mcp` feature.
+- Fixed the `excel-wasm` feature so spreadsheet extraction builds for WebAssembly.
+- Fixed WebAssembly configuration so unsupported managed credential providers are rejected explicitly.
 
 ### Security
 
@@ -173,12 +224,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   NUL bytes, drive-letter paths, UNC paths, and symlink escapes.
 - Added bounded EPUB traversal and retained-content accounting to prevent resource-limit bypasses.
 - Cache namespaces are validated before directories are created.
-- Redaction now reports only content that was actually removed, and post-processing no longer leaks
-  pre-redaction element text.
+- Redaction now reports only content that was actually removed, never exposes pre-redaction element
+  text, and rejects invalid strategies instead of silently falling back to masking.
 
-### Documentation
-
-- Corrected cancellation, Docker GPU support, and table coordinate-space documentation.
 ## [1.0.14] - 2026-08-04
 
 ### Fixed

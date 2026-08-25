@@ -16,9 +16,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::RegionKind;
 use crate::Result;
 use crate::core::config::ExtractionConfig;
-use crate::llm::region_extractor::{RegionKind, extract_region_with_vlm_usage};
+use crate::llm::region_extractor::extract_region_with_vlm_usage;
 use crate::plugins::{Plugin, PostProcessor, ProcessingStage, register_post_processor};
 use crate::types::{ExtractedDocument, ExtractedImage};
 

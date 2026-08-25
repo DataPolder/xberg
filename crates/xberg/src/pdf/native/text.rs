@@ -16,6 +16,49 @@ use xberg_native_pdf::document::ReadingOrder;
 /// Result type for PDF text extraction with optional page tracking.
 type PdfTextExtractionResult = (String, Option<Vec<PageBoundary>>, Option<Vec<PageContent>>);
 
+const DEFAULT_TOP_MARGIN_FRACTION: f32 = 0.06;
+const DEFAULT_BOTTOM_MARGIN_FRACTION: f32 = 0.05;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PageMarginFractions {
+    pub(crate) top: f32,
+    pub(crate) bottom: f32,
+}
+
+impl Default for PageMarginFractions {
+    fn default() -> Self {
+        Self {
+            top: DEFAULT_TOP_MARGIN_FRACTION,
+            bottom: DEFAULT_BOTTOM_MARGIN_FRACTION,
+        }
+    }
+}
+
+impl PageMarginFractions {
+    pub(crate) fn from_extraction_config(config: Option<&ExtractionConfig>) -> Self {
+        let defaults = Self::default();
+        let top = config
+            .and_then(|config| config.pdf_options.as_ref())
+            .and_then(|pdf| pdf.top_margin_fraction)
+            .unwrap_or(defaults.top);
+        let bottom = config
+            .and_then(|config| config.pdf_options.as_ref())
+            .and_then(|pdf| pdf.bottom_margin_fraction)
+            .unwrap_or(defaults.bottom);
+        let include_headers = config
+            .and_then(|config| config.content_filter.as_ref())
+            .is_some_and(|filter| filter.include_headers);
+        let include_footers = config
+            .and_then(|config| config.content_filter.as_ref())
+            .is_some_and(|filter| filter.include_footers);
+
+        Self {
+            top: if include_headers { 0.0 } else { top },
+            bottom: if include_footers { 0.0 } else { bottom },
+        }
+    }
+}
+
 /// Result type for unified PDF text and metadata extraction.
 ///
 /// Contains text, optional page boundaries, optional per-page content, and metadata.
@@ -35,7 +78,9 @@ pub(crate) fn extract_text_and_metadata(
     extraction_config: Option<&ExtractionConfig>,
 ) -> Result<NativeUnifiedExtractionResult> {
     let page_config = extraction_config.and_then(|c| c.pages.as_ref());
-    let (text, boundaries, page_contents) = extract_text_from_native_document(doc, page_config, extraction_config)?;
+    let margins = PageMarginFractions::from_extraction_config(extraction_config);
+    let (text, boundaries, page_contents) =
+        extract_text_from_native_document(doc, page_config, extraction_config, margins)?;
 
     let scanned_min_confidence = extraction_config
         .map(|c| c.ocr_strategy.effective_min_confidence())
@@ -65,6 +110,7 @@ pub(crate) fn extract_text_and_metadata(
 pub(crate) fn extract_spans_from_page(
     doc: &mut xberg_native_pdf::PdfDocument,
     page_index: usize,
+    margins: PageMarginFractions,
 ) -> Result<(Vec<crate::extractors::pdf::rotation::TextSpan>, bool)> {
     use xberg_native_pdf::document::ReadingOrder;
 
@@ -75,6 +121,8 @@ pub(crate) fn extract_spans_from_page(
         },
         |panic| PdfError::TextExtractionFailed(format!("Page text extraction panicked in xberg_native_pdf: {}", panic)),
     )?;
+    let (page_bottom, page_top) = page_vertical_bounds(doc, page_index)?;
+    retain_spans_inside_page_margins(&mut page_text_data.spans, page_bottom, page_top, margins);
     let reordered_sparse_columns = reorder_sparse_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
 
     let spans = page_text_data.spans.iter().map(rotation_span).collect();
@@ -99,17 +147,18 @@ pub(crate) fn extract_text_from_native_document(
     doc: &mut NativeDocument,
     page_config: Option<&PageConfig>,
     extraction_config: Option<&ExtractionConfig>,
+    margins: PageMarginFractions,
 ) -> Result<PdfTextExtractionResult> {
     let needs_boundaries =
         extraction_config.is_some_and(|c| c.force_ocr_pages.as_ref().is_some_and(|p| !p.is_empty()) || c.ocr.is_some());
 
     if let Some(config) = page_config {
-        extract_text_with_tracking(doc, config)
+        extract_text_with_tracking(doc, config, margins)
     } else if needs_boundaries {
         let default_config = PageConfig::default();
-        extract_text_with_tracking(doc, &default_config)
+        extract_text_with_tracking(doc, &default_config, margins)
     } else {
-        extract_text_fast_path(doc)
+        extract_text_fast_path(doc, margins)
     }
 }
 
@@ -118,7 +167,7 @@ pub(crate) fn extract_text_from_native_document(
 /// Iterates pages one-by-one, applies control-char fixes and optional HTML
 /// conversion, and builds a single concatenated string. Pre-allocates capacity
 /// after sampling the first 5 pages.
-fn extract_text_fast_path(doc: &mut NativeDocument) -> Result<PdfTextExtractionResult> {
+fn extract_text_fast_path(doc: &mut NativeDocument, margins: PageMarginFractions) -> Result<PdfTextExtractionResult> {
     let page_count = doc
         .doc
         .page_count()
@@ -134,7 +183,7 @@ fn extract_text_fast_path(doc: &mut NativeDocument) -> Result<PdfTextExtractionR
     let mut sample_count = 0;
 
     for page_idx in 0..page_count {
-        let page_text = extract_page_text_column_aware(&mut doc.doc, page_idx, &excluded_layers)?;
+        let page_text = extract_page_text_column_aware(&mut doc.doc, page_idx, &excluded_layers, margins)?;
 
         let page_size = page_text.len();
 
@@ -165,7 +214,11 @@ fn extract_text_fast_path(doc: &mut NativeDocument) -> Result<PdfTextExtractionR
 /// Mirrors `extract_text_lazy_with_tracking`: tracks byte
 /// offsets for each page, optionally collects per-page `PageContent`, and inserts
 /// page markers when configured.
-fn extract_text_with_tracking(doc: &mut NativeDocument, config: &PageConfig) -> Result<PdfTextExtractionResult> {
+fn extract_text_with_tracking(
+    doc: &mut NativeDocument,
+    config: &PageConfig,
+    margins: PageMarginFractions,
+) -> Result<PdfTextExtractionResult> {
     let page_count = doc
         .doc
         .page_count()
@@ -188,7 +241,7 @@ fn extract_text_with_tracking(doc: &mut NativeDocument, config: &PageConfig) -> 
     for page_idx in 0..page_count {
         let page_number = page_idx + 1;
 
-        let page_text = extract_page_text_column_aware(&mut doc.doc, page_idx, &excluded_layers)?;
+        let page_text = extract_page_text_column_aware(&mut doc.doc, page_idx, &excluded_layers, margins)?;
 
         let page_size = page_text.len();
 
@@ -223,6 +276,7 @@ fn extract_text_with_tracking(doc: &mut NativeDocument, config: &PageConfig) -> 
                 content: cleaned.into_owned(),
                 tables: Vec::new(),
                 image_indices: Vec::new(),
+                image_preprocessing: None,
                 hierarchy: None,
                 is_blank,
                 layout_regions: None,
@@ -1253,6 +1307,41 @@ fn page_text_with_options_excluding_layers(
     })
 }
 
+fn page_vertical_bounds(doc: &xberg_native_pdf::PdfDocument, page_index: usize) -> Result<(f32, f32)> {
+    let (_, lower_y, _, upper_y) = doc.get_page_media_box(page_index).map_err(|error| {
+        PdfError::TextExtractionFailed(format!(
+            "Failed to read page {} media box for margin filtering: {error}",
+            page_index + 1
+        ))
+    })?;
+    Ok((lower_y.min(upper_y), lower_y.max(upper_y)))
+}
+
+pub(crate) fn baseline_is_inside_page_margins(
+    baseline_y: f32,
+    page_bottom: f32,
+    page_top: f32,
+    margins: PageMarginFractions,
+) -> bool {
+    let page_height = page_top - page_bottom;
+    if !page_height.is_finite() || page_height <= 0.0 {
+        return true;
+    }
+
+    let bottom_cutoff = page_bottom + page_height * margins.bottom;
+    let top_cutoff = page_top - page_height * margins.top;
+    baseline_y >= bottom_cutoff && baseline_y <= top_cutoff
+}
+
+fn retain_spans_inside_page_margins(
+    spans: &mut Vec<xberg_native_pdf::layout::TextSpan>,
+    page_bottom: f32,
+    page_top: f32,
+    margins: PageMarginFractions,
+) {
+    spans.retain(|span| baseline_is_inside_page_margins(span.bbox.y, page_bottom, page_top, margins));
+}
+
 /// Extract text from one page with column-aware ordering and guarded repairs.
 ///
 /// Applies sparse-column and glyph-fragmentation repairs before assembling the
@@ -1261,8 +1350,12 @@ fn extract_page_text_column_aware(
     doc: &mut xberg_native_pdf::PdfDocument,
     page_index: usize,
     excluded_layers: &std::collections::HashSet<String>,
+    margins: PageMarginFractions,
 ) -> Result<String> {
-    let widgets = collect_widget_field_values(doc, page_index);
+    let (page_bottom, page_top) = page_vertical_bounds(doc, page_index)?;
+    let mut widgets = collect_widget_field_values(doc, page_index);
+    widgets
+        .retain(|(baseline_y, _)| baseline_is_inside_page_margins(*baseline_y as f32, page_bottom, page_top, margins));
 
     let mut page_text_data = super::guard_native_panic(
         || {
@@ -1278,6 +1371,8 @@ fn extract_page_text_column_aware(
             ))
         },
     )?;
+
+    retain_spans_inside_page_margins(&mut page_text_data.spans, page_bottom, page_top, margins);
 
     reorder_sparse_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
     reorder_dense_two_column_page(&mut page_text_data.spans, page_text_data.page_width);
@@ -1350,6 +1445,78 @@ mod tests {
             font_size,
             ..TextSpan::default()
         }
+    }
+
+    #[test]
+    fn should_exclude_native_spans_by_configured_page_margins() {
+        let mut spans = vec![
+            span("header", 20.0, 950.0, 10.0, 10.0),
+            span("top boundary", 20.0, 900.0, 10.0, 10.0),
+            span("body", 20.0, 400.0, 10.0, 10.0),
+            span("bottom boundary", 20.0, 100.0, 10.0, 10.0),
+            span("footer", 20.0, 40.0, 10.0, 10.0),
+        ];
+
+        retain_spans_inside_page_margins(
+            &mut spans,
+            0.0,
+            1000.0,
+            PageMarginFractions {
+                top: 0.10,
+                bottom: 0.10,
+            },
+        );
+
+        assert_eq!(
+            spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
+            ["top boundary", "body", "bottom boundary"]
+        );
+    }
+
+    #[test]
+    fn should_resolve_default_margins_and_account_for_non_zero_page_origin() {
+        let mut spans = vec![
+            span("header", 20.0, 860.0, 10.0, 10.0),
+            span("body", 20.0, 500.0, 10.0, 10.0),
+            span("footer", 20.0, 130.0, 10.0, 10.0),
+        ];
+
+        retain_spans_inside_page_margins(&mut spans, 100.0, 900.0, PageMarginFractions::default());
+
+        assert_eq!(
+            spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
+            ["body"]
+        );
+    }
+
+    #[test]
+    fn should_disable_respective_pdf_margin_when_content_filter_includes_furniture() {
+        let mut config = ExtractionConfig {
+            pdf_options: Some(crate::core::config::PdfConfig {
+                top_margin_fraction: Some(0.25),
+                bottom_margin_fraction: Some(0.20),
+                ..crate::core::config::PdfConfig::default()
+            }),
+            ..ExtractionConfig::default()
+        };
+        config.content_filter = Some(crate::core::config::ContentFilterConfig {
+            include_headers: true,
+            ..crate::core::config::ContentFilterConfig::default()
+        });
+
+        let margins = PageMarginFractions::from_extraction_config(Some(&config));
+
+        assert_eq!(margins.top, 0.0);
+        assert_eq!(margins.bottom, 0.20);
+
+        config.content_filter = Some(crate::core::config::ContentFilterConfig {
+            include_footers: true,
+            ..crate::core::config::ContentFilterConfig::default()
+        });
+        let margins = PageMarginFractions::from_extraction_config(Some(&config));
+
+        assert_eq!(margins.top, 0.25);
+        assert_eq!(margins.bottom, 0.0);
     }
 
     /// Build a list of N single-char spans that each trigger a same-line x-disorder

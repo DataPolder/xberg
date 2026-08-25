@@ -255,7 +255,9 @@ mod tests {
     }
 
     fn test_router_with_config(config: crate::ExtractionConfig) -> Router {
-        let extraction_service = crate::service::ExtractionServiceBuilder::new().build();
+        let extraction_service = crate::service::ExtractionServiceBuilder::new()
+            .build()
+            .expect("default extraction service configuration should be valid");
         let state = ApiState {
             default_config: std::sync::Arc::new(config),
             extraction_service: std::sync::Arc::new(std::sync::Mutex::new(extraction_service)),

@@ -37,9 +37,9 @@ use crate::core::config::OcrConfig;
 use crate::ocr::conversion::{detailed_text_block_to_elements, elements_to_hocr_words};
 use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
 use crate::table_core::{reconstruct_table, table_to_markdown};
-use crate::types::{
-    ExtractedDocument, FormatMetadata, Metadata, OcrElement, OcrElementConfig, OcrElementLevel, OcrMetadata, Table,
-};
+#[cfg(test)]
+use crate::types::OcrElementLevel;
+use crate::types::{ExtractedDocument, FormatMetadata, Metadata, OcrElement, OcrElementConfig, OcrMetadata, Table};
 
 #[cfg(test)]
 use super::config::DEFAULT_RECOGNITION_BATCH_SIZE;
@@ -1273,16 +1273,11 @@ impl PaddleOcrBackend {
         words: &[OcrElement],
         config: Option<&OcrElementConfig>,
     ) -> Vec<OcrElement> {
-        let Some(config) = config.filter(|config| config.include_elements) else {
+        let Some(config) = config else {
             return Vec::new();
         };
-        let mut elements = match config.min_level {
-            OcrElementLevel::Word => lines.iter().chain(words).cloned().collect::<Vec<_>>(),
-            OcrElementLevel::Line => lines.to_vec(),
-            OcrElementLevel::Block | OcrElementLevel::Page => Vec::new(),
-        };
-        elements.retain(|element| element.confidence.recognition >= config.min_confidence);
-        elements
+        let elements = lines.iter().chain(words).cloned().collect::<Vec<_>>();
+        config.select_elements(&elements)
     }
 }
 
@@ -1916,7 +1911,7 @@ mod tests {
             include_elements: true,
             min_level: OcrElementLevel::Word,
             min_confidence: 0.5,
-            build_hierarchy: false,
+            build_hierarchy: true,
         };
 
         let selected = PaddleOcrBackend::select_output_elements(&lines, &words, Some(&config));
@@ -1925,6 +1920,7 @@ mod tests {
             selected.iter().map(|element| element.text.as_str()).collect::<Vec<_>>(),
             ["line", "kept"]
         );
+        assert_eq!(selected[1].parent_id.as_deref(), selected[0].element_id());
     }
 
     #[test]

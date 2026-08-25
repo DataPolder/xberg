@@ -3,8 +3,7 @@
 //! This module holds the extraction internals moved verbatim from
 //! `core/extract/mod.rs`. The public free functions `crate::extract` /
 //! `crate::extract_batch` delegate here via a process-global default
-//! [`crate::engine::Engine`]. The logic is unchanged from the previous
-//! free-function implementation.
+//! [`crate::engine::Engine`].
 
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
@@ -50,10 +49,15 @@ const PROGRESS_STAGE_START: &str = "extract_start";
 const PROGRESS_STAGE_CACHE_HIT: &str = "extract_cache_hit";
 const PROGRESS_STAGE_COMPLETE: &str = "extract_complete";
 const PROGRESS_STAGE_ERROR: &str = "extract_error";
+const BATCH_PROGRESS_STAGE_START: &str = "extract_batch_start";
+const BATCH_PROGRESS_STAGE_CACHE_HIT: &str = "extract_batch_cache_hit";
+const BATCH_PROGRESS_STAGE_COMPLETE: &str = "extract_batch_complete";
+const BATCH_PROGRESS_STAGE_ERROR: &str = "extract_batch_error";
 
 /// Namespace prefix mixed into the content-hash cache key so a future,
 /// incompatible key derivation can never collide with entries this version wrote.
 const CACHE_KEY_NAMESPACE: &[u8] = b"xberg-engine-extract-v1";
+const BATCH_CACHE_KEY_NAMESPACE: &[u8] = b"xberg-engine-extract-batch-v1";
 
 /// Extract content from a single bytes or URI input.
 ///
@@ -77,7 +81,7 @@ pub(crate) async fn extract(
         fraction: Some(0.0),
     });
 
-    if let Err(error) = ensure_not_cancelled(config) {
+    if let Err(error) = config.validate().and_then(|()| ensure_not_cancelled(config)) {
         inner.progress.emit(ProgressEvent {
             stage: PROGRESS_STAGE_ERROR.to_string(),
             message: Some(error.to_string()),
@@ -120,7 +124,8 @@ pub(crate) async fn extract(
 
     match &result {
         Ok(output) => {
-            if let Some(key) = cache_key
+            if output.errors.is_empty()
+                && let Some(key) = cache_key
                 && let Ok(serialized) = serde_json::to_vec(output)
             {
                 inner.cache.put(&key, serialized, None).await;
@@ -192,8 +197,83 @@ fn content_cache_key(input: &ExtractInput, base_config: &ExtractionConfig) -> Op
     Some(hasher.finalize().to_hex().to_string())
 }
 
+fn batch_content_cache_key(inputs: &[ExtractInput], base_config: &ExtractionConfig) -> Option<String> {
+    if inputs.is_empty() {
+        return None;
+    }
+
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(BATCH_CACHE_KEY_NAMESPACE);
+    hasher.update(&(inputs.len() as u64).to_le_bytes());
+    for input in inputs {
+        let item_key = content_cache_key(input, base_config)?;
+        hasher.update(&(item_key.len() as u64).to_le_bytes());
+        hasher.update(item_key.as_bytes());
+    }
+    Some(hasher.finalize().to_hex().to_string())
+}
+
 /// Extract content from multiple bytes or URI inputs.
 pub(crate) async fn extract_batch(
+    inner: &super::EngineInner,
+    inputs: Vec<ExtractInput>,
+    config: &ExtractionConfig,
+) -> Result<ExtractionResult> {
+    inner.progress.emit(ProgressEvent {
+        stage: BATCH_PROGRESS_STAGE_START.to_string(),
+        message: None,
+        fraction: Some(0.0),
+    });
+
+    if let Err(error) = config.validate().and_then(|()| ensure_not_cancelled(config)) {
+        inner.progress.emit(ProgressEvent {
+            stage: BATCH_PROGRESS_STAGE_ERROR.to_string(),
+            message: Some(error.to_string()),
+            fraction: None,
+        });
+        return Err(error);
+    }
+
+    let cache_key = batch_content_cache_key(&inputs, config);
+    if let Some(key) = cache_key.as_deref()
+        && let Some(cached_bytes) = inner.cache.get(key).await
+        && let Ok(cached_result) = serde_json::from_slice::<ExtractionResult>(&cached_bytes)
+    {
+        inner.progress.emit(ProgressEvent {
+            stage: BATCH_PROGRESS_STAGE_CACHE_HIT.to_string(),
+            message: None,
+            fraction: Some(1.0),
+        });
+        return Ok(cached_result);
+    }
+
+    let result = extract_batch_uncached(inner, inputs, config).await;
+    match &result {
+        Ok(output) => {
+            if output.errors.is_empty()
+                && let Some(key) = cache_key
+                && let Ok(serialized) = serde_json::to_vec(output)
+            {
+                inner.cache.put(&key, serialized, None).await;
+            }
+            inner.progress.emit(ProgressEvent {
+                stage: BATCH_PROGRESS_STAGE_COMPLETE.to_string(),
+                message: None,
+                fraction: Some(1.0),
+            });
+        }
+        Err(error) => {
+            inner.progress.emit(ProgressEvent {
+                stage: BATCH_PROGRESS_STAGE_ERROR.to_string(),
+                message: Some(error.to_string()),
+                fraction: None,
+            });
+        }
+    }
+    result
+}
+
+async fn extract_batch_uncached(
     inner: &super::EngineInner,
     inputs: Vec<ExtractInput>,
     config: &ExtractionConfig,
@@ -256,7 +336,6 @@ fn record_batch_metrics(elapsed: std::time::Duration, result: &Result<Extraction
 
 #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
 async fn extract_batch_sequential(inputs: Vec<ExtractInput>, config: &ExtractionConfig) -> Result<ExtractionResult> {
-    ensure_not_cancelled(config)?;
     let mut seen = initial_seen_urls(&inputs);
     let seed_hosts = initial_seed_hosts(&inputs);
     let mut output = ExtractionResult {
@@ -293,7 +372,6 @@ async fn extract_batch_concurrent(
     inputs: Vec<ExtractInput>,
     config: &ExtractionConfig,
 ) -> Result<ExtractionResult> {
-    ensure_not_cancelled(config)?;
     let input_count = inputs.len();
     let mut seen = initial_seen_urls(&inputs);
     let seed_hosts = initial_seed_hosts(&inputs);

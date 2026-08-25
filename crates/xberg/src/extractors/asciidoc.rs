@@ -1049,8 +1049,9 @@ impl InternalDocumentExtractor for AsciiDocExtractor {
             word_count: body.split_whitespace().count() as u32,
             character_count: body.chars().count() as u32,
             headers: Some(parsed.headers).filter(|h| !h.is_empty()),
-            links: Some(parsed.links).filter(|l| !l.is_empty()),
-            code_blocks: Some(parsed.code_blocks).filter(|c| !c.is_empty()),
+            links: Some(parsed.links.into_iter().map(Into::into).collect()).filter(|l: &Vec<_>| !l.is_empty()),
+            code_blocks: Some(parsed.code_blocks.into_iter().map(Into::into).collect())
+                .filter(|blocks: &Vec<_>| !blocks.is_empty()),
         }));
 
         Ok(document)

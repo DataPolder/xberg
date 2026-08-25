@@ -41,7 +41,7 @@ use super::extraction::BoundingBox;
 /// it automatically creates a `Group` container and nests subsequent content
 /// under it. Higher-level headings pop deeper sections off the stack.
 #[cfg(any(feature = "office", feature = "email", feature = "xml"))]
-pub struct DocumentStructureBuilder {
+pub(crate) struct DocumentStructureBuilder {
     doc: DocumentStructure,
     section_stack: Vec<(u8, NodeIndex)>,
     /// Stack of active container nodes (Quote, Admonition, Slide, etc.).
@@ -336,7 +336,9 @@ impl DocumentStructureBuilder {
 
     /// Push a metadata block (email headers, frontmatter key-value pairs).
     pub(crate) fn push_metadata_block(&mut self, entries: Vec<(String, String)>, page: Option<u32>) -> NodeIndex {
-        let content = NodeContent::MetadataBlock { entries };
+        let content = NodeContent::MetadataBlock {
+            entries: entries.into_iter().map(Into::into).collect(),
+        };
         self.push_body_node(content, page, None, vec![])
     }
 

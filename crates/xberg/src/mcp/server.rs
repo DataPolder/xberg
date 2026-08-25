@@ -92,7 +92,7 @@ pub struct XbergMcp {
     prompt_router: PromptRouter<XbergMcp>,
     /// Default extraction configuration loaded from config file via discovery
     default_config: std::sync::Arc<ExtractionConfig>,
-    /// Tower service for extraction requests with tracing and metrics layers.
+    /// Tower service for extraction requests with tracing and optional metrics layers.
     ///
     /// Wrapped in `Mutex` because `BoxCloneService` is `Send` but not `Sync`,
     /// while `XbergMcp` must be `Sync` for the MCP handler trait.
@@ -152,7 +152,12 @@ impl XbergMcp {
     ///
     /// * `config` - Default extraction configuration for all tool calls
     pub(crate) fn with_config(config: ExtractionConfig) -> Self {
-        let extraction_service = ExtractionServiceBuilder::new().with_tracing().with_metrics().build();
+        let extraction_service_builder = ExtractionServiceBuilder::new().with_tracing();
+        #[cfg(feature = "otel")]
+        let extraction_service_builder = extraction_service_builder.with_metrics();
+        let extraction_service = extraction_service_builder
+            .build()
+            .expect("the built-in MCP extraction service uses a valid concurrency limit");
 
         Self {
             tool_router: Self::tool_router(),

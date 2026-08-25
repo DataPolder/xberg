@@ -542,7 +542,7 @@ dependency, platform restriction, or CI-untested status per Cargo.toml's own com
 | `ner-llm`                                                     | Zero-shot NER via any configured liter-llm provider                     | Requires `liter-llm`; no ORT needed |
 | `ner-onnx`                                                    | NER via the `xberg-gliner` ONNX backend                                 | ORT-dependent; downloads models from Hugging Face on first use |
 | `presets`                                                     | Built-in extraction preset format, registry, and resolver               | Pure Rust, no native deps |
-| `structured`                                                  | Enables `ExtractionConfig.structured_extraction` (LLM-driven typed JSON extraction against a caller-supplied schema) | Requires `liter-llm`; unrelated to `OutputFormat::Structured`, which is a metadata-only label that renders identically to Plain |
+| `structured`                                                  | Enables `ExtractionConfig.structured_extraction` (LLM-driven typed JSON extraction against a caller-supplied schema) | Requires `liter-llm` |
 | `redaction-rehydrate`                                         | Encrypted rehydration map capture for reversible PII redaction          | Requires `redaction`; adds `aes-gcm`, `scrypt`, `zeroize` |
 | `redaction-ml`                                                | Couples NER into redaction for PERSON/ORG/LOC pattern matching          | Requires `redaction` + `ner` |
 | `summarization-llm`                                           | Abstractive summarization via any liter-llm provider                    | Requires `summarization` + `liter-llm` (the base `summarization` feature is pure-Rust TextRank only) |
@@ -554,7 +554,7 @@ dependency, platform restriction, or CI-untested status per Cargo.toml's own com
 Skipped as internal plumbing (pure marker/aggregate features with no independent behavior, or types-only
 subsets already covered by their parent feature above): `paddle-ocr-types`, `layout-types`,
 `auto-rotate-types`, `transcription-types`, `embedding-presets`, `reranker-presets`,
-`sparse-embedding-presets`, `late-interaction-presets`, `api-types`, `ner-llm-types`, `onnx-runtime`,
+`sparse-embedding-presets`, `late-interaction-presets`, `api-types`, `onnx-runtime`,
 `ocr-pipeline`, `image-encode`, `url-config-types`, `tower-service`, `no-ort-target`, `formats-no-heic`,
 `full-no-heic`, `simd-utf8`, `tokio-runtime`, `profiling`, `pool-metrics`.
 

@@ -88,6 +88,7 @@ fn build_internal_document(
     let mut current_list_ordered: bool = false;
     let mut current_list_nesting_level: i64 = 0;
     let mut open_list_count: i64 = 0;
+    let mut current_page = 1;
 
     // Bookmark name -> the element it starts in, and the internal (`#anchor`) links
     // waiting on it. A table of contents precedes the headings it points at, so the
@@ -139,7 +140,7 @@ fn build_internal_document(
                     } else {
                         text.clone()
                     };
-                    let idx = builder.push_heading(level, &heading_text, None, None);
+                    let idx = builder.push_heading(level, &heading_text, Some(current_page), None);
                     if !annotations.is_empty() {
                         builder.set_annotations(idx, annotations.clone());
                     }
@@ -153,12 +154,12 @@ fn build_internal_document(
                         open_list_count = 0;
                     }
                     builder.push_quote_start();
-                    let para_idx = builder.push_paragraph(&text, annotations.clone(), None, None);
+                    let para_idx = builder.push_paragraph(&text, annotations.clone(), Some(current_page), None);
                     builder.push_quote_end();
                     Some(para_idx)
                 } else if let Some(nid) = paragraph.numbering_id {
                     for formula in &math_formulas {
-                        builder.push_formula(formula, None, None);
+                        builder.push_formula(formula, Some(current_page), None);
                     }
                     if !text.is_empty() {
                         let nlvl = paragraph.numbering_level.unwrap_or(0);
@@ -193,8 +194,13 @@ fn build_internal_document(
                             }
                             current_list_nesting_level = nlvl;
                         }
-                        let li_idx =
-                            builder.push_list_item(&text, current_list_ordered, annotations.clone(), None, None);
+                        let li_idx = builder.push_list_item(
+                            &text,
+                            current_list_ordered,
+                            annotations.clone(),
+                            Some(current_page),
+                            None,
+                        );
                         Some(li_idx)
                     } else {
                         None
@@ -208,10 +214,10 @@ fn build_internal_document(
                         open_list_count = 0;
                     }
                     for formula in &math_formulas {
-                        builder.push_formula(formula, None, None);
+                        builder.push_formula(formula, Some(current_page), None);
                     }
                     if !text.is_empty() {
-                        let para_idx = builder.push_paragraph(&text, annotations.clone(), None, None);
+                        let para_idx = builder.push_paragraph(&text, annotations.clone(), Some(current_page), None);
                         Some(para_idx)
                     } else {
                         None
@@ -260,7 +266,7 @@ fn build_internal_document(
                             let ref_id = &text[abs_start + 2..abs_start + end];
                             if !ref_id.is_empty() && ref_id.chars().all(|c| c.is_ascii_digit()) {
                                 let key = format!("fn{}", ref_id);
-                                builder.push_footnote_ref(ref_id, &key, None);
+                                builder.push_footnote_ref(ref_id, &key, Some(current_page));
                             }
                             search_start = abs_start + end + 1;
                         } else {
@@ -281,7 +287,7 @@ fn build_internal_document(
                             let comment_id = &text[abs_start + 5..abs_start + end];
                             if !comment_id.is_empty() {
                                 let key = format!("cmt{}", comment_id);
-                                builder.push_comment_ref(comment_id, &key, None);
+                                builder.push_comment_ref(comment_id, &key, Some(current_page));
                             }
                             search_start = abs_start + end + 1;
                         } else {
@@ -300,7 +306,7 @@ fn build_internal_document(
                     && let Some(ref caption) = props.caption
                     && !caption.is_empty()
                 {
-                    builder.push_paragraph(caption, vec![], None, None);
+                    builder.push_paragraph(caption, vec![], Some(current_page), None);
                 }
                 let mut cells: Vec<Vec<String>> = Vec::new();
                 for row in &table.rows {
@@ -339,7 +345,7 @@ fn build_internal_document(
                     }
                 }
                 if !cells.is_empty() {
-                    builder.push_table_from_cells(&cells, None, None);
+                    builder.push_table_from_cells(&cells, Some(current_page), None);
                 }
             }
             crate::extraction::docx::parser::DocumentElement::Drawing(idx) => {
@@ -352,7 +358,7 @@ fn build_internal_document(
                         builder.end_list();
                         current_list_numbering_id = None;
                     }
-                    builder.push_paragraph(textbox_text, vec![], None, None);
+                    builder.push_paragraph(textbox_text, vec![], Some(current_page), None);
                 }
 
                 if drawing.image_ref.is_none() {
@@ -393,7 +399,7 @@ fn build_internal_document(
                     image_index: *idx as u32,
                 };
                 let text_val = description.as_deref().unwrap_or("");
-                let elem = InternalElement::text(kind, text_val, 0);
+                let elem = InternalElement::text(kind, text_val, 0).with_page(current_page);
                 let elem = if let Some(b) = bbox { elem.with_bbox(b) } else { elem };
                 let img_elem_idx = builder.push_element(elem);
 
@@ -413,7 +419,10 @@ fn build_internal_document(
                     builder.set_attributes(img_elem_idx, attrs);
                 }
             }
-            crate::extraction::docx::parser::DocumentElement::PageBreak => {}
+            crate::extraction::docx::parser::DocumentElement::PageBreak => {
+                builder.push_page_break_with_page(Some(current_page));
+                current_page += 1;
+            }
         }
     }
 
@@ -737,7 +746,7 @@ fn parse_docx_core(
         })
         .collect();
 
-    let page_boundaries = if page_boundaries.len() > 1 {
+    let page_boundaries = if page_boundaries.len() > 1 || !text.trim().is_empty() {
         Some(page_boundaries)
     } else {
         None
@@ -1234,6 +1243,7 @@ impl InternalDocumentExtractor for DocxExtractor {
                         content: page_text,
                         tables: page_tables,
                         image_indices: page_image_indices,
+                        image_preprocessing: None,
                         hierarchy: None,
                         is_blank: Some(is_blank),
                         layout_regions: None,
@@ -1249,6 +1259,7 @@ impl InternalDocumentExtractor for DocxExtractor {
                     content: text.clone(),
                     tables: arc_tables,
                     image_indices: (0..extracted_images.len() as u32).collect(),
+                    image_preprocessing: None,
                     hierarchy: None,
                     is_blank: Some(text.chars().filter(|c| !c.is_whitespace()).count() < 3),
                     layout_regions: None,
@@ -2390,6 +2401,75 @@ mod tests {
             "Content should contain the document text: {}",
             result.content
         );
+        let page_structure = result
+            .metadata
+            .pages
+            .as_ref()
+            .expect("non-empty DOCX should report its one-page structure");
+        assert_eq!(page_structure.total_count, 1);
+        assert_eq!(page_structure.boundaries.as_ref().map(Vec::len), Some(1));
+        assert_eq!(result.pages.as_ref().map(Vec::len), Some(1));
+        let elements = crate::extraction::transform::transform_extraction_result_to_elements(&result);
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0].metadata.page_number, Some(1));
+    }
+
+    #[tokio::test]
+    async fn should_attribute_docx_elements_to_pages_and_preserve_break_order() {
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Page one body text</w:t></w:r></w:p>
+    <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+    <w:p><w:r><w:t>Page two body text</w:t></w:r></w:p>
+    <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+    <w:p><w:r><w:t>Page three body text</w:t></w:r></w:p>
+  </w:body>
+</w:document>"#;
+
+        let data = build_test_docx(document_xml);
+        let extractor = DocxExtractor::new();
+        let result = extractor
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &ExtractionConfig::default(),
+            )
+            .await
+            .unwrap();
+        let result =
+            crate::extraction::derive::derive_extraction_result(result, true, crate::core::config::OutputFormat::Plain);
+        let elements = crate::extraction::transform::transform_extraction_result_to_elements(&result);
+
+        assert_eq!(
+            elements.iter().map(|element| element.element_type).collect::<Vec<_>>(),
+            vec![
+                crate::types::ElementType::NarrativeText,
+                crate::types::ElementType::PageBreak,
+                crate::types::ElementType::NarrativeText,
+                crate::types::ElementType::PageBreak,
+                crate::types::ElementType::NarrativeText,
+            ]
+        );
+        assert_eq!(
+            elements
+                .iter()
+                .map(|element| element.metadata.page_number)
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(1), Some(2), Some(2), Some(3)]
+        );
+        assert_eq!(
+            elements.iter().map(|element| element.text.as_str()).collect::<Vec<_>>(),
+            vec![
+                "Page one body text",
+                "--- PAGE BREAK (page 1 → 2) ---",
+                "Page two body text",
+                "--- PAGE BREAK (page 2 → 3) ---",
+                "Page three body text"
+            ]
+        );
+        assert_eq!(result.pages.as_ref().map(Vec::len), Some(3));
+        assert_eq!(result.metadata.pages.as_ref().map(|pages| pages.total_count), Some(3));
     }
 
     #[tokio::test]

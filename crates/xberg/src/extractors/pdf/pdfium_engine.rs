@@ -3,7 +3,8 @@
 //! # Scope
 //!
 //! Deliberately smaller than [`super::PdfExtractor::extract_core_native`]: page
-//! count, per-page plain text (via `PdfPageText::all()`), and Info-dictionary
+//! count, per-page plain text (via `PdfPageText::inside_rect()` with the resolved
+//! page margins), and Info-dictionary
 //! metadata (Title/Author/Subject/Keywords/Creator/Producer/CreationDate/
 //! ModificationDate). `xberg-pdfium-render`'s public API does not currently give
 //! this crate anything to build the rest of the native contract from -- no table
@@ -12,7 +13,9 @@
 //! embedded-file extraction, and no OCR fallback path. None of that runs here.
 //! Every call appends a `ProcessingWarning` naming the gap so a caller diffing
 //! pdfium output against `xberg_native_pdf` output is never left assuming parity
-//! silently.
+//! silently. Header/footer inclusion is honored through the resolved page margins;
+//! explicitly requested content filters that require document structure receive
+//! separate capability warnings.
 //!
 //! # The pdfium library binding is process-global and happens once
 //!
@@ -51,8 +54,21 @@ use crate::Result;
 use crate::core::config::ExtractionConfig;
 use crate::error::XbergError;
 use crate::pdf::metadata::PdfMetadata as PdfSpecificMetadata;
+use crate::pdf::native::text::PageMarginFractions;
 use crate::types::internal::InternalDocument;
 use crate::types::{ExtractionMethod, Metadata, PageBoundary, PageStructure, PageUnitType, ProcessingWarning};
+
+const PDFIUM_WARNING_SOURCE: &str = "pdf_backend_pdfium";
+const UNSUPPORTED_REPEATING_TEXT_MESSAGE: &str =
+    "the pdfium backend cannot apply ContentFilterConfig.strip_repeating_text; repeated text was preserved";
+const UNSUPPORTED_FOOTNOTES_MESSAGE: &str = concat!(
+    "the pdfium backend cannot apply ContentFilterConfig.include_footnotes; ",
+    "footnote inclusion follows Pdfium's plain-text extraction"
+);
+const UNSUPPORTED_WATERMARKS_MESSAGE: &str = concat!(
+    "the pdfium backend cannot apply ContentFilterConfig.include_watermarks; ",
+    "watermark inclusion follows Pdfium's plain-text extraction"
+);
 
 /// Cached outcome of the one-and-only bind attempt for this process. `Ok(())`
 /// once bound; `Err(message)` if binding failed, so later calls report the same
@@ -167,19 +183,59 @@ fn open_document<'a>(pdfium: &'a Pdfium, content: &'a [u8], passwords: &[String]
     }
 }
 
+fn page_content_rect(page_width: PdfPoints, page_height: PdfPoints, margins: PageMarginFractions) -> Option<PdfRect> {
+    let bottom = page_height * margins.bottom;
+    let top = page_height * (1.0 - margins.top);
+    (bottom <= top).then(|| PdfRect::new(bottom, PdfPoints::ZERO, top, page_width))
+}
+
+fn unsupported_content_filter_warnings(config: &ExtractionConfig) -> Vec<ProcessingWarning> {
+    let Some(filter) = config.content_filter.as_ref() else {
+        return Vec::new();
+    };
+    let mut warnings = Vec::with_capacity(3);
+    let warning = |message: &'static str| ProcessingWarning {
+        source: std::borrow::Cow::Borrowed(PDFIUM_WARNING_SOURCE),
+        message: std::borrow::Cow::Borrowed(message),
+    };
+
+    if filter.strip_repeating_text {
+        warnings.push(warning(UNSUPPORTED_REPEATING_TEXT_MESSAGE));
+    }
+    if filter.include_footnotes {
+        warnings.push(warning(UNSUPPORTED_FOOTNOTES_MESSAGE));
+    }
+    if filter.include_watermarks {
+        warnings.push(warning(UNSUPPORTED_WATERMARKS_MESSAGE));
+    }
+    warnings
+}
+
 /// CPU-bound pdfium work, run inside `spawn_blocking` by [`extract`]. Builds the
 /// `InternalDocument` directly rather than returning intermediate pieces --
 /// there is no OCR/layout/table stage downstream of this backend (yet) that
 /// would need them.
-fn extract_blocking(content: &[u8], mime_type: &str, passwords: &[String]) -> Result<InternalDocument> {
+fn extract_blocking(
+    content: &[u8],
+    mime_type: &str,
+    passwords: &[String],
+    extract_metadata: bool,
+    margins: PageMarginFractions,
+) -> Result<InternalDocument> {
     let _operation_guard = PDFIUM_OPERATION_LOCK
         .lock()
         .map_err(|_| XbergError::parsing("pdfium operation lock was poisoned by an earlier extraction panic"))?;
 
-    extract_blocking_serialized(content, mime_type, passwords)
+    extract_blocking_serialized(content, mime_type, passwords, extract_metadata, margins)
 }
 
-fn extract_blocking_serialized(content: &[u8], mime_type: &str, passwords: &[String]) -> Result<InternalDocument> {
+fn extract_blocking_serialized(
+    content: &[u8],
+    mime_type: &str,
+    passwords: &[String],
+    extract_metadata: bool,
+    margins: PageMarginFractions,
+) -> Result<InternalDocument> {
     let pdfium = Pdfium;
     let document = open_document(&pdfium, content, passwords)?;
 
@@ -196,12 +252,14 @@ fn extract_blocking_serialized(content: &[u8], mime_type: &str, passwords: &[Str
 
     for (index, page) in document.pages().iter().enumerate() {
         let page_number = (index + 1) as u32;
+        let content_rect = page_content_rect(page.width(), page.height(), margins);
         let page_text = page
             .text()
             .map_err(|err| XbergError::parsing(format!("pdfium failed to read text on page {page_number}: {err}")))?;
+        let content = content_rect.map_or_else(String::new, |rect| page_text.inside_rect(rect));
 
         let byte_start = joined_text.len();
-        joined_text.push_str(&page_text.all());
+        joined_text.push_str(&content);
         let byte_end = joined_text.len();
         joined_text.push_str("\n\n");
 
@@ -222,36 +280,39 @@ fn extract_blocking_serialized(content: &[u8], mime_type: &str, passwords: &[Str
         ..Default::default()
     };
 
-    doc.metadata = Metadata {
-        title: common.title,
-        subject: common.subject,
-        authors: common.authors,
-        keywords: common.keywords,
-        created_at: common.created_at,
-        modified_at: common.modified_at,
-        created_by: common.created_by,
-        pages: Some(PageStructure {
-            total_count: page_count,
-            unit_type: PageUnitType::Page,
-            boundaries: Some(boundaries),
-            pages: None,
-        }),
-        format: Some(crate::types::FormatMetadata::Pdf(pdf_specific)),
-        ocr_used: false,
-        ..Default::default()
-    };
+    if extract_metadata {
+        doc.metadata = Metadata {
+            title: common.title,
+            subject: common.subject,
+            authors: common.authors,
+            keywords: common.keywords,
+            created_at: common.created_at,
+            modified_at: common.modified_at,
+            created_by: common.created_by,
+            pages: Some(PageStructure {
+                total_count: page_count,
+                unit_type: PageUnitType::Page,
+                boundaries: Some(boundaries),
+                pages: None,
+            }),
+            format: Some(crate::types::FormatMetadata::Pdf(pdf_specific)),
+            ocr_used: false,
+            ..Default::default()
+        };
+    }
     doc.metadata.additional.insert(
         std::borrow::Cow::Borrowed("extraction_method"),
         serde_json::Value::String(ExtractionMethod::Native.as_str().to_string()),
     );
 
     doc.processing_warnings.push(ProcessingWarning {
-        source: std::borrow::Cow::Borrowed("pdf_backend_pdfium"),
+        source: std::borrow::Cow::Borrowed(PDFIUM_WARNING_SOURCE),
         message: std::borrow::Cow::Borrowed(
             "the pdfium backend currently extracts text, page count, and Info-dictionary \
              metadata only; tables, images, annotations, form fields, embedded files, and OCR \
-             fallback are not implemented for this backend (issue #702). Select the default \
-             native backend if the document needs those.",
+             fallback are not implemented for this backend (issue #702). Content filtering is \
+             limited to configured header/footer margins. Select the default native backend if \
+             the document needs those capabilities.",
         ),
     });
 
@@ -270,13 +331,154 @@ pub(super) async fn extract(content: &[u8], mime_type: &str, config: &Extraction
         .as_ref()
         .and_then(|options| options.passwords.clone())
         .unwrap_or_default();
+    let extract_metadata = config
+        .pdf_options
+        .as_ref()
+        .is_none_or(|options| options.extract_metadata);
+    let margins = PageMarginFractions::from_extraction_config(Some(config));
+    let unsupported_filter_warnings = unsupported_content_filter_warnings(config);
     let content = content.to_vec();
     let mime_type = mime_type.to_string();
 
-    match tokio::task::spawn_blocking(move || extract_blocking(&content, &mime_type, &passwords)).await {
-        Ok(result) => result,
+    match tokio::task::spawn_blocking(move || {
+        extract_blocking(&content, &mime_type, &passwords, extract_metadata, margins)
+    })
+    .await
+    {
+        Ok(result) => result.map(|mut document| {
+            document.processing_warnings.extend(unsupported_filter_warnings);
+            document
+        }),
         Err(join_error) => Err(XbergError::parsing(format!(
             "pdfium extraction task panicked: {join_error}"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_build_pdfium_content_rect_from_page_margin_fractions() {
+        let rect = page_content_rect(
+            PdfPoints::new(600.0),
+            PdfPoints::new(1000.0),
+            PageMarginFractions {
+                top: 0.10,
+                bottom: 0.20,
+            },
+        )
+        .expect("non-overlapping margins should produce a content rectangle");
+
+        assert_eq!(rect.left().value, 0.0);
+        assert_eq!(rect.right().value, 600.0);
+        assert_eq!(rect.bottom().value, 200.0);
+        assert_eq!(rect.top().value, 900.0);
+    }
+
+    #[test]
+    fn should_return_no_pdfium_content_rect_when_margins_overlap() {
+        let rect = page_content_rect(
+            PdfPoints::new(600.0),
+            PdfPoints::new(1000.0),
+            PageMarginFractions {
+                top: 0.60,
+                bottom: 0.60,
+            },
+        );
+
+        assert!(rect.is_none());
+    }
+
+    #[test]
+    fn should_use_full_pdfium_page_height_when_headers_and_footers_are_included() {
+        let config = ExtractionConfig {
+            pdf_options: Some(crate::core::config::PdfConfig {
+                top_margin_fraction: Some(0.10),
+                bottom_margin_fraction: Some(0.20),
+                ..Default::default()
+            }),
+            content_filter: Some(crate::core::config::ContentFilterConfig {
+                include_headers: true,
+                include_footers: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let rect = page_content_rect(
+            PdfPoints::new(600.0),
+            PdfPoints::new(1000.0),
+            PageMarginFractions::from_extraction_config(Some(&config)),
+        )
+        .expect("including headers and footers should retain the full page");
+
+        assert_eq!(rect.bottom().value, 0.0);
+        assert_eq!(rect.top().value, 1000.0);
+    }
+
+    #[test]
+    fn should_not_warn_when_pdfium_content_filter_is_absent_or_only_uses_supported_controls() {
+        assert!(unsupported_content_filter_warnings(&ExtractionConfig::default()).is_empty());
+
+        let config = ExtractionConfig {
+            content_filter: Some(crate::core::config::ContentFilterConfig {
+                include_headers: true,
+                include_footers: true,
+                strip_repeating_text: false,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        assert!(unsupported_content_filter_warnings(&config).is_empty());
+    }
+
+    #[test]
+    fn should_warn_when_explicit_default_content_filter_requests_repeating_text_removal() {
+        let config = ExtractionConfig {
+            content_filter: Some(crate::core::config::ContentFilterConfig::default()),
+            ..Default::default()
+        };
+
+        let warnings = unsupported_content_filter_warnings(&config);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].message, UNSUPPORTED_REPEATING_TEXT_MESSAGE);
+    }
+
+    #[test]
+    fn should_warn_for_each_requested_unsupported_pdfium_content_filter() {
+        let config = ExtractionConfig {
+            content_filter: Some(crate::core::config::ContentFilterConfig {
+                include_headers: true,
+                include_footers: true,
+                include_footnotes: true,
+                strip_repeating_text: true,
+                include_watermarks: true,
+            }),
+            ..Default::default()
+        };
+
+        let warnings = unsupported_content_filter_warnings(&config);
+        assert_eq!(warnings.len(), 3);
+        assert!(warnings.iter().all(|warning| warning.source == "pdf_backend_pdfium"));
+        assert_eq!(
+            warnings
+                .iter()
+                .map(|warning| warning.message.as_ref())
+                .collect::<Vec<_>>(),
+            [
+                "the pdfium backend cannot apply ContentFilterConfig.strip_repeating_text; repeated text was preserved",
+                concat!(
+                    "the pdfium backend cannot apply ContentFilterConfig.include_footnotes; ",
+                    "footnote inclusion follows Pdfium's plain-text extraction"
+                ),
+                concat!(
+                    "the pdfium backend cannot apply ContentFilterConfig.include_watermarks; ",
+                    "watermark inclusion follows Pdfium's plain-text extraction"
+                ),
+            ]
+        );
     }
 }

@@ -218,7 +218,6 @@ Text chunking for RAG, indexing, and length-limited systems.
 | `chunker_type`            | `"text"` \| `"markdown"` \| `"semantic"` | "text" | Chunking strategy.                                          |
 | `embedding`               | EmbeddingConfig \| None   | None      | Generate an embedding per chunk. None = no embeddings.                      |
 | `preset`                  | str \| None               | None      | Named preset (overrides individual settings if provided).                  |
-| `prepend_heading_context` | bool                      | False     | (Markdown chunker) prepend the heading breadcrumb to each chunk's content. |
 
 > **IMPORTANT:** The fields are `max_characters` and `overlap` (NOT `max_chars`/`max_overlap` or `max_chars`/`max_chars`).
 

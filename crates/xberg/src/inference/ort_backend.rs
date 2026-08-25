@@ -11,7 +11,6 @@
 //! hard-errors in that case. [`OrtSession`] wraps the resulting
 //! `ort::session::Session` and converts tensors at the boundary.
 //!
-//! Since v5.0.0 (issue #1275).
 
 use std::borrow::Cow;
 use std::path::Path;

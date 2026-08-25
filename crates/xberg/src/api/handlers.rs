@@ -1391,7 +1391,9 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_router() -> Router {
-        let extraction_service = crate::service::ExtractionServiceBuilder::new().build();
+        let extraction_service = crate::service::ExtractionServiceBuilder::new()
+            .build()
+            .expect("default extraction service configuration should be valid");
         let state = ApiState {
             default_config: std::sync::Arc::new(crate::ExtractionConfig::default()),
             extraction_service: std::sync::Arc::new(std::sync::Mutex::new(extraction_service)),

@@ -1101,6 +1101,34 @@ async fn test_run_pipeline_with_output_format_plain() {
 
 #[tokio::test]
 #[serial]
+async fn test_pipeline_honors_include_watermarks_for_markdown() {
+    let watermark = "Research title 7 arXiv:2401.12345v2 [cs.CL] 9 Jan 2024";
+    let default_config = ExtractionConfig {
+        output_format: OutputFormat::Markdown,
+        ..Default::default()
+    };
+    let stripped = run_pipeline(make_doc(watermark, "application/pdf"), &default_config)
+        .await
+        .unwrap();
+
+    let preserve_config = ExtractionConfig {
+        output_format: OutputFormat::Markdown,
+        content_filter: Some(crate::core::config::ContentFilterConfig {
+            include_watermarks: true,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let preserved = run_pipeline(make_doc(watermark, "application/pdf"), &preserve_config)
+        .await
+        .unwrap();
+
+    assert!(!stripped.content.contains("arXiv:2401.12345v2"));
+    assert!(preserved.content.contains("arXiv:2401.12345v2 [cs.CL] 9 Jan 2024"));
+}
+
+#[tokio::test]
+#[serial]
 async fn test_run_pipeline_with_output_format_djot() {
     let doc = make_doc("test content", "text/djot");
 
@@ -1374,7 +1402,7 @@ mod full_page_image_ocr_tests {
         PageInfo {
             number,
             title: None,
-            dimensions: Some((100.0, 100.0)),
+            dimensions: Some((100.0, 100.0).into()),
             image_count: None,
             table_count: None,
             hidden: None,
@@ -1759,6 +1787,7 @@ mod document_counts {
             content: String::new(),
             tables: Vec::new(),
             image_indices: Vec::new(),
+            image_preprocessing: None,
             hierarchy: None,
             is_blank: None,
             layout_regions: None,

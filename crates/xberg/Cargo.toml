@@ -82,7 +82,7 @@ pdf-pdfium = ["dep:pdfium-render", "tokio-runtime"]
 # parts calamine does not model — revision headers, cell comments — are read out of
 # it directly. Without them a bare `--features excel` build did not compile at all.
 excel = ["dep:calamine", "dep:roxmltree", "dep:zip", "dep:quick-xml", "tokio-runtime"]
-excel-wasm = ["dep:calamine", "dep:roxmltree"]
+excel-wasm = ["dep:calamine", "dep:roxmltree", "dep:zip"]
 office = [
     "dep:cfb",
     "dep:roxmltree",
@@ -561,9 +561,6 @@ ner-candle = ["ner-candle-backend", "tokio-runtime"]
 # natively too, for callers wanting candle NER without a runtime dependency.
 ner-candle-wasm = ["ner-candle-backend"]
 ner = [] # NER result types only; safe on every target.
-ner-llm-types = [
-    "ner",
-] # LlmBackend stub for targets without full ner-llm (Windows, Android x86_64, WASM).
 ner-llm = ["ner", "liter-llm"] # LLM-driven zero-shot NER (no ORT).
 ner-onnx = [
     # xberg-gliner ONNX backend with Hugging Face model download.
@@ -866,7 +863,6 @@ windows-target = [
     "transcription",
     "ner-onnx",
     "ner",
-    "ner-llm-types",
     "presets",
     "redaction",
     # redaction-rehydrate = [redaction, dep:aes-gcm, dep:scrypt, dep:zeroize]: `redaction`
@@ -891,11 +887,8 @@ windows-target = [
     # The following five features each depend only on some combination of `liter-llm`,
     # `tokio-runtime`, `ner`, `redaction` and `summarization` — every one of them already
     # enabled above — so none of these adds a single new dependency on Windows (GH#1443).
-    # captioning = [liter-llm, tokio-runtime]; ner-llm = [ner, liter-llm] (note:
-    # `ner-llm-types` above only stubs `LlmBackend`/omits `NerBackend` — see
-    # `text::ner::mod.rs` and `lib.rs`'s `#[cfg(feature = "ner-llm")]` gate — so without
-    # this entry Windows silently got the non-functional stub even though its own
-    # dependencies were already present); redaction-ml = [redaction, ner];
+    # captioning = [liter-llm, tokio-runtime]; ner-llm = [ner, liter-llm];
+    # redaction-ml = [redaction, ner];
     # summarization-llm = [summarization, liter-llm]; translation = [liter-llm].
     "captioning",
     "ner-llm",
@@ -1013,7 +1006,6 @@ windows-gnu-target = [
     "late-interaction-presets",
     "transcription-types",
     "ner",
-    "ner-llm-types",
     "presets",
     "redaction",
     # redaction-rehydrate = [redaction, dep:aes-gcm, dep:scrypt, dep:zeroize]: RustCrypto,

@@ -277,7 +277,6 @@ name = "balanced"
 | `chunker_type`                     | string          | `"text"`    | Chunker: `text`, `markdown`, `yaml`, `semantic`                         |
 | `preset`                           | string \| null  | `null`      | Use a preset config (overrides individual settings when set)           |
 | `sizing`                           | table \| null   | `null`      | How to measure chunk size; default `characters`. `tokenizer` requires the `chunking-tokenizers` feature |
-| `prepend_heading_context`          | boolean         | `false`     | For `markdown` chunker, prepend the heading hierarchy path to each chunk |
 | `topic_threshold`                  | float \| null   | `null`      | Cosine similarity threshold for `semantic` chunker (effective default 0.75) |
 | `table_chunking`                   | string          | `"split"`   | Oversized markdown tables: `split` or `repeat_header`                   |
 | `embedding`                        | table \| null   | `null`      | Embedding configuration (see below)                                    |

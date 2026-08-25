@@ -337,10 +337,10 @@ mod tests {
         use crate::types::ElementType;
         let id1 = generate_element_id("test", ElementType::Title, Some(1));
         let id2 = generate_element_id("test", ElementType::Title, Some(1));
-        assert_eq!(id1.as_ref(), id2.as_ref());
+        assert_eq!(id1, id2);
 
         let id3 = generate_element_id("different", ElementType::Title, Some(1));
-        assert_ne!(id1.as_ref(), id3.as_ref());
+        assert_ne!(id1, id3);
     }
 
     #[test]
@@ -407,6 +407,7 @@ mod tests {
                     content: "This is a test paragraph.\n\nAnother paragraph here.".to_string(),
                     tables: vec![],
                     image_indices: vec![],
+                    image_preprocessing: None,
                     hierarchy: Some(PageHierarchy {
                         block_count: 2,
                         blocks: vec![
@@ -414,13 +415,13 @@ mod tests {
                                 text: "Main Title".to_string(),
                                 font_size: 24.0,
                                 level: "h1".to_string(),
-                                bbox: Some((10.0, 20.0, 100.0, 50.0)),
+                                bbox: Some((10.0, 20.0, 100.0, 50.0).into()),
                             },
                             HierarchicalBlock {
                                 text: "Subtitle".to_string(),
                                 font_size: 16.0,
                                 level: "h2".to_string(),
-                                bbox: Some((10.0, 60.0, 100.0, 80.0)),
+                                bbox: Some((10.0, 60.0, 100.0, 80.0).into()),
                             },
                         ],
                     }),
@@ -435,6 +436,7 @@ mod tests {
                     content: "- List item 1\n- List item 2".to_string(),
                     tables: vec![],
                     image_indices: vec![],
+                    image_preprocessing: None,
                     hierarchy: None,
                     is_blank: None,
                     layout_regions: None,
@@ -532,6 +534,7 @@ mod tests {
                 content: "Some text".to_string(),
                 tables: vec![Arc::new(table)],
                 image_indices: vec![0],
+                image_preprocessing: None,
                 hierarchy: None,
                 is_blank: None,
                 layout_regions: None,
@@ -700,6 +703,7 @@ mod tests {
                 content: "Some body text here.".to_string(),
                 tables: vec![],
                 image_indices: vec![],
+                image_preprocessing: None,
                 hierarchy: Some(PageHierarchy {
                     block_count: 2,
                     blocks: vec![
@@ -707,13 +711,13 @@ mod tests {
                             text: "Heading".to_string(),
                             font_size: 18.0,
                             level: "h1".to_string(),
-                            bbox: Some((10.0, 20.0, 200.0, 40.0)),
+                            bbox: Some((10.0, 20.0, 200.0, 40.0).into()),
                         },
                         HierarchicalBlock {
                             text: "Some body text here.".to_string(),
                             font_size: 12.0,
                             level: "body".to_string(),
-                            bbox: Some((10.0, 50.0, 200.0, 65.0)),
+                            bbox: Some((10.0, 50.0, 200.0, 65.0).into()),
                         },
                     ],
                 }),
@@ -773,6 +777,7 @@ mod tests {
                 content: "Paragraph one.\n\nParagraph two.".to_string(),
                 tables: vec![],
                 image_indices: vec![],
+                image_preprocessing: None,
                 hierarchy: Some(PageHierarchy {
                     block_count: 1,
                     blocks: vec![HierarchicalBlock {

@@ -208,10 +208,10 @@ fn ocr_geometry_bounds(geometry: &crate::types::OcrBoundingGeometry) -> (u32, u3
             height,
         } => (*left, *top, *width, *height),
         crate::types::OcrBoundingGeometry::Quadrilateral { points } => {
-            let min_x = points.iter().map(|(x, _)| *x).min().unwrap_or(0);
-            let max_x = points.iter().map(|(x, _)| *x).max().unwrap_or(0);
-            let min_y = points.iter().map(|(_, y)| *y).min().unwrap_or(0);
-            let max_y = points.iter().map(|(_, y)| *y).max().unwrap_or(0);
+            let min_x = points.iter().map(|point| point.x).min().unwrap_or(0);
+            let max_x = points.iter().map(|point| point.x).max().unwrap_or(0);
+            let min_y = points.iter().map(|point| point.y).min().unwrap_or(0);
+            let max_y = points.iter().map(|point| point.y).max().unwrap_or(0);
             (min_x, min_y, max_x.saturating_sub(min_x), max_y.saturating_sub(min_y))
         }
     }
@@ -588,6 +588,7 @@ fn finish_cached_layout_document(
         speaker_notes: None,
         section_name: None,
         sheet_name: None,
+        image_preprocessing: whole_image_doc.metadata.image_preprocessing.clone(),
     }]);
     ImageExtractor::mark_ocr_extraction(&mut assembled);
     assembled
@@ -1320,12 +1321,21 @@ fn sparse_image_ocr_fallback_config(
 /// fails; OCR should still be attempted on the original image rather than
 /// aborting the extraction.
 #[cfg(feature = "ocr-pipeline")]
+struct NormalizedOcrImage {
+    bytes: Vec<u8>,
+    metadata: Option<crate::types::ImagePreprocessingMetadata>,
+}
+
+#[cfg(feature = "ocr-pipeline")]
 fn normalize_image_bytes_for_ocr(
     content: &[u8],
     images_config: &crate::core::config::ImageExtractionConfig,
-) -> Vec<u8> {
+) -> NormalizedOcrImage {
     let Ok(decoded) = image::load_from_memory(content) else {
-        return content.to_vec();
+        return NormalizedOcrImage {
+            bytes: content.to_vec(),
+            metadata: None,
+        };
     };
     let rgb = decoded.into_rgb8();
     let (width, height) = rgb.dimensions();
@@ -1340,10 +1350,27 @@ fn normalize_image_bytes_for_ocr(
     ) {
         Ok(result) => {
             let (new_width, new_height) = result.dimensions;
-            encode_rgb_as_png(&result.rgb_data, new_width as u32, new_height as u32)
-                .unwrap_or_else(|_| content.to_vec())
+            match encode_rgb_as_png(&result.rgb_data, new_width as u32, new_height as u32) {
+                Ok(bytes) => NormalizedOcrImage {
+                    bytes,
+                    metadata: Some(result.metadata),
+                },
+                Err(error) => {
+                    tracing::warn!(%error, "failed to encode normalized OCR image; using original image");
+                    NormalizedOcrImage {
+                        bytes: content.to_vec(),
+                        metadata: None,
+                    }
+                }
+            }
         }
-        Err(_) => content.to_vec(),
+        Err((error, _)) => {
+            tracing::warn!(%error, "failed to normalize OCR image; using original image");
+            NormalizedOcrImage {
+                bytes: content.to_vec(),
+                metadata: None,
+            }
+        }
     }
 }
 
@@ -1458,6 +1485,11 @@ fn enable_image_ocr_elements(config: &mut crate::core::config::OcrConfig, includ
     }
 }
 
+#[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
+fn apply_public_image_ocr_element_policy(document: &mut InternalDocument, config: &crate::core::config::OcrConfig) {
+    document.prebuilt_ocr_elements = config.select_public_elements(document.prebuilt_ocr_elements.take());
+}
+
 #[cfg_attr(alef, alef(skip))]
 /// Image extractor for various image formats.
 ///
@@ -1548,7 +1580,10 @@ impl ImageExtractor {
             .as_ref()
             .map(|images_config| normalize_image_bytes_for_ocr(content, images_config));
         #[cfg(feature = "ocr-pipeline")]
-        let ocr_input: &[u8] = normalized_ocr_bytes.as_deref().unwrap_or(content);
+        let ocr_input: &[u8] = normalized_ocr_bytes
+            .as_ref()
+            .map(|normalized| normalized.bytes.as_slice())
+            .unwrap_or(content);
         #[cfg(not(feature = "ocr-pipeline"))]
         let ocr_input: &[u8] = content;
 
@@ -1568,6 +1603,14 @@ impl ImageExtractor {
                     Ok(_) => {}
                     Err(error) => tracing::warn!(%error, "sparse standalone image OCR fallback failed"),
                 }
+            }
+            ocr_result
+        };
+        #[cfg(feature = "ocr-pipeline")]
+        let ocr_result = {
+            let mut ocr_result = ocr_result;
+            if let Some(metadata) = normalized_ocr_bytes.and_then(|normalized| normalized.metadata) {
+                ocr_result.metadata.image_preprocessing = Some(metadata);
             }
             ocr_result
         };
@@ -1646,6 +1689,7 @@ impl ImageExtractor {
                         content: text,
                         tables: page_tables,
                         image_indices: vec![],
+                        image_preprocessing: None,
                         hierarchy: None,
                         is_blank: None,
                         layout_regions: None,
@@ -1675,6 +1719,7 @@ impl ImageExtractor {
                     content: text,
                     tables: vec![],
                     image_indices: vec![],
+                    image_preprocessing: None,
                     hierarchy: None,
                     is_blank: None,
                     layout_regions: None,
@@ -1705,7 +1750,7 @@ impl ImageExtractor {
         })?;
         let images = [image];
 
-        let (text, _tables, ocr_elements, pipeline_doc, llm_usage, _page_texts, _rasters, formulas) =
+        let (text, _tables, ocr_elements, pipeline_doc, llm_usage, _page_texts, _rasters, formulas, _) =
             Box::pin(crate::extractors::pdf::ocr::run_ocr_pipeline(
                 None,
                 Some(&images),
@@ -1744,6 +1789,7 @@ impl ImageExtractor {
                 content: trimmed,
                 tables: vec![],
                 image_indices: vec![],
+                image_preprocessing: None,
                 hierarchy: None,
                 is_blank: None,
                 layout_regions: None,
@@ -2222,6 +2268,9 @@ impl InternalDocumentExtractor for ImageExtractor {
                     || self.extract_with_ocr(content, mime_type, config),
                 )
                 .await?;
+                if let Some(ocr_config) = config.ocr.as_ref() {
+                    apply_public_image_ocr_element_policy(&mut doc, ocr_config);
+                }
                 Self::mark_ocr_extraction(&mut doc);
                 doc.metadata.format = Some(crate::types::FormatMetadata::Image(image_metadata));
                 doc.mime_type = mime_type.to_string();
@@ -2240,6 +2289,9 @@ impl InternalDocumentExtractor for ImageExtractor {
             ))]
             {
                 let mut doc = self.extract_with_ocr(content, mime_type, config).await?;
+                if let Some(ocr_config) = config.ocr.as_ref() {
+                    apply_public_image_ocr_element_policy(&mut doc, ocr_config);
+                }
                 Self::mark_ocr_extraction(&mut doc);
                 doc.metadata.format = Some(crate::types::FormatMetadata::Image(image_metadata));
                 doc.mime_type = mime_type.to_string();
@@ -2339,13 +2391,30 @@ mod tests {
         };
         let normalized = normalize_image_bytes_for_ocr(&png, &images_config);
 
-        assert_ne!(normalized, png, "the oversized image should not pass through unchanged");
-        let decoded = image::load_from_memory(&normalized).expect("decode the normalized image");
+        assert_ne!(
+            normalized.bytes, png,
+            "the oversized image should not pass through unchanged"
+        );
+        let decoded = image::load_from_memory(&normalized.bytes).expect("decode the normalized image");
         assert_eq!(
             (decoded.width(), decoded.height()),
             (300, 150),
             "the long edge should be clamped to max_image_dimension, preserving the 2:1 aspect ratio"
         );
+        let metadata = normalized
+            .metadata
+            .expect("successful standalone-image normalization must retain metadata");
+        assert_eq!(metadata.original_dimensions.width, 1200);
+        assert_eq!(metadata.original_dimensions.height, 600);
+        assert_eq!(
+            metadata.new_dimensions.as_ref().map(|dimensions| dimensions.width),
+            Some(300)
+        );
+        assert_eq!(
+            metadata.new_dimensions.as_ref().map(|dimensions| dimensions.height),
+            Some(150)
+        );
+        assert!(metadata.dimension_clamped);
     }
 
     #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
@@ -3726,7 +3795,9 @@ mod tests {
     async fn test_extract_with_ocr_populates_pages_for_elements_gated_backend() {
         use crate::core::config::OcrConfig;
         use crate::plugins::{OcrBackend, OcrBackendType, Plugin, register_ocr_backend, unregister_ocr_backend};
-        use crate::types::{ExtractedDocument, OcrBoundingGeometry, OcrConfidence, OcrElement, OcrElementLevel};
+        use crate::types::{
+            ExtractedDocument, OcrBoundingGeometry, OcrConfidence, OcrElement, OcrElementConfig, OcrElementLevel,
+        };
 
         let mut png_buf = std::io::Cursor::new(Vec::new());
         image::ImageBuffer::<image::Rgb<u8>, _>::from_pixel(1, 1, image::Rgb([255u8, 255, 255]))
@@ -3750,16 +3821,25 @@ mod tests {
                 let include_elements = config.element_config.as_ref().is_some_and(|ec| ec.include_elements);
 
                 let elements = if include_elements {
-                    let geo = OcrBoundingGeometry::Rectangle {
-                        left: 0,
-                        top: 0,
-                        width: 100,
-                        height: 20,
+                    let element = |text: &str, level: OcrElementLevel, confidence: f64, left: u32, width: u32| {
+                        OcrElement::new(
+                            text.to_string(),
+                            OcrBoundingGeometry::Rectangle {
+                                left,
+                                top: 0,
+                                width,
+                                height: 20,
+                            },
+                            OcrConfidence::from_tesseract(confidence),
+                        )
+                        .with_level(level)
+                        .with_page_number(1)
                     };
-                    let elem = OcrElement::new("hello world".to_string(), geo, OcrConfidence::from_tesseract(99.0))
-                        .with_level(OcrElementLevel::Line)
-                        .with_page_number(1);
-                    Some(vec![elem])
+                    Some(vec![
+                        element("hello world", OcrElementLevel::Line, 99.0, 0, 100),
+                        element("hello", OcrElementLevel::Word, 95.0, 5, 30),
+                        element("noise", OcrElementLevel::Word, 20.0, 60, 30),
+                    ])
                 } else {
                     None
                 };
@@ -3811,12 +3891,59 @@ mod tests {
             "successful image OCR must be reflected in metadata"
         );
         assert_eq!(result.extraction_method, Some(crate::types::ExtractionMethod::Ocr));
+        assert!(
+            result.ocr_elements.is_none(),
+            "elements forced for internal page assembly must remain private unless requested"
+        );
         let pages = result
             .pages
             .as_ref()
             .expect("pages must be populated (regression of #705)");
         assert!(!pages.is_empty(), "pages[] must not be empty (regression of #705)");
         assert_eq!(pages[0].content.trim(), "hello world");
+
+        let explicitly_disabled = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                backend: "gated-elements-test".to_string(),
+                element_config: Some(OcrElementConfig::default()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let disabled_doc = extractor
+            .extract_content(&png_1x1, "image/png", &explicitly_disabled)
+            .await
+            .unwrap();
+        assert!(disabled_doc.prebuilt_ocr_elements.is_none());
+
+        let filtered_config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                backend: "gated-elements-test".to_string(),
+                element_config: Some(OcrElementConfig {
+                    include_elements: true,
+                    min_level: OcrElementLevel::Word,
+                    min_confidence: 0.8,
+                    build_hierarchy: true,
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let filtered_doc = extractor
+            .extract_content(&png_1x1, "image/png", &filtered_config)
+            .await
+            .unwrap();
+        let filtered = filtered_doc
+            .prebuilt_ocr_elements
+            .expect("requested custom-backend elements must be published");
+        assert_eq!(
+            filtered.iter().map(|element| element.text.as_str()).collect::<Vec<_>>(),
+            ["hello world", "hello"]
+        );
+        let line = filtered.iter().find(|element| element.text == "hello world").unwrap();
+        let word = filtered.iter().find(|element| element.text == "hello").unwrap();
+        assert!(line.parent_id.is_none());
+        assert!(word.parent_id.is_some());
 
         unregister_ocr_backend("gated-elements-test").unwrap();
     }

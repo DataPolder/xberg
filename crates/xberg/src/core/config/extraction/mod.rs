@@ -20,9 +20,8 @@ pub use self::file_config::FileExtractionConfig;
 #[cfg(feature = "svg")]
 pub use self::types::SvgOptions;
 pub use self::types::{
-    BreadcrumbTarget, ExtractInput, ExtractInputKind, ExtractionErrorItem, ExtractionResult, ExtractionSummary,
-    ImageExtractionConfig, ImageOutputFormat, LanguageDetectionConfig, TokenReductionOptions, UrlExtractionConfig,
-    UrlExtractionMode,
+    ExtractInput, ExtractInputKind, ExtractionErrorItem, ExtractionResult, ExtractionSummary, ImageExtractionConfig,
+    ImageOutputFormat, LanguageDetectionConfig, TokenReductionOptions, UrlExtractionConfig, UrlExtractionMode,
 };
 
 #[cfg(test)]

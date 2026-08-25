@@ -33,3 +33,4 @@ interface PostProcessor
      */
     public function processing_stage(): mixed;
 }
+

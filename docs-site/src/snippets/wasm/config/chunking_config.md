@@ -1,3 +1,8 @@
+---
+language: typescript
+target: wasm
+---
+
 ```typescript title="WASM"
 import { initWasm, extract } from "@xberg-io/xberg-wasm";
 

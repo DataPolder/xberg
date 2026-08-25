@@ -29,3 +29,4 @@ interface EmbeddingBackend
      */
     public function embed(mixed $texts): mixed;
 }
+

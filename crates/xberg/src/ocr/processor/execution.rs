@@ -446,6 +446,7 @@ struct PreparedOcrImage {
     height: u32,
     source_dpi: i32,
     apply_pix_preprocessing: bool,
+    image_preprocessing: Option<crate::types::ImagePreprocessingMetadata>,
 }
 
 /// Prepare the raster Tesseract will recognize, and report the resolution it should be told.
@@ -484,6 +485,7 @@ fn prepare_ocr_image(
             // says it is; 72 remains the assumption only when nobody knows.
             source_dpi: known_source_dpi.map_or(RAW_IMAGE_SOURCE_DPI, |dpi| dpi.round() as i32),
             apply_pix_preprocessing: false,
+            image_preprocessing: None,
         };
     };
 
@@ -574,6 +576,7 @@ fn prepare_preprocessed_ocr_image(
                 height: normalized_height,
                 source_dpi,
                 apply_pix_preprocessing: true,
+                image_preprocessing: Some(result.metadata),
             }
         }
         Err((error, data)) => {
@@ -586,6 +589,7 @@ fn prepare_preprocessed_ocr_image(
                 // one. The 300 fallback is a guess for when there is nothing better.
                 source_dpi: known_source_dpi.map_or(PREPROCESSING_FALLBACK_SOURCE_DPI, |dpi| dpi.round() as i32),
                 apply_pix_preprocessing: true,
+                image_preprocessing: None,
             }
         }
     }
@@ -971,6 +975,7 @@ pub(super) fn perform_ocr(
     let width = prepared_image.width;
     let height = prepared_image.height;
     let source_dpi = prepared_image.source_dpi;
+    let image_preprocessing = prepared_image.image_preprocessing;
     #[cfg_attr(not(auto_rotate), allow(unused_mut))]
     let mut ocr_image_width = width;
     #[cfg_attr(not(auto_rotate), allow(unused_mut))]
@@ -1313,6 +1318,15 @@ pub(super) fn perform_ocr(
     };
 
     let mut metadata = HashMap::new();
+    if let Some(image_preprocessing) = image_preprocessing {
+        let value = serde_json::to_value(image_preprocessing).map_err(|error| {
+            OcrError::ProcessingFailed(format!("Failed to serialize image preprocessing metadata: {error}"))
+        })?;
+        metadata.insert(
+            crate::ocr_metadata_keys::OCR_IMAGE_PREPROCESSING_METADATA_KEY.to_string(),
+            value,
+        );
+    }
     metadata.insert(
         crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.to_string(),
         serde_json::Value::Number(ocr_image_width.into()),
@@ -2323,6 +2337,20 @@ mod tests {
             prepared.height, 2,
             "max_image_dimension=2 must clamp the resized height"
         );
+        let metadata = prepared
+            .image_preprocessing
+            .expect("successful normalization must retain its metadata");
+        assert_eq!(metadata.original_dimensions.width, SOURCE_DIMENSION as usize);
+        assert_eq!(metadata.original_dimensions.height, SOURCE_DIMENSION as usize);
+        assert_eq!(
+            metadata.new_dimensions.as_ref().map(|dimensions| dimensions.width),
+            Some(2)
+        );
+        assert_eq!(
+            metadata.new_dimensions.as_ref().map(|dimensions| dimensions.height),
+            Some(2)
+        );
+        assert!(metadata.dimension_clamped);
     }
 
     /// Pixel width of a US Letter page (612pt wide) rendered at the 150 DPI the PDF OCR route

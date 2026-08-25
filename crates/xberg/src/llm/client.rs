@@ -668,11 +668,8 @@ pub(crate) fn create_client(config: &LlmConfig) -> crate::Result<Arc<ManagedClie
 /// construct `provider` from there in the first place. [`LlmConfig::credential_provider`]
 /// itself still exists as a field on wasm32 (see that field's docs) — it is simply never read.
 ///
-/// `#[cfg_attr(alef, alef(skip))]`: `Arc<dyn liter_llm::auth::CredentialProvider>` is a trait
-/// object with no FFI-representable equivalent — alef's own `lossy_sanitized_surface` check
-/// rejects it outright rather than silently degrading the parameter to a `String`, matching
-/// every other binding-unreachable LLM entry point in this crate (e.g.
-/// `llm::text_completion::complete_text`, `llm::structured::complete_with_json_schema`).
+/// This Rust-only function accepts a liter-llm trait object and is not exposed
+/// through language bindings.
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg_attr(alef, alef(skip))]
 pub fn create_client_with_credential_provider(

@@ -12,6 +12,9 @@ use ahash::AHashMap;
 use parking_lot::RwLock;
 
 use crate::Result;
+use crate::candle_ocr::config::{
+    CandleTrocrVariant, TrocrBackendOptions, parse_backend_options, validate_optional_non_empty,
+};
 use crate::core::config::OcrConfig;
 use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
 use crate::types::ExtractedDocument;
@@ -151,12 +154,16 @@ fn get_or_init_engine(
 /// ```json
 /// {
 ///   "variant": "base-printed",
-///   "device": "auto"
+///   "device": "auto",
+///   "cache_dir": "/path/to/huggingface/cache",
+///   "hf_revision": "immutable-commit"
 /// }
 /// ```
 ///
 /// - `variant` (string): `"base-printed"` (default), `"large-printed"`, `"base-handwritten"`, `"large-handwritten"`
 /// - `device` (string): `"auto"`, `"cpu"`, `"cuda"`, `"metal"`
+/// - `cache_dir` (string, optional): explicit Hugging Face Hub cache root
+/// - `hf_revision` (string, optional): immutable model revision
 #[cfg_attr(alef, alef(skip))]
 pub struct TrocrBackend {
     variant: TrocrVariant,
@@ -188,37 +195,22 @@ impl TrocrBackend {
     ///
     /// Device selection is delegated to [`crate::candle_ocr::resolve_device_preference`]
     /// so the central `AccelerationConfig` is honoured.
-    fn parse_options(config: &OcrConfig) -> TrocrOptions {
-        let mut variant: Option<TrocrVariant> = None;
-        let mut cache_dir = None;
-        let mut hf_revision = None;
-
-        if let Some(opts) = &config.backend_options {
-            if let Some(v) = opts.get("variant").and_then(|v| v.as_str()) {
-                variant = Some(match v {
-                    "large-printed" => TrocrVariant::LargePrinted,
-                    "base-handwritten" => TrocrVariant::BaseHandwritten,
-                    "large-handwritten" => TrocrVariant::LargeHandwritten,
-                    _ => TrocrVariant::BasePrinted,
-                });
-            }
-            cache_dir = opts
-                .get("cache_dir")
-                .and_then(|value| value.as_str())
-                .map(PathBuf::from);
-            hf_revision = opts
-                .get("hf_revision")
-                .or_else(|| opts.get("revision"))
-                .and_then(|value| value.as_str())
-                .map(str::to_string);
-        }
-
-        TrocrOptions {
+    fn parse_options(config: &OcrConfig) -> Result<TrocrOptions> {
+        let options: TrocrBackendOptions = parse_backend_options(config.backend_options.as_ref(), "candle-trocr")?;
+        validate_optional_non_empty(options.cache_dir.as_deref(), "candle-trocr", "cache_dir")?;
+        validate_optional_non_empty(options.hf_revision.as_deref(), "candle-trocr", "hf_revision")?;
+        let variant = options.variant.map(|variant| match variant {
+            CandleTrocrVariant::BasePrinted => TrocrVariant::BasePrinted,
+            CandleTrocrVariant::LargePrinted => TrocrVariant::LargePrinted,
+            CandleTrocrVariant::BaseHandwritten => TrocrVariant::BaseHandwritten,
+            CandleTrocrVariant::LargeHandwritten => TrocrVariant::LargeHandwritten,
+        });
+        Ok(TrocrOptions {
             variant,
-            device: super::resolve_device_preference(config),
-            cache_dir,
-            hf_revision,
-        }
+            device: super::resolve_device_preference(config, options.device),
+            cache_dir: options.cache_dir.map(PathBuf::from),
+            hf_revision: options.hf_revision,
+        })
     }
 }
 
@@ -251,7 +243,7 @@ impl OcrBackend for TrocrBackend {
     /// in `self.variant`. Inference runs inside `tokio::task::spawn_blocking` so the
     /// async runtime is never blocked.
     async fn process_image(&self, image_bytes: &[u8], config: &OcrConfig) -> Result<ExtractedDocument> {
-        let options = Self::parse_options(config);
+        let options = Self::parse_options(config)?;
         let variant = options.variant.unwrap_or(self.variant);
         let cache_dir = options.cache_dir.unwrap_or_else(hf_hub::resolve_cache_dir);
         let revision = options.hf_revision.unwrap_or_else(|| variant.revision().to_string());
@@ -352,7 +344,7 @@ mod tests {
     #[test]
     fn test_parse_options_defaults() {
         let config = OcrConfig::default();
-        let options = TrocrBackend::parse_options(&config);
+        let options = TrocrBackend::parse_options(&config).unwrap();
         assert_eq!(options.variant, None);
         assert_eq!(options.device, DevicePreference::Auto);
     }
@@ -365,7 +357,7 @@ mod tests {
             })),
             ..Default::default()
         };
-        let options = TrocrBackend::parse_options(&config);
+        let options = TrocrBackend::parse_options(&config).unwrap();
         assert_eq!(options.variant, Some(TrocrVariant::LargePrinted));
     }
 
@@ -377,8 +369,22 @@ mod tests {
             })),
             ..Default::default()
         };
-        let options = TrocrBackend::parse_options(&config);
+        let options = TrocrBackend::parse_options(&config).unwrap();
         assert_eq!(options.device, DevicePreference::Cpu);
+    }
+
+    #[test]
+    fn test_parse_options_hf_cache_and_revision() {
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({
+                "cache_dir": "/tmp/trocr-cache",
+                "hf_revision": "trocr-revision"
+            })),
+            ..Default::default()
+        };
+        let options = TrocrBackend::parse_options(&config).unwrap();
+        assert_eq!(options.cache_dir.as_deref(), Some(Path::new("/tmp/trocr-cache")));
+        assert_eq!(options.hf_revision.as_deref(), Some("trocr-revision"));
     }
 
     #[test]

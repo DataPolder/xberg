@@ -265,6 +265,11 @@ pub struct InternalDocument {
     #[serde(skip)]
     pub escape_markdown: bool,
 
+    /// ~keep When `true`, Markdown rendering preserves watermark text such as arXiv
+    /// identifiers. Set by the pipeline from `ContentFilterConfig::include_watermarks`.
+    #[serde(skip)]
+    pub include_watermarks: bool,
+
     /// Page marker format (with `{page_num}` placeholder) when
     /// `PageConfig::insert_page_markers` is enabled, `None` otherwise. Set by
     /// the pipeline. Renderers use it to emit page markers verbatim instead of
@@ -350,6 +355,7 @@ impl InternalDocument {
             ocr_text_only: false,
             append_ocr_text: false,
             escape_markdown: true,
+            include_watermarks: false,
             page_marker_format: None,
             table_anchors: false,
             form_fields: Vec::new(),

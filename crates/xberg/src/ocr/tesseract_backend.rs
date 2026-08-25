@@ -17,6 +17,15 @@ use std::sync::Arc;
 
 const USE_CACHE_BACKEND_OPTION: &str = "use_cache";
 
+fn select_output_ocr_elements(
+    elements: Option<Vec<crate::types::OcrElement>>,
+    config: &OcrConfig,
+) -> Option<Vec<crate::types::OcrElement>> {
+    let options = config.element_config.as_ref()?;
+    let selected = options.select_elements(elements.as_deref().unwrap_or_default());
+    (!selected.is_empty()).then_some(selected)
+}
+
 use crate::ocr::types::TesseractConfig as InternalTesseractConfig;
 
 /// Native Tesseract OCR backend.
@@ -300,9 +309,11 @@ impl OcrBackend for TesseractBackend {
             .to_string();
 
         let pre_formatted = extract_pre_formatted_metadata(&mut ocr_result.metadata);
+        let image_preprocessing = extract_image_preprocessing_metadata(&mut ocr_result.metadata);
 
         let processing_warnings = warnings_from_ocr_metadata(&ocr_result.metadata);
         strip_ocr_scratch_metadata_keys(&mut ocr_result.metadata);
+        let ocr_elements = select_output_ocr_elements(ocr_result.ocr_elements.take(), config);
 
         let mut additional = AHashMap::new();
         for (key, value) in ocr_result.metadata {
@@ -322,6 +333,7 @@ impl OcrBackend for TesseractBackend {
                     .and_then(|t| t.cells.first().map(|row| row.len() as u32)),
             })),
             output_format: pre_formatted,
+            image_preprocessing,
             additional,
             ..Default::default()
         };
@@ -336,7 +348,7 @@ impl OcrBackend for TesseractBackend {
                 .enumerate()
                 .map(|(index, t)| convert_ocr_table(index, t))
                 .collect(),
-            ocr_elements: ocr_result.ocr_elements,
+            ocr_elements,
             ocr_internal_document: ocr_result.internal_document,
             processing_warnings,
             ..Default::default()
@@ -396,9 +408,11 @@ impl OcrBackend for TesseractBackend {
             .to_string();
 
         let pre_formatted = extract_pre_formatted_metadata(&mut ocr_result.metadata);
+        let image_preprocessing = extract_image_preprocessing_metadata(&mut ocr_result.metadata);
 
         let processing_warnings = warnings_from_ocr_metadata(&ocr_result.metadata);
         strip_ocr_scratch_metadata_keys(&mut ocr_result.metadata);
+        let ocr_elements = select_output_ocr_elements(ocr_result.ocr_elements.take(), config);
 
         let mut additional = AHashMap::new();
         for (key, value) in ocr_result.metadata {
@@ -418,6 +432,7 @@ impl OcrBackend for TesseractBackend {
                     .and_then(|t| t.cells.first().map(|row| row.len() as u32)),
             })),
             output_format: pre_formatted,
+            image_preprocessing,
             additional,
             ..Default::default()
         };
@@ -432,7 +447,7 @@ impl OcrBackend for TesseractBackend {
                 .enumerate()
                 .map(|(index, t)| convert_ocr_table(index, t))
                 .collect(),
-            ocr_elements: ocr_result.ocr_elements,
+            ocr_elements,
             ocr_internal_document: ocr_result.internal_document,
             processing_warnings,
             ..Default::default()
@@ -613,6 +628,19 @@ fn extract_pre_formatted_metadata(
     metadata
         .remove(PRE_FORMATTED_METADATA_KEY)
         .and_then(|v| v.as_str().map(str::to_string))
+}
+
+fn extract_image_preprocessing_metadata(
+    metadata: &mut std::collections::HashMap<String, serde_json::Value>,
+) -> Option<crate::types::ImagePreprocessingMetadata> {
+    let value = metadata.remove(crate::ocr_metadata_keys::OCR_IMAGE_PREPROCESSING_METADATA_KEY)?;
+    match serde_json::from_value(value) {
+        Ok(metadata) => Some(metadata),
+        Err(error) => {
+            tracing::warn!(%error, "discarding invalid OCR image preprocessing metadata");
+            None
+        }
+    }
 }
 
 /// Turn the OCR backend's metadata side-channel into the `ProcessingWarning`s a
@@ -1288,6 +1316,47 @@ mod tests {
 
         assert_eq!(extracted.as_deref(), Some("markdown"));
         assert!(!metadata.contains_key(PRE_FORMATTED_METADATA_KEY));
+    }
+
+    #[test]
+    fn image_preprocessing_metadata_is_promoted_to_the_typed_document_field() {
+        let mut metadata = std::collections::HashMap::from([
+            (
+                crate::ocr_metadata_keys::OCR_IMAGE_PREPROCESSING_METADATA_KEY.to_string(),
+                serde_json::json!({
+                    "original_dimensions": [4, 4],
+                    "original_dpi": [72.0, 72.0],
+                    "target_dpi": 300,
+                    "scale_factor": 0.5,
+                    "auto_adjusted": false,
+                    "final_dpi": 36,
+                    "new_dimensions": [2, 2],
+                    "resample_method": "LANCZOS3",
+                    "dimension_clamped": true,
+                    "calculated_dpi": null,
+                    "skipped_resize": false,
+                    "resize_error": null
+                }),
+            ),
+            ("mean_text_conf".to_string(), serde_json::json!(98.5)),
+        ]);
+
+        let promoted =
+            extract_image_preprocessing_metadata(&mut metadata).expect("valid preprocessing metadata must be promoted");
+
+        assert_eq!(promoted.original_dimensions.width, 4);
+        assert_eq!(promoted.original_dimensions.height, 4);
+        assert_eq!(
+            promoted.new_dimensions.as_ref().map(|dimensions| dimensions.width),
+            Some(2)
+        );
+        assert_eq!(
+            promoted.new_dimensions.as_ref().map(|dimensions| dimensions.height),
+            Some(2)
+        );
+        assert!(promoted.dimension_clamped);
+        assert!(!metadata.contains_key(crate::ocr_metadata_keys::OCR_IMAGE_PREPROCESSING_METADATA_KEY));
+        assert_eq!(metadata.get("mean_text_conf"), Some(&serde_json::json!(98.5)));
     }
 
     /// #354 must not over-fire: genuine document metadata that happens to

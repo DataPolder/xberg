@@ -15,7 +15,7 @@ pub(crate) fn map_output_format(format: XbergOutputFormat) -> LibOutputFormat {
         XbergOutputFormat::Markdown => LibOutputFormat::Markdown,
         XbergOutputFormat::Djot => LibOutputFormat::Djot,
         XbergOutputFormat::Plain => LibOutputFormat::Plain,
-        XbergOutputFormat::Html | XbergOutputFormat::Json | XbergOutputFormat::Structured => LibOutputFormat::Markdown,
+        XbergOutputFormat::Html | XbergOutputFormat::Json => LibOutputFormat::Markdown,
         // The conversion library has no DocTags mode. Markdown is the closest structured
         // intermediate; the DocTags renderer works from the element tree, not from this text.
         XbergOutputFormat::DocTags => LibOutputFormat::Markdown,

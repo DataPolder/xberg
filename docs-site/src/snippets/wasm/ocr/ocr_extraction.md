@@ -1,3 +1,8 @@
+---
+language: typescript
+target: wasm
+---
+
 ```typescript title="WASM (Browser)"
 import { enableOcr, extract, initWasm } from "@xberg-io/xberg-wasm";
 

@@ -574,12 +574,6 @@ pub(crate) fn validate_dpi(dpi: i32) -> Result<()> {
 ///
 /// Checks that max_chars > 0 and max_overlap < max_chars.
 ///
-/// Note: `ChunkingConfig::breadcrumb_target` (`BreadcrumbTarget`) needs no runtime
-/// validation function alongside this one — it is a genuine Rust enum
-/// (`content`/`metadata`/`both`), so an invalid value already fails config
-/// deserialization with a clear serde "unknown variant" error before `validate()`
-/// ever runs (#337).
-///
 /// # Arguments
 ///
 /// * `max_chars` - The maximum characters per chunk

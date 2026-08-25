@@ -20,6 +20,9 @@ use ahash::AHashMap;
 use parking_lot::{Mutex, RwLock};
 
 use crate::Result;
+use crate::candle_ocr::config::{
+    GlmOcrBackendOptions, GlmOcrLayoutMode, GlmOcrTaskKind, parse_backend_options, validate_optional_non_empty,
+};
 use crate::core::config::OcrConfig;
 use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
 use crate::types::ExtractedDocument;
@@ -349,13 +352,17 @@ fn checkbox_marker_for_class(class: crate::layout::LayoutClass) -> Option<&'stat
 /// {
 ///   "task": "ocr",
 ///   "device": "auto",
-///   "layout_mode": "whole_page"
+///   "layout_mode": "whole_page",
+///   "enable_chart_understanding": false,
+///   "cache_dir": "/path/to/huggingface/cache"
 /// }
 /// ```
 ///
 /// - `task` (string): `"ocr"` (default), `"table"`, `"formula"`, `"chart"`, `"caption"`
 /// - `device` (string): `"auto"`, `"cpu"`, `"cuda"`, `"metal"`
 /// - `layout_mode` (string): `"whole_page"` (default), `"paired"` (requires `layout-detection` feature)
+/// - `enable_chart_understanding` (boolean): route chart regions to chart understanding
+/// - `cache_dir` (string, optional): explicit Hugging Face Hub cache root
 #[cfg_attr(alef, alef(skip))]
 pub struct GlmOcrBackend {
     default_task: GlmOcrTask,
@@ -393,54 +400,43 @@ impl GlmOcrBackend {
     /// - `cache_dir` (string, optional): explicit Hugging Face Hub cache root.
     ///
     /// Unlike [`crate::candle_ocr::PaddleOcrVlBackend`] and
-    /// [`crate::candle_ocr::TrOcrBackend`], GLM-OCR has no `model_id` option — weights
+    /// [`crate::candle_ocr::TrocrBackend`], GLM-OCR has no `model_id` option — weights
     /// always come from the single, checksum-pinned `zai-org/GLM-OCR` repository, so an
     /// `hf_revision`/`revision` override could never resolve to different, still-valid
     /// content. Deliberately not exposed: every value other than the internal pin would
     /// fail `GlmOcrEngine::new_with_hf`'s revision check, and the pin itself is already the
     /// default. See the engine-level pinning check for the (retained) defensive guard.
-    fn parse_options(&self, config: &OcrConfig) -> GlmOcrOptions {
-        let mut task = self.default_task;
-        let mut layout_mode = self.layout_mode;
-        let mut enable_chart_understanding = false;
-        let mut cache_dir = None;
-
-        if let Some(opts) = &config.backend_options {
-            if let Some(t) = opts.get("task").and_then(|v| v.as_str()) {
-                task = match t {
-                    "table" => GlmOcrTask::Table,
-                    "formula" => GlmOcrTask::Formula,
-                    "chart" => GlmOcrTask::Chart,
-                    "caption" => GlmOcrTask::Caption,
-                    _ => GlmOcrTask::Ocr,
-                };
+    fn parse_options(&self, config: &OcrConfig) -> Result<GlmOcrOptions> {
+        let options: GlmOcrBackendOptions = parse_backend_options(config.backend_options.as_ref(), "candle-glm-ocr")?;
+        validate_optional_non_empty(options.cache_dir.as_deref(), "candle-glm-ocr", "cache_dir")?;
+        let task = match options.task {
+            None => self.default_task,
+            Some(GlmOcrTaskKind::Ocr) => GlmOcrTask::Ocr,
+            Some(GlmOcrTaskKind::Table) => GlmOcrTask::Table,
+            Some(GlmOcrTaskKind::Formula) => GlmOcrTask::Formula,
+            Some(GlmOcrTaskKind::Chart) => GlmOcrTask::Chart,
+            Some(GlmOcrTaskKind::Caption) => GlmOcrTask::Caption,
+        };
+        let layout_mode = match options.layout_mode {
+            None => self.layout_mode,
+            Some(GlmOcrLayoutMode::WholePage) => LayoutMode::WholePage,
+            #[cfg(feature = "layout-detection")]
+            Some(GlmOcrLayoutMode::Paired) => LayoutMode::Paired,
+            #[cfg(not(feature = "layout-detection"))]
+            Some(GlmOcrLayoutMode::Paired) => {
+                return Err(crate::XbergError::validation(
+                    "invalid candle-glm-ocr backend_options.layout_mode: paired requires the layout-detection feature"
+                        .to_string(),
+                ));
             }
-
-            if let Some(m) = opts.get("layout_mode").and_then(|v| v.as_str()) {
-                layout_mode = match m {
-                    #[cfg(feature = "layout-detection")]
-                    "paired" => LayoutMode::Paired,
-                    _ => LayoutMode::WholePage,
-                };
-            }
-
-            if let Some(e) = opts.get("enable_chart_understanding").and_then(|v| v.as_bool()) {
-                enable_chart_understanding = e;
-            }
-            cache_dir = opts
-                .get("cache_dir")
-                .and_then(|value| value.as_str())
-                .map(PathBuf::from);
-        }
-
-        let device = super::resolve_device_preference(config);
-        GlmOcrOptions {
+        };
+        Ok(GlmOcrOptions {
             task,
-            device,
+            device: super::resolve_device_preference(config, options.device),
             layout_mode,
-            enable_chart_understanding,
-            cache_dir,
-        }
+            enable_chart_understanding: options.enable_chart_understanding.unwrap_or(false),
+            cache_dir: options.cache_dir.map(PathBuf::from),
+        })
     }
 }
 
@@ -470,7 +466,7 @@ impl Plugin for GlmOcrBackend {
 #[async_trait]
 impl OcrBackend for GlmOcrBackend {
     async fn process_image(&self, image_bytes: &[u8], config: &OcrConfig) -> Result<ExtractedDocument> {
-        let opts = self.parse_options(config);
+        let opts = self.parse_options(config)?;
 
         if image_bytes.is_empty() {
             return Err(crate::XbergError::Validation {
@@ -779,7 +775,9 @@ mod tests {
     #[test]
     fn test_parse_options_defaults() {
         let config = OcrConfig::default();
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
         assert_eq!(opts.task, GlmOcrTask::Ocr);
         assert_eq!(opts.device, DevicePreference::Auto);
         assert!(!opts.enable_chart_understanding);
@@ -791,7 +789,9 @@ mod tests {
             backend_options: Some(serde_json::json!({"task": "table"})),
             ..Default::default()
         };
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
         assert_eq!(opts.task, GlmOcrTask::Table);
     }
 
@@ -801,7 +801,9 @@ mod tests {
             backend_options: Some(serde_json::json!({"task": "formula"})),
             ..Default::default()
         };
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
         assert_eq!(opts.task, GlmOcrTask::Formula);
     }
 
@@ -811,7 +813,9 @@ mod tests {
             backend_options: Some(serde_json::json!({"device": "cpu"})),
             ..Default::default()
         };
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
         assert_eq!(opts.device, DevicePreference::Cpu);
     }
 
@@ -821,7 +825,9 @@ mod tests {
             backend_options: Some(serde_json::json!({"enable_chart_understanding": true})),
             ..Default::default()
         };
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
         assert!(opts.enable_chart_understanding);
     }
 
@@ -831,14 +837,18 @@ mod tests {
             backend_options: Some(serde_json::json!({"enable_chart_understanding": false})),
             ..Default::default()
         };
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
         assert!(!opts.enable_chart_understanding);
     }
 
     #[test]
     fn test_parse_options_chart_understanding_default() {
         let config = OcrConfig::default();
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
         assert!(!opts.enable_chart_understanding);
     }
 
@@ -852,30 +862,35 @@ mod tests {
             })),
             ..Default::default()
         };
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
         assert_eq!(opts.task, GlmOcrTask::Chart);
         assert_eq!(opts.device, DevicePreference::Cuda);
         assert!(opts.enable_chart_understanding);
     }
 
     #[test]
-    fn test_parse_options_non_object_json_returns_defaults() {
+    fn test_parse_options_non_object_json_returns_contextual_errors() {
         let config = OcrConfig {
             backend_options: Some(serde_json::json!([1, 2, 3])),
             ..Default::default()
         };
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
-        assert_eq!(opts.task, GlmOcrTask::Ocr);
-        assert_eq!(opts.device, DevicePreference::Auto);
-        assert!(!opts.enable_chart_understanding);
-        assert!(opts.cache_dir.is_none());
+        let error = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("candle-glm-ocr backend_options"));
 
         let config = OcrConfig {
             backend_options: Some(serde_json::json!("ocr")),
             ..Default::default()
         };
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
-        assert_eq!(opts.task, GlmOcrTask::Ocr);
+        let error = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("candle-glm-ocr backend_options"));
     }
 
     #[test]
@@ -884,11 +899,29 @@ mod tests {
             backend_options: Some(serde_json::json!({})),
             ..Default::default()
         };
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
         assert_eq!(opts.task, GlmOcrTask::Ocr);
         assert_eq!(opts.device, DevicePreference::Auto);
         assert!(!opts.enable_chart_understanding);
         assert!(opts.cache_dir.is_none());
+    }
+
+    #[test]
+    fn test_parse_options_layout_mode_and_cache_dir() {
+        let config = OcrConfig {
+            backend_options: Some(serde_json::json!({
+                "layout_mode": "paired",
+                "cache_dir": "/tmp/glm-cache"
+            })),
+            ..Default::default()
+        };
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
+        assert_eq!(opts.layout_mode, LayoutMode::Paired);
+        assert_eq!(opts.cache_dir.as_deref(), Some(Path::new("/tmp/glm-cache")));
     }
 
     #[test]
@@ -941,7 +974,9 @@ mod tests {
             backend_options: Some(serde_json::json!({"enable_chart_understanding": true})),
             ..Default::default()
         };
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
         let routed_task = task_for_label(LayoutClass::Chart, opts.enable_chart_understanding);
         assert_eq!(routed_task, GlmOcrTask::Chart);
     }
@@ -954,7 +989,9 @@ mod tests {
             backend_options: Some(serde_json::json!({"enable_chart_understanding": false})),
             ..Default::default()
         };
-        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default()).parse_options(&config);
+        let opts = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::default())
+            .parse_options(&config)
+            .unwrap();
         let routed_task = task_for_label(LayoutClass::Chart, opts.enable_chart_understanding);
         assert_eq!(routed_task, GlmOcrTask::Caption);
     }

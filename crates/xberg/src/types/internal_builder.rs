@@ -1,7 +1,7 @@
 //! Ergonomic builder for constructing `InternalDocument` instances.
 //!
 //! Mirrors the API of `DocumentStructureBuilder`
-//! but outputs the flat [`InternalDocument`](super::internal::InternalDocument) representation
+//! but outputs the flat `InternalDocument` representation
 //! instead of a tree-based `DocumentStructure`.
 //!
 //! # Example
@@ -350,7 +350,11 @@ impl InternalDocumentBuilder {
 
     /// Push a page break marker at depth 0.
     pub fn push_page_break(&mut self) {
-        let elem = self.make_element(ElementKind::PageBreak, "", 0, None, None, None);
+        self.push_page_break_with_page(None);
+    }
+
+    pub(crate) fn push_page_break_with_page(&mut self, page: Option<u32>) {
+        let elem = self.make_element(ElementKind::PageBreak, "", 0, page, None, None);
         self.doc.push_element(elem);
     }
 

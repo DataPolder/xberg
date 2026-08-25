@@ -73,7 +73,9 @@ pub(crate) fn text_block_to_element(block: &TextBlock, page_number: u32) -> Resu
         (block.box_points[3].x, block.box_points[3].y),
     ];
 
-    let geometry = OcrBoundingGeometry::Quadrilateral { points };
+    let geometry = OcrBoundingGeometry::Quadrilateral {
+        points: points.into_iter().map(Into::into).collect(),
+    };
 
     let confidence = OcrConfidence::from_paddle(block.box_score, block.text_score);
 
@@ -131,11 +133,11 @@ fn word_block_to_element(
         return None;
     }
     let geometry = OcrBoundingGeometry::Quadrilateral {
-        points: [
-            (points[0].x, points[0].y),
-            (points[1].x, points[1].y),
-            (points[2].x, points[2].y),
-            (points[3].x, points[3].y),
+        points: vec![
+            (points[0].x, points[0].y).into(),
+            (points[1].x, points[1].y).into(),
+            (points[2].x, points[2].y).into(),
+            (points[3].x, points[3].y).into(),
         ],
     };
     Some(
@@ -392,31 +394,14 @@ pub(crate) fn tsv_row_to_element(row: &TsvRow) -> OcrElement {
     let confidence = OcrConfidence::from_tesseract(row.conf);
     let level = OcrElementLevel::from_tesseract_level(row.level);
 
-    let parent_id = if row.level == 5 {
-        Some(format!(
-            "p{}_b{}_par{}_l{}",
-            row.page_num, row.block_num, row.par_num, row.line_num
-        ))
-    } else if row.level == 4 {
-        Some(format!("p{}_b{}_par{}", row.page_num, row.block_num, row.par_num))
-    } else {
-        None
-    };
-
-    let mut element = OcrElement::new(row.text.clone(), geometry, confidence)
+    OcrElement::new(row.text.clone(), geometry, confidence)
         .with_level(level)
         .with_page_number(row.page_num as u32)
         .with_metadata("backend", serde_json::json!("tesseract"))
         .with_metadata("block_num", serde_json::json!(row.block_num))
         .with_metadata("par_num", serde_json::json!(row.par_num))
         .with_metadata("line_num", serde_json::json!(row.line_num))
-        .with_metadata("word_num", serde_json::json!(row.word_num));
-
-    if let Some(pid) = parent_id {
-        element = element.with_parent_id(pid);
-    }
-
-    element
+        .with_metadata("word_num", serde_json::json!(row.word_num))
 }
 
 /// Convert a Tesseract iterator WordData to a unified OcrElement with rich metadata.
@@ -626,8 +611,7 @@ mod tests {
         assert_eq!(element.text, "Hello");
         assert_eq!(element.level, OcrElementLevel::Word);
         assert_eq!(element.page_number, 1);
-        assert!(element.parent_id.is_some());
-        assert_eq!(element.parent_id.as_ref().unwrap(), "p1_b1_par1_l2");
+        assert_eq!(element.parent_id, None);
 
         #[cfg(any(paddle_ocr, feature = "layout-detection"))]
         {
@@ -665,7 +649,10 @@ mod tests {
     #[test]
     fn test_quadrilateral_to_hocr_word() {
         let geometry = OcrBoundingGeometry::Quadrilateral {
-            points: [(10, 22), (108, 20), (110, 72), (12, 74)],
+            points: [(10, 22), (108, 20), (110, 72), (12, 74)]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         };
         let confidence = OcrConfidence::from_paddle(0.95, 0.88);
         let element = OcrElement::new("Rotated", geometry, confidence);
@@ -815,10 +802,10 @@ mod tests {
         assert_eq!(element.page_number, 1);
 
         if let OcrBoundingGeometry::Quadrilateral { points } = &element.geometry {
-            assert_eq!(points[0], (10, 20));
-            assert_eq!(points[1], (100, 22));
-            assert_eq!(points[2], (98, 70));
-            assert_eq!(points[3], (8, 68));
+            assert_eq!(points[0], (10, 20).into());
+            assert_eq!(points[1], (100, 22).into());
+            assert_eq!(points[2], (98, 70).into());
+            assert_eq!(points[3], (8, 68).into());
         } else {
             panic!("Expected Quadrilateral geometry");
         }
@@ -884,6 +871,9 @@ mod tests {
             group.words[0].geometry,
             OcrBoundingGeometry::Quadrilateral {
                 points: [(10, 20), (50, 20), (50, 40), (10, 40)]
+                    .into_iter()
+                    .map(Into::into)
+                    .collect()
             }
         );
     }

@@ -401,6 +401,9 @@ pub trait OcrBackend: Plugin {
     /// Check if the backend supports direct document-level processing (e.g. for PDFs).
     ///
     /// Defaults to `false`. Override if the backend has optimized document processing.
+    /// PDF extraction uses this optimized path only when both effective page margins
+    /// are zero; nonzero margins require per-page image processing so geometry can be
+    /// filtered correctly.
     fn supports_document_processing(&self) -> bool {
         false
     }

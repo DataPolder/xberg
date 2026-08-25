@@ -22,3 +22,4 @@ interface RerankerBackend
      */
     public function rerank(string $query, mixed $documents): mixed;
 }
+

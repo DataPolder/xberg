@@ -459,7 +459,7 @@ fn element_to_node_content(
             }
         }
         ElementKind::MetadataBlock => {
-            let entries = parse_metadata_entries(&elem.text);
+            let entries = parse_metadata_entries(&elem.text).into_iter().map(Into::into).collect();
             NodeContent::MetadataBlock { entries }
         }
         ElementKind::OcrText { .. } => NodeContent::Paragraph {
@@ -598,7 +598,6 @@ pub fn derive_extraction_result(
                 Some(crate::rendering::render_json(&doc))
             }
         }
-        crate::core::config::OutputFormat::Structured => None,
         crate::core::config::OutputFormat::DocTags => {
             if doc.pre_rendered_content.is_some() && doc.metadata.output_format.as_deref() == Some("doctags") {
                 doc.pre_rendered_content.take()
@@ -928,6 +927,7 @@ fn build_pages(doc: &InternalDocument) -> Option<Vec<PageContent>> {
                 content,
                 tables,
                 image_indices,
+                image_preprocessing: None,
                 hierarchy: None,
                 is_blank: None,
                 layout_regions: None,
@@ -944,7 +944,7 @@ fn build_pages(doc: &InternalDocument) -> Option<Vec<PageContent>> {
 /// Re-render each page's content using the requested output format.
 ///
 /// Called after pages are built but before `derive_document_structure_inner` moves
-/// element text out of the document. For Plain/Structured/Json/Custom formats this
+/// element text out of the document. For Plain/Json/Custom formats this
 /// is a no-op. For Markdown/Djot/Html/DocTags, each page's element subset is
 /// rendered with the same renderer used for the full document, so `pages[n].content`
 /// matches the format of `result.content` after `apply_output_format`.
@@ -964,7 +964,7 @@ fn apply_page_content_format(
         OutputFormat::Djot => crate::rendering::render_djot,
         OutputFormat::Html => crate::rendering::render_html,
         OutputFormat::DocTags => crate::rendering::render_doctags,
-        OutputFormat::Plain | OutputFormat::Structured | OutputFormat::Json | OutputFormat::Custom(_) => {
+        OutputFormat::Plain | OutputFormat::Json | OutputFormat::Custom(_) => {
             return pages;
         }
     };
@@ -2039,6 +2039,7 @@ mod tests {
             content: "Native PDF page content.".to_string(),
             tables: vec![],
             image_indices: vec![],
+            image_preprocessing: None,
             hierarchy: None,
             is_blank: None,
             layout_regions: None,
@@ -2082,6 +2083,7 @@ mod tests {
                 content: "Page 1 plain".to_string(),
                 tables: vec![],
                 image_indices: vec![],
+                image_preprocessing: None,
                 hierarchy: None,
                 is_blank: None,
                 layout_regions: None,
@@ -2094,6 +2096,7 @@ mod tests {
                 content: "Page 2 native content.".to_string(),
                 tables: vec![],
                 image_indices: vec![],
+                image_preprocessing: None,
                 hierarchy: None,
                 is_blank: None,
                 layout_regions: None,

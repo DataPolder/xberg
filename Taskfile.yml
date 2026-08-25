@@ -52,6 +52,9 @@ includes:
     taskfile: ./.task/tools/general.yml
     flatten: true
 
+vars:
+  AI_RULEZ_VERSION: "4.11.3"
+
 tasks:
   default:
     desc: "List available tasks"
@@ -63,6 +66,7 @@ tasks:
     cmds:
       - task: rust:install
       - alef setup
+      - task: governance:generate
       - task: integrations:sync
       - command -v poly >/dev/null 2>&1 || brew install goldziher/tap/poly
       - poly hooks install
@@ -157,6 +161,31 @@ tasks:
     cmds:
       - task: format:check
       - task: lint:check
+
+  governance:generate:
+    desc: "Generate local AI governance files with the pinned ai-rulez version"
+    cmds:
+      - npx -y ai-rulez@{{.AI_RULEZ_VERSION}} generate
+
+  governance:validate:
+    desc: "Validate the root AI governance configuration"
+    cmds:
+      - npx -y ai-rulez@{{.AI_RULEZ_VERSION}} validate
+
+  governance:verify:
+    desc: "Validate that AI governance inputs resolve and render without modifying the checkout"
+    deps:
+      - governance:validate
+    cmds:
+      - |
+        set -euo pipefail
+        governance_verify_root="$(mktemp -d)"
+        trap 'rm -rf -- "$governance_verify_root"' EXIT
+        cp -R .ai-rulez "$governance_verify_root/.ai-rulez"
+        (
+          cd "$governance_verify_root"
+          npx -y ai-rulez@{{.AI_RULEZ_VERSION}} generate --no-configure-cli-mcp --quiet
+        )
 
   check:android:
     desc: "cargo check xberg-dart + xberg-ffi for Android ABIs"

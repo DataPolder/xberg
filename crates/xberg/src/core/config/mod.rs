@@ -44,9 +44,9 @@ pub use csv::CsvConfig;
 pub(crate) use download_progress::DownloadProgress;
 pub use email::EmailConfig;
 pub use extraction::{
-    BreadcrumbTarget, ExtractInput, ExtractInputKind, ExtractionConfig, ExtractionErrorItem, ExtractionResult,
-    ExtractionSummary, FileExtractionConfig, ImageExtractionConfig, LanguageDetectionConfig, TokenReductionOptions,
-    UrlExtractionConfig, UrlExtractionMode,
+    ExtractInput, ExtractInputKind, ExtractionConfig, ExtractionErrorItem, ExtractionResult, ExtractionSummary,
+    FileExtractionConfig, ImageExtractionConfig, LanguageDetectionConfig, TokenReductionOptions, UrlExtractionConfig,
+    UrlExtractionMode,
 };
 pub use formats::{JupyterCellRendering, OutputFormat};
 #[cfg(feature = "html")]

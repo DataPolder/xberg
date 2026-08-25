@@ -57,7 +57,7 @@ fn should_skip_pdf_image_ocr(doc: &InternalDocument, image: &crate::types::Extra
     let Some(page_number) = image.page_number else {
         return false;
     };
-    let Some((page_width, page_height)) = doc
+    let Some(dimensions) = doc
         .metadata
         .pages
         .as_ref()
@@ -67,6 +67,8 @@ fn should_skip_pdf_image_ocr(doc: &InternalDocument, image: &crate::types::Extra
     else {
         return false;
     };
+    let page_width = dimensions.width;
+    let page_height = dimensions.height;
     if page_width <= 0.0 || page_height <= 0.0 {
         return false;
     }
@@ -306,6 +308,10 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     doc.ocr_text_only = config.images.as_ref().map(|i| i.ocr_text_only).unwrap_or(false);
     doc.append_ocr_text = config.images.as_ref().map(|i| i.append_ocr_text).unwrap_or(false);
     doc.escape_markdown = config.escape_markdown;
+    doc.include_watermarks = config
+        .content_filter
+        .as_ref()
+        .is_some_and(|filter| filter.include_watermarks);
     doc.table_anchors = config.table_anchors;
     doc.page_marker_format = config
         .pages
@@ -604,6 +610,10 @@ pub fn run_pipeline_sync(mut doc: InternalDocument, config: &ExtractionConfig) -
     doc.ocr_text_only = config.images.as_ref().map(|i| i.ocr_text_only).unwrap_or(false);
     doc.append_ocr_text = config.images.as_ref().map(|i| i.append_ocr_text).unwrap_or(false);
     doc.escape_markdown = config.escape_markdown;
+    doc.include_watermarks = config
+        .content_filter
+        .as_ref()
+        .is_some_and(|filter| filter.include_watermarks);
     doc.table_anchors = config.table_anchors;
     doc.page_marker_format = config
         .pages

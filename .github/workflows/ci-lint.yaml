@@ -21,6 +21,7 @@ on:
       - "alef.toml"
       - "pyproject.toml"
       - "plugin/**"
+      - ".ai-rulez/**"
       - ".claude-plugin/**"
       - ".agents/plugins/**"
       - "test_documents"
@@ -45,6 +46,7 @@ on:
       - "alef.toml"
       - "pyproject.toml"
       - "plugin/**"
+      - ".ai-rulez/**"
       - ".claude-plugin/**"
       - ".agents/plugins/**"
       - "test_documents"
@@ -58,6 +60,16 @@ permissions:
   contents: read
 
 jobs:
+  governance-validation:
+    name: AI governance validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install Task
+        uses: xberg-io/actions/install-task@54a96fe62890b0843bb33365f72926b6415c06f9
+      - name: Validate AI governance inputs
+        run: task governance:verify
+
   benchmark-scripts:
     if: github.event.pull_request.draft != true
     name: Benchmark script regressions

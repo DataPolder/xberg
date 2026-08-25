@@ -45,13 +45,30 @@ fn effective_layout_acceleration<'a>(
 /// (`core/pipeline/format.rs`'s `custom_fallback_to_plain`). `DocTags` is a real,
 /// always-registered built-in renderer that needs the same geometry and headings
 /// as Markdown/Djot/HTML, so it gets its own explicit arm instead.
-fn needs_structured_extraction(hierarchy_enabled: bool, output_format: &OutputFormat, ocr_inline_images: bool) -> bool {
+fn needs_structured_extraction(
+    hierarchy_enabled: bool,
+    output_format: &OutputFormat,
+    ocr_inline_images: bool,
+    content_filter_configured: bool,
+) -> bool {
     hierarchy_enabled
         || matches!(
             output_format,
             OutputFormat::Markdown | OutputFormat::Djot | OutputFormat::Html | OutputFormat::DocTags
         )
         || ocr_inline_images
+        || content_filter_configured
+}
+
+fn hierarchy_cluster_count(config: &ExtractionConfig) -> usize {
+    config
+        .pdf_options
+        .as_ref()
+        .and_then(|options| options.hierarchy.as_ref())
+        .map_or_else(
+            || crate::core::config::HierarchyConfig::default().k_clusters,
+            |hierarchy| hierarchy.k_clusters,
+        )
 }
 
 /// Report a table-extraction failure that took out a whole detector pass, not just one page.
@@ -72,6 +89,18 @@ fn table_stage_failure_warning(stage: &str, error: &impl std::fmt::Display) -> c
              tables from this pass were skipped"
         )),
     }
+}
+
+#[cfg(feature = "pdf")]
+fn retain_segments_inside_page_margins(
+    segments: &mut Vec<crate::pdf::hierarchy::SegmentData>,
+    page_bottom: f32,
+    page_top: f32,
+    margins: crate::pdf::native::text::PageMarginFractions,
+) {
+    segments.retain(|segment| {
+        crate::pdf::native::text::baseline_is_inside_page_margins(segment.baseline_y, page_bottom, page_top, margins)
+    });
 }
 
 /// Extract text, metadata, tables, and annotations from a PDF document using the xberg_native_pdf backend.
@@ -103,6 +132,7 @@ pub(crate) fn extract_all_from_native_document(
     >,
 ) -> Result<PdfExtractionPhaseResult> {
     let _span = tracing::debug_span!("extract_xberg_native_pdf").entered();
+    let margins = crate::pdf::native::text::PageMarginFractions::from_extraction_config(Some(config));
 
     #[cfg_attr(not(feature = "layout-detection"), allow(unused_mut))]
     let (mut native_text, mut boundaries, mut page_contents, mut pdf_metadata) =
@@ -117,7 +147,7 @@ pub(crate) fn extract_all_from_native_document(
     if config.pdf_options.as_ref().is_some_and(|opts| opts.reading_order)
         && let Some(hints) = layout_hints
     {
-        match apply_reading_order_reordering(&mut doc, &native_text, hints, config.pages.as_ref()) {
+        match apply_reading_order_reordering(&mut doc, &native_text, hints, config.pages.as_ref(), margins) {
             Ok((reordered, reordered_boundaries, reordered_per_page)) => {
                 native_text = reordered;
                 // Reordering rebuilds the text, so boundaries computed against
@@ -152,7 +182,12 @@ pub(crate) fn extract_all_from_native_document(
         .pdf_options
         .as_ref()
         .is_some_and(|options| options.hierarchy.as_ref().is_some_and(|hierarchy| hierarchy.enabled));
-    let needs_structured = needs_structured_extraction(hierarchy_enabled, &config.output_format, ocr_inline_images);
+    let needs_structured = needs_structured_extraction(
+        hierarchy_enabled,
+        &config.output_format,
+        ocr_inline_images,
+        config.content_filter.is_some(),
+    );
     let retain_hierarchy_segments = needs_structured && !config.force_ocr;
 
     let mut extraction_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
@@ -259,12 +294,7 @@ pub(crate) fn extract_all_from_native_document(
     }
 
     let pre_rendered_doc = if needs_structured && !config.force_ocr {
-        let k = config
-            .pdf_options
-            .as_ref()
-            .and_then(|opts| opts.hierarchy.as_ref())
-            .map(|h| h.k_clusters)
-            .unwrap_or(4);
+        let k = hierarchy_cluster_count(config);
 
         // `HierarchyConfig::include_bbox` (default `true`): when explicitly disabled,
         // bounding-box info is stripped from every structural element below so
@@ -277,7 +307,7 @@ pub(crate) fn extract_all_from_native_document(
             .map(|h| h.include_bbox)
             .unwrap_or(true);
 
-        let (strip_repeating_text, include_headers, include_footers, include_footnotes) = config
+        let (strip_repeating_text, include_headers, include_footers, include_footnotes, include_watermarks) = config
             .content_filter
             .as_ref()
             .map(|cf| {
@@ -286,11 +316,12 @@ pub(crate) fn extract_all_from_native_document(
                     cf.include_headers,
                     cf.include_footers,
                     cf.include_footnotes,
+                    cf.include_watermarks,
                 )
             })
-            .unwrap_or((true, false, false, false));
+            .unwrap_or((true, false, false, false, false));
 
-        let (all_page_segments, used_structure_tree) = match extracted_hierarchy_segments.take() {
+        let (mut all_page_segments, used_structure_tree) = match extracted_hierarchy_segments.take() {
             Some(segments) => (segments.pages, segments.used_structure_tree),
             None => crate::pdf::native::hierarchy::extract_all_segments(&mut doc).map_err(|e| {
                 crate::error::XbergError::Parsing {
@@ -299,6 +330,20 @@ pub(crate) fn extract_all_from_native_document(
                 }
             })?,
         };
+
+        for (page_index, segments) in all_page_segments.iter_mut().enumerate() {
+            let (_, lower_y, _, upper_y) =
+                doc.doc
+                    .get_page_media_box(page_index)
+                    .map_err(|error| crate::error::XbergError::Parsing {
+                        message: format!(
+                            "xberg_native_pdf failed to read page {} media box for margin filtering: {error}",
+                            page_index + 1
+                        ),
+                        source: None,
+                    })?;
+            retain_segments_inside_page_margins(segments, lower_y.min(upper_y), lower_y.max(upper_y), margins);
+        }
 
         let total_segs: usize = all_page_segments.iter().map(|s| s.len()).sum();
         tracing::debug!(
@@ -321,6 +366,7 @@ pub(crate) fn extract_all_from_native_document(
                 include_headers,
                 include_footers,
                 include_footnotes,
+                include_watermarks,
                 used_structure_tree,
                 image_positions: &image_positions,
                 images: images.as_deref(),
@@ -435,6 +481,7 @@ fn apply_reading_order_reordering(
     native_text: &str,
     layout_hints_per_page: &[Vec<crate::pdf::structure::types::LayoutHint>],
     page_config: Option<&crate::core::config::PageConfig>,
+    margins: crate::pdf::native::text::PageMarginFractions,
 ) -> Result<(String, Vec<crate::types::PageBoundary>, Vec<String>)> {
     use crate::extractors::pdf::reading_order;
 
@@ -458,7 +505,7 @@ fn apply_reading_order_reordering(
 
     for (page_idx, hints) in layout_hints_per_page.iter().enumerate().take(page_count) {
         let (spans, reordered_sparse_columns) =
-            crate::pdf::native::text::extract_spans_from_page(&mut doc.doc, page_idx).map_err(|e| {
+            crate::pdf::native::text::extract_spans_from_page(&mut doc.doc, page_idx, margins).map_err(|e| {
                 crate::error::XbergError::Parsing {
                     message: format!(
                         "reading-order reordering: failed to extract spans from page {}: {e}",
@@ -549,8 +596,61 @@ fn join_pages_with_boundaries(
 
 #[cfg(test)]
 mod tests {
-    use super::{needs_structured_extraction, table_stage_failure_warning};
+    use super::{
+        hierarchy_cluster_count, needs_structured_extraction, retain_segments_inside_page_margins,
+        table_stage_failure_warning,
+    };
     use crate::core::config::OutputFormat;
+
+    #[test]
+    fn should_use_public_hierarchy_default_for_implicit_structure() {
+        let config = crate::core::config::ExtractionConfig::default();
+
+        assert_eq!(
+            hierarchy_cluster_count(&config),
+            crate::core::config::HierarchyConfig::default().k_clusters
+        );
+    }
+
+    #[test]
+    fn should_filter_reused_hierarchy_segments_by_page_margins() {
+        let segment = |text: &str, baseline_y: f32| crate::pdf::hierarchy::SegmentData {
+            text: text.to_string(),
+            x: 20.0,
+            y: baseline_y,
+            width: 100.0,
+            height: 10.0,
+            font_size: 10.0,
+            is_bold: false,
+            is_italic: false,
+            is_monospace: false,
+            baseline_y,
+            rotation_degrees: 0.0,
+            assigned_role: None,
+        };
+        let mut segments = vec![
+            segment("header", 1000.01),
+            segment("top boundary", 1000.0),
+            segment("body", 500.0),
+            segment("bottom boundary", 150.0),
+            segment("footer", 149.99),
+        ];
+
+        retain_segments_inside_page_margins(
+            &mut segments,
+            100.0,
+            1100.0,
+            crate::pdf::native::text::PageMarginFractions {
+                top: 0.10,
+                bottom: 0.05,
+            },
+        );
+
+        assert_eq!(
+            segments.iter().map(|segment| segment.text.as_str()).collect::<Vec<_>>(),
+            ["top boundary", "body", "bottom boundary"]
+        );
+    }
 
     /// Characterises `table_stage_failure_warning`'s message format only — it constructs the
     /// error directly rather than driving a real xberg_native_pdf failure, so it does NOT prove any
@@ -589,7 +689,7 @@ mod tests {
     #[test]
     fn should_not_trigger_structured_extraction_for_unregistered_custom_format() {
         let output_format = OutputFormat::Custom("markdwon".to_string());
-        assert!(!needs_structured_extraction(false, &output_format, false));
+        assert!(!needs_structured_extraction(false, &output_format, false, false));
     }
 
     /// `DocTags` is a real, always-registered built-in renderer (see
@@ -597,32 +697,36 @@ mod tests {
     /// geometry/headings as Markdown, Djot, and HTML.
     #[test]
     fn should_trigger_structured_extraction_for_doctags_format() {
-        assert!(needs_structured_extraction(false, &OutputFormat::DocTags, false));
+        assert!(needs_structured_extraction(false, &OutputFormat::DocTags, false, false));
     }
 
     /// The pre-existing markup formats must keep triggering the structured path.
     #[test]
     fn should_trigger_structured_extraction_for_markdown_djot_and_html() {
-        assert!(needs_structured_extraction(false, &OutputFormat::Markdown, false));
-        assert!(needs_structured_extraction(false, &OutputFormat::Djot, false));
-        assert!(needs_structured_extraction(false, &OutputFormat::Html, false));
+        assert!(needs_structured_extraction(
+            false,
+            &OutputFormat::Markdown,
+            false,
+            false
+        ));
+        assert!(needs_structured_extraction(false, &OutputFormat::Djot, false, false));
+        assert!(needs_structured_extraction(false, &OutputFormat::Html, false, false));
     }
 
-    /// `Plain`, `Json`, and `Structured` must not trigger the structured path on
-    /// their own — only `hierarchy_enabled` or `ocr_inline_images` can force it.
+    /// `Plain` and `Json` must not trigger the structured path on their own.
     #[test]
-    fn should_not_trigger_structured_extraction_for_plain_json_or_structured() {
-        assert!(!needs_structured_extraction(false, &OutputFormat::Plain, false));
-        assert!(!needs_structured_extraction(false, &OutputFormat::Json, false));
-        assert!(!needs_structured_extraction(false, &OutputFormat::Structured, false));
+    fn should_not_trigger_structured_extraction_for_plain_or_json() {
+        assert!(!needs_structured_extraction(false, &OutputFormat::Plain, false, false));
+        assert!(!needs_structured_extraction(false, &OutputFormat::Json, false, false));
     }
 
-    /// `hierarchy_enabled` and `ocr_inline_images` must force the structured path
-    /// regardless of output format.
+    /// Hierarchy, inline-image OCR, and explicit content filtering require the
+    /// structured path regardless of output format.
     #[test]
-    fn should_trigger_structured_extraction_when_hierarchy_or_ocr_inline_images_enabled() {
-        assert!(needs_structured_extraction(true, &OutputFormat::Plain, false));
-        assert!(needs_structured_extraction(false, &OutputFormat::Plain, true));
+    fn should_trigger_structured_extraction_when_structure_dependent_options_are_enabled() {
+        assert!(needs_structured_extraction(true, &OutputFormat::Plain, false, false));
+        assert!(needs_structured_extraction(false, &OutputFormat::Plain, true, false));
+        assert!(needs_structured_extraction(false, &OutputFormat::Plain, false, true));
     }
 
     #[cfg(feature = "layout-detection")]
@@ -684,6 +788,7 @@ mod tests {
                 speaker_notes: None,
                 section_name: None,
                 sheet_name: None,
+                image_preprocessing: None,
             },
             PageContent {
                 page_number: 2,
@@ -696,6 +801,7 @@ mod tests {
                 speaker_notes: None,
                 section_name: None,
                 sheet_name: None,
+                image_preprocessing: None,
             },
         ]);
         let reordered_per_page = vec![

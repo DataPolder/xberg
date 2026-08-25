@@ -405,7 +405,7 @@ fn extract_pptx_from_container<R: std::io::Read + std::io::Seek>(
             page_structure,
             page_contents,
             document,
-            hyperlinks: collected_hyperlinks,
+            hyperlinks: collected_hyperlinks.into_iter().map(Into::into).collect(),
             office_metadata,
             revisions,
         },

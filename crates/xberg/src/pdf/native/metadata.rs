@@ -339,7 +339,7 @@ fn build_page_structure(doc: &mut NativeDocument, boundaries: &[PageBoundary], c
         pages.push(PageInfo {
             number: page_number,
             title: None,
-            dimensions,
+            dimensions: dimensions.map(Into::into),
             image_count: None,
             table_count: None,
             hidden: None,

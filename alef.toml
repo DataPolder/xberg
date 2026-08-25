@@ -1,5 +1,5 @@
 [workspace]
-alef_version = "0.67.5"
+alef_version = "0.67.7"
 # -D warnings (emitted into every generated Rust binding as #![allow(...)]).
 extra_clippy_allows = ["redundant_field_names", "collapsible_if", "vec_init_then_push"]
 languages = [
@@ -158,17 +158,10 @@ manifest = "crates/xberg-node/package.json"
 # `@xberg-io/xberg` -- 64 of their 69 failures were a single TS2307
 # "cannot find module". Generated snippets are unaffected either way: they
 # carry `target: node`/`target: wasm`, which takes priority over this fallback.
-# Aliased to the node package because every hand-authored TS snippet under
-# docs-site/src/snippets/typescript/ imports `@xberg-io/xberg`.
-# KNOWN GAP, measured 2026-08-14: that alias is wrong for the 15 hand-authored
-# snippets under docs-site/src/snippets/wasm/ (9 .md + 6 .ts), which DO import
-# `@xberg-io/xberg-wasm` and therefore fail this session with 18 x TS2307
-# "cannot find module". An earlier revision of this comment asserted that none
-# of them existed; it only surveyed the typescript/ directory.
-# They cannot be routed the generated tree's way either: `target:` lives in
-# markdown frontmatter, 0 of the 419 hand-authored snippets carry frontmatter at
-# all, and 6 of these 15 are raw `.ts` files that cannot carry any. Selecting a
-# session per directory is the missing capability; raised upstream. ~keep
+# Aliased to the node package because every hand-authored snippet under
+# docs-site/src/snippets/typescript/ imports `@xberg-io/xberg`. The handwritten
+# Markdown snippets under docs-site/src/snippets/wasm/ declare `target: wasm`
+# explicitly, so Alef validates them against the WASM session below. ~keep
 [workspace.docs.snippets.sessions.typescript]
 cwd = "crates/xberg-node"
 manifest = "crates/xberg-node/package.json"
@@ -1143,6 +1136,8 @@ exclude_functions = [
   "embed_sparse_async",
   "embed_multi_vector",
   "embed_multi_vector_async",
+  "max_sim_rank",
+  "max_sim_score",
   # Infallible return type; alef emits a compile_error! rather than a binding for it. Excluded
   # here per that error's own remedy -- `xberg doctor` inspects host backends and model caches,
   # neither of which exists in a browser. ~keep
@@ -1966,27 +1961,6 @@ cfg = 'any(target_os = "ios", target_os = "android")'
 features = ["android-target"]
 default_features = false
 
-# NOTE (heic / xberg-ffi on the swift-bridge shim):
-# The swift-bridge backend injects an `xberg-ffi` path dependency (the C-ABI
-# shim) with Cargo-default features. That pulls xberg-ffi's default `heic`
-# cannot cross-compile, breaking every cross-compiled xberg-swift target
-# (x86_64-apple-darwin; Linux via zigbuild). alef hardcodes this injection
-# (src/backends/swift/gen_rust_crate/cargo.rs) with no `default-features`
-# control, and it is NOT covered by the swift crate's `excluded_default_features`
-# / `target_dep_overrides` (those govern only the primary `xberg` core dep). An
-# `extra_dependencies.xberg-ffi` entry does NOT override it — it emits a SECOND
-# `xberg-ffi` key, a duplicate-key manifest that poisons the workspace mid-regen.
-# So we do NOT declare it here. Instead `packages/swift/rust/Cargo.toml` carries
-# a committed post-regen normalization: its single unconditional `xberg-ffi` line
-# is split into two `[target.cfg(...)]` blocks, mirroring the `xberg` dep below —
-# `default-features = false` + `full-no-heic` off-iOS/Android, `android-target` on
-# iOS/Android. A plain unconditional `full-no-heic` pulls in `sceptre-ocr` (->
-# `sceptre-ocr-ort`), which trips the mobile-only `compile_error!` guards in
-# crates/xberg/src/lib.rs (issue #324) because Cargo unifies features across
-# dependency edges for the same resolved package. That edit is stable for
-# CI/publish (no CI job regenerates `packages/` + diffs), but a local `alef all`
-# reverts it — reapply it. Durable fix is upstream in alef.
-
 [crates.csharp]
 namespace = "Xberg"
 package_id = "XbergIo.Xberg"
@@ -2172,22 +2146,11 @@ dart = "packages/dart/lib/src/"
 zig = "packages/zig/src/"
 
 [crates.exclude]
-fields = [
-  "ConversionOptions.output_format",
-  "ConversionOptions.include_document_structure",
-  "ConversionOptions.extract_images",
-  # tier_strategy pulls in TierStrategy, whose Tier1 variant is #[cfg(feature = "testkit")]
-  "ConversionOptions.tier_strategy",
-]
+fields = []
 types = [
-  "Pool",
-
   "SplitConfig",
   "SplitStrategy",
   "SplitSegment",
-  "xberg::core::split::SplitConfig",
-  "xberg::core::split::SplitStrategy",
-  "xberg::core::split::SplitSegment",
 
   "xberg::extraction::docx::parser::Table",
   "xberg::extraction::docx::parser::TableCell",
@@ -2198,23 +2161,16 @@ types = [
 
   "GlineBackend",
   "LlmBackend",
-  "xberg::text::ner::llm::LlmBackend",
 
   "xberg::chunking::semantic::merge::Segment",
 
   "NerBackend",
-  "xberg::text::ner::backend::NerBackend",
 
   "EnrichmentConfig",
   "EnrichedResult",
-  "xberg::enrich::EnrichmentConfig",
-  "xberg::enrich::EnrichedResult",
   "NerEnrichmentConfig",
-  "xberg::enrich::NerEnrichmentConfig",
   "ClassificationEnrichmentConfig",
-  "xberg::enrich::ClassificationEnrichmentConfig",
   "CaptioningEnrichmentConfig",
-  "xberg::enrich::CaptioningEnrichmentConfig",
 
   "EnrichOptions",
   "EnrichResult",
@@ -2224,8 +2180,6 @@ types = [
   "xberg::enrichment::EnrichStatus",
   "ChunkPlan",
   "ChunkingDecision",
-  "xberg::heuristics::decision::ChunkPlan",
-  "xberg::heuristics::decision::ChunkingDecision",
   "ChunkingResult",
   "ConfidenceSignals",
   "ConfidenceWeights",
@@ -2234,19 +2188,8 @@ types = [
   "StructuredInput",
   "StructuredThresholds",
   "StructuredCallMode",
-  "StructuredOptions",
-  "StructuredOutput",
-  "StructuredError",
-  "PresetSpec",
-  "VisionConfig",
-
   "ClassifyContext",
   "xberg::text::classification::page_classifier::ClassifyContext",
-
-  "BatchBytesItem",
-  "BatchFileItem",
-
-  "SyncExtractor",
 
   "Engine",
   "EngineBuilder",
@@ -2310,28 +2253,9 @@ types = [
   "xberg::engine::parsed::ParsedDocument",
 ]
 methods = [
-  "ApiError.from",
-
-  # Hand-written redacting Debug impls that keep api_key and header values out of
-  # logs. `fmt` takes a std::fmt::Formatter, which has no binding representation.
-  "LlmConfig.fmt",
-  "BedrockConfig.fmt",
-
-  "BBox.fmt",
-  "LayoutDetection.fmt",
-  "PooledString.fmt",
-
-  "PooledString.deref",
-  "PooledString.deref_mut",
-  "PooledString.buffer_mut",
-
-  "BBox.center",
-  "TessdataManager.manifest",
-
   "LayoutDetection.class",
   "LayoutRegion.class",
 
-  "ModelCache.new",
   "MetricsLayer.layer",
   "MultipartApi.from_request",
 
@@ -2345,7 +2269,6 @@ functions = [
   # an FFI wrapper the ffi crate's feature set cannot satisfy. A prometheus
   # Registry is not a meaningful C-ABI/binding surface in any case.
   "init_prometheus",
-  "xberg::telemetry::init_prometheus",
   "fuse",
   "build_prompt",
   "build_vision_fallback_prompt",
@@ -2354,19 +2277,15 @@ functions = [
   # Wraps build_vision_fallback_prompt with the threshold decision; returns
   # Option<BuiltPrompt>, and BuiltPrompt is already excluded above.
   "escalate_if_below_threshold",
-  # Returns Vec<(u32, u32, Vec<u32>)> -- a bare tuple with no binding
-  # representation. Internal Whisper token-stream helper.
+  "build_decoder_prompt_tokens",
+  "timestamp_token_to_ms",
   "parse_timestamped_segments",
+  "install_pdf_render_diagnostics",
+  "take_xberg_native_pdf_render_warnings",
+  "ensure_initialized",
   "batch_pages",
   "pages_for_call",
   "validate_and_merge",
-  "xberg::engine::structured::citations::fuse",
-  "xberg::engine::structured::prompts::build_prompt",
-  "xberg::engine::structured::prompts::build_vision_fallback_prompt",
-  "xberg::engine::structured::chunk::batch_pages",
-  "xberg::engine::structured::rasterize::pages_for_call",
-  "xberg::engine::structured::schema::validate_and_merge",
-
   "apply_strategy",
 
   "classify_one",
@@ -2392,12 +2311,7 @@ functions = [
 
   "enrich",
 
-  "extract_structured",
-  "extract_structured_sync",
-  "extract_structured_json",
   "split_and_extract",
-  "split_and_extract_sync",
-  "split_and_extract_json",
 
   "analyze_document",
   "analyze_with_user_chunks",
@@ -2435,17 +2349,6 @@ functions = [
   "known_models",
   "register_builtin",
   "resolve",
-
-  "extract_sync",
-  "extract_batch_sync",
-  "extract_bytes",
-  "extract_bytes_sync",
-  "extract_file",
-  "extract_file_sync",
-  "batch_extract_bytes",
-  "batch_extract_bytes_sync",
-  "batch_extract_files",
-  "batch_extract_files_sync",
 
   # Both take `TokenizerSource<'a>`, a borrowed enum whose four variants mean
   # different things (HF model ID, model+revision pair, local `tokenizer.json`
@@ -4472,7 +4375,7 @@ package_manager = ["pnpm"]
 features = { ocr = true, async = true, plugin_system = true, embeddings = true, config_discovery = true, code_intelligence = true }
 ocr_backends = ["tesseract", "paddleocr", "sceptre"]
 optional_sections = ["native_vs_wasm_comparison", "ocr_support", "performance", "napi_implementation"]
-snippets = { basic_extraction = "getting-started/basic_usage.md", async_extraction = "api/client_extract_single_file.md", batch_processing = "getting-started/extract_batch.md", ocr_configuration = "config/config_ocr.md", table_extraction = "api/tables.md", config_discovery = "config/config_discovery.md" }
+snippets = { basic_extraction = "getting-started/basic_usage.md", async_extraction = "api/client_extract_single_file.md", batch_processing = "api/extract_batch.md", ocr_configuration = "config/config_ocr.md", table_extraction = "api/tables.md", config_discovery = "config/config_discovery.md" }
 
 [crates.readme.languages.go]
 template = "go.md"

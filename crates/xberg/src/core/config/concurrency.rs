@@ -39,7 +39,6 @@ use serde::{Deserialize, Serialize};
 ///     max_threads: Some(2),
 /// };
 /// ```
-#[cfg_attr(alef, alef(skip))]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct ConcurrencyConfig {

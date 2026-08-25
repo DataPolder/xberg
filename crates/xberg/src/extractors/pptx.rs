@@ -364,8 +364,8 @@ impl PptxExtractor {
 
         doc.metadata = metadata;
 
-        for (url, label) in pptx_result.hyperlinks {
-            doc.push_uri(ExtractedUri::hyperlink(&url, label));
+        for hyperlink in pptx_result.hyperlinks {
+            doc.push_uri(ExtractedUri::hyperlink(&hyperlink.url, hyperlink.label));
         }
 
         doc.prebuilt_pages = pptx_result.page_contents;

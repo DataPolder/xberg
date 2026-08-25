@@ -92,11 +92,17 @@ pub struct PdfConfig {
     pub extract_annotations: bool,
 
     /// Top margin fraction (0.0–1.0) of page height to exclude headers/running heads.
+    /// Ignored when `ContentFilterConfig.include_headers` is `true`.
+    /// Effective nonzero margins require per-page OCR so geometry can be filtered;
+    /// document-capable OCR backends use their image-processing path in that case.
     /// Default: 0.06 (6%)
     #[serde(default)]
     pub top_margin_fraction: Option<f32>,
 
     /// Bottom margin fraction (0.0–1.0) of page height to exclude footers/page numbers.
+    /// Ignored when `ContentFilterConfig.include_footers` is `true`.
+    /// Effective nonzero margins require per-page OCR so geometry can be filtered;
+    /// document-capable OCR backends use their image-processing path in that case.
     /// Default: 0.05 (5%)
     #[serde(default)]
     pub bottom_margin_fraction: Option<f32>,
@@ -112,11 +118,12 @@ pub struct PdfConfig {
     pub allow_single_column_tables: bool,
 
     /// Perform OCR on inline images extracted from PDF pages and attach the
-    /// recognized text to each `ExtractedImage.ocr_result`. Requires Tesseract
-    /// to be available; if `ExtractionConfig.ocr` is `None` the extractor
-    /// falls back to `TesseractConfig::default()`. Per-image failures degrade
-    /// gracefully (the image is returned without OCR text rather than failing
-    /// the whole extraction). Default: `false`.
+    /// recognized text to each `ExtractedImage.ocr_result`. Uses the backend
+    /// selected by `ExtractionConfig.ocr`, or the default OCR backend when no
+    /// OCR configuration is supplied. Requires the `ocr` or `ocr-pipeline`
+    /// feature. Per-image failures degrade gracefully (the image is returned
+    /// without OCR text rather than failing the whole extraction). Default:
+    /// `false`.
     #[serde(default)]
     pub ocr_inline_images: bool,
 
@@ -170,7 +177,7 @@ pub struct HierarchyConfig {
 
     /// Number of font size clusters to use for hierarchy levels (1-7)
     ///
-    /// Default: 6, which provides H1-H6 heading levels with body text.
+    /// Default: 3, which provides two heading levels plus body text.
     /// Larger values create more fine-grained hierarchy levels.
     #[serde(default = "default_k_clusters")]
     pub k_clusters: usize,
@@ -201,6 +208,60 @@ impl Default for PdfConfig {
     }
 }
 
+#[cfg(feature = "pdf")]
+impl PdfConfig {
+    /// Validate PDF-specific extraction settings.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::XbergError::Validation`] when a configured page margin is
+    /// non-finite or outside `[0.0, 1.0]`, when hierarchy clustering requests
+    /// fewer than one or more than seven clusters, or when an enabled option is
+    /// unavailable in the current feature set.
+    pub fn validate(&self) -> crate::Result<()> {
+        validate_margin_fraction("pdf_options.top_margin_fraction", self.top_margin_fraction)?;
+        validate_margin_fraction("pdf_options.bottom_margin_fraction", self.bottom_margin_fraction)?;
+
+        if let Some(hierarchy) = &self.hierarchy
+            && !(1..=7).contains(&hierarchy.k_clusters)
+        {
+            return Err(crate::XbergError::validation(format!(
+                "pdf_options.hierarchy.k_clusters must be between 1 and 7 inclusive, got {}",
+                hierarchy.k_clusters
+            )));
+        }
+
+        #[cfg(not(feature = "layout-detection"))]
+        if self.reading_order {
+            return Err(crate::XbergError::validation(
+                "pdf_options.reading_order requires the layout-detection feature",
+            ));
+        }
+
+        #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
+        if self.ocr_inline_images {
+            return Err(crate::XbergError::validation(
+                "pdf_options.ocr_inline_images requires the ocr or ocr-pipeline feature",
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "pdf")]
+fn validate_margin_fraction(field: &str, value: Option<f32>) -> crate::Result<()> {
+    if let Some(value) = value
+        && (!value.is_finite() || !(0.0..=1.0).contains(&value))
+    {
+        return Err(crate::XbergError::validation(format!(
+            "{field} must be finite and between 0.0 and 1.0 inclusive, got {value}"
+        )));
+    }
+
+    Ok(())
+}
+
 impl Default for HierarchyConfig {
     fn default() -> Self {
         Self {
@@ -221,10 +282,97 @@ fn default_k_clusters() -> usize {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(all(feature = "pdf", not(feature = "layout-detection")))]
+    fn should_reject_reading_order_without_layout_detection() {
+        let config = PdfConfig {
+            reading_order: true,
+            ..Default::default()
+        };
+
+        let error = config.validate().expect_err("unsupported reading order must fail");
+        assert!(error.to_string().contains("layout-detection"));
+    }
+
+    #[test]
+    #[cfg(all(feature = "pdf", not(any(feature = "ocr", feature = "ocr-pipeline"))))]
+    fn should_reject_inline_image_ocr_without_ocr_support() {
+        let config = PdfConfig {
+            ocr_inline_images: true,
+            ..Default::default()
+        };
+
+        let error = config.validate().expect_err("unsupported inline image OCR must fail");
+        assert!(error.to_string().contains("ocr or ocr-pipeline"));
+    }
+
+    #[test]
+    #[cfg(feature = "pdf")]
+    fn should_reject_non_finite_or_out_of_range_pdf_margins() {
+        for (field, top_margin_fraction, bottom_margin_fraction) in [
+            ("top_margin_fraction", Some(f32::NAN), None),
+            ("top_margin_fraction", Some(f32::INFINITY), None),
+            ("top_margin_fraction", Some(-0.01), None),
+            ("top_margin_fraction", Some(1.01), None),
+            ("bottom_margin_fraction", None, Some(f32::NEG_INFINITY)),
+            ("bottom_margin_fraction", None, Some(-0.01)),
+            ("bottom_margin_fraction", None, Some(1.01)),
+        ] {
+            let config = PdfConfig {
+                top_margin_fraction,
+                bottom_margin_fraction,
+                ..PdfConfig::default()
+            };
+
+            let error = config.validate().expect_err("invalid PDF margin must be rejected");
+            assert!(
+                error.to_string().contains(field),
+                "error must identify {field}, got: {error}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "pdf")]
+    fn should_accept_inclusive_pdf_margin_bounds() {
+        for value in [0.0, 1.0] {
+            let config = PdfConfig {
+                top_margin_fraction: Some(value),
+                bottom_margin_fraction: Some(value),
+                ..PdfConfig::default()
+            };
+
+            config.validate().expect("inclusive PDF margin bound must be valid");
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "pdf")]
+    fn should_reject_hierarchy_cluster_count_outside_supported_range() {
+        for k_clusters in [0, 8] {
+            let config = PdfConfig {
+                hierarchy: Some(HierarchyConfig {
+                    k_clusters,
+                    ..HierarchyConfig::default()
+                }),
+                ..PdfConfig::default()
+            };
+
+            let error = config
+                .validate()
+                .expect_err("unsupported hierarchy cluster count must be rejected");
+            assert!(
+                error.to_string().contains("k_clusters"),
+                "error must identify k_clusters, got: {error}"
+            );
+        }
+    }
+
     #[test]
     #[cfg(feature = "pdf")]
     fn test_hierarchy_config_default() {
-        use super::*;
         let config = HierarchyConfig::default();
         assert!(config.enabled);
         assert_eq!(config.k_clusters, 3);
@@ -234,7 +382,6 @@ mod tests {
     #[test]
     #[cfg(feature = "pdf")]
     fn test_hierarchy_config_disabled() {
-        use super::*;
         let config = HierarchyConfig {
             enabled: false,
             k_clusters: 3,
@@ -248,7 +395,6 @@ mod tests {
     #[test]
     #[cfg(feature = "pdf")]
     fn test_pdf_config_custom_margins() {
-        use super::*;
         let config = PdfConfig {
             extract_images: false,
             extract_tables: true,
@@ -271,7 +417,6 @@ mod tests {
     #[test]
     #[cfg(feature = "pdf")]
     fn pdf_config_omitting_extract_form_fields_defaults_to_true() {
-        use super::*;
         let json = r#"{"extract_tables": true, "extract_metadata": true}"#;
         let config: PdfConfig = serde_json::from_str(json).unwrap();
         assert!(
@@ -283,7 +428,6 @@ mod tests {
     #[test]
     #[cfg(feature = "pdf")]
     fn pdf_config_omitting_reading_order_defaults_to_false() {
-        use super::*;
         // reading_order uses `#[serde(default)]` (bool default = false).
         let json = r#"{"extract_tables": true, "extract_metadata": true}"#;
         let config: PdfConfig = serde_json::from_str(json).unwrap();
@@ -293,7 +437,6 @@ mod tests {
     #[test]
     #[cfg(feature = "pdf")]
     fn pdf_config_new_fields_round_trip() {
-        use super::*;
         let config = PdfConfig {
             extract_form_fields: false,
             reading_order: true,
@@ -308,7 +451,6 @@ mod tests {
     #[test]
     #[cfg(feature = "pdf")]
     fn pdf_config_omitting_backend_defaults_to_native() {
-        use super::*;
         let json = r#"{"extract_tables": true, "extract_metadata": true}"#;
         let config: PdfConfig = serde_json::from_str(json).unwrap();
         assert_eq!(
@@ -321,7 +463,6 @@ mod tests {
     #[test]
     #[cfg(feature = "pdf")]
     fn pdf_backend_round_trips_through_json_as_snake_case() {
-        use super::*;
         let config = PdfConfig {
             backend: PdfBackend::Pdfium,
             ..PdfConfig::default()
@@ -338,7 +479,6 @@ mod tests {
 
     #[test]
     fn pdf_backend_from_str_is_case_insensitive() {
-        use super::*;
         assert_eq!("native".parse::<PdfBackend>().unwrap(), PdfBackend::Native);
         assert_eq!("NATIVE".parse::<PdfBackend>().unwrap(), PdfBackend::Native);
         assert_eq!("pdfium".parse::<PdfBackend>().unwrap(), PdfBackend::Pdfium);
@@ -353,7 +493,6 @@ mod tests {
     /// behaviour they did not ask for.
     #[test]
     fn pdf_backend_from_str_rejects_the_pre_rename_spelling() {
-        use super::*;
         for old in ["pdf_oxide", "pdf-oxide", "PDF-OXIDE"] {
             let error = old.parse::<PdfBackend>().unwrap_err();
             assert!(
@@ -365,7 +504,6 @@ mod tests {
 
     #[test]
     fn pdf_backend_from_str_rejects_unknown_value_and_lists_valid_ones() {
-        use super::*;
         let error = "xyz".parse::<PdfBackend>().unwrap_err();
         assert!(error.contains("native"), "error must list native, got: {error}");
         assert!(error.contains("pdfium"), "error must list pdfium, got: {error}");
@@ -383,7 +521,6 @@ mod tests {
     #[test]
     #[cfg(feature = "pdf")]
     fn pdf_config_typod_backend_key_is_silently_dropped() {
-        use super::*;
         let json = serde_json::json!({"extract_tables": true, "pdf_backend": "pdfium"});
         let config: PdfConfig = serde_json::from_value(json).expect("an unknown key must not be a parse error today");
         assert_eq!(

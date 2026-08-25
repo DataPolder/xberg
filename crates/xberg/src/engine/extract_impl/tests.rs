@@ -157,7 +157,7 @@ async fn extract_batch_collects_unsupported_scheme_error() {
     assert_eq!(output.summary.results, 1);
     assert_eq!(output.summary.errors, 1);
     assert_eq!(output.errors[0].index, 1);
-    assert_eq!(output.errors[0].code, 1003);
+    assert_eq!(output.errors[0].code, 1010);
     assert_eq!(output.errors[0].error_type, "unsupported_format");
 }
 
@@ -170,61 +170,58 @@ async fn extract_batch_applies_item_timeout() {
     .await;
 
     let error = item.result.unwrap_err();
-    assert_eq!(error_code(&error), 1004);
+    assert_eq!(error_code(&error), 1014);
     assert_eq!(error_type(&error), "timeout");
 }
 
 #[test]
-fn should_map_named_variants_to_their_dedicated_code_and_type() {
-    let cases: [(XbergError, u32, &str); 6] = [
-        (XbergError::Io(std::io::Error::other("t")), 1001, "io"),
-        (XbergError::validation("t"), 1002, "validation"),
+fn should_map_every_variant_to_its_canonical_code_and_type() {
+    let cases: [(XbergError, u32, &str); 18] = [
+        (XbergError::Io(std::io::Error::other("t")), 1000, "io"),
+        (XbergError::parsing("t"), 1001, "parsing"),
+        (XbergError::ocr("t"), 1002, "ocr"),
+        (XbergError::validation("t"), 1003, "validation"),
+        (XbergError::cache("t"), 1004, "cache"),
+        (XbergError::image_processing("t"), 1005, "image_processing"),
+        (XbergError::serialization("t"), 1006, "serialization"),
+        (
+            XbergError::MissingDependency("t".to_string()),
+            1007,
+            "missing_dependency",
+        ),
+        (
+            XbergError::Plugin {
+                message: "t".to_string(),
+                plugin_name: "p".to_string(),
+            },
+            1008,
+            "plugin",
+        ),
+        (XbergError::LockPoisoned("t".to_string()), 1009, "lock_poisoned"),
         (
             XbergError::UnsupportedFormat("t/mime".to_string()),
-            1003,
+            1010,
             "unsupported_format",
         ),
+        (XbergError::embedding("t"), 1011, "embedding"),
+        (XbergError::reranking("t"), 1012, "reranking"),
+        (XbergError::transcription("t"), 1013, "transcription"),
         (
             XbergError::Timeout {
                 elapsed_ms: 1,
                 limit_ms: 2,
             },
-            1004,
+            1014,
             "timeout",
         ),
-        (XbergError::Cancelled, 1005, "cancelled"),
-        (XbergError::security("t"), 1006, "security"),
+        (XbergError::Cancelled, 1015, "cancelled"),
+        (XbergError::security("t"), 1016, "security"),
+        (XbergError::Other("t".to_string()), 1017, "other"),
     ];
 
     for (error, expected_code, expected_type) in cases {
         assert_eq!(error_code(&error), expected_code);
         assert_eq!(error_type(&error), expected_type);
-    }
-}
-
-#[test]
-fn should_default_unlisted_variants_to_1099_and_other() {
-    let cases: [XbergError; 12] = [
-        XbergError::parsing("t"),
-        XbergError::ocr("t"),
-        XbergError::cache("t"),
-        XbergError::image_processing("t"),
-        XbergError::serialization("t"),
-        XbergError::MissingDependency("t".to_string()),
-        XbergError::Plugin {
-            message: "t".to_string(),
-            plugin_name: "p".to_string(),
-        },
-        XbergError::LockPoisoned("t".to_string()),
-        XbergError::embedding("t"),
-        XbergError::Other("t".to_string()),
-        XbergError::transcription("t"),
-        XbergError::reranking("t"),
-    ];
-
-    for error in cases {
-        assert_eq!(error_code(&error), 1099);
-        assert_eq!(error_type(&error), "other");
     }
 }
 

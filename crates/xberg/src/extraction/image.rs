@@ -519,6 +519,7 @@ pub(crate) fn extract_text_from_image_with_ocr(
             content: frame_text.to_string(),
             tables: vec![],
             image_indices: vec![],
+            image_preprocessing: None,
             hierarchy: None,
             is_blank: Some(crate::extraction::blank_detection::is_page_text_blank(frame_text)),
             layout_regions: None,

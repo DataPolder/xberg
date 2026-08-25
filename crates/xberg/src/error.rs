@@ -196,7 +196,6 @@ pub enum XbergError {
 
     /// The reranker model or reranking pipeline returned an error.
     ///
-    /// Since v5.0.0.
     #[error("Reranking error: {message}")]
     #[cfg_attr(alef, alef(error_code = 1012))]
     Reranking {
@@ -435,7 +434,6 @@ impl XbergError {
 
     /// Returns the canonical snake_case error-type label used in batch extraction error items.
     ///
-    /// Only a subset of variants have a dedicated label; every other variant reports `"other"`.
     /// This is the single source of truth for
     /// `core::config::extraction::types::ExtractionErrorItem::error_type`; do not duplicate this
     /// match elsewhere.
@@ -443,31 +441,53 @@ impl XbergError {
     pub(crate) fn extraction_error_type(&self) -> &'static str {
         match self {
             XbergError::Io(_) => "io",
+            XbergError::Parsing { .. } => "parsing",
+            XbergError::Ocr { .. } => "ocr",
             XbergError::Validation { .. } => "validation",
+            XbergError::Cache { .. } => "cache",
+            XbergError::ImageProcessing { .. } => "image_processing",
+            XbergError::Serialization { .. } => "serialization",
+            XbergError::MissingDependency(_) => "missing_dependency",
+            XbergError::Plugin { .. } => "plugin",
+            XbergError::LockPoisoned(_) => "lock_poisoned",
             XbergError::UnsupportedFormat(_) => "unsupported_format",
+            XbergError::Embedding { .. } => "embedding",
+            XbergError::Reranking { .. } => "reranking",
+            XbergError::Transcription { .. } => "transcription",
             XbergError::Timeout { .. } => "timeout",
             XbergError::Cancelled => "cancelled",
             XbergError::Security { .. } => "security",
-            _ => "other",
+            XbergError::Other(_) => "other",
         }
     }
 
     /// Returns the canonical numeric error code used in batch extraction error items.
     ///
-    /// Only a subset of variants have a dedicated code; every other variant reports `1099`. This
-    /// is the single source of truth for
+    /// These values match the stable FFI error codes declared on [`XbergError`]. This is the
+    /// single source of truth for
     /// `core::config::extraction::types::ExtractionErrorItem::code`; do not duplicate this match
     /// elsewhere.
     #[cfg_attr(alef, alef(skip))]
-    pub(crate) fn extraction_error_code(&self) -> u32 {
+    pub(crate) const fn extraction_error_code(&self) -> u32 {
         match self {
-            XbergError::Io(_) => 1001,
-            XbergError::Validation { .. } => 1002,
-            XbergError::UnsupportedFormat(_) => 1003,
-            XbergError::Timeout { .. } => 1004,
-            XbergError::Cancelled => 1005,
-            XbergError::Security { .. } => 1006,
-            _ => 1099,
+            XbergError::Io(_) => 1000,
+            XbergError::Parsing { .. } => 1001,
+            XbergError::Ocr { .. } => 1002,
+            XbergError::Validation { .. } => 1003,
+            XbergError::Cache { .. } => 1004,
+            XbergError::ImageProcessing { .. } => 1005,
+            XbergError::Serialization { .. } => 1006,
+            XbergError::MissingDependency(_) => 1007,
+            XbergError::Plugin { .. } => 1008,
+            XbergError::LockPoisoned(_) => 1009,
+            XbergError::UnsupportedFormat(_) => 1010,
+            XbergError::Embedding { .. } => 1011,
+            XbergError::Reranking { .. } => 1012,
+            XbergError::Transcription { .. } => 1013,
+            XbergError::Timeout { .. } => 1014,
+            XbergError::Cancelled => 1015,
+            XbergError::Security { .. } => 1016,
+            XbergError::Other(_) => 1017,
         }
     }
 
@@ -801,13 +821,33 @@ mod tests {
     }
 
     #[test]
-    fn should_map_named_variants_to_their_extraction_error_type() {
+    fn should_map_every_variant_to_its_canonical_extraction_error_type() {
         assert_eq!(XbergError::Io(std::io::Error::other("t")).extraction_error_type(), "io");
+        assert_eq!(XbergError::parsing("t").extraction_error_type(), "parsing");
+        assert_eq!(XbergError::ocr("t").extraction_error_type(), "ocr");
         assert_eq!(XbergError::validation("t").extraction_error_type(), "validation");
+        assert_eq!(XbergError::cache("t").extraction_error_type(), "cache");
+        assert_eq!(
+            XbergError::image_processing("t").extraction_error_type(),
+            "image_processing"
+        );
+        assert_eq!(XbergError::serialization("t").extraction_error_type(), "serialization");
+        assert_eq!(
+            XbergError::MissingDependency("t".to_string()).extraction_error_type(),
+            "missing_dependency"
+        );
+        assert_eq!(plugin_error().extraction_error_type(), "plugin");
+        assert_eq!(
+            XbergError::LockPoisoned("t".to_string()).extraction_error_type(),
+            "lock_poisoned"
+        );
         assert_eq!(
             XbergError::UnsupportedFormat("t/mime".to_string()).extraction_error_type(),
             "unsupported_format"
         );
+        assert_eq!(XbergError::embedding("t").extraction_error_type(), "embedding");
+        assert_eq!(XbergError::reranking("t").extraction_error_type(), "reranking");
+        assert_eq!(XbergError::transcription("t").extraction_error_type(), "transcription");
         assert_eq!(
             XbergError::Timeout {
                 elapsed_ms: 1,
@@ -818,67 +858,42 @@ mod tests {
         );
         assert_eq!(XbergError::Cancelled.extraction_error_type(), "cancelled");
         assert_eq!(XbergError::security("t").extraction_error_type(), "security");
-    }
-
-    #[test]
-    fn should_default_unlisted_variants_to_other_extraction_error_type() {
-        assert_eq!(XbergError::parsing("t").extraction_error_type(), "other");
-        assert_eq!(XbergError::ocr("t").extraction_error_type(), "other");
-        assert_eq!(XbergError::cache("t").extraction_error_type(), "other");
-        assert_eq!(XbergError::image_processing("t").extraction_error_type(), "other");
-        assert_eq!(XbergError::serialization("t").extraction_error_type(), "other");
-        assert_eq!(
-            XbergError::MissingDependency("t".to_string()).extraction_error_type(),
-            "other"
-        );
-        assert_eq!(plugin_error().extraction_error_type(), "other");
-        assert_eq!(
-            XbergError::LockPoisoned("t".to_string()).extraction_error_type(),
-            "other"
-        );
-        assert_eq!(XbergError::embedding("t").extraction_error_type(), "other");
         assert_eq!(XbergError::Other("t".to_string()).extraction_error_type(), "other");
-        assert_eq!(XbergError::transcription("t").extraction_error_type(), "other");
-        assert_eq!(XbergError::reranking("t").extraction_error_type(), "other");
     }
 
     #[test]
-    fn should_map_named_variants_to_their_extraction_error_code() {
-        assert_eq!(XbergError::Io(std::io::Error::other("t")).extraction_error_code(), 1001);
-        assert_eq!(XbergError::validation("t").extraction_error_code(), 1002);
+    fn should_map_every_variant_to_its_canonical_ffi_error_code() {
+        assert_eq!(XbergError::Io(std::io::Error::other("t")).extraction_error_code(), 1000);
+        assert_eq!(XbergError::parsing("t").extraction_error_code(), 1001);
+        assert_eq!(XbergError::ocr("t").extraction_error_code(), 1002);
+        assert_eq!(XbergError::validation("t").extraction_error_code(), 1003);
+        assert_eq!(XbergError::cache("t").extraction_error_code(), 1004);
+        assert_eq!(XbergError::image_processing("t").extraction_error_code(), 1005);
+        assert_eq!(XbergError::serialization("t").extraction_error_code(), 1006);
+        assert_eq!(
+            XbergError::MissingDependency("t".to_string()).extraction_error_code(),
+            1007
+        );
+        assert_eq!(plugin_error().extraction_error_code(), 1008);
+        assert_eq!(XbergError::LockPoisoned("t".to_string()).extraction_error_code(), 1009);
         assert_eq!(
             XbergError::UnsupportedFormat("t/mime".to_string()).extraction_error_code(),
-            1003
+            1010
         );
+        assert_eq!(XbergError::embedding("t").extraction_error_code(), 1011);
+        assert_eq!(XbergError::reranking("t").extraction_error_code(), 1012);
+        assert_eq!(XbergError::transcription("t").extraction_error_code(), 1013);
         assert_eq!(
             XbergError::Timeout {
                 elapsed_ms: 1,
                 limit_ms: 2
             }
             .extraction_error_code(),
-            1004
+            1014
         );
-        assert_eq!(XbergError::Cancelled.extraction_error_code(), 1005);
-        assert_eq!(XbergError::security("t").extraction_error_code(), 1006);
-    }
-
-    #[test]
-    fn should_default_unlisted_variants_to_1099_extraction_error_code() {
-        assert_eq!(XbergError::parsing("t").extraction_error_code(), 1099);
-        assert_eq!(XbergError::ocr("t").extraction_error_code(), 1099);
-        assert_eq!(XbergError::cache("t").extraction_error_code(), 1099);
-        assert_eq!(XbergError::image_processing("t").extraction_error_code(), 1099);
-        assert_eq!(XbergError::serialization("t").extraction_error_code(), 1099);
-        assert_eq!(
-            XbergError::MissingDependency("t".to_string()).extraction_error_code(),
-            1099
-        );
-        assert_eq!(plugin_error().extraction_error_code(), 1099);
-        assert_eq!(XbergError::LockPoisoned("t".to_string()).extraction_error_code(), 1099);
-        assert_eq!(XbergError::embedding("t").extraction_error_code(), 1099);
-        assert_eq!(XbergError::Other("t".to_string()).extraction_error_code(), 1099);
-        assert_eq!(XbergError::transcription("t").extraction_error_code(), 1099);
-        assert_eq!(XbergError::reranking("t").extraction_error_code(), 1099);
+        assert_eq!(XbergError::Cancelled.extraction_error_code(), 1015);
+        assert_eq!(XbergError::security("t").extraction_error_code(), 1016);
+        assert_eq!(XbergError::Other("t".to_string()).extraction_error_code(), 1017);
     }
 
     #[cfg(feature = "mcp")]

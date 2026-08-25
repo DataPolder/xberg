@@ -177,14 +177,14 @@ tasks:
       - cargo deny check licenses
 
   doc:
-    desc: "Generate Rust documentation and open in browser"
+    desc: "Generate Xberg library documentation and open it in the browser"
     cmds:
-      - cargo doc --no-deps --open
+      - cargo doc -p xberg --lib --no-deps --open
 
   doc:build:
-    desc: "Build Rust documentation (without opening)"
+    desc: "Build Xberg library documentation (without opening)"
     cmds:
-      - cargo doc --no-deps
+      - cargo doc -p xberg --lib --no-deps
 
   clean:
     desc: "Clean Rust build artifacts"

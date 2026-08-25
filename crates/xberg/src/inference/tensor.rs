@@ -9,7 +9,6 @@
 //!
 //! [`InferenceSession`]: super::InferenceSession
 //!
-//! Since v5.0.0 (issue #1275).
 
 use ndarray::ArrayD;
 

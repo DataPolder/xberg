@@ -411,10 +411,11 @@ fn quad_edge_height_px(geometry: &crate::types::OcrBoundingGeometry) -> Option<f
     let crate::types::OcrBoundingGeometry::Quadrilateral { points } = geometry else {
         return None;
     };
-    // Clockwise from top-left: [top_left, top_right, bottom_right, bottom_left].
-    let [top_left, top_right, bottom_right, bottom_left] = *points;
-    let left_edge = point_distance(top_left, bottom_left);
-    let right_edge = point_distance(top_right, bottom_right);
+    let [top_left, top_right, bottom_right, bottom_left] = points.as_slice() else {
+        return None;
+    };
+    let left_edge = point_distance((*top_left).into(), (*bottom_left).into());
+    let right_edge = point_distance((*top_right).into(), (*bottom_right).into());
     let height = (left_edge + right_edge) / 2.0;
     (height.is_finite() && height > 0.0).then_some(height)
 }
@@ -1987,7 +1988,10 @@ mod tests {
             y1: 205.0,
         });
         elem.ocr_geometry = Some(crate::types::OcrBoundingGeometry::Quadrilateral {
-            points: [(100, 100), (900, 170), (900, 205), (100, 135)],
+            points: [(100, 100), (900, 170), (900, 205), (100, 135)]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         });
         doc.push_element(elem);
 
@@ -2043,7 +2047,10 @@ mod tests {
             y1: 400.0,
         });
         elem.ocr_geometry = Some(crate::types::OcrBoundingGeometry::Quadrilateral {
-            points: [(100, 100), (900, 100), (900, 300), (100, 300)],
+            points: [(100, 100), (900, 100), (900, 300), (100, 300)]
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         });
         doc.push_element(elem);
 
@@ -2086,7 +2093,10 @@ mod tests {
                 y1: f64::from(top + height),
             });
             element.ocr_geometry = Some(crate::types::OcrBoundingGeometry::Quadrilateral {
-                points: [(100, top), (500, top), (500, top + height), (100, top + height)],
+                points: [(100, top), (500, top), (500, top + height), (100, top + height)]
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
             });
             let attributes = block_id
                 .map(|block_id| ("hocr_block_id".to_string(), block_id.to_string()))
@@ -3484,6 +3494,7 @@ mod tests {
     /// `y` == `baseline_y`, `width`, `height`, `font_size`), matching the shape
     /// [`make_ocr_pdf_line`] always produces for OCR segments
     /// (`rotation_degrees == 0.0`).
+    #[cfg(feature = "layout-detection")]
     fn rotated_list_test_paragraph(
         text: &str,
         x: f32,

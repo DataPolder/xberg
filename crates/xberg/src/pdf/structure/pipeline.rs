@@ -2384,6 +2384,7 @@ pub(crate) struct SegmentStructureConfig<'a> {
     pub include_headers: bool,
     pub include_footers: bool,
     pub include_footnotes: bool,
+    pub include_watermarks: bool,
     pub used_structure_tree: bool,
     pub image_positions: &'a [(u32, u32)],
     pub images: Option<&'a [crate::types::ExtractedImage]>,
@@ -2429,6 +2430,7 @@ pub(crate) fn extract_document_structure_from_segments(
         include_headers,
         include_footers,
         include_footnotes,
+        include_watermarks,
         used_structure_tree,
         image_positions,
         images,
@@ -2985,7 +2987,9 @@ pub(crate) fn extract_document_structure_from_segments(
         mark_cross_page_repeating_text(&mut all_page_paragraphs, &page_heights);
         mark_cross_page_repeating_short_text(&mut all_page_paragraphs);
     }
-    mark_arxiv_noise(&mut all_page_paragraphs);
+    if !include_watermarks {
+        mark_arxiv_noise(&mut all_page_paragraphs);
+    }
     recover_headings_from_outline(&mut all_page_paragraphs, outline_entries);
     // Runs after heading recovery (so recovered headings are excluded) and
     // immediately before the deletion pass it feeds. It needs every page in
@@ -4263,7 +4267,7 @@ fn canonical_table_order(left: &crate::types::Table, right: &crate::types::Table
 /// This must run **before** `retain_page_furniture_safely`, which physically
 /// removes furniture paragraphs via `.retain()`. Un-marking here ensures that
 /// user-opted-in header/footer/footnote paragraphs survive that pass.
-fn un_mark_layout_furniture_per_config(
+pub(crate) fn un_mark_layout_furniture_per_config(
     paragraphs: &mut [PdfParagraph],
     include_headers: bool,
     include_footers: bool,
@@ -4669,6 +4673,18 @@ fn document_content_width(all_pages: &[Vec<PdfParagraph>]) -> f32 {
         .filter(|right| *right > 0.0)
         .fold(0.0_f32, f32::max);
     if widest > 0.0 { widest } else { FALLBACK_PAGE_WIDTH_PTS }
+}
+
+/// Apply the structure pipeline's cross-page repeating-text policy to pages that
+/// were already classified by another source, such as OCR layout detection. ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+pub(crate) fn strip_repeating_text_from_pages(pages: &mut [Vec<PdfParagraph>], page_heights: &[f32]) {
+    mark_cross_page_repeating_text(pages, page_heights);
+    mark_cross_page_repeating_short_text(pages);
+    for page in pages.iter_mut() {
+        retain_page_furniture_safely(page);
+    }
+    deduplicate_paragraphs(pages);
 }
 
 /// Filter page furniture paragraphs with a safety valve.

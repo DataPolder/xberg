@@ -280,9 +280,11 @@ fn page_dimensions(doc: &InternalDocument) -> AHashMap<u32, (f64, f64)> {
         return dims;
     };
     for page in pages {
-        let Some((width, height)) = page.dimensions else {
+        let Some(dimensions) = page.dimensions else {
             continue;
         };
+        let width = dimensions.width;
+        let height = dimensions.height;
         if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
             dims.insert(page.number, (width, height));
         }
@@ -777,7 +779,7 @@ mod tests {
             pages: Some(vec![crate::types::PageInfo {
                 number: 1,
                 title: None,
-                dimensions,
+                dimensions: dimensions.map(Into::into),
                 image_count: None,
                 table_count: None,
                 hidden: None,

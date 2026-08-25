@@ -277,7 +277,7 @@ impl LayoutDetection {
     }
 
     /// Deprecated: use the `class_name` field directly.
-    #[deprecated(since = "4.10.0", note = "Use `class_name` field instead")]
+    #[deprecated(since = "1.1.0", note = "Use `class_name` field instead")]
     pub fn class(&self) -> LayoutClass {
         self.class_name
     }

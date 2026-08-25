@@ -203,7 +203,6 @@ pub struct ChunkingConfig {
     pub chunker_type: ChunkerType,  // Text | Markdown | Semantic
     pub embedding: Option<EmbeddingConfig>,
     pub preset: Option<String>,
-    pub prepend_heading_context: bool,
     // ...
 }
 ```
@@ -218,7 +217,6 @@ let config = ExtractionConfig {
         max_characters: 512,
         overlap: 50,
         chunker_type: ChunkerType::Markdown,
-        prepend_heading_context: true,
         ..Default::default()
     }),
     ..Default::default()
@@ -230,7 +228,7 @@ let config = ExtractionConfig {
 `ExtractionConfig::output_format` controls the `content` text format:
 
 ```rust
-pub enum OutputFormat { Plain, Markdown, Djot, Html, Json, Structured, Custom(String) }
+pub enum OutputFormat { Plain, Markdown, Djot, Html, Json, DocTags, Custom(String) }
 ```
 
 `ExtractionConfig::result_format` controls the result structure:

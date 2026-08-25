@@ -2,7 +2,6 @@
 
 use crate::Result;
 use crate::core::config::ExtractionConfig;
-use crate::extractors::SyncExtractor;
 use crate::extractors::security::SecurityBudget;
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::internal::InternalDocument;
@@ -126,48 +125,6 @@ fn is_ooxml_zip_mime(mime_type: &str) -> bool {
     )
 }
 
-/// Name the embedded objects under `xl/embeddings/` in an OOXML zip package,
-/// for the [`SyncExtractor`] path (WASM), which cannot recurse into them the way
-/// `extract_content`/`extract_path` do via `ooxml_embedded` (that helper calls
-/// back into the async extraction pipeline). Naming them in a warning at least
-/// makes their presence and identity visible (xberg-io/xberg#78) rather than
-/// silently dropping them.
-///
-/// Returns `None` when `mime_type` is not an OOXML zip format, the content is
-/// not a readable zip, or the archive has no `xl/embeddings/` entries.
-#[cfg(feature = "office")]
-fn scan_for_embedded_objects(content: &[u8], mime_type: &str) -> Option<ProcessingWarning> {
-    if !is_ooxml_zip_mime(mime_type) {
-        return None;
-    }
-
-    let cursor = std::io::Cursor::new(content);
-    let mut archive = zip::ZipArchive::new(cursor).ok()?;
-
-    let mut names = Vec::new();
-    for i in 0..archive.len() {
-        let entry = archive.by_index(i).ok()?;
-        let name = entry.name().to_string();
-        if name.starts_with("xl/embeddings/") && !name.ends_with('/') {
-            names.push(name);
-        }
-    }
-    if names.is_empty() {
-        return None;
-    }
-    names.sort();
-
-    Some(ProcessingWarning {
-        source: Cow::Borrowed("excel"),
-        message: Cow::Owned(format!(
-            "Workbook contains {} embedded object{} that were not extracted ({})",
-            names.len(),
-            if names.len() == 1 { "" } else { "s" },
-            crate::core::diagnostics::format_entry_list(&names)
-        )),
-    })
-}
-
 /// Excel spreadsheet extractor using calamine.
 ///
 /// Supports: .xlsx, .xlsm, .xlam, .xltm, .xls, .xla, .xlsb, .ods
@@ -284,6 +241,7 @@ impl ExcelExtractor {
                     content: page_content,
                     tables: vec![arc_table],
                     image_indices: Vec::new(),
+                    image_preprocessing: None,
                     hierarchy: None,
                     is_blank: Some(false),
                     layout_regions: None,
@@ -302,6 +260,7 @@ impl ExcelExtractor {
                     content,
                     tables: Vec::new(),
                     image_indices: Vec::new(),
+                    image_preprocessing: None,
                     hierarchy: None,
                     is_blank: Some(true),
                     layout_regions: None,
@@ -398,46 +357,6 @@ impl ExcelExtractor {
         }
 
         doc
-    }
-}
-
-impl SyncExtractor for ExcelExtractor {
-    fn extract_sync(&self, content: &[u8], mime_type: &str, config: &ExtractionConfig) -> Result<InternalDocument> {
-        let _span = tracing::debug_span!("extract_excel", element_count = tracing::field::Empty,).entered();
-
-        let extension = match mime_type {
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => ".xlsx",
-            "application/vnd.ms-excel.sheet.macroEnabled.12" => ".xlsm",
-            "application/vnd.ms-excel.addin.macroEnabled.12" => ".xlam",
-            "application/vnd.ms-excel.template.macroEnabled.12" => ".xltm",
-            "application/vnd.ms-excel" => ".xls",
-            "application/vnd.ms-excel.addin.macroEnabled" => ".xla",
-            "application/vnd.ms-excel.sheet.binary.macroEnabled.12" => ".xlsb",
-            "application/vnd.oasis.opendocument.spreadsheet" => ".ods",
-            _ => ".xlsx",
-        };
-
-        let security_limits = config.security_limits.clone().unwrap_or_default();
-        let (workbook, read_warnings) =
-            crate::extraction::excel::read_excel_bytes(content, extension, &security_limits)?;
-        let mut budget = SecurityBudget::from_config(config);
-        validate_workbook_budget(&workbook, &mut budget)?;
-        let mut doc = Self::workbook_to_internal_document(&workbook);
-        doc.processing_warnings.extend(read_warnings);
-        doc.mime_type = mime_type.to_string();
-
-        // The sync path (WASM) cannot recurse into embedded objects the way
-        // `extract_content`/`extract_path` do via `ooxml_embedded`, which requires
-        // async pipeline extraction. Name them in a warning instead so a workbook
-        // with embedded files doesn't look fully extracted (xberg-io/xberg#78). ~keep
-        #[cfg(feature = "office")]
-        if config.max_archive_depth > 0
-            && let Some(warning) = scan_for_embedded_objects(content, mime_type)
-        {
-            doc.processing_warnings.push(warning);
-        }
-
-        Ok(doc)
     }
 }
 
@@ -995,56 +914,6 @@ mod tests {
         let doc = ExcelExtractor::build_internal_document(&workbook);
         let pages = doc.prebuilt_pages.as_ref().unwrap();
         assert!(pages[0].content.starts_with("## Sheet1\n"), "{:?}", pages[0].content);
-    }
-
-    #[cfg(feature = "office")]
-    fn make_zip_with_entry(entry_path: &str, entry_data: &[u8]) -> Vec<u8> {
-        use std::io::{Cursor, Write};
-        let buf = Cursor::new(Vec::new());
-        let mut zip = zip::ZipWriter::new(buf);
-        let options = zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Stored);
-        zip.start_file(entry_path, options).unwrap();
-        zip.write_all(entry_data).unwrap();
-        zip.finish().unwrap().into_inner()
-    }
-
-    /// xberg-io/xberg#78: an OOXML zip carrying files under `xl/embeddings/`
-    /// must be flagged, naming the embedded file, on the sync (WASM) path that
-    /// cannot recurse into them.
-    #[cfg(feature = "office")]
-    #[test]
-    fn should_warn_about_embedded_objects_on_sync_path() {
-        let bytes = make_zip_with_entry("xl/embeddings/Workbook1.xlsx", b"fake embedded workbook bytes");
-        let warning = scan_for_embedded_objects(
-            &bytes,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        .expect("embedded object under xl/embeddings/ must produce a warning");
-        assert_eq!(warning.source, "excel");
-        assert_eq!(
-            warning.message,
-            "Workbook contains 1 embedded object that were not extracted (xl/embeddings/Workbook1.xlsx)"
-        );
-    }
-
-    #[cfg(feature = "office")]
-    #[test]
-    fn should_not_warn_when_no_embedded_objects_present() {
-        let bytes = make_zip_with_entry("xl/worksheets/sheet1.xml", b"<worksheet/>");
-        assert!(
-            scan_for_embedded_objects(
-                &bytes,
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            .is_none()
-        );
-    }
-
-    #[cfg(feature = "office")]
-    #[test]
-    fn should_not_scan_non_ooxml_zip_mime_types_for_embedded_objects() {
-        let bytes = make_zip_with_entry("xl/embeddings/Object1.bin", b"data");
-        assert!(scan_for_embedded_objects(&bytes, "application/vnd.ms-excel").is_none());
     }
 
     /// Build a minimal in-memory `.xlsx` zip with one working sheet, plus `extra_entries`
