@@ -503,6 +503,25 @@ fn xberg_entries(cohort: &str, include_layout: bool, include_paddle: bool, inclu
     entries
 }
 
+/// The native-PDF Pdfium comparison cells emitted by the benchmark workflow.
+fn xberg_pdfium_entries(cohort: &str) -> Vec<MatrixEntry> {
+    let mut entries = Vec::new();
+    for output_format in [OutputFormat::Markdown, OutputFormat::Plaintext] {
+        for mode in [ExecutionMode::SingleFile, ExecutionMode::Batch] {
+            entries.push(matrix_entry(
+                format!(
+                    "benchmarks-rust-pdfium-baseline-{output_format}-{}-{cohort}",
+                    mode.artifact_slug()
+                ),
+                format!("xberg-{output_format}-baseline-pdfium"),
+                output_format,
+                mode,
+            ));
+        }
+    }
+    entries
+}
+
 /// The full markdown/plaintext x single/batch grid for one competitor framework.
 fn grid_entries(framework: &str, cohort: &str) -> Vec<MatrixEntry> {
     let mut entries = Vec::new();
@@ -554,6 +573,7 @@ fn optional(entries: Vec<MatrixEntry>) -> Vec<MatrixEntry> {
 
 fn native_matrix() -> Vec<MatrixEntry> {
     let mut matrix = xberg_entries(NATIVE_COHORT, true, false, false);
+    matrix.extend(xberg_pdfium_entries(NATIVE_COHORT));
     matrix.extend(grid_entries("docling", NATIVE_COHORT));
     matrix.push(matrix_entry(
         format!("benchmarks-markitdown-markdown-single-file-{NATIVE_COHORT}"),
@@ -761,7 +781,7 @@ mod tests {
     /// artifact / aggregate validators gate publication on; optional competitor cells are allowed
     /// but never required for the per-format-family cohorts.
     const CONTRACT_CELL_COUNTS: [(Cohort, usize, usize); 8] = [
-        (Cohort::Native, 21, 20),
+        (Cohort::Native, 25, 24),
         (Cohort::Ocr, 39, 36),
         (Cohort::Office, 11, 4),
         (Cohort::Markup, 11, 4),
@@ -805,6 +825,31 @@ mod tests {
                 cohort.as_str()
             );
         }
+    }
+
+    #[test]
+    fn native_contract_includes_every_pdfium_workflow_cell() {
+        let contract = Cohort::Native.contract();
+        let pdfium_entries: Vec<_> = contract
+            .matrix
+            .iter()
+            .filter(|entry| entry.artifact.starts_with("benchmarks-rust-pdfium-"))
+            .collect();
+
+        assert_eq!(pdfium_entries.len(), 4);
+        assert!(pdfium_entries.iter().all(|entry| !entry.optional));
+        assert_eq!(
+            pdfium_entries
+                .iter()
+                .map(|entry| entry.artifact.as_str())
+                .collect::<HashSet<_>>(),
+            HashSet::from([
+                "benchmarks-rust-pdfium-baseline-markdown-single-file-native-pdf-fast-b8",
+                "benchmarks-rust-pdfium-baseline-markdown-batch-native-pdf-fast-b8",
+                "benchmarks-rust-pdfium-baseline-plaintext-single-file-native-pdf-fast-b8",
+                "benchmarks-rust-pdfium-baseline-plaintext-batch-native-pdf-fast-b8",
+            ])
+        );
     }
 
     #[test]
