@@ -16,6 +16,7 @@ default = ["api", "api-types", "auto-rotate-types", "chunking-tokenizers", "clas
 api = ["xberg/api"]
 api-types = ["xberg/api-types"]
 auto-rotate-types = ["xberg/auto-rotate-types"]
+candle-ocr = ["xberg/candle-ocr"]
 chunking-tokenizers = ["xberg/chunking-tokenizers"]
 classification = ["xberg/classification"]
 diff = ["xberg/diff"]
