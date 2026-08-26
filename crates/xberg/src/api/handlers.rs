@@ -478,9 +478,11 @@ fn parse_output_format(format_str: &str) -> Result<crate::core::config::OutputFo
         "markdown" => crate::core::config::OutputFormat::Markdown,
         "djot" => crate::core::config::OutputFormat::Djot,
         "html" => crate::core::config::OutputFormat::Html,
+        "json" => crate::core::config::OutputFormat::Json,
+        "doctags" => crate::core::config::OutputFormat::DocTags,
         _ => {
             return Err(ApiError::validation(crate::error::XbergError::validation(format!(
-                "Invalid output_format: '{}'. Valid values: 'plain', 'markdown', 'djot', 'html'",
+                "Invalid output_format: '{}'. Valid values: 'plain', 'markdown', 'djot', 'html', 'json', 'doctags'",
                 format_str
             ))));
         }
@@ -1428,6 +1430,39 @@ mod tests {
             .header("content-type", format!("multipart/form-data; boundary={boundary}"))
             .body(Body::from(body))
             .expect("valid multipart request")
+    }
+
+    #[test]
+    fn should_parse_json_multipart_output_format() {
+        assert_eq!(
+            parse_output_format("json").expect("json is a built-in output format"),
+            crate::core::config::OutputFormat::Json
+        );
+    }
+
+    #[test]
+    fn should_parse_doctags_multipart_output_format() {
+        assert_eq!(
+            parse_output_format("doctags").expect("doctags is a built-in output format"),
+            crate::core::config::OutputFormat::DocTags
+        );
+    }
+
+    #[test]
+    fn should_reject_unknown_multipart_output_format() {
+        let error =
+            parse_output_format("registered-later").expect_err("multipart output formats must be built-in names");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.body.status_code, 400);
+        assert_eq!(error.body.error_type, "ValidationError");
+        assert_eq!(
+            error.body.message,
+            concat!(
+                "Validation error: Invalid output_format: 'registered-later'. Valid values: ",
+                "'plain', 'markdown', 'djot', 'html', 'json', 'doctags'"
+            )
+        );
     }
 
     /// An unknown multipart field must be rejected, not silently dropped (#248).
