@@ -149,6 +149,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binary data, folder traversal, and repeated text.
 - Fixed Markdown, MDX, RST, HTML, DocBook, JATS, FictionBook, Djot, Org, YAML frontmatter, and Jupyter
   extraction so supported structure and content are retained.
+- Fixed `result.elements` so headings report their level (`metadata.additional["heading_level"]`)
+  instead of every `##`-`######` heading collapsing into indistinguishable `Heading` elements with
+  empty metadata; `result.document.nodes` already carried the level correctly (#1504).
 - Fixed CSV parsing for stray quotes and archive extraction order.
 - Fixed MIME routing so HTML is detected before the generic XML fallback and supported-format lists
   reflect the active extractor registry.

@@ -1336,6 +1336,56 @@ mod tests {
         assert_eq!(h2_group.children.len(), 2);
     }
 
+    /// Regression test for xberg-io/xberg#1504: `document.nodes` and `elements` are two
+    /// views derived from the same `InternalDocument`, and they must agree on heading
+    /// depth. `document.nodes` already carried the level correctly on
+    /// `NodeContent::Heading { level, .. }`; the bug was that `elements`' `heading_level`
+    /// (in `metadata.additional`, via `convert_internal_elements_to_elements`) silently
+    /// disagreed by reporting nothing at all. This pins the cross-view invariant directly,
+    /// rather than checking either side in isolation.
+    #[test]
+    fn test_elements_and_document_nodes_agree_on_heading_level() {
+        let mut doc = make_doc("markdown");
+        doc.push_element(InternalElement::text(ElementKind::Heading { level: 1 }, "Title", 0));
+        doc.push_element(InternalElement::text(ElementKind::Heading { level: 2 }, "Section", 1));
+        doc.push_element(InternalElement::text(
+            ElementKind::Heading { level: 6 },
+            "Deep subsection",
+            2,
+        ));
+
+        // `derive_document_structure_inner` takes `&mut` and moves text/annotations out of
+        // elements via `mem::take`, so derive the `elements` view from an independent clone
+        // taken before that happens.
+        let doc_for_elements = doc.clone();
+
+        resolve_relationships(&mut doc);
+        let ds = derive_document_structure_inner(&mut doc);
+        assert!(ds.validate().is_ok(), "validation: {:?}", ds.validate());
+
+        let document_node_levels: Vec<u8> = ds
+            .nodes
+            .iter()
+            .filter_map(|node| match &node.content {
+                NodeContent::Heading { level, .. } => Some(*level),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(document_node_levels, vec![1, 2, 6]);
+
+        let elements = crate::extraction::transform::convert_internal_elements_to_elements(&doc_for_elements, &None);
+        let element_levels: Vec<u8> = elements
+            .iter()
+            .filter_map(|e| e.metadata.additional.get("heading_level"))
+            .map(|level| level.parse::<u8>().expect("heading_level must be a decimal string"))
+            .collect();
+
+        assert_eq!(
+            element_levels, document_node_levels,
+            "elements' heading_level must agree with document.nodes' NodeContent::Heading level"
+        );
+    }
+
     #[test]
     fn test_group_end_closes_layout_group_beneath_heading() {
         let mut doc = make_doc("pdf");
