@@ -4267,7 +4267,7 @@ mod tests {
     ///
     /// Gated on `not(feature = "pdf-pdfium")`: with the real engine enabled, a valid
     /// document legitimately extracting via pdfium is the whole point (see
-    /// `pdfium_engine_extracts_real_text_when_the_library_is_available` below), not
+    /// `pdfium_engine_serializes_concurrent_extractions_when_the_library_is_available` below), not
     /// a silent fallback -- this test's premise (pdfium selection must always fail)
     /// only holds for the stub.
     #[tokio::test]

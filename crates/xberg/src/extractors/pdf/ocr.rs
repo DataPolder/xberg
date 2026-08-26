@@ -1625,6 +1625,12 @@ fn undo_auto_rotate_document_bboxes(
 /// [`assemble_mixed_ocr_page_document`] built it from -- see that function's doc
 /// comment.
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "six of the eight are one page's geometry (pixel size, point size, margins); grouping \
+              them into a struct is the better shape but would touch all seven call sites, so it is \
+              deliberately left as follow-up rather than bundled into a lint fix"
+)]
 fn build_mixed_ocr_page_document(
     result: &mut crate::types::ExtractedDocument,
     public_ocr_config: &crate::core::config::OcrConfig,

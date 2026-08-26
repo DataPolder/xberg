@@ -622,7 +622,7 @@ jobs:
 
   # #702: `PdfBackend::Pdfium` (crates/xberg/src/extractors/pdf/pdfium_engine.rs) had zero
   # executed CI coverage. Its regression test,
-  # `pdfium_engine_extracts_real_text_when_the_library_is_available`, is gated
+  # `pdfium_engine_serializes_concurrent_extractions_when_the_library_is_available`, is gated
   # `#[cfg(all(feature = "pdf", feature = "pdf-pdfium"))]`, and `pdf-pdfium` is enabled by no
   # feature set any job in this file (or `task rust:test:ci`) builds -- not even `full` -- so
   # the test has never once compiled, let alone run. On top of that, the test itself
@@ -681,10 +681,10 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --locked -p xberg --features "pdf,pdf-pdfium" --lib \
-            extractors::pdf::tests::pdfium_engine_extracts_real_text_when_the_library_is_available \
+            extractors::pdf::tests::pdfium_engine_serializes_concurrent_extractions_when_the_library_is_available \
             -- --exact --nocapture 2>&1 | tee /tmp/pdfium-engine-test.log
           if ! grep -qE '^test result: ok\. 1 passed' /tmp/pdfium-engine-test.log; then
-            echo "::error::pdfium_engine_extracts_real_text_when_the_library_is_available did not run -- this is the sole CI execution of PdfBackend::Pdfium; a renamed/moved/re-gated test would silently go green here" >&2
+            echo "::error::pdfium_engine_serializes_concurrent_extractions_when_the_library_is_available did not run -- this is the sole CI execution of PdfBackend::Pdfium; a renamed/moved/re-gated test would silently go green here" >&2
             exit 1
           fi
         shell: bash

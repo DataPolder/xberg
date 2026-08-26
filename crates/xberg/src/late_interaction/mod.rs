@@ -295,6 +295,11 @@ struct LateInteractionEngineCacheKey {
 
 #[cfg(feature = "late-interaction")]
 impl LateInteractionEngineCacheKey {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "every argument is a distinct dimension of the cache key this constructor builds; \
+                  grouping any of them would just move the same fields behind another struct"
+    )]
     fn new(
         repo_name: &str,
         model_file: &str,

@@ -110,6 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** removed the duplicate `xberg::llm::region_extractor::RegionKind`; import `xberg::RegionKind`
   instead.
 - Parsing and configuration deserialization now reject invalid region, redaction, and reranker values.
+- Corrected and expanded installation, CLI, configuration, extraction, migration, integration, and
+  cross-language API documentation.
 
 ### Removed
 
@@ -177,6 +179,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binary data, folder traversal, and repeated text.
 - Fixed Markdown, MDX, RST, HTML, DocBook, JATS, FictionBook, Djot, Org, YAML frontmatter, and Jupyter
   extraction so supported structure and content are retained.
+- Fixed `result.elements` so headings report their level (`metadata.additional["heading_level"]`)
+  instead of every `##`-`######` heading collapsing into indistinguishable `Heading` elements with
+  empty metadata; `result.document.nodes` already carried the level correctly (#1504).
 - Fixed CSV parsing for stray quotes and archive extraction order.
 - Fixed MIME routing so HTML is detected before the generic XML fallback and supported-format lists
   reflect the active extractor registry.
@@ -186,6 +191,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   preserving unrelated chunking settings.
 - Fixed extraction timeout handling so timed-out work is cancelled.
 - Fixed configuration merging so changing one CLI option no longer erases sibling settings.
+- Fixed multipart API extraction to accept `json` and `doctags` values for `output_format`.
 - Fixed cache keys to reflect only settings that affect the corresponding extraction or OCR result.
 - Fixed model caching so OCR, embedding, and reranking settings no longer reuse incompatible models.
 - Fixed Node.js native-library loading, Swift iOS resolution, Windows DirectML packaging, and
