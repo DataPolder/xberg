@@ -4,9 +4,9 @@ target: wasm
 ---
 
 ```typescript title="WASM"
-import { initWasm, extract } from "@xberg-io/xberg-wasm";
+import init, { extract } from "@xberg-io/xberg-wasm";
 
-await initWasm();
+await init();
 
 const config = {
   chunking: {
@@ -15,6 +15,7 @@ const config = {
   },
 };
 
+const buffer = await fetch("document.pdf").then((response) => response.arrayBuffer());
 const bytes = new Uint8Array(buffer);
 const result = await extract({ kind: "bytes", bytes, mimeType: "application/pdf" }, config);
 
@@ -25,9 +26,9 @@ result.results[0].chunks?.forEach((chunk, idx) => {
 ```
 
 ```typescript title="WASM - Markdown with Heading Context"
-import { initWasm, extract } from "@xberg-io/xberg-wasm";
+import init, { extract } from "@xberg-io/xberg-wasm";
 
-await initWasm();
+await init();
 
 const config = {
   chunking: {
@@ -38,6 +39,7 @@ const config = {
   },
 };
 
+const buffer = await fetch("document.md").then((response) => response.arrayBuffer());
 const bytes = new Uint8Array(buffer);
 const result = await extract({ kind: "bytes", bytes, mimeType: "text/markdown" }, config);
 
@@ -46,7 +48,7 @@ result.results[0].chunks?.forEach((chunk, idx) => {
 
   if (chunk.metadata?.headingContext?.headings) {
     console.log("Headings:");
-    chunk.metadata.headingContext.headings.forEach((h) => {
+    chunk.metadata.headingContext.headings.forEach((h: any) => {
       console.log(`  Level ${h.level}: ${h.text}`);
     });
   }

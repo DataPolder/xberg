@@ -4,9 +4,9 @@ target: wasm
 ---
 
 ```typescript title="WASM"
-import { initWasm, extract } from "@xberg-io/xberg-wasm";
+import init, { extract } from "@xberg-io/xberg-wasm";
 
-await initWasm();
+await init();
 
 const fileInput = document.getElementById("file") as HTMLInputElement;
 const file = fileInput.files?.[0];
@@ -15,7 +15,7 @@ if (file) {
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const result = await extract({ kind: "bytes", bytes, mimeType: file.type || "application/pdf" }, undefined);
-    console.log(`Extracted: ${result.content.length} characters`);
+    console.log(`Extracted: ${result.results[0].content.length} characters`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Extraction failed:", message);
