@@ -4,7 +4,7 @@ title: "Format Support"
 
 import { Tabs, TabItem } from "@astrojs/starlight/components";
 
-Xberg supports 101 file formats across 120 file extensions across major categories through native Rust extractors.
+Xberg supports 100 file formats across 120 file extensions across major categories through native Rust extractors.
 
 ## Overview
 
@@ -242,7 +242,7 @@ To enable specific features:
 ```toml title="Cargo.toml"
 [dependencies]
 # Enable only PDF and Excel format support
-xberg = { version = "5", features = ["pdf", "excel"] }
+xberg = { version = "1", features = ["pdf", "excel"] }
 ```
 
 To enable all features with `--all-features`:
@@ -258,21 +258,21 @@ All format extraction features (no server components):
 
 ```toml title="Cargo.toml"
 [dependencies]
-xberg = { version = "5", features = ["full"] }
+xberg = { version = "1", features = ["full"] }
 ```
 
 Server features (API, MCP) with common format support:
 
 ```toml title="Cargo.toml"
 [dependencies]
-xberg = { version = "5", features = ["server"] }
+xberg = { version = "1", features = ["server"] }
 ```
 
 CLI features with commonly used formats:
 
 ```toml title="Cargo.toml"
 [dependencies]
-xberg = { version = "5", features = ["cli"] }
+xberg = { version = "1", features = ["cli"] }
 ```
 
 ## System Dependencies

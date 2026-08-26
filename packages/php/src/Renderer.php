@@ -16,4 +16,3 @@ interface Renderer
     // trait's Rust default behavior applies otherwise): render_result.
     // The lifecycle hooks initialize()/shutdown() are likewise optional.
 }
-

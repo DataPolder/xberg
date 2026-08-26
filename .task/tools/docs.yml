@@ -21,13 +21,18 @@ tasks:
 
   lint:links:
     desc: Check links with lychee
+    deps:
+      - build
     cmds:
-      - lychee --offline docs-site/src/content/docs README.md
+      - >-
+        lychee --offline --root-dir "{{.ROOT_DIR}}/docs-site/dist" --index-files index.html
+        docs-site/src/content/docs README.md
 
   lint:prose:
     desc: Lint prose with textlint
     cmds:
-      - npx textlint 'docs-site/src/content/docs/**/*.{md,mdx}'
+      - pnpm install --frozen-lockfile
+      - pnpm exec textlint 'docs-site/src/content/docs/**/*.{md,mdx}'
 
   snippets:list:
     desc: List all documentation snippets discovered by alef

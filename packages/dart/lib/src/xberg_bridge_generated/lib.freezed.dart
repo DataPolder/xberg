@@ -8580,7 +8580,7 @@ return metadataBlock(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String text)?  title,TResult Function( PlatformInt64 level,  String text)?  heading,TResult Function( String text)?  paragraph,TResult Function( bool ordered)?  list,TResult Function( String text)?  listItem,TResult Function( TableGrid grid)?  table,TResult Function( String description,  PlatformInt64 imageIndex,  String src)?  image,TResult Function( String text,  String language)?  code,TResult Function()?  quote,TResult Function( String text)?  formula,TResult Function( String text)?  footnote,TResult Function( String text)?  comment,TResult Function( String label,  PlatformInt64 headingLevel,  String headingText)?  group,TResult Function()?  pageBreak,TResult Function( PlatformInt64 number,  String title)?  slide,TResult Function()?  definitionList,TResult Function( String term,  String definition)?  definitionItem,TResult Function( String key,  String text)?  citation,TResult Function( String kind,  String title)?  admonition,TResult Function( String format,  String content)?  rawBlock,TResult Function()?  metadataBlock,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String text)?  title,TResult Function( PlatformInt64 level,  String text)?  heading,TResult Function( String text)?  paragraph,TResult Function( bool ordered)?  list,TResult Function( String text)?  listItem,TResult Function( TableGrid grid)?  table,TResult Function( String description,  PlatformInt64 imageIndex,  String src)?  image,TResult Function( String text,  String language)?  code,TResult Function()?  quote,TResult Function( String text)?  formula,TResult Function( String text)?  footnote,TResult Function( String text)?  comment,TResult Function( String label,  PlatformInt64 headingLevel,  String headingText)?  group,TResult Function()?  pageBreak,TResult Function( PlatformInt64 number,  String title)?  slide,TResult Function()?  definitionList,TResult Function( String term,  String definition)?  definitionItem,TResult Function( String key,  String text)?  citation,TResult Function( String kind,  String title)?  admonition,TResult Function( String format,  String content)?  rawBlock,TResult Function( List<KeyValueAttribute> entries)?  metadataBlock,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case NodeContent_Title() when title != null:
 return title(_that.text);case NodeContent_Heading() when heading != null:
@@ -8603,7 +8603,7 @@ return definitionItem(_that.term,_that.definition);case NodeContent_Citation() w
 return citation(_that.key,_that.text);case NodeContent_Admonition() when admonition != null:
 return admonition(_that.kind,_that.title);case NodeContent_RawBlock() when rawBlock != null:
 return rawBlock(_that.format,_that.content);case NodeContent_MetadataBlock() when metadataBlock != null:
-return metadataBlock();case _:
+return metadataBlock(_that.entries);case _:
   return orElse();
 
 }
@@ -8621,7 +8621,7 @@ return metadataBlock();case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String text)  title,required TResult Function( PlatformInt64 level,  String text)  heading,required TResult Function( String text)  paragraph,required TResult Function( bool ordered)  list,required TResult Function( String text)  listItem,required TResult Function( TableGrid grid)  table,required TResult Function( String description,  PlatformInt64 imageIndex,  String src)  image,required TResult Function( String text,  String language)  code,required TResult Function()  quote,required TResult Function( String text)  formula,required TResult Function( String text)  footnote,required TResult Function( String text)  comment,required TResult Function( String label,  PlatformInt64 headingLevel,  String headingText)  group,required TResult Function()  pageBreak,required TResult Function( PlatformInt64 number,  String title)  slide,required TResult Function()  definitionList,required TResult Function( String term,  String definition)  definitionItem,required TResult Function( String key,  String text)  citation,required TResult Function( String kind,  String title)  admonition,required TResult Function( String format,  String content)  rawBlock,required TResult Function()  metadataBlock,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String text)  title,required TResult Function( PlatformInt64 level,  String text)  heading,required TResult Function( String text)  paragraph,required TResult Function( bool ordered)  list,required TResult Function( String text)  listItem,required TResult Function( TableGrid grid)  table,required TResult Function( String description,  PlatformInt64 imageIndex,  String src)  image,required TResult Function( String text,  String language)  code,required TResult Function()  quote,required TResult Function( String text)  formula,required TResult Function( String text)  footnote,required TResult Function( String text)  comment,required TResult Function( String label,  PlatformInt64 headingLevel,  String headingText)  group,required TResult Function()  pageBreak,required TResult Function( PlatformInt64 number,  String title)  slide,required TResult Function()  definitionList,required TResult Function( String term,  String definition)  definitionItem,required TResult Function( String key,  String text)  citation,required TResult Function( String kind,  String title)  admonition,required TResult Function( String format,  String content)  rawBlock,required TResult Function( List<KeyValueAttribute> entries)  metadataBlock,}) {final _that = this;
 switch (_that) {
 case NodeContent_Title():
 return title(_that.text);case NodeContent_Heading():
@@ -8644,7 +8644,7 @@ return definitionItem(_that.term,_that.definition);case NodeContent_Citation():
 return citation(_that.key,_that.text);case NodeContent_Admonition():
 return admonition(_that.kind,_that.title);case NodeContent_RawBlock():
 return rawBlock(_that.format,_that.content);case NodeContent_MetadataBlock():
-return metadataBlock();}
+return metadataBlock(_that.entries);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -8658,7 +8658,7 @@ return metadataBlock();}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String text)?  title,TResult? Function( PlatformInt64 level,  String text)?  heading,TResult? Function( String text)?  paragraph,TResult? Function( bool ordered)?  list,TResult? Function( String text)?  listItem,TResult? Function( TableGrid grid)?  table,TResult? Function( String description,  PlatformInt64 imageIndex,  String src)?  image,TResult? Function( String text,  String language)?  code,TResult? Function()?  quote,TResult? Function( String text)?  formula,TResult? Function( String text)?  footnote,TResult? Function( String text)?  comment,TResult? Function( String label,  PlatformInt64 headingLevel,  String headingText)?  group,TResult? Function()?  pageBreak,TResult? Function( PlatformInt64 number,  String title)?  slide,TResult? Function()?  definitionList,TResult? Function( String term,  String definition)?  definitionItem,TResult? Function( String key,  String text)?  citation,TResult? Function( String kind,  String title)?  admonition,TResult? Function( String format,  String content)?  rawBlock,TResult? Function()?  metadataBlock,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String text)?  title,TResult? Function( PlatformInt64 level,  String text)?  heading,TResult? Function( String text)?  paragraph,TResult? Function( bool ordered)?  list,TResult? Function( String text)?  listItem,TResult? Function( TableGrid grid)?  table,TResult? Function( String description,  PlatformInt64 imageIndex,  String src)?  image,TResult? Function( String text,  String language)?  code,TResult? Function()?  quote,TResult? Function( String text)?  formula,TResult? Function( String text)?  footnote,TResult? Function( String text)?  comment,TResult? Function( String label,  PlatformInt64 headingLevel,  String headingText)?  group,TResult? Function()?  pageBreak,TResult? Function( PlatformInt64 number,  String title)?  slide,TResult? Function()?  definitionList,TResult? Function( String term,  String definition)?  definitionItem,TResult? Function( String key,  String text)?  citation,TResult? Function( String kind,  String title)?  admonition,TResult? Function( String format,  String content)?  rawBlock,TResult? Function( List<KeyValueAttribute> entries)?  metadataBlock,}) {final _that = this;
 switch (_that) {
 case NodeContent_Title() when title != null:
 return title(_that.text);case NodeContent_Heading() when heading != null:
@@ -8681,7 +8681,7 @@ return definitionItem(_that.term,_that.definition);case NodeContent_Citation() w
 return citation(_that.key,_that.text);case NodeContent_Admonition() when admonition != null:
 return admonition(_that.kind,_that.title);case NodeContent_RawBlock() when rawBlock != null:
 return rawBlock(_that.format,_that.content);case NodeContent_MetadataBlock() when metadataBlock != null:
-return metadataBlock();case _:
+return metadataBlock(_that.entries);case _:
   return null;
 
 }
@@ -9961,33 +9961,75 @@ as String,
 
 
 class NodeContent_MetadataBlock extends NodeContent {
-  const NodeContent_MetadataBlock(): super._();
+  const NodeContent_MetadataBlock({required final  List<KeyValueAttribute> entries}): _entries = entries,super._();
 
 
+/// Key-value pairs extracted from the metadata block.
+ final  List<KeyValueAttribute> _entries;
+/// Key-value pairs extracted from the metadata block.
+ List<KeyValueAttribute> get entries {
+  if (_entries is EqualUnmodifiableListView) return _entries;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_entries);
+}
 
 
+/// Create a copy of NodeContent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$NodeContent_MetadataBlockCopyWith<NodeContent_MetadataBlock> get copyWith => _$NodeContent_MetadataBlockCopyWithImpl<NodeContent_MetadataBlock>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is NodeContent_MetadataBlock);
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is NodeContent_MetadataBlock&&const DeepCollectionEquality().equals(other._entries, _entries));
 }
 
 
 @override
-int get hashCode => runtimeType.hashCode;
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_entries));
 
 @override
 String toString() {
-  return 'NodeContent.metadataBlock()';
+  return 'NodeContent.metadataBlock(entries: $entries)';
 }
 
 
 }
 
+/// @nodoc
+abstract mixin class $NodeContent_MetadataBlockCopyWith<$Res> implements $NodeContentCopyWith<$Res> {
+  factory $NodeContent_MetadataBlockCopyWith(NodeContent_MetadataBlock value, $Res Function(NodeContent_MetadataBlock) _then) = _$NodeContent_MetadataBlockCopyWithImpl;
+@useResult
+$Res call({
+ List<KeyValueAttribute> entries
+});
 
 
+
+
+}
+/// @nodoc
+class _$NodeContent_MetadataBlockCopyWithImpl<$Res>
+    implements $NodeContent_MetadataBlockCopyWith<$Res> {
+  _$NodeContent_MetadataBlockCopyWithImpl(this._self, this._then);
+
+  final NodeContent_MetadataBlock _self;
+  final $Res Function(NodeContent_MetadataBlock) _then;
+
+/// Create a copy of NodeContent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? entries = null,}) {
+  return _then(NodeContent_MetadataBlock(
+entries: null == entries ? _self._entries : entries // ignore: cast_nullable_to_non_nullable
+as List<KeyValueAttribute>,
+  ));
+}
+
+
+}
 
 /// @nodoc
 mixin _$OcrBoundingGeometry {
@@ -10097,11 +10139,11 @@ return quadrilateral(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( PlatformInt64 left,  PlatformInt64 top,  PlatformInt64 width,  PlatformInt64 height)?  rectangle,TResult Function()?  quadrilateral,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( PlatformInt64 left,  PlatformInt64 top,  PlatformInt64 width,  PlatformInt64 height)?  rectangle,TResult Function( List<OcrPoint> points)?  quadrilateral,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case OcrBoundingGeometry_Rectangle() when rectangle != null:
 return rectangle(_that.left,_that.top,_that.width,_that.height);case OcrBoundingGeometry_Quadrilateral() when quadrilateral != null:
-return quadrilateral();case _:
+return quadrilateral(_that.points);case _:
   return orElse();
 
 }
@@ -10119,11 +10161,11 @@ return quadrilateral();case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( PlatformInt64 left,  PlatformInt64 top,  PlatformInt64 width,  PlatformInt64 height)  rectangle,required TResult Function()  quadrilateral,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( PlatformInt64 left,  PlatformInt64 top,  PlatformInt64 width,  PlatformInt64 height)  rectangle,required TResult Function( List<OcrPoint> points)  quadrilateral,}) {final _that = this;
 switch (_that) {
 case OcrBoundingGeometry_Rectangle():
 return rectangle(_that.left,_that.top,_that.width,_that.height);case OcrBoundingGeometry_Quadrilateral():
-return quadrilateral();}
+return quadrilateral(_that.points);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -10137,11 +10179,11 @@ return quadrilateral();}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( PlatformInt64 left,  PlatformInt64 top,  PlatformInt64 width,  PlatformInt64 height)?  rectangle,TResult? Function()?  quadrilateral,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( PlatformInt64 left,  PlatformInt64 top,  PlatformInt64 width,  PlatformInt64 height)?  rectangle,TResult? Function( List<OcrPoint> points)?  quadrilateral,}) {final _that = this;
 switch (_that) {
 case OcrBoundingGeometry_Rectangle() when rectangle != null:
 return rectangle(_that.left,_that.top,_that.width,_that.height);case OcrBoundingGeometry_Quadrilateral() when quadrilateral != null:
-return quadrilateral();case _:
+return quadrilateral(_that.points);case _:
   return null;
 
 }
@@ -10229,33 +10271,75 @@ as PlatformInt64,
 
 
 class OcrBoundingGeometry_Quadrilateral extends OcrBoundingGeometry {
-  const OcrBoundingGeometry_Quadrilateral(): super._();
+  const OcrBoundingGeometry_Quadrilateral({required final  List<OcrPoint> points}): _points = points,super._();
 
 
+/// Exactly four corner points in clockwise order.
+ final  List<OcrPoint> _points;
+/// Exactly four corner points in clockwise order.
+ List<OcrPoint> get points {
+  if (_points is EqualUnmodifiableListView) return _points;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_points);
+}
 
 
+/// Create a copy of OcrBoundingGeometry
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$OcrBoundingGeometry_QuadrilateralCopyWith<OcrBoundingGeometry_Quadrilateral> get copyWith => _$OcrBoundingGeometry_QuadrilateralCopyWithImpl<OcrBoundingGeometry_Quadrilateral>(this, _$identity);
 
 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is OcrBoundingGeometry_Quadrilateral);
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is OcrBoundingGeometry_Quadrilateral&&const DeepCollectionEquality().equals(other._points, _points));
 }
 
 
 @override
-int get hashCode => runtimeType.hashCode;
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_points));
 
 @override
 String toString() {
-  return 'OcrBoundingGeometry.quadrilateral()';
+  return 'OcrBoundingGeometry.quadrilateral(points: $points)';
 }
 
 
 }
 
+/// @nodoc
+abstract mixin class $OcrBoundingGeometry_QuadrilateralCopyWith<$Res> implements $OcrBoundingGeometryCopyWith<$Res> {
+  factory $OcrBoundingGeometry_QuadrilateralCopyWith(OcrBoundingGeometry_Quadrilateral value, $Res Function(OcrBoundingGeometry_Quadrilateral) _then) = _$OcrBoundingGeometry_QuadrilateralCopyWithImpl;
+@useResult
+$Res call({
+ List<OcrPoint> points
+});
 
 
+
+
+}
+/// @nodoc
+class _$OcrBoundingGeometry_QuadrilateralCopyWithImpl<$Res>
+    implements $OcrBoundingGeometry_QuadrilateralCopyWith<$Res> {
+  _$OcrBoundingGeometry_QuadrilateralCopyWithImpl(this._self, this._then);
+
+  final OcrBoundingGeometry_Quadrilateral _self;
+  final $Res Function(OcrBoundingGeometry_Quadrilateral) _then;
+
+/// Create a copy of OcrBoundingGeometry
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? points = null,}) {
+  return _then(OcrBoundingGeometry_Quadrilateral(
+points: null == points ? _self._points : points // ignore: cast_nullable_to_non_nullable
+as List<OcrPoint>,
+  ));
+}
+
+
+}
 
 /// @nodoc
 mixin _$OcrStrategy {
@@ -10456,8 +10540,9 @@ class OcrStrategy_ScannedPages extends OcrStrategy {
   const OcrStrategy_ScannedPages({required this.minConfidence}): super._();
 
 
-/// Minimum scan confidence, in `[0.0, 1.0]`. Values outside the range are
-/// clamped. See [`DEFAULT_SCANNED_MIN_CONFIDENCE`] for how to pick one.
+/// Minimum scan confidence, in `[0.0, 1.0]`. Configuration validation rejects
+/// non-finite or out-of-range values. See [`DEFAULT_SCANNED_MIN_CONFIDENCE`]
+/// for how to pick one.
  final  double minConfidence;
 
 /// Create a copy of OcrStrategy
@@ -10561,7 +10646,7 @@ extension OutputFormatPatterns on OutputFormat {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( OutputFormat_Plain value)?  plain,TResult Function( OutputFormat_Markdown value)?  markdown,TResult Function( OutputFormat_Djot value)?  djot,TResult Function( OutputFormat_Html value)?  html,TResult Function( OutputFormat_Json value)?  json,TResult Function( OutputFormat_Structured value)?  structured,TResult Function( OutputFormat_DocTags value)?  docTags,TResult Function( OutputFormat_Custom value)?  custom,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( OutputFormat_Plain value)?  plain,TResult Function( OutputFormat_Markdown value)?  markdown,TResult Function( OutputFormat_Djot value)?  djot,TResult Function( OutputFormat_Html value)?  html,TResult Function( OutputFormat_Json value)?  json,TResult Function( OutputFormat_DocTags value)?  docTags,TResult Function( OutputFormat_Custom value)?  custom,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case OutputFormat_Plain() when plain != null:
@@ -10569,8 +10654,7 @@ return plain(_that);case OutputFormat_Markdown() when markdown != null:
 return markdown(_that);case OutputFormat_Djot() when djot != null:
 return djot(_that);case OutputFormat_Html() when html != null:
 return html(_that);case OutputFormat_Json() when json != null:
-return json(_that);case OutputFormat_Structured() when structured != null:
-return structured(_that);case OutputFormat_DocTags() when docTags != null:
+return json(_that);case OutputFormat_DocTags() when docTags != null:
 return docTags(_that);case OutputFormat_Custom() when custom != null:
 return custom(_that);case _:
   return orElse();
@@ -10590,7 +10674,7 @@ return custom(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( OutputFormat_Plain value)  plain,required TResult Function( OutputFormat_Markdown value)  markdown,required TResult Function( OutputFormat_Djot value)  djot,required TResult Function( OutputFormat_Html value)  html,required TResult Function( OutputFormat_Json value)  json,required TResult Function( OutputFormat_Structured value)  structured,required TResult Function( OutputFormat_DocTags value)  docTags,required TResult Function( OutputFormat_Custom value)  custom,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( OutputFormat_Plain value)  plain,required TResult Function( OutputFormat_Markdown value)  markdown,required TResult Function( OutputFormat_Djot value)  djot,required TResult Function( OutputFormat_Html value)  html,required TResult Function( OutputFormat_Json value)  json,required TResult Function( OutputFormat_DocTags value)  docTags,required TResult Function( OutputFormat_Custom value)  custom,}){
 final _that = this;
 switch (_that) {
 case OutputFormat_Plain():
@@ -10598,8 +10682,7 @@ return plain(_that);case OutputFormat_Markdown():
 return markdown(_that);case OutputFormat_Djot():
 return djot(_that);case OutputFormat_Html():
 return html(_that);case OutputFormat_Json():
-return json(_that);case OutputFormat_Structured():
-return structured(_that);case OutputFormat_DocTags():
+return json(_that);case OutputFormat_DocTags():
 return docTags(_that);case OutputFormat_Custom():
 return custom(_that);}
 }
@@ -10615,7 +10698,7 @@ return custom(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( OutputFormat_Plain value)?  plain,TResult? Function( OutputFormat_Markdown value)?  markdown,TResult? Function( OutputFormat_Djot value)?  djot,TResult? Function( OutputFormat_Html value)?  html,TResult? Function( OutputFormat_Json value)?  json,TResult? Function( OutputFormat_Structured value)?  structured,TResult? Function( OutputFormat_DocTags value)?  docTags,TResult? Function( OutputFormat_Custom value)?  custom,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( OutputFormat_Plain value)?  plain,TResult? Function( OutputFormat_Markdown value)?  markdown,TResult? Function( OutputFormat_Djot value)?  djot,TResult? Function( OutputFormat_Html value)?  html,TResult? Function( OutputFormat_Json value)?  json,TResult? Function( OutputFormat_DocTags value)?  docTags,TResult? Function( OutputFormat_Custom value)?  custom,}){
 final _that = this;
 switch (_that) {
 case OutputFormat_Plain() when plain != null:
@@ -10623,8 +10706,7 @@ return plain(_that);case OutputFormat_Markdown() when markdown != null:
 return markdown(_that);case OutputFormat_Djot() when djot != null:
 return djot(_that);case OutputFormat_Html() when html != null:
 return html(_that);case OutputFormat_Json() when json != null:
-return json(_that);case OutputFormat_Structured() when structured != null:
-return structured(_that);case OutputFormat_DocTags() when docTags != null:
+return json(_that);case OutputFormat_DocTags() when docTags != null:
 return docTags(_that);case OutputFormat_Custom() when custom != null:
 return custom(_that);case _:
   return null;
@@ -10643,15 +10725,14 @@ return custom(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  plain,TResult Function()?  markdown,TResult Function()?  djot,TResult Function()?  html,TResult Function()?  json,TResult Function()?  structured,TResult Function()?  docTags,TResult Function( String field0)?  custom,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  plain,TResult Function()?  markdown,TResult Function()?  djot,TResult Function()?  html,TResult Function()?  json,TResult Function()?  docTags,TResult Function( String field0)?  custom,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case OutputFormat_Plain() when plain != null:
 return plain();case OutputFormat_Markdown() when markdown != null:
 return markdown();case OutputFormat_Djot() when djot != null:
 return djot();case OutputFormat_Html() when html != null:
 return html();case OutputFormat_Json() when json != null:
-return json();case OutputFormat_Structured() when structured != null:
-return structured();case OutputFormat_DocTags() when docTags != null:
+return json();case OutputFormat_DocTags() when docTags != null:
 return docTags();case OutputFormat_Custom() when custom != null:
 return custom(_that.field0);case _:
   return orElse();
@@ -10671,15 +10752,14 @@ return custom(_that.field0);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  plain,required TResult Function()  markdown,required TResult Function()  djot,required TResult Function()  html,required TResult Function()  json,required TResult Function()  structured,required TResult Function()  docTags,required TResult Function( String field0)  custom,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  plain,required TResult Function()  markdown,required TResult Function()  djot,required TResult Function()  html,required TResult Function()  json,required TResult Function()  docTags,required TResult Function( String field0)  custom,}) {final _that = this;
 switch (_that) {
 case OutputFormat_Plain():
 return plain();case OutputFormat_Markdown():
 return markdown();case OutputFormat_Djot():
 return djot();case OutputFormat_Html():
 return html();case OutputFormat_Json():
-return json();case OutputFormat_Structured():
-return structured();case OutputFormat_DocTags():
+return json();case OutputFormat_DocTags():
 return docTags();case OutputFormat_Custom():
 return custom(_that.field0);}
 }
@@ -10695,15 +10775,14 @@ return custom(_that.field0);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  plain,TResult? Function()?  markdown,TResult? Function()?  djot,TResult? Function()?  html,TResult? Function()?  json,TResult? Function()?  structured,TResult? Function()?  docTags,TResult? Function( String field0)?  custom,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  plain,TResult? Function()?  markdown,TResult? Function()?  djot,TResult? Function()?  html,TResult? Function()?  json,TResult? Function()?  docTags,TResult? Function( String field0)?  custom,}) {final _that = this;
 switch (_that) {
 case OutputFormat_Plain() when plain != null:
 return plain();case OutputFormat_Markdown() when markdown != null:
 return markdown();case OutputFormat_Djot() when djot != null:
 return djot();case OutputFormat_Html() when html != null:
 return html();case OutputFormat_Json() when json != null:
-return json();case OutputFormat_Structured() when structured != null:
-return structured();case OutputFormat_DocTags() when docTags != null:
+return json();case OutputFormat_DocTags() when docTags != null:
 return docTags();case OutputFormat_Custom() when custom != null:
 return custom(_that.field0);case _:
   return null;
@@ -10865,38 +10944,6 @@ int get hashCode => runtimeType.hashCode;
 @override
 String toString() {
   return 'OutputFormat.json()';
-}
-
-
-}
-
-
-
-
-/// @nodoc
-
-
-class OutputFormat_Structured extends OutputFormat {
-  const OutputFormat_Structured(): super._();
-
-
-
-
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is OutputFormat_Structured);
-}
-
-
-@override
-int get hashCode => runtimeType.hashCode;
-
-@override
-String toString() {
-  return 'OutputFormat.structured()';
 }
 
 

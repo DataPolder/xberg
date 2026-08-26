@@ -33,4 +33,3 @@ interface DocumentExtractor
      */
     public function supported_mime_types(): mixed;
 }
-

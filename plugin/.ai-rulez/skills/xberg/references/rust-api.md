@@ -8,11 +8,11 @@ Complete API reference for the Xberg document extraction library in Rust. Xberg 
 cargo add xberg
 ```
 
-The crate version is `1.0.2`. Add it to `Cargo.toml`:
+The crate version is `1.1.0`. Add it to `Cargo.toml`:
 
 ```toml
 [dependencies]
-xberg = { version = "1.0.2", features = ["full"] }
+xberg = { version = "1.1.0", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -148,7 +148,7 @@ pub struct ExtractionConfig {
     pub postprocessor: Option<PostProcessorConfig>,
     pub max_concurrent_extractions: Option<usize>,
     pub result_format: ResultFormat,       // Unified | ElementBased
-    pub output_format: OutputFormat,       // Plain | Markdown | Djot | Html
+    pub output_format: OutputFormat,       // Plain | Markdown | Djot | Html | Json | DocTags | Custom
     pub security_limits: Option<SecurityLimits>,
     // ... additional optional fields
 }
@@ -402,4 +402,4 @@ pub type Result<T> = std::result::Result<T, XbergError>;
 
 ## Version
 
-This reference targets Xberg `1.0.2`.
+This reference targets Xberg `1.1.0`.

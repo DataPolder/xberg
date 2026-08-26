@@ -55,7 +55,7 @@
         },
         "skip_languages": {
           "default": [],
-          "description": "Language backends for which this adapter should NOT be emitted.\n\nMirrors the same field on `[[crates.e2e.calls.*]]`. Useful when a\nconsumer's core crate cannot compile on a given target (e.g.\na streaming crate on `wasm32-unknown-unknown` which has no working async\nruntime for streaming). The adapter remains declared for every backend\nwhere it works, with explicit per-backend opt-out rather than removing\nthe adapter entirely.\n\nValues must match the canonical TOML language names used in `languages`\n(`\"python\"`, `\"node\"`, `\"wasm\"`, `\"ruby\"`, `\"php\"`, `\"go\"`,\n`\"java\"`, `\"csharp\"`, `\"elixir\"`, `\"kotlin\"`, `\"kotlin_android\"`,\n`\"swift\"`, `\"dart\"`, `\"zig\"`, `\"ffi\"`, `\"r\"`, `\"gleam\"`, `\"c\"`,\n`\"jni\"`, `\"rust\"`). An unknown name fails at config-resolve time.\n\nExample: `skip_languages = [\"wasm\", \"kotlin\"]`",
+          "description": "Language backends for which this adapter should NOT be emitted.\n\nMirrors the same field on `[[crates.e2e.calls.*]]`. Useful when a\nconsumer's core crate cannot compile on a given target (e.g.\na streaming crate on `wasm32-unknown-unknown` which has no working async\nruntime for streaming). The adapter remains declared for every backend\nwhere it works, with explicit per-backend opt-out rather than removing\nthe adapter entirely.\n\nValues must match a canonical [`Language`] name (see [`Language::ALL`]).\nAn unknown name fails at config-resolve time.\n\nExample: `skip_languages = [\"wasm\", \"kotlin\"]`",
           "items": {
             "type": "string"
           },
@@ -211,6 +211,12 @@
         "precondition": {
           "description": "Shell command that must exit 0 for build to run; skip with warning on failure.",
           "type": ["string", "null"]
+        },
+        "timeout_seconds": {
+          "description": "Ceiling in seconds for this language's post-build `RunCommand` step (e.g. Swift's\n`cargo build --release` for the swift-bridge crate). `None` keeps alef's built-in\nceiling (`RUN_COMMAND_TIMEOUT` in `cli::pipeline::commands::build`, 1800s). Raise this\nwhen a cold release build in a large workspace legitimately runs longer than that --\nalef #364 hit exactly this for a Swift `cargo build --release` that was making\ncontinuous progress past 30 minutes. Only governs a post-build `RunCommand` step; the\n`build`/`build_release` commands above run unbounded, same as before this field existed.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": ["integer", "null"]
         }
       },
       "type": "object"
@@ -1435,6 +1441,50 @@
       "required": ["cfg"],
       "type": "object"
     },
+    "DeclaredMcpItem": {
+      "additionalProperties": false,
+      "description": "A single MCP tool, prompt, or resource declared in config because it is constructed at\nruntime rather than through a `#[tool]`/`#[prompt]`/`#[resource]` attribute. See\n[`DocsMcpConfig::declared`] for when this fallback applies.",
+      "properties": {
+        "annotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Free-form annotations (e.g. `read_only_hint`), matching attribute extraction's shape.",
+          "type": "object"
+        },
+        "description": {
+          "default": null,
+          "description": "Human-readable description shown in the reference page.",
+          "type": ["string", "null"]
+        },
+        "kind": {
+          "$ref": "#/$defs/DeclaredMcpKind",
+          "description": "Which MCP surface this entry belongs to."
+        },
+        "name": {
+          "description": "The name the MCP client sees.",
+          "type": "string"
+        },
+        "params_type": {
+          "default": null,
+          "description": "Rendered parameter type name, if any.",
+          "type": ["string", "null"]
+        },
+        "title": {
+          "default": null,
+          "description": "Human-readable title. Defaults to a title-cased `name`, matching attribute extraction.",
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["kind", "name"],
+      "type": "object"
+    },
+    "DeclaredMcpKind": {
+      "description": "The MCP surface a [`DeclaredMcpItem`] belongs to.",
+      "enum": ["tool", "prompt", "resource"],
+      "type": "string"
+    },
     "DocsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -1465,7 +1515,7 @@
         "mcp": {
           "anyOf": [
             {
-              "$ref": "#/$defs/DocsSourceConfig"
+              "$ref": "#/$defs/DocsMcpConfig"
             },
             {
               "type": "null"
@@ -1473,6 +1523,11 @@
           ],
           "default": null,
           "description": "Static extraction config for rmcp-style MCP reference docs."
+        },
+        "reference_link_style": {
+          "$ref": "#/$defs/DocsReferenceLinkStyle",
+          "default": "suffixed",
+          "description": "How generated reference pages link to each other. Defaults to\n[`DocsReferenceLinkStyle::Suffixed`]."
         },
         "reference_output": {
           "default": null,
@@ -1526,6 +1581,59 @@
         }
       },
       "type": "object"
+    },
+    "DocsMcpConfig": {
+      "additionalProperties": false,
+      "description": "Static extraction config for rmcp-style MCP reference docs, plus a declarative fallback\nfor surfaces that static extraction cannot see at all.\n\n`rust_static::extract_mcp_surface` finds tools, prompts, and resources by scanning method\nattributes (`#[tool]`, `#[prompt]`, `#[resource]`). That works only for surfaces *declared*\nthat way. Some consumers instead *construct* prompts/resources at runtime (for example a\n`Prompt::new(...)` or `Resource::new(...)` call assembled from a config file or a loop), and\nno attribute exists for extraction to find. `declared` is the fallback for exactly that\ncondition — MCP surfaces constructed at runtime rather than declared by attribute — not a\ngeneral-purpose override of attribute extraction.\n\nThis is intentionally a second source of truth rather than lifting constructor-call\narguments: lifting `Prompt::new(...)` arguments only works while every argument is a string\nliteral, and it degrades silently the moment one argument becomes computed (a `format!`, a\nvariable, a loop). A declarative list is bounded and honest about being hand-maintained,\ninstead of quietly falling back to guesses.\n\nThis field lives on `DocsMcpConfig` rather than the shared `DocsSourceConfig` used by\n`docs.cli` on purpose: Clap CLI surfaces are always declared through struct/enum derives, so\na `declared` escape hatch would be a no-op there — accepted by config, silently ignored by\nextraction. That is the same \"examined nothing\" shape this fallback exists to fix, so the\nfield only exists where it does something.",
+      "properties": {
+        "adopt_existing": {
+          "default": false,
+          "description": "Allow the first render to replace an existing unmanaged output file.\nDefaults to false to avoid clobbering hand-authored CLI/MCP docs.",
+          "type": "boolean"
+        },
+        "declared": {
+          "default": [],
+          "description": "Tools, prompts, and resources that are constructed at runtime and therefore invisible\nto attribute-based extraction. Additive: entries here are appended to what extraction\nfinds. When a declared entry's `(kind, name)` matches an attribute-derived item, the\nattribute-derived item wins and the declared entry is dropped with a warning, since a\ncollision means the declared entry is stale (the surface has since gained an attribute)\nrather than a genuine second copy. Consumers who declare nothing see no behavior\nchange and no new warnings.",
+          "items": {
+            "$ref": "#/$defs/DeclaredMcpItem"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "default": null,
+          "description": "Enable this reference extractor. Defaults to true when the table exists.",
+          "type": ["boolean", "null"]
+        },
+        "output": {
+          "default": null,
+          "description": "Output markdown file. Relative paths are resolved from the repository root.\nWhen unset, Alef writes into `reference_output`.",
+          "type": ["string", "null"]
+        },
+        "sources": {
+          "default": [],
+          "description": "Rust source files to parse for this reference surface. When empty, Alef\nfalls back to the crate source list.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "DocsReferenceLinkStyle": {
+      "description": "How a generated reference page links to another generated reference page in the same\n`reference_output` directory.\n\nDifferent docs-site generators resolve a sibling page's URL differently: plain\nGitHub-rendered Markdown and most static-site generators serve the file as written, so\nthe link must keep the `.md` suffix, while content-collection site generators (for\nexample Astro Starlight) resolve routes from a page's slug and treat a `.md`-suffixed\nlink as a broken route. Alef cannot infer which is true for a given consumer, so this is\nconfiguration rather than a guess -- see `docs::shared_pages::reference_page_link`,\nthe single place that reads it. ~keep",
+      "oneOf": [
+        {
+          "const": "suffixed",
+          "description": "Keep the `.md` suffix: `configuration.md`. Correct for GitHub-rendered Markdown and\nmost static-site generators that serve the file as-is.",
+          "type": "string"
+        },
+        {
+          "const": "extensionless",
+          "description": "Drop the file extension and use a directory-style route: `./configuration/`.\nMatches content-collection site generators that resolve routes from slugs.",
+          "type": "string"
+        }
+      ]
     },
     "DocsSkillTemplateConfig": {
       "additionalProperties": false,
@@ -1681,7 +1789,7 @@
         },
         "deny_unclassified": {
           "default": false,
-          "description": "Reject snippets whose side-effect classification is missing.",
+          "description": "Reject snippets whose side-effect classification is missing.\n\nAlways enabled while [`Self::strict`] is set (or `--strict` is passed), the same as\nevery other strict-gated check in this command. Set this independently of `strict` for a\nnarrower opt-in: denying unclassified snippets without also failing on coverage gaps or\nunavailable/downgraded checks.",
           "type": "boolean"
         },
         "dirs": {
@@ -1757,7 +1865,7 @@
         },
         "strict": {
           "default": false,
-          "description": "Treat coverage gaps and unavailable or downgraded checks as errors.",
+          "description": "Treat coverage gaps and unavailable or downgraded checks as errors.\n\nEquivalent to always passing `--strict` to `alef snippets check`: this and the CLI flag\nare unioned (either one enables strict behavior), and both enable the identical set of\nchecks, including [`Self::deny_unclassified`] -- setting this alone is enough to reject\nunclassified snippets, without also passing `--strict` on every invocation.",
           "type": "boolean"
         },
         "timeout_secs": {
@@ -2120,6 +2228,14 @@
           },
           "type": "array"
         },
+        "excluded_default_features": {
+          "default": [],
+          "description": "Feature names that should be declared as opt-in flags in the generated NIF\ncrate's `[features]` table but excluded from its `default = [...]` array and\nfrom the core-crate dependency's own explicit `features = [...]` list.\n\n`scaffold_elixir_cargo` otherwise puts every name `collect_cfg_features` finds\nstraight into the wrapper's unconditional `default = [...]` list, which\nforwards `<name> = [\"<core-crate>/<name>\"]` on every platform. Cargo unions\nfeature sets across every dependency edge to the same resolved package, so\nthat unconditional forwarding re-enables a feature a [`Self::target_dep_overrides`]\nentry excluded for a specific `cfg` target -- defeating the override. Listing\nthe name here keeps it declared (so `cargo build --features <name>` still\nworks) without auto-enabling it, the same tradeoff\n`RubyConfig::excluded_default_features` makes for the Magnus crate. ~keep",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "extra_dependencies": {
           "additionalProperties": true,
           "default": {},
@@ -2143,7 +2259,7 @@
         },
         "nif_features": {
           "default": null,
-          "description": "NIF crate `[features]` to forward to the core crate. If empty or not set,\ndefaults to [\"download\", \"serde\", \"config\"]. Set to an empty list to\ndisable default feature forwarding (e.g., when the core crate does not\nhave these features).",
+          "description": "NIF crate `[features]` to forward to the core crate. If not set, defaults to\nthe core crate's own declared `[features] default = [...]` list (read from its\n`Cargo.toml`), so a consumer whose core crate declares no defaults gets no\nimplicit forwarding. Set to an empty list to disable default feature forwarding\noutright regardless of what the core crate declares.",
           "items": {
             "type": "string"
           },
@@ -2270,7 +2386,7 @@
           "type": "string"
         },
         "into_raw_type": {
-          "description": "Fully-qualified Rust pointee type produced by `value.into_raw()`.\nThe generated body casts to `*const {into_raw_type}`.\n**Required** — there is no default.",
+          "description": "Fully-qualified Rust pointee type of the `*const {into_raw_type}` that\n`value.into_raw()` already returns. The generated body calls `value.into_raw()`\nas-is (no cast is added): since this field IS the declared return type of\n`into_raw()`, and the exported function's return type is declared as the same\n`*const {into_raw_type}`, an `as` cast would be a no-op and trip\n`clippy::unnecessary_cast`.\n**Required** — there is no default.",
           "type": "string"
         },
         "package": {
@@ -2313,6 +2429,14 @@
         "exclude_types": {
           "default": [],
           "description": "Types to exclude from FFI binding generation.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "excluded_default_features": {
+          "default": [],
+          "description": "Feature names that should be declared as opt-in flags in the generated FFI\ncrate's `[features]` table but excluded from its `default = [...]` array and\nfrom the core-crate dependency's own explicit `features = [...]` list.\n\n[`effective_ffi_default_features`](crate::codegen::cfg::effective_ffi_default_features)\notherwise puts every name explicitly configured via [`Self::features`] straight into the\nFFI crate's unconditional `default = [...]` list, which forwards\n`<name> = [\"<core-crate>/<name>\"]` on every platform. Cargo unions feature sets across\nevery dependency edge to the same resolved package, so that unconditional forwarding\nre-enables a feature a [`Self::target_dep_overrides`] entry excluded for a specific `cfg`\ntarget -- defeating the override. Listing the name here keeps it declared (so\n`cargo build --features <name>` still works) without auto-enabling it, the same tradeoff\n`RubyConfig::excluded_default_features` makes for the Magnus crate.\n\nDistinct from [`Self::extra_features`]: that field is for a name the FFI source\nreferences in a cfg gate but that must never default (a mutually-exclusive alternative);\nthis field is for a name that legitimately belongs in [`Self::features`] or in\n`collect_cfg_features`'s discovered set, but must be stripped back out of both defaulting\nsurfaces once a [`Self::target_dep_overrides`] entry needs to exclude it somewhere. ~keep",
           "items": {
             "type": "string"
           },
@@ -3569,6 +3693,14 @@
           },
           "type": "array"
         },
+        "excluded_default_features": {
+          "default": [],
+          "description": "Feature names that should be declared as opt-in flags in the generated wrapper\ncrate's `[features]` table but excluded from its `default = [...]` array and\nfrom the core-crate dependency's own explicit `features = [...]` list.\n\n`scaffold_node_cargo` otherwise puts every name `collect_cfg_features` finds\nstraight into the wrapper's unconditional `default = [...]` list, which\nforwards `<name> = [\"<core-crate>/<name>\"]` on every platform. Cargo unions\nfeature sets across every dependency edge to the same resolved package, so\nthat unconditional forwarding re-enables a feature a [`Self::target_dep_overrides`]\nentry excluded for a specific `cfg` target -- defeating the override. Listing\nthe name here keeps it declared (so `cargo build --features <name>` still\nworks) without auto-enabling it, the same tradeoff\n`RubyConfig::excluded_default_features` makes for the Magnus crate. ~keep",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "extra_dependencies": {
           "additionalProperties": true,
           "default": {},
@@ -3908,6 +4040,14 @@
         "exclude_types": {
           "default": [],
           "description": "Types to exclude from PHP binding generation.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "excluded_default_features": {
+          "default": [],
+          "description": "Feature names that should be declared as opt-in flags in the generated wrapper\ncrate's `[features]` table but excluded from its `default = [...]` array and\nfrom the core-crate dependency's own explicit `features = [...]` list.\n\n`scaffold_php_cargo` otherwise puts every name `collect_cfg_features` finds\nstraight into the wrapper's unconditional `default = [...]` list, which\nforwards `<name> = [\"<core-crate>/<name>\"]` on every platform. Cargo unions\nfeature sets across every dependency edge to the same resolved package, so\nthat unconditional forwarding re-enables a feature a [`Self::target_dep_overrides`]\nentry excluded for a specific `cfg` target -- defeating the override. Listing\nthe name here keeps it declared (so `cargo build --features <name>` still\nworks) without auto-enabling it, the same tradeoff\n`RubyConfig::excluded_default_features` makes for the Magnus crate. ~keep",
           "items": {
             "type": "string"
           },
@@ -5003,6 +5143,13 @@
           "default": {},
           "type": "object"
         },
+        "verify": {
+          "$ref": "#/$defs/VerifyConfig",
+          "default": {
+            "ignore_ephemeral": []
+          },
+          "description": "`alef verify` opt-outs for this crate. See [`super::VerifyConfig`] -- currently just\n`ignore_ephemeral`, a narrow, path-named exemption for generated output the consumer\ndeliberately never commits (e.g. registry-mode `test_apps/`), so its absence never\nbecomes a permanent \"missing generated files\" failure."
+        },
         "version_from": {
           "default": null,
           "description": "File whose `[package] version` is the source of truth for this crate.\nDefaults to `\"Cargo.toml\"` (resolved relative to the alef.toml).",
@@ -5230,6 +5377,14 @@
         "exclude_types": {
           "default": [],
           "description": "Types to exclude from Ruby binding generation.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "excluded_default_features": {
+          "default": [],
+          "description": "Feature names that should be declared as opt-in flags in the generated wrapper\ncrate's `[features]` table but excluded from its `default = [...]` array and\nfrom the core-crate dependency's own explicit `features = [...]` list.\n\n`scaffold_ruby_cargo` otherwise puts every name `collect_cfg_features` finds\nstraight into the wrapper's unconditional `default = [...]` list, which\nforwards `<name> = [\"<core-crate>/<name>\"]` on every platform. Cargo unions\nfeature sets across every dependency edge to the same resolved package, so\nthat unconditional forwarding re-enables a feature a [`Self::target_dep_overrides`]\nentry excluded for a specific `cfg` target -- defeating the override. Listing\nthe name here keeps it declared (so `cargo build --features <name>` still\nworks) without auto-enabling it, the same tradeoff\n`SwiftConfig::excluded_default_features` makes for the swift-bridge crate. ~keep",
           "items": {
             "type": "string"
           },
@@ -5618,6 +5773,14 @@
             "all": []
           }
         },
+        "curated_snippets": {
+          "default": [],
+          "description": "Glob patterns naming hand-authored snippet files that are curated on purpose, rather\nthan generated by alef.\n\nPatterns are relative to the PROJECT ROOT -- the directory holding `alef.toml`, the\nsame base [`Self::output`] itself is written in -- and not relative to `output`.\nHand-authored snippets characteristically sit beside the generated tree rather than\ninside it (`docs/snippets/cli/*.md` next to `output = \"docs/snippets/generated\"`), so\nan `output`-relative pattern could not name them at all.\n\nCoverage tracks fixture/language cells alef itself renders; a curated file has no\nfixture behind it at all (a Docker recipe, an API-server walkthrough, anything alef's\ncurrent backends cannot express). Before this field existed, alef had no way to say\nso: every curated path either sat outside coverage entirely (invisible) or was\nmisreported by a migration comparison as a gap alef \"should\" close. Declaring a path\nhere resolves it into `SnippetGenerationReport::curated_paths` as CURATED -- distinct\nfrom both `generated` and `missing` -- and into\n`migration::MigrationEntry::curated` for the migration-comparison path, so a report\ncan state \"N curated, M generated\" instead of leaving \"all snippets are generated\" an\nunverifiable claim.\n\nMirrors `docs.coverage_exceptions`, which retires one fixture/language coverage\nCELL with a reason; this retires a PATH that never had a cell to begin with, because\nno fixture stands behind it. Every declared pattern must match at least one real file\nunder the project root at generation time -- a pattern matching zero files fails the run\nrather than silently marking nothing as curated, which would recreate the exact\n\"coverage reports curated files as missing\" gap this field exists to close. A pattern\nmust never match a path alef itself generates.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "languages": {
           "default": [],
           "items": {
@@ -5627,6 +5790,11 @@
         },
         "output": {
           "type": "string"
+        },
+        "sample_base_url": {
+          "default": null,
+          "description": "Public base URL the generated *documentation* snippets bind for a fixture's\n`mock_url` / `mock_url_list` arguments, e.g. `\"https://samples.example.org\"`.\n\nDocumentation-only: the executable e2e suite keeps binding the per-fixture mock\nserver, so configuring this can never send a generated test to the network. Unset\nfalls back to `https://example.com`, the reserved documentation domain, and the\nsnippet run reports every fixture whose published snippet carries it.",
+          "type": ["string", "null"]
         }
       },
       "required": ["output"],
@@ -6289,6 +6457,21 @@
           "type": "string"
         }
       ]
+    },
+    "VerifyConfig": {
+      "additionalProperties": false,
+      "description": "Per-crate `alef verify` opt-outs. Everything here narrows what one specific check may name\nas a failure; nothing here can turn a genuine drift or ownership finding silent for a path\nit does not match.",
+      "properties": {
+        "ignore_ephemeral": {
+          "default": [],
+          "description": "Repo-relative glob patterns (matched with [`glob::Pattern`] against the path relative to\nthe config file's directory) naming generated output that is intentionally ephemeral --\nregenerated per run, deliberately gitignored, and never meant to be committed.\n\nA path this run's managed surface expects but that is absent from disk AND matches one of\nthese patterns is dropped entirely from `alef verify`'s \"missing generated files\" and\n\"missing generated files that are also gitignored\" reports, instead of failing the run\nforever for output the consumer never intended to track. It does NOT affect a path that\nalready exists on disk (stale/frozen/orphan checks are unaffected -- those apply to real\nbytes on disk, which \"ephemeral\" says nothing about the correctness of).\n\nExample, matching a consumer's whole registry-mode test-app output:\n```toml\n[crates.verify]\nignore_ephemeral = [\"test_apps/**\"]\n```",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
     },
     "WasmConfig": {
       "additionalProperties": false,
@@ -7012,7 +7195,7 @@
       "type": "object"
     }
   },
-  "$id": "https://github.com/xberg-io/alef/releases/download/v0.62.6/alef.schema.json",
+  "$id": "https://github.com/xberg-io/alef/releases/download/v0.69.0/alef.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "JSON Schema for the JSON representation of alef.toml.",
@@ -7130,6 +7313,6 @@
   "required": ["crates"],
   "title": "Alef configuration",
   "type": "object",
-  "version": "0.62.6",
-  "x-alef-version": "0.62.6"
+  "version": "0.69.0",
+  "x-alef-version": "0.69.0"
 }

@@ -24,7 +24,7 @@ pub async fn extract_batch(
 ) -> Result<ExtractionResult>;
 ```
 
-`extract_batch` processes inputs concurrently when the `tokio-runtime` feature is active; otherwise it uses a sequential loop. Set `ExtractionConfig::concurrency` with `xberg::core::config::ConcurrencyConfig` to constrain Rust-side worker and thread budgets.
+`extract_batch` processes inputs concurrently when the `tokio-runtime` feature is active; otherwise it uses a sequential loop. Set `ExtractionConfig::concurrency` with `xberg::ConcurrencyConfig` to constrain Rust-side worker and thread budgets.
 
 Both functions return an `ExtractionResult` envelope rather than a bare document vector. A URI may expand to multiple documents through crawling, so even `extract` can return more than one result. Initial batch outcomes are collected in input order, and each input may contribute zero or more documents; recursively followed document URLs are appended in traversal order. Per-input failures are recorded in `errors` while successful inputs remain in `results`. An outer `Err` means the operation itself could not run, for example because configuration validation failed or the operation was cancelled. An empty batch returns an empty successful envelope.
 
@@ -79,7 +79,7 @@ pub struct ExtractedDocument {
 
 ## Configuration
 
-`ExtractionConfig` and commonly used cross-language sub-configs are re-exported at the crate root. Advanced and Rust-only controls, including `ConcurrencyConfig` and the detailed LLM budget, cache, provider, and rate-limit configs, live under `xberg::core::config`. Pass `ExtractionConfig::default()` to get safe defaults.
+`ExtractionConfig`, `ConcurrencyConfig`, and the detailed LLM budget, cache, provider, and rate-limit configs are re-exported at the crate root. Their defining module remains `xberg::core::config`, so both paths are available to Rust callers. Pass `ExtractionConfig::default()` to get safe defaults.
 
 Key sub-configs that unlock capabilities at the field level:
 
@@ -379,7 +379,21 @@ pub fn pdf_page_count(
     pdf_bytes: &[u8],
     password: Option<&str>,
 ) -> Result<usize>;
+
+pub struct PdfRenderSession { /* private fields */ }
+
+impl PdfRenderSession {
+    pub fn open(pdf_bytes: &[u8], password: Option<&str>) -> Result<Self>;
+    pub fn page_count(&self) -> usize;
+    pub fn render_page_to_png(
+        &self,
+        page_index: usize,
+        dpi: Option<i32>,
+    ) -> Result<Vec<u8>>;
+}
 ```
+
+Import `PdfRenderSession` from `xberg::pdf`. Use it when rendering multiple pages from one document: the session opens and authenticates the PDF once, then reuses that parsed document for every page. The standalone functions remain convenient for one page or a page-count-only call.
 
 The renderer automatically reduces DPI on very wide pages to avoid exceeding the 16 384 px dimension cap.
 

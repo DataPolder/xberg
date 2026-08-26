@@ -25,4 +25,3 @@ interface Validator
      */
     public function validate(ExtractedDocument $result, ExtractionConfig $config): mixed;
 }
-

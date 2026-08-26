@@ -85,7 +85,7 @@ fn tiff_predictor_colors_wider_than_row_returns_err_not_panic() {
 #[test]
 fn object_stream_with_colors_wider_than_row_returns_err_not_panic() {
     let stream = stream_with_filter_and_decode_parms(
-        b"00", // ASCIIHexDecode -> single 0x00 byte, i.e. one 1-byte row
+        b"00", 
         "ASCIIHexDecode",
         Some(decode_parms_dict(2, 1, 4, 1)),
     );

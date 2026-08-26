@@ -9,7 +9,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'lib.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ChunkClassificationEnrichmentConfig`, `DocumentExtractorDartCallbacks`, `EmbeddingBackendDartCallbacks`, `OcrBackendDartCallbacks`, `PostProcessorDartCallbacks`, `RendererDartCallbacks`, `RerankerBackendDartCallbacks`, `TokenizerBackendDartCallbacks`, `ValidatorDartCallbacks`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `confidence_semantics`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `page_orientation_handling`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `confidence_semantics`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `page_orientation_handling`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
 
 /// Extract content from a single bytes or URI input.
 Future<ExtractionResult> extract({
@@ -66,18 +66,6 @@ Future<MapResult> mapUrl({
 Future<List<SupportedFormat>> listSupportedFormats() =>
     RustLib.instance.api.crateListSupportedFormats();
 
-/// Ensure built-in extractors are registered.
-///
-/// This function is called automatically on first extraction operation.
-/// It's safe to call multiple times - registration only happens once,
-/// unless the registry was cleared, in which case extractors are re-registered.
-///
-/// Public so a caller that wants to *inspect* the registry — rather than extract —
-/// can populate it directly. Without this the only way to trigger registration is to
-/// run a real extraction, which `xberg formats` would otherwise have to fake (#233).
-Future<void> ensureInitialized() =>
-    RustLib.instance.api.crateEnsureInitialized();
-
 /// List the names of all registered embedding backends.
 ///
 /// Used by `xberg-cli`, the api/mcp endpoints, and generated language
@@ -123,8 +111,6 @@ Future<List<String>> listRenderers() =>
 ///
 /// Used by `xberg-cli`, the api/mcp endpoints, and generated language
 /// bindings.
-///
-/// Since v5.0.
 Future<List<String>> listRerankerBackends() =>
     RustLib.instance.api.crateListRerankerBackends();
 
@@ -139,26 +125,21 @@ Future<List<String>> listTokenizerBackends() =>
 Future<List<String>> listValidators() =>
     RustLib.instance.api.crateListValidators();
 
-/// Run chunk classification against an extraction result.
+/// Classify a document's chunks and return the updated document.
 ///
-/// Mutates `ChunkMetadata.classifications` on every chunk in
-/// `result.chunks` and appends every LLM call's usage to `result.llm_usage`.
-/// A chunk whose classification batch call fails (or that the model omitted
-/// from its response) is simply left with an empty `classifications` vector for
-/// that chunk, unless the failure is a validation error (empty config) or every
-/// batch task fails, in which case the first error is returned.
+/// This owned form preserves the mutations when the document crosses a language-binding boundary.
+/// Rust callers that already own a mutable document can use `classify_chunks` to avoid moving it.
 ///
 /// **Errors:**
 ///
-/// Returns `Validation` when `config.definitions` is empty.
-/// Returns the first batch error encountered when rendering the prompt or
-/// calling the LLM fails for every batch; partial failures on a subset of
-/// batches are recorded here as a `ProcessingWarning` on `result` instead of
-/// aborting the whole run.
-Future<void> classifyChunks({
+/// Returns the same validation and LLM errors as `classify_chunks`.
+Future<ExtractedDocument> classifyChunksOwned({
   required ExtractedDocument result,
   required ChunkClassificationConfig config,
-}) => RustLib.instance.api.crateClassifyChunks(result: result, config: config);
+}) => RustLib.instance.api.crateClassifyChunksOwned(
+  result: result,
+  config: config,
+);
 
 /// Find unmarked claims in markdown text.
 ///
@@ -202,8 +183,6 @@ Future<bool> verifyExcerpt({
 /// `num_tokens * dim`).
 ///
 /// Pure CPU primitive — available without ONNX Runtime.
-///
-/// Since v5.0.
 Future<double> maxSimScore({
   required MultiVectorEmbedding query,
   required MultiVectorEmbedding doc,
@@ -215,8 +194,6 @@ Future<double> maxSimScore({
 /// minus top-k truncation (callers slice the returned `Vec` themselves).
 ///
 /// Pure CPU primitive — available without ONNX Runtime.
-///
-/// Since v5.0.
 Future<List<LateInteractionMatch>> maxSimRank({
   required MultiVectorEmbedding query,
   required List<MultiVectorEmbedding> docs,
@@ -229,108 +206,6 @@ Future<List<LateInteractionMatch>> maxSimRank({
 /// in or whose models are not cached report `Skip` rather than failing.
 Future<DoctorReport> doctor({required ExtractionConfig config}) =>
     RustLib.instance.api.crateDoctor(config: config);
-
-/// Install the glyph-drop capture as the process-wide `tracing`
-/// `Subscriber`, exactly once.
-///
-/// **Prefer `glyph_drop_capture_layer` if the application installs a subscriber of its own.**
-/// `tracing` has exactly one global default dispatcher slot per process, and this function
-/// claims it. If something else already holds it — an application wiring
-/// `tracing_subscriber.fmt()...try_init()`, which is what `xberg-cli` does in `main()` —
-/// `set_global_default` fails and this is a no-op, so the engine's glyph-drop records go to
-/// that other subscriber and `take_xberg_native_pdf_render_warnings` stays empty. This function is
-/// the fallback for embedders that have no subscriber at all; composing the layer is what
-/// works when they do.
-///
-/// ★ That distinction is not theoretical, and it does not show up in tests. A test binary
-/// installs no `fmt` subscriber, so the capture always wins the slot there and every test
-/// passes — while the CLI, which claims the slot first, captures nothing. The port that
-/// introduced this function in its `set_global_default`-only form would have gone green on all
-/// three glyph-drop tests with the real CLI path still dead. Warnings arriving in a test are
-/// not evidence that they arrive in production; the contested resource only exists once
-/// something else has claimed it.
-///
-/// **Opt-in.** Nothing calls this automatically: a library that seizes the global dispatcher on
-/// its own behalf breaks its embedder, because a host that later calls
-/// `tracing_subscriber.fmt()...init()` panics (`.try_init()` instead returns `Err`). That
-/// decision belongs to the application.
-///
-/// Returns whether the capture is active — `true` if this call installed it, an earlier call
-/// did, or a `glyph_drop_capture_layer` was composed into someone else's stack; `false` if
-/// some other component owns the dispatcher slot and no layer was composed.
-///
-/// Without one of the two opt-ins the #1364 warnings are not produced. The glyph drop itself is
-/// decided inside `xberg_native_pdf`, which reports it only through `tracing.warn!`; there is no
-/// return-value channel to read instead.
-Future<bool> installPdfRenderDiagnostics() =>
-    RustLib.instance.api.crateInstallPdfRenderDiagnostics();
-
-/// Drain the glyph-drop `ProcessingWarning`s accumulated on this thread by
-/// render calls since the last call to this function.
-///
-/// Callers that render pages as part of extraction should call this after
-/// their render pass and merge the result into
-/// `InternalDocument.processing_warnings` (see the module-level convention
-/// in `crate.core.diagnostics`) so a page with missing glyphs is never
-/// returned to the user without a signal. Warnings are already deduped
-/// per-thread across all pages rendered before this call.
-///
-/// `pub` (rather than `pub(crate)`) so both in-tree render-consumers and the
-/// regression test for #1364 can observe capture without depending on any
-/// one extractor's internal state.
-///
-/// As of #340, `crate.extractors.pdf.mod` drains this unconditionally right
-/// after assembling a document's `processing_warnings`, so every PDF
-/// extraction that renders at least one page picks up any captured
-/// glyph-drop warnings for free. that drain only ever observes
-/// warnings from render calls that happened on the *same OS thread* before it
-/// ran, because `ENGINE_PENDING_WARNINGS` is thread-local. OCR page
-/// rendering runs inline on the extracting task's thread, so it is covered.
-/// Layout-detection rasterization runs inside `tokio.task.spawn_blocking`,
-/// which always executes on a different OS thread, so this function alone
-/// would never see those warnings. As of #353,
-/// `extractors.pdf.layout_runner.run_layout_for_pdf_pages_async` drains
-/// this function itself from inside its `spawn_blocking` closure — the only
-/// place that can observe the blocking-pool thread's thread-local buffer —
-/// and threads the drained warnings back through its return value for the
-/// caller in `extractors.pdf.mod` to merge, so layout-path glyph drops are
-/// no longer silently lost.
-Future<List<ProcessingWarning>> takeXbergNativePdfRenderWarnings() =>
-    RustLib.instance.api.crateTakeXbergNativePdfRenderWarnings();
-
-/// Build the four (or three) token Whisper decoder prompt.
-///
-/// The canonical Whisper prompt is
-/// `[<|startoftranscript|>, <|{lang}|>, <|transcribe|>, <|notimestamps|>]`.
-/// When `timestamps` is `true`, the trailing `no_timestamps` token is omitted
-/// so the model is free to emit `<|x.xx|>` timestamp tokens in its output
-/// instead of being forced to suppress them.
-Future<Int64List> buildDecoderPromptTokens({
-  required PlatformInt64 startOfTranscript,
-  required PlatformInt64 langId,
-  required PlatformInt64 transcribe,
-  required PlatformInt64 noTimestamps,
-  required bool timestamps,
-}) => RustLib.instance.api.crateBuildDecoderPromptTokens(
-  startOfTranscript: startOfTranscript,
-  langId: langId,
-  transcribe: transcribe,
-  noTimestamps: noTimestamps,
-  timestamps: timestamps,
-);
-
-/// Convert a raw Whisper timestamp token ID to a millisecond offset from the
-/// start of the 30-second chunk it was decoded in.
-///
-/// `token_id` must be `>= timestamp_begin_id`; IDs below that are ordinary
-/// vocabulary tokens, not timestamps.
-Future<PlatformInt64> timestampTokenToMs({
-  required PlatformInt64 tokenId,
-  required PlatformInt64 timestampBeginId,
-}) => RustLib.instance.api.crateTimestampTokenToMs(
-  tokenId: tokenId,
-  timestampBeginId: timestampBeginId,
-);
 
 Future<CacheStats> createCacheStatsFromJson({required String json}) =>
     RustLib.instance.api.crateCreateCacheStatsFromJson(json: json);
@@ -360,6 +235,10 @@ Future<PageClassificationConfig> createPageClassificationConfigFromJson({
 }) => RustLib.instance.api.crateCreatePageClassificationConfigFromJson(
   json: json,
 );
+
+Future<ConcurrencyConfig> createConcurrencyConfigFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateConcurrencyConfigFromJson(json: json);
 
 Future<ContentFilterConfig> createContentFilterConfigFromJson({
   required String json,
@@ -586,6 +465,10 @@ Future<ClassificationLabel> createClassificationLabelFromJson({
   required String json,
 }) => RustLib.instance.api.crateCreateClassificationLabelFromJson(json: json);
 
+Future<DjotAttributeGroup> createDjotAttributeGroupFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateDjotAttributeGroupFromJson(json: json);
+
 Future<DjotContent> createDjotContentFromJson({required String json}) =>
     RustLib.instance.api.crateCreateDjotContentFromJson(json: json);
 
@@ -594,6 +477,9 @@ Future<FormattedBlock> createFormattedBlockFromJson({required String json}) =>
 
 Future<InlineElement> createInlineElementFromJson({required String json}) =>
     RustLib.instance.api.crateCreateInlineElementFromJson(json: json);
+
+Future<Attributes> createAttributesFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateAttributesFromJson(json: json);
 
 Future<DjotImage> createDjotImageFromJson({required String json}) =>
     RustLib.instance.api.crateCreateDjotImageFromJson(json: json);
@@ -692,6 +578,10 @@ Future<TextExtractionResult> createTextExtractionResultFromJson({
   required String json,
 }) => RustLib.instance.api.crateCreateTextExtractionResultFromJson(json: json);
 
+Future<PresentationHyperlink> createPresentationHyperlinkFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreatePresentationHyperlinkFromJson(json: json);
+
 Future<PptxExtractionResult> createPptxExtractionResultFromJson({
   required String json,
 }) => RustLib.instance.api.crateCreatePptxExtractionResultFromJson(json: json);
@@ -722,6 +612,12 @@ Future<ImagePreprocessingConfig> createImagePreprocessingConfigFromJson({
 
 Future<TesseractConfig> createTesseractConfigFromJson({required String json}) =>
     RustLib.instance.api.crateCreateTesseractConfigFromJson(json: json);
+
+Future<PixelDimensions> createPixelDimensionsFromJson({required String json}) =>
+    RustLib.instance.api.crateCreatePixelDimensionsFromJson(json: json);
+
+Future<ImageDpi> createImageDpiFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateImageDpiFromJson(json: json);
 
 Future<ImagePreprocessingMetadata> createImagePreprocessingMetadataFromJson({
   required String json,
@@ -762,6 +658,20 @@ Future<ImageMetadata> createImageMetadataFromJson({required String json}) =>
 
 Future<XmlMetadata> createXmlMetadataFromJson({required String json}) =>
     RustLib.instance.api.crateCreateXmlMetadataFromJson(json: json);
+
+Future<MarkdownLink> createMarkdownLinkFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateMarkdownLinkFromJson(json: json);
+
+Future<MarkdownCodeBlock> createMarkdownCodeBlockFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateMarkdownCodeBlockFromJson(json: json);
+
+Future<KeyValueAttribute> createKeyValueAttributeFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateKeyValueAttributeFromJson(json: json);
+
+Future<ImageDimensions> createImageDimensionsFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateImageDimensionsFromJson(json: json);
 
 Future<TextMetadata> createTextMetadataFromJson({required String json}) =>
     RustLib.instance.api.crateCreateTextMetadataFromJson(json: json);
@@ -832,6 +742,9 @@ Future<PstMetadata> createPstMetadataFromJson({required String json}) =>
 Future<AudioMetadata> createAudioMetadataFromJson({required String json}) =>
     RustLib.instance.api.crateCreateAudioMetadataFromJson(json: json);
 
+Future<OcrPoint> createOcrPointFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateOcrPointFromJson(json: json);
+
 Future<OcrConfidence> createOcrConfidenceFromJson({required String json}) =>
     RustLib.instance.api.crateCreateOcrConfidenceFromJson(json: json);
 
@@ -851,6 +764,9 @@ Future<PageStructure> createPageStructureFromJson({required String json}) =>
 Future<PageBoundary> createPageBoundaryFromJson({required String json}) =>
     RustLib.instance.api.crateCreatePageBoundaryFromJson(json: json);
 
+Future<PageDimensions> createPageDimensionsFromJson({required String json}) =>
+    RustLib.instance.api.crateCreatePageDimensionsFromJson(json: json);
+
 Future<PageInfo> createPageInfoFromJson({required String json}) =>
     RustLib.instance.api.crateCreatePageInfoFromJson(json: json);
 
@@ -862,6 +778,11 @@ Future<LayoutRegion> createLayoutRegionFromJson({required String json}) =>
 
 Future<PageHierarchy> createPageHierarchyFromJson({required String json}) =>
     RustLib.instance.api.crateCreatePageHierarchyFromJson(json: json);
+
+Future<HierarchicalBoundingBox> createHierarchicalBoundingBoxFromJson({
+  required String json,
+}) =>
+    RustLib.instance.api.crateCreateHierarchicalBoundingBoxFromJson(json: json);
 
 Future<HierarchicalBlock> createHierarchicalBlockFromJson({
   required String json,
@@ -952,6 +873,9 @@ Future<LateInteractionMatch> createLateInteractionMatchFromJson({
   required String json,
 }) => RustLib.instance.api.crateCreateLateInteractionMatchFromJson(json: json);
 
+Future<NgramRange> createNgramRangeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateNgramRangeFromJson(json: json);
+
 Future<YakeParams> createYakeParamsFromJson({required String json}) =>
     RustLib.instance.api.crateCreateYakeParamsFromJson(json: json);
 
@@ -1022,6 +946,26 @@ Future<PaddleOcrConfig> createPaddleOcrConfigFromJson({required String json}) =>
 
 Future<ModelPaths> createModelPathsFromJson({required String json}) =>
     RustLib.instance.api.crateCreateModelPathsFromJson(json: json);
+
+Future<TrocrBackendOptions> createTrocrBackendOptionsFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateTrocrBackendOptionsFromJson(json: json);
+
+Future<PaddleOcrVlBackendOptions> createPaddleOcrVlBackendOptionsFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreatePaddleOcrVlBackendOptionsFromJson(
+  json: json,
+);
+
+Future<GlmOcrBackendOptions> createGlmOcrBackendOptionsFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateGlmOcrBackendOptionsFromJson(json: json);
+
+Future<DeepseekOcrBackendOptions> createDeepseekOcrBackendOptionsFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateDeepseekOcrBackendOptionsFromJson(
+  json: json,
+);
 
 Future<OrientationResult> createOrientationResultFromJson({
   required String json,
@@ -1743,6 +1687,34 @@ enum AssetCategory {
   other,
 }
 
+/// Element attributes in Djot.
+///
+/// Represents the attributes attached to elements using {.class #id key="value"} syntax.
+class Attributes {
+  /// Element ID (#identifier)
+  final String? id;
+
+  /// CSS classes (.class1 .class2)
+  final List<String> classes;
+
+  /// Key-value pairs (key="value")
+  final List<KeyValueAttribute> keyValues;
+
+  const Attributes({this.id, required this.classes, required this.keyValues});
+
+  @override
+  int get hashCode => id.hashCode ^ classes.hashCode ^ keyValues.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Attributes &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          classes == other.classes &&
+          keyValues == other.keyValues;
+}
+
 /// Audio/video file metadata.
 ///
 /// Populated from container tags (ID3v2, MP4 atoms, Vorbis comments, etc.) and
@@ -2075,56 +2047,6 @@ class BoundingBox {
           y1 == other.y1;
 }
 
-/// **Deprecated and inert.** Chunking no longer writes a heading breadcrumb into
-/// `content` for either variant of this enum — see the revised design adopted in
-/// <https://github.com/xberg-io/xberg/issues/1393>. Setting this field has no
-/// effect on chunking output any more. It is kept only so the ~15 alef-generated
-/// binding packages that construct it keep compiling; removing it outright is a
-/// separate, coordinated breaking change.
-///
-/// # Why this became inert
-///
-/// The original design (this enum, plus
-/// [`ChunkingConfig::prepend_heading_context`](super::super::processing::ChunkingConfig::prepend_heading_context))
-/// let `Content` mode prepend the heading breadcrumb directly into a chunk's
-/// `content`. GH#1393's follow-up discussion argued that a single flag on the
-/// chunker cannot serve all three retrieval consumers of the same chunk: dense/
-/// embedding retrieval wants the breadcrumb inline, but lexical (BM25/TF-IDF) and
-/// sparse learned (SPLADE) retrieval are actively harmed by it — SPLADE worse
-/// than BM25, because its term-expansion pulls each heading's whole learned
-/// neighbourhood (e.g. `"Authentication"` → `auth`, `login`, `credential`,
-/// `oauth`) into every chunk of that section, and that damage cannot be
-/// corrected by re-indexing since the expansion comes from a pretrained encoder,
-/// not the collection being indexed. Mutating `content` also desynced it from
-/// `byte_start`/`byte_end` (#1294): `chunk.content.len() != byte_end - byte_start`
-/// whenever a breadcrumb had been prepended, so slicing the source document by a
-/// chunk's own offsets silently returned different text than `content`.
-///
-/// The revised design removes the mutation entirely: `chunk.content` now always
-/// equals the exact `[byte_start, byte_end)` source span, regardless of this
-/// enum's value or `prepend_heading_context`.
-///
-/// # What to do instead
-///
-/// Call [`render_heading_breadcrumb`](crate::chunking::render_heading_breadcrumb)
-/// explicitly at index time, with a chunk's (always-clean) `content` and its
-/// [`heading_context`](crate::types::ChunkMetadata::heading_context) — only for
-/// the consumer that wants the breadcrumb inline (typically dense/embedding).
-/// BM25 and SPLADE consumers need no special handling: index `chunk.content` as
-/// returned. See the [`rag`](crate::chunking::rag) module docs for the full
-/// per-consumer guidance.
-enum BreadcrumbTarget {
-  /// Inert (#1393). Previously prepended the heading breadcrumb into chunk
-  /// `content`; no longer has any effect — `content` is left untouched, exactly
-  /// like `Metadata`. Kept as the default only for wire/API compatibility.
-  content,
-
-  /// Inert (#1393), and was already a no-op on `content` before this change.
-  /// Kept only for backward compatibility, since `Content` is no longer
-  /// distinguishable from it.
-  metadata,
-}
-
 /// Browser backend used for JavaScript rendering.
 enum BrowserBackend {
   /// Existing Chromium/CDP backend powered by chromiumoxide.
@@ -2337,6 +2259,17 @@ enum CallMode {
 
   /// Provide both extracted text and page images to the model.
   textPlusVision,
+}
+
+/// Device selection shared by the typed candle backend option objects.
+enum CandleDevicePreference { auto, cpu, cuda, metal }
+
+/// TrOCR model variant accepted by `candle-trocr` backend options.
+enum CandleTrocrVariant {
+  basePrinted,
+  largePrinted,
+  baseHandwritten,
+  largeHandwritten,
 }
 
 /// Configuration for the VLM captioning post-processor.
@@ -2667,9 +2600,8 @@ class ChunkMetadata {
   ///
   /// Joins a chunk back to the structured document tree via
   /// [`DocumentNode::id`](super::document_structure::DocumentNode::id).
-  /// Empty until the node-to-rendered-offset mapping needed to compute the
-  /// intersection is implemented (tracked under #1294/#1295); this field is
-  /// the wire-format foundation for that follow-up.
+  /// Populated from exact node provenance when available, with a textual
+  /// containment fallback for rendered chunks that do not retain byte offsets.
   final List<String> nodeIds;
 
   /// Per-page bounding-box spans this chunk covers, for viewer highlighting (#1295).
@@ -2918,28 +2850,6 @@ class ChunkingConfig {
   /// Enable `chunking-tiktoken` or `chunking-tokenizers` features for token-based sizing.
   final ChunkSizing sizing;
 
-  /// **Deprecated and inert** (#1393): no longer prepends anything into
-  /// `content`. Setting this field has no observable effect on chunking output
-  /// any more.
-  ///
-  /// Previously, when `true` and `chunker_type` was `Markdown`, this prepended
-  /// the heading hierarchy path (e.g. `"# Title > ## Section\n\n"`) directly
-  /// into each chunk's `content` string. `content` now always equals the exact
-  /// `[byte_start, byte_end)` source span regardless of this flag — see
-  /// [`BreadcrumbTarget`](crate::core::config::extraction::BreadcrumbTarget) for
-  /// the full rationale. `heading_context`/`heading_path` on `ChunkMetadata` are
-  /// populated independently of this flag, so callers lose no information —
-  /// only the in-place mutation is gone.
-  ///
-  /// Call [`render_heading_breadcrumb`](crate::chunking::render_heading_breadcrumb)
-  /// explicitly at index time instead, for the retrieval consumer that wants the
-  /// breadcrumb inline.
-  ///
-  /// Kept only so existing callers keep compiling.
-  ///
-  /// Default: `false`
-  final bool prependHeadingContext;
-
   /// Optional cosine similarity threshold for semantic topic boundary detection.
   ///
   /// Only used when `chunker_type` is `Semantic` and an `EmbeddingConfig` is
@@ -2961,16 +2871,6 @@ class ChunkingConfig {
   /// Default: `Split`
   final TableChunkingMode tableChunking;
 
-  /// **Deprecated and inert** (#1393): see
-  /// [`BreadcrumbTarget`](crate::core::config::extraction::BreadcrumbTarget) for
-  /// the full explanation. Neither variant has any effect on `content` any
-  /// more — call
-  /// [`render_heading_breadcrumb`](crate::chunking::render_heading_breadcrumb)
-  /// explicitly at index time instead. Kept only for backward compatibility.
-  ///
-  /// Default: `Content`.
-  final BreadcrumbTarget breadcrumbTarget;
-
   const ChunkingConfig({
     required this.maxCharacters,
     required this.overlap,
@@ -2981,10 +2881,8 @@ class ChunkingConfig {
     this.lateInteraction,
     this.preset,
     required this.sizing,
-    required this.prependHeadingContext,
     this.topicThreshold,
     required this.tableChunking,
-    required this.breadcrumbTarget,
   });
 
   @override
@@ -2998,10 +2896,8 @@ class ChunkingConfig {
       lateInteraction.hashCode ^
       preset.hashCode ^
       sizing.hashCode ^
-      prependHeadingContext.hashCode ^
       topicThreshold.hashCode ^
-      tableChunking.hashCode ^
-      breadcrumbTarget.hashCode;
+      tableChunking.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -3017,10 +2913,8 @@ class ChunkingConfig {
           lateInteraction == other.lateInteraction &&
           preset == other.preset &&
           sizing == other.sizing &&
-          prependHeadingContext == other.prependHeadingContext &&
           topicThreshold == other.topicThreshold &&
-          tableChunking == other.tableChunking &&
-          breadcrumbTarget == other.breadcrumbTarget;
+          tableChunking == other.tableChunking;
 }
 
 @freezed
@@ -3403,6 +3297,65 @@ class CodeMetadata {
           runtimeType == other.runtimeType &&
           chunks == other.chunks &&
           data == other.data;
+}
+
+/// Controls thread usage for constrained environments.
+///
+/// Set `max_threads` to cap all internal thread pools (Rayon, ONNX Runtime
+/// intra-op) and batch concurrency to a single limit.
+///
+/// # Default budget when `max_threads` is unset
+///
+/// Without an explicit `max_threads`, the effective budget is
+/// `min(detected_cpu_cores, 8)` — a deliberate ceiling chosen for
+/// serverless/shared-tenant defaults, not a full-host auto-scale. On a host
+/// with more than 8 cores this means the extra cores go **unused** unless one
+/// of the following applies:
+///
+/// - `max_threads` is set explicitly above 8 (the only way to exceed the
+///   ceiling on a bare-metal or VM host with no CPU quota).
+/// - The process runs under a Linux cgroup CPU quota (containers, Kubernetes
+///   `resources.limits.cpu`); in that case the quota itself is used as the
+///   ceiling instead of the hardcoded 8, since the quota already reflects a
+///   deliberately-configured resource limit.
+///
+/// When neither applies and the host has more than 8 cores, a single
+/// `WARN`-level log is emitted the first time the budget is resolved,
+/// naming the detected core count and the applied cap, so the ceiling is
+/// discoverable without reading source.
+///
+/// # Example
+///
+/// ```rust
+/// use xberg::core::config::ConcurrencyConfig;
+///
+/// let config = ConcurrencyConfig {
+///     max_threads: Some(2),
+/// };
+/// ```
+class ConcurrencyConfig {
+  /// Maximum number of threads for all internal thread pools.
+  ///
+  /// Caps Rayon global pool size, ONNX Runtime intra-op threads, and the
+  /// combined document/inner-task budget for batch extraction. When `None`,
+  /// the effective budget is `min(detected_cpu_cores, 8)` unless a Linux
+  /// cgroup CPU quota is present, in which case the quota is used as the
+  /// ceiling instead. On hosts with more than 8 cores and no cgroup quota,
+  /// set `max_threads` explicitly to use the additional cores — the
+  /// default will not scale past 8 on its own.
+  final PlatformInt64? maxThreads;
+
+  const ConcurrencyConfig({this.maxThreads});
+
+  @override
+  int get hashCode => maxThreads.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ConcurrencyConfig &&
+          runtimeType == other.runtimeType &&
+          maxThreads == other.maxThreads;
 }
 
 @freezed
@@ -3828,6 +3781,15 @@ class ConversionOptions {
   /// Link rendering style (inline or reference).
   final LinkStyle linkStyle;
 
+  /// Target output format (Markdown, plain text, etc.).
+  final HtmlToMarkdownRsOutputFormat outputFormat;
+
+  /// Include structured document tree in result.
+  final bool includeDocumentStructure;
+
+  /// Extract inline images from data URIs and SVGs.
+  final bool extractImages;
+
   /// Maximum decoded image size in bytes (default 5MB).
   final PlatformInt64 maxImageSize;
 
@@ -3891,6 +3853,9 @@ class ConversionOptions {
     required this.skipImages,
     required this.urlEscapeStyle,
     required this.linkStyle,
+    required this.outputFormat,
+    required this.includeDocumentStructure,
+    required this.extractImages,
     required this.maxImageSize,
     required this.captureSvg,
     required this.inferDimensions,
@@ -3934,6 +3899,9 @@ class ConversionOptions {
       skipImages.hashCode ^
       urlEscapeStyle.hashCode ^
       linkStyle.hashCode ^
+      outputFormat.hashCode ^
+      includeDocumentStructure.hashCode ^
+      extractImages.hashCode ^
       maxImageSize.hashCode ^
       captureSvg.hashCode ^
       inferDimensions.hashCode ^
@@ -3979,6 +3947,9 @@ class ConversionOptions {
           skipImages == other.skipImages &&
           urlEscapeStyle == other.urlEscapeStyle &&
           linkStyle == other.linkStyle &&
+          outputFormat == other.outputFormat &&
+          includeDocumentStructure == other.includeDocumentStructure &&
+          extractImages == other.extractImages &&
           maxImageSize == other.maxImageSize &&
           captureSvg == other.captureSvg &&
           inferDimensions == other.inferDimensions &&
@@ -4693,6 +4664,32 @@ class DbfMetadata {
           fields == other.fields;
 }
 
+/// Runtime options accepted by the `candle-deepseek-ocr` backend.
+class DeepseekOcrBackendOptions {
+  /// Local DeepSeek-OCR model directory. The backend requires this option.
+  final String? modelPath;
+
+  /// Optional per-call device override.
+  final CandleDevicePreference? device;
+
+  /// DeepSeek-OCR model generation, either 1 or 2. Defaults to 2.
+  final PlatformInt64? version;
+
+  const DeepseekOcrBackendOptions({this.modelPath, this.device, this.version});
+
+  @override
+  int get hashCode => modelPath.hashCode ^ device.hashCode ^ version.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DeepseekOcrBackendOptions &&
+          runtimeType == other.runtimeType &&
+          modelPath == other.modelPath &&
+          device == other.device &&
+          version == other.version;
+}
+
 /// MIME type detection response.
 class DetectResponse {
   /// Detected MIME type
@@ -4841,6 +4838,31 @@ class DiffOptions {
           maxContentChars == other.maxContentChars;
 }
 
+/// Attributes associated with a named Djot element.
+class DjotAttributeGroup {
+  /// Element identifier used by the Djot attribute map.
+  final String identifier;
+
+  /// Attributes associated with the element.
+  final Attributes attributes;
+
+  const DjotAttributeGroup({
+    required this.identifier,
+    required this.attributes,
+  });
+
+  @override
+  int get hashCode => identifier.hashCode ^ attributes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DjotAttributeGroup &&
+          runtimeType == other.runtimeType &&
+          identifier == other.identifier &&
+          attributes == other.attributes;
+}
+
 /// Comprehensive Djot document structure with semantic preservation.
 ///
 /// This type captures the full richness of Djot markup, including:
@@ -4874,6 +4896,9 @@ class DjotContent {
   /// Footnote definitions
   final List<Footnote> footnotes;
 
+  /// Attributes mapped by element identifier (if present)
+  final List<DjotAttributeGroup> attributes;
+
   const DjotContent({
     required this.plainText,
     required this.blocks,
@@ -4882,6 +4907,7 @@ class DjotContent {
     required this.images,
     required this.links,
     required this.footnotes,
+    required this.attributes,
   });
 
   @override
@@ -4892,7 +4918,8 @@ class DjotContent {
       tables.hashCode ^
       images.hashCode ^
       links.hashCode ^
-      footnotes.hashCode;
+      footnotes.hashCode ^
+      attributes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -4905,7 +4932,8 @@ class DjotContent {
           tables == other.tables &&
           images == other.images &&
           links == other.links &&
-          footnotes == other.footnotes;
+          footnotes == other.footnotes &&
+          attributes == other.attributes;
 }
 
 /// Image element in Djot.
@@ -4919,10 +4947,19 @@ class DjotImage {
   /// Optional title
   final String? title;
 
-  const DjotImage({required this.src, required this.alt, this.title});
+  /// Element attributes
+  final Attributes? attributes;
+
+  const DjotImage({
+    required this.src,
+    required this.alt,
+    this.title,
+    this.attributes,
+  });
 
   @override
-  int get hashCode => src.hashCode ^ alt.hashCode ^ title.hashCode;
+  int get hashCode =>
+      src.hashCode ^ alt.hashCode ^ title.hashCode ^ attributes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -4931,7 +4968,8 @@ class DjotImage {
           runtimeType == other.runtimeType &&
           src == other.src &&
           alt == other.alt &&
-          title == other.title;
+          title == other.title &&
+          attributes == other.attributes;
 }
 
 /// Link element in Djot.
@@ -4945,10 +4983,19 @@ class DjotLink {
   /// Optional title
   final String? title;
 
-  const DjotLink({required this.url, required this.text, this.title});
+  /// Element attributes
+  final Attributes? attributes;
+
+  const DjotLink({
+    required this.url,
+    required this.text,
+    this.title,
+    this.attributes,
+  });
 
   @override
-  int get hashCode => url.hashCode ^ text.hashCode ^ title.hashCode;
+  int get hashCode =>
+      url.hashCode ^ text.hashCode ^ title.hashCode ^ attributes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -4957,7 +5004,8 @@ class DjotLink {
           runtimeType == other.runtimeType &&
           url == other.url &&
           text == other.text &&
-          title == other.title;
+          title == other.title &&
+          attributes == other.attributes;
 }
 
 /// A single doctor verdict: what was checked, the outcome, and why.
@@ -5600,6 +5648,10 @@ class DocxMetadata {
 /// Represents a logical unit of content with semantic classification,
 /// unique identifier, and metadata for tracking origin and position.
 class Element {
+  /// Deterministic element identifier. Empty only when deserializing legacy payloads
+  /// that predate this field's wire representation.
+  final String elementId;
+
   /// Semantic type of this element
   final ElementType elementType;
 
@@ -5610,19 +5662,25 @@ class Element {
   final ElementMetadata metadata;
 
   const Element({
+    required this.elementId,
     required this.elementType,
     required this.text,
     required this.metadata,
   });
 
   @override
-  int get hashCode => elementType.hashCode ^ text.hashCode ^ metadata.hashCode;
+  int get hashCode =>
+      elementId.hashCode ^
+      elementType.hashCode ^
+      text.hashCode ^
+      metadata.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is Element &&
           runtimeType == other.runtimeType &&
+          elementId == other.elementId &&
           elementType == other.elementType &&
           text == other.text &&
           metadata == other.metadata;
@@ -7460,6 +7518,13 @@ class ExtractionConfig {
   /// auto-detection. See `CsvConfig` for details.
   final CsvConfig? csv;
 
+  /// Concurrency limits for constrained environments (None = use defaults).
+  ///
+  /// Controls Rayon thread pool size, ONNX Runtime intra-op threads, and the
+  /// combined document/inner-task budget for batch extraction. See
+  /// `ConcurrencyConfig` for details.
+  final ConcurrencyConfig? concurrency;
+
   /// URL ingestion and crawl configuration.
   final UrlExtractionConfig url;
 
@@ -7552,6 +7617,7 @@ class ExtractionConfig {
     this.cacheTtlSecs,
     this.email,
     this.csv,
+    this.concurrency,
     required this.url,
     required this.maxArchiveDepth,
     this.treeSitter,
@@ -7604,6 +7670,7 @@ class ExtractionConfig {
       cacheTtlSecs.hashCode ^
       email.hashCode ^
       csv.hashCode ^
+      concurrency.hashCode ^
       url.hashCode ^
       maxArchiveDepth.hashCode ^
       treeSitter.hashCode ^
@@ -7658,6 +7725,7 @@ class ExtractionConfig {
           cacheTtlSecs == other.cacheTtlSecs &&
           email == other.email &&
           csv == other.csv &&
+          concurrency == other.concurrency &&
           url == other.url &&
           maxArchiveDepth == other.maxArchiveDepth &&
           treeSitter == other.treeSitter &&
@@ -7995,6 +8063,9 @@ class FileExtractionConfig {
   /// Override post-processor for this file.
   final PostProcessorConfig? postprocessor;
 
+  /// Override HTML conversion options for this file.
+  final ConversionOptions? htmlOptions;
+
   /// Override styled HTML output configuration for this file.
   final HtmlOutputConfig? htmlOutput;
 
@@ -8073,6 +8144,7 @@ class FileExtractionConfig {
     this.pages,
     this.keywords,
     this.postprocessor,
+    this.htmlOptions,
     this.htmlOutput,
     this.resultFormat,
     this.outputFormat,
@@ -8110,6 +8182,7 @@ class FileExtractionConfig {
       pages.hashCode ^
       keywords.hashCode ^
       postprocessor.hashCode ^
+      htmlOptions.hashCode ^
       htmlOutput.hashCode ^
       resultFormat.hashCode ^
       outputFormat.hashCode ^
@@ -8149,6 +8222,7 @@ class FileExtractionConfig {
           pages == other.pages &&
           keywords == other.keywords &&
           postprocessor == other.postprocessor &&
+          htmlOptions == other.htmlOptions &&
           htmlOutput == other.htmlOutput &&
           resultFormat == other.resultFormat &&
           outputFormat == other.outputFormat &&
@@ -8408,6 +8482,9 @@ class FormattedBlock {
   /// Inline content within the block
   final List<InlineElement> inlineContent;
 
+  /// Element attributes (classes, IDs, key-value pairs)
+  final Attributes? attributes;
+
   /// Language identifier for code blocks
   final String? language;
 
@@ -8421,6 +8498,7 @@ class FormattedBlock {
     required this.blockType,
     this.level,
     required this.inlineContent,
+    this.attributes,
     this.language,
     this.code,
     required this.children,
@@ -8431,6 +8509,7 @@ class FormattedBlock {
       blockType.hashCode ^
       level.hashCode ^
       inlineContent.hashCode ^
+      attributes.hashCode ^
       language.hashCode ^
       code.hashCode ^
       children.hashCode;
@@ -8443,6 +8522,7 @@ class FormattedBlock {
           blockType == other.blockType &&
           level == other.level &&
           inlineContent == other.inlineContent &&
+          attributes == other.attributes &&
           language == other.language &&
           code == other.code &&
           children == other.children;
@@ -8499,6 +8579,57 @@ enum FormulaModel {
   /// ~180 MB total, downloaded on demand.
   latexOcr,
 }
+
+/// Runtime options accepted by the `candle-glm-ocr` backend.
+class GlmOcrBackendOptions {
+  /// Optional recognition task; the backend constructor's task is used when absent.
+  final GlmOcrTaskKind? task;
+
+  /// Optional per-call device override.
+  final CandleDevicePreference? device;
+
+  /// Optional whole-page or layout-paired dispatch mode.
+  final GlmOcrLayoutMode? layoutMode;
+
+  /// Whether chart regions use chart understanding instead of captioning.
+  final bool? enableChartUnderstanding;
+
+  /// Optional Hugging Face cache root.
+  final String? cacheDir;
+
+  const GlmOcrBackendOptions({
+    this.task,
+    this.device,
+    this.layoutMode,
+    this.enableChartUnderstanding,
+    this.cacheDir,
+  });
+
+  @override
+  int get hashCode =>
+      task.hashCode ^
+      device.hashCode ^
+      layoutMode.hashCode ^
+      enableChartUnderstanding.hashCode ^
+      cacheDir.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GlmOcrBackendOptions &&
+          runtimeType == other.runtimeType &&
+          task == other.task &&
+          device == other.device &&
+          layoutMode == other.layoutMode &&
+          enableChartUnderstanding == other.enableChartUnderstanding &&
+          cacheDir == other.cacheDir;
+}
+
+/// Page layout mode accepted by `candle-glm-ocr` backend options.
+enum GlmOcrLayoutMode { wholePage, paired }
+
+/// Task accepted by `candle-glm-ocr` backend options.
+enum GlmOcrTaskKind { ocr, table, formula, chart, caption }
 
 /// Individual grid cell with position and span metadata.
 class GridCell {
@@ -8784,10 +8915,6 @@ sealed class HeuristicsError with _$HeuristicsError {
       HeuristicsError_PdfAnalysisError;
 }
 
-/// A text block with hierarchy level assignment.
-///
-/// Represents a block of text with semantic heading information extracted from
-/// font size clustering and hierarchical analysis.
 class HierarchicalBlock {
   /// The text content of this block
   final String text;
@@ -8807,14 +8934,21 @@ class HierarchicalBlock {
   /// - "body": Body text (no heading level)
   final String level;
 
+  /// Bounding box information for the block
+  ///
+  /// Contains left, top, right, and bottom coordinates in PDF units.
+  final HierarchicalBoundingBox? bbox;
+
   const HierarchicalBlock({
     required this.text,
     required this.fontSize,
     required this.level,
+    this.bbox,
   });
 
   @override
-  int get hashCode => text.hashCode ^ fontSize.hashCode ^ level.hashCode;
+  int get hashCode =>
+      text.hashCode ^ fontSize.hashCode ^ level.hashCode ^ bbox.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -8823,7 +8957,47 @@ class HierarchicalBlock {
           runtimeType == other.runtimeType &&
           text == other.text &&
           fontSize == other.fontSize &&
-          level == other.level;
+          level == other.level &&
+          bbox == other.bbox;
+}
+
+/// A text block with hierarchy level assignment.
+///
+/// Represents a block of text with semantic heading information extracted from
+/// font size clustering and hierarchical analysis.
+class HierarchicalBoundingBox {
+  /// Left coordinate.
+  final double left;
+
+  /// Top coordinate.
+  final double top;
+
+  /// Right coordinate.
+  final double right;
+
+  /// Bottom coordinate.
+  final double bottom;
+
+  const HierarchicalBoundingBox({
+    required this.left,
+    required this.top,
+    required this.right,
+    required this.bottom,
+  });
+
+  @override
+  int get hashCode =>
+      left.hashCode ^ top.hashCode ^ right.hashCode ^ bottom.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is HierarchicalBoundingBox &&
+          runtimeType == other.runtimeType &&
+          left == other.left &&
+          top == other.top &&
+          right == other.right &&
+          bottom == other.bottom;
 }
 
 /// Hierarchy extraction configuration for PDF text structure analysis.
@@ -8837,7 +9011,7 @@ class HierarchyConfig {
 
   /// Number of font size clusters to use for hierarchy levels (1-7)
   ///
-  /// Default: 6, which provides H1-H6 heading levels with body text.
+  /// Default: 3, which provides two heading levels plus body text.
   /// Larger values create more fine-grained hierarchy levels.
   final PlatformInt64 kClusters;
 
@@ -9108,6 +9282,64 @@ enum HtmlTheme {
   unstyled,
 }
 
+/// Output format for conversion.
+///
+/// Specifies the target markup language format for the conversion output.
+enum HtmlToMarkdownRsOutputFormat {
+  /// Standard Markdown (`CommonMark` compatible). Default.
+  markdown,
+
+  /// Djot lightweight markup language.
+  djot,
+
+  /// Plain text output (no markup, visible text only).
+  plain,
+}
+
+/// Image dimensions in pixels.
+class ImageDimensions {
+  /// Width in pixels.
+  final PlatformInt64 width;
+
+  /// Height in pixels.
+  final PlatformInt64 height;
+
+  const ImageDimensions({required this.width, required this.height});
+
+  @override
+  int get hashCode => width.hashCode ^ height.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ImageDimensions &&
+          runtimeType == other.runtimeType &&
+          width == other.width &&
+          height == other.height;
+}
+
+/// Horizontal and vertical image resolution in dots per inch.
+class ImageDpi {
+  /// Horizontal resolution.
+  final double horizontal;
+
+  /// Vertical resolution.
+  final double vertical;
+
+  const ImageDpi({required this.horizontal, required this.vertical});
+
+  @override
+  int get hashCode => horizontal.hashCode ^ vertical.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ImageDpi &&
+          runtimeType == other.runtimeType &&
+          horizontal == other.horizontal &&
+          vertical == other.vertical;
+}
+
 /// Image extraction configuration.
 class ImageExtractionConfig {
   /// Extract images from documents
@@ -9352,19 +9584,32 @@ class ImageMetadataType {
   /// Title attribute
   final String? title;
 
+  /// Image dimensions if available.
+  final ImageDimensions? dimensions;
+
   /// Image type classification
   final ImageType imageType;
+
+  /// Additional attributes as key-value pairs.
+  final List<KeyValueAttribute> attributes;
 
   const ImageMetadataType({
     required this.src,
     this.alt,
     this.title,
+    this.dimensions,
     required this.imageType,
+    required this.attributes,
   });
 
   @override
   int get hashCode =>
-      src.hashCode ^ alt.hashCode ^ title.hashCode ^ imageType.hashCode;
+      src.hashCode ^
+      alt.hashCode ^
+      title.hashCode ^
+      dimensions.hashCode ^
+      imageType.hashCode ^
+      attributes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -9374,7 +9619,9 @@ class ImageMetadataType {
           src == other.src &&
           alt == other.alt &&
           title == other.title &&
-          imageType == other.imageType;
+          dimensions == other.dimensions &&
+          imageType == other.imageType &&
+          attributes == other.attributes;
 }
 
 @freezed
@@ -9494,11 +9741,13 @@ class ImagePreprocessingConfig {
           invertColors == other.invertColors;
 }
 
-/// Image preprocessing metadata.
-///
-/// Tracks the transformations applied to an image during OCR preprocessing,
-/// including DPI normalization, resizing, and resampling.
 class ImagePreprocessingMetadata {
+  /// Original image dimensions in pixels.
+  final PixelDimensions originalDimensions;
+
+  /// Original image resolution.
+  final ImageDpi originalDpi;
+
   /// Target DPI from configuration
   final PlatformInt64 targetDpi;
 
@@ -9510,6 +9759,9 @@ class ImagePreprocessingMetadata {
 
   /// Final DPI after processing
   final PlatformInt64 finalDpi;
+
+  /// New dimensions after resizing (if resized).
+  final PixelDimensions? newDimensions;
 
   /// Resampling algorithm used ("LANCZOS3", "CATMULLROM", etc.)
   final String resampleMethod;
@@ -9527,10 +9779,13 @@ class ImagePreprocessingMetadata {
   final String? resizeError;
 
   const ImagePreprocessingMetadata({
+    required this.originalDimensions,
+    required this.originalDpi,
     required this.targetDpi,
     required this.scaleFactor,
     required this.autoAdjusted,
     required this.finalDpi,
+    this.newDimensions,
     required this.resampleMethod,
     required this.dimensionClamped,
     this.calculatedDpi,
@@ -9540,10 +9795,13 @@ class ImagePreprocessingMetadata {
 
   @override
   int get hashCode =>
+      originalDimensions.hashCode ^
+      originalDpi.hashCode ^
       targetDpi.hashCode ^
       scaleFactor.hashCode ^
       autoAdjusted.hashCode ^
       finalDpi.hashCode ^
+      newDimensions.hashCode ^
       resampleMethod.hashCode ^
       dimensionClamped.hashCode ^
       calculatedDpi.hashCode ^
@@ -9555,10 +9813,13 @@ class ImagePreprocessingMetadata {
       identical(this, other) ||
       other is ImagePreprocessingMetadata &&
           runtimeType == other.runtimeType &&
+          originalDimensions == other.originalDimensions &&
+          originalDpi == other.originalDpi &&
           targetDpi == other.targetDpi &&
           scaleFactor == other.scaleFactor &&
           autoAdjusted == other.autoAdjusted &&
           finalDpi == other.finalDpi &&
+          newDimensions == other.newDimensions &&
           resampleMethod == other.resampleMethod &&
           dimensionClamped == other.dimensionClamped &&
           calculatedDpi == other.calculatedDpi &&
@@ -9591,18 +9852,25 @@ class InlineElement {
   /// Text content
   final String content;
 
+  /// Element attributes
+  final Attributes? attributes;
+
   /// Additional metadata (e.g., href for links, src/alt for images)
   final Map<String, String>? metadata;
 
   const InlineElement({
     required this.elementType,
     required this.content,
+    this.attributes,
     this.metadata,
   });
 
   @override
   int get hashCode =>
-      elementType.hashCode ^ content.hashCode ^ metadata.hashCode;
+      elementType.hashCode ^
+      content.hashCode ^
+      attributes.hashCode ^
+      metadata.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -9611,6 +9879,7 @@ class InlineElement {
           runtimeType == other.runtimeType &&
           elementType == other.elementType &&
           content == other.content &&
+          attributes == other.attributes &&
           metadata == other.metadata;
 }
 
@@ -9727,6 +9996,28 @@ enum JupyterCellRendering {
   both,
 }
 
+/// A string key-value attribute.
+class KeyValueAttribute {
+  /// Attribute name.
+  final String key;
+
+  /// Attribute value.
+  final String value;
+
+  const KeyValueAttribute({required this.key, required this.value});
+
+  @override
+  int get hashCode => key.hashCode ^ value.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is KeyValueAttribute &&
+          runtimeType == other.runtimeType &&
+          key == other.key &&
+          value == other.value;
+}
+
 /// Extracted keyword with metadata.
 class Keyword {
   /// The keyword text.
@@ -9786,6 +10077,13 @@ class KeywordConfig {
   /// Note: Score ranges differ between algorithms.
   final double minScore;
 
+  /// N-gram range for keyword extraction (min, max).
+  ///
+  /// (1, 1) = unigrams only
+  /// (1, 2) = unigrams and bigrams
+  /// (1, 3) = unigrams, bigrams, and trigrams (default)
+  final NgramRange ngramRange;
+
   /// Language code for stopword filtering (e.g., "en", "de", "fr").
   ///
   /// If None, no stopword filtering is applied.
@@ -9801,6 +10099,7 @@ class KeywordConfig {
     required this.algorithm,
     required this.maxKeywords,
     required this.minScore,
+    required this.ngramRange,
     this.language,
     this.yakeParams,
     this.rakeParams,
@@ -9811,6 +10110,7 @@ class KeywordConfig {
       algorithm.hashCode ^
       maxKeywords.hashCode ^
       minScore.hashCode ^
+      ngramRange.hashCode ^
       language.hashCode ^
       yakeParams.hashCode ^
       rakeParams.hashCode;
@@ -9823,6 +10123,7 @@ class KeywordConfig {
           algorithm == other.algorithm &&
           maxKeywords == other.maxKeywords &&
           minScore == other.minScore &&
+          ngramRange == other.ngramRange &&
           language == other.language &&
           yakeParams == other.yakeParams &&
           rakeParams == other.rakeParams;
@@ -9831,7 +10132,7 @@ class KeywordConfig {
 /// Structured per-language detection result: confidence, document share, and script —
 /// the information the ISO-code-only `detected_languages` list cannot convey (#261).
 ///
-/// Populated by `language_detection` alongside `detected_languages`, with one
+/// Populated by the language-detection processor alongside `detected_languages`, with one
 /// entry per language, in the same order as `detected_languages`.
 class LanguageConfidence {
   /// ISO 639-3 language code, matching the corresponding entry in `detected_languages`.
@@ -9926,8 +10227,6 @@ class LanguageDetectionConfig {
 ///
 /// Controls which model to use, batching, and download/cache behavior for the
 /// local ONNX ColBERT model.
-///
-/// Since v5.0.0.
 class LateInteractionConfig {
   /// The late-interaction model to use (defaults to the "gte-moderncolbert" preset).
   final LateInteractionModelType model;
@@ -10008,8 +10307,6 @@ class LateInteractionConfig {
 
 /// A single document match returned by [`max_sim_rank`], with its position in
 /// the input and MaxSim score.
-///
-/// Since v5.0.0.
 class LateInteractionMatch {
   /// Position of this document in the original input slice.
   final PlatformInt64 index;
@@ -10065,8 +10362,6 @@ sealed class LateInteractionModelType with _$LateInteractionModelType {
 }
 
 /// Static metadata for a bundled ColBERT preset (WASM/Android-safe, no ORT).
-///
-/// Since v5.0.0.
 class LateInteractionPreset {
   /// Stable preset name referenced from config.
   final String name;
@@ -10397,12 +10692,16 @@ class LinkMetadata {
   /// Rel attribute values
   final List<String> rel;
 
+  /// Additional attributes as key-value pairs.
+  final List<KeyValueAttribute> attributes;
+
   const LinkMetadata({
     required this.href,
     required this.text,
     this.title,
     required this.linkType,
     required this.rel,
+    required this.attributes,
   });
 
   @override
@@ -10411,7 +10710,8 @@ class LinkMetadata {
       text.hashCode ^
       title.hashCode ^
       linkType.hashCode ^
-      rel.hashCode;
+      rel.hashCode ^
+      attributes.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -10422,7 +10722,8 @@ class LinkMetadata {
           text == other.text &&
           title == other.title &&
           linkType == other.linkType &&
-          rel == other.rel;
+          rel == other.rel &&
+          attributes == other.attributes;
 }
 
 /// Link rendering style in Markdown output.
@@ -10621,7 +10922,7 @@ class LlmConfig {
   /// single, FFI-friendly shape across every language binding instead of a
   /// single-or-list union type. Converted to liter-llm's
   /// `StopSequence::Multiple` at each request-building call site; see
-  /// `to_stop_sequence`.
+  /// `llm::client::to_stop_sequence`.
   final List<String>? stop;
 
   /// Random seed for reproducible outputs, applied to individual requests built
@@ -10656,7 +10957,7 @@ class LlmConfig {
   /// `"minimal"`, `"max"` (case-insensitive; liter-llm's own
   /// `#[serde(rename_all = "lowercase")]` spelling) — rather than importing
   /// liter-llm's enum, because this module compiles even when the `liter-llm`
-  /// feature is disabled. See `parse_reasoning_effort` for the
+  /// feature is disabled. See `llm::client::parse_reasoning_effort` for the
   /// conversion into `liter_llm::ReasoningEffort`.
   final String? reasoningEffort;
 
@@ -10754,18 +11055,9 @@ class LlmConfig {
   /// round-trips through TOML/JSON/YAML and every language binding like the rest of
   /// `LlmConfig`.
   ///
-  /// Inert on `wasm32`: `crate::llm` (the module that reads this field —
-  /// `build_credential_provider` and friends) is compiled out
-  /// entirely on that target, via the crate-root `#[cfg(all(feature = "liter-llm",
-  /// not(target_arch = "wasm32")))] pub mod llm;` gate in `lib.rs`. Every variant needs
-  /// liter-llm's `native-http`-backed auth modules, and wasm32 builds request only
-  /// `wasm-http` (see the `liter-llm` dependency comment in Cargo.toml), so there is no
-  /// code path left on that target to construct a provider from this field, or to reject
-  /// it. This type (`core::config::llm`) has no `liter-llm` dependency itself and compiles
-  /// on every target, so setting this field on a wasm32 build is accepted by serde and
-  /// silently ignored — a plain no-op, not a `Validation`. Reject a
-  /// wasm32 build that sets this field yourself if that silence is a problem for your use
-  /// case; xberg does not do it for you.
+  /// Managed credential providers are unavailable on `wasm32`, where liter-llm uses
+  /// browser HTTP rather than its native authentication modules. [`LlmConfig::validate`]
+  /// rejects a configured provider on that target instead of silently ignoring it.
   ///
   /// GitHub Copilot's device-flow provider has no variant here: it takes no configuration at
   /// all (`liter_llm::auth::github_copilot::GithubCopilotCredentialProvider::new` accepts only
@@ -11078,6 +11370,50 @@ class MapResult {
           urls == other.urls;
 }
 
+/// A fenced code block extracted from Markdown.
+class MarkdownCodeBlock {
+  /// Declared language identifier, or an empty string when absent.
+  final String language;
+
+  /// Code block content.
+  final String code;
+
+  const MarkdownCodeBlock({required this.language, required this.code});
+
+  @override
+  int get hashCode => language.hashCode ^ code.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MarkdownCodeBlock &&
+          runtimeType == other.runtimeType &&
+          language == other.language &&
+          code == other.code;
+}
+
+/// A link extracted from Markdown.
+class MarkdownLink {
+  /// Visible link text.
+  final String text;
+
+  /// Link destination.
+  final String url;
+
+  const MarkdownLink({required this.text, required this.url});
+
+  @override
+  int get hashCode => text.hashCode ^ url.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MarkdownLink &&
+          runtimeType == other.runtimeType &&
+          text == other.text &&
+          url == other.url;
+}
+
 /// How partial results from multiple model calls (e.g. per page batch) are combined.
 ///
 /// Canonical home for the merge strategy referenced by presets and by the
@@ -11305,8 +11641,6 @@ class ModelPaths {
 /// (the embedding for token `i`) occupies `data[i*dim .. (i+1)*dim]`. Flat
 /// storage keeps the type FFI-friendly across binding boundaries; use
 /// [`MultiVectorEmbedding::rows`] internally to iterate per-token slices.
-///
-/// Since v5.0.0.
 class MultiVectorEmbedding {
   /// Number of attention-live token rows (padding rows are dropped, not
   /// zeroed — see [`engine::normalize_tokens`]).
@@ -11465,6 +11799,28 @@ enum NewlineStyle {
 
   /// Backslash at end of line. Alternative Markdown syntax.
   backslash,
+}
+
+/// Inclusive word-count range used to form keyword candidates.
+class NgramRange {
+  /// Minimum number of words in a candidate.
+  final PlatformInt64 min;
+
+  /// Maximum number of words in a candidate.
+  final PlatformInt64 max;
+
+  const NgramRange({required this.min, required this.max});
+
+  @override
+  int get hashCode => min.hashCode ^ max.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is NgramRange &&
+          runtimeType == other.runtimeType &&
+          min == other.min &&
+          max == other.max;
 }
 
 @freezed
@@ -11674,7 +12030,10 @@ sealed class NodeContent with _$NodeContent {
   }) = NodeContent_RawBlock;
 
   /// Structured metadata block (email headers, YAML frontmatter, etc.).
-  const factory NodeContent.metadataBlock() = NodeContent_MetadataBlock;
+  const factory NodeContent.metadataBlock({
+    /// Key-value pairs extracted from the metadata block.
+    required List<KeyValueAttribute> entries,
+  }) = NodeContent_MetadataBlock;
 }
 
 /// OCR backend types.
@@ -11715,8 +12074,10 @@ sealed class OcrBoundingGeometry with _$OcrBoundingGeometry {
   ///
   /// Points are in clockwise order starting from top-left:
   /// `[top_left, top_right, bottom_right, bottom_left]`
-  const factory OcrBoundingGeometry.quadrilateral() =
-      OcrBoundingGeometry_Quadrilateral;
+  const factory OcrBoundingGeometry.quadrilateral({
+    /// Exactly four corner points in clockwise order.
+    required List<OcrPoint> points,
+  }) = OcrBoundingGeometry_Quadrilateral;
 }
 
 /// Confidence scores for an OCR element.
@@ -11783,7 +12144,7 @@ class OcrConfig {
 
   /// PaddleOCR-specific configuration (optional, JSON passthrough).
   ///
-  /// Deserialized into a [`PaddleOcrConfig`](crate::PaddleOcrConfig), so any of its fields can be
+  /// Deserialized into a `PaddleOcrConfig`, so any of its fields can be
   /// overridden here — most notably `model_version` (`"pp-ocrv6"` default / `"pp-ocrv5"`) and
   /// `model_tier`. In TOML:
   ///
@@ -11987,7 +12348,8 @@ class OcrElement {
 
   /// Parent element ID for hierarchical relationships.
   ///
-  /// Only used for Tesseract output which has word -> line -> block hierarchy.
+  /// When hierarchy output is enabled, this resolves to another emitted element's
+  /// `backend_metadata["element_id"]` value.
   final String? parentId;
 
   /// Backend-specific metadata that doesn't fit the unified schema.
@@ -12051,8 +12413,8 @@ class OcrElementConfig {
 
   /// Whether to build hierarchical relationships between elements.
   ///
-  /// When true, `parent_id` fields will be populated based on spatial containment.
-  /// Only meaningful for Tesseract output.
+  /// When true, emitted elements receive an `element_id` metadata value and `parent_id`
+  /// references are populated only when a spatially containing parent is also emitted.
   final bool buildHierarchy;
 
   const OcrElementConfig({
@@ -12307,6 +12669,28 @@ class OcrPipelineStage {
           backendOptions == other.backendOptions;
 }
 
+/// A point in OCR raster pixel coordinates.
+class OcrPoint {
+  /// Horizontal coordinate.
+  final PlatformInt64 x;
+
+  /// Vertical coordinate.
+  final PlatformInt64 y;
+
+  const OcrPoint({required this.x, required this.y});
+
+  @override
+  int get hashCode => x.hashCode ^ y.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OcrPoint &&
+          runtimeType == other.runtimeType &&
+          x == other.x &&
+          y == other.y;
+}
+
 /// Quality thresholds for OCR fallback decisions and pipeline quality gating.
 ///
 /// All fields default to the values that match the previous hardcoded behavior,
@@ -12386,7 +12770,7 @@ class OcrQualityThresholds {
   /// `dictionary_invalid_word_ratio` in `ocr::processor::execution`), so this threshold is
   /// simply never consulted for them.
   ///
-  /// Calibration owed, same as `min_confidence`:
+  /// Calibration owed, same as `ocr::types::TesseractConfig::min_confidence`:
   /// unlike [`Self::max_ocr_output_fragmented_word_ratio`] (measured across a recorded
   /// ordinance's prose vs. drawing pages), this ratio has not yet had a page-level
   /// measurement run over a labeled corpus. The default therefore disables the check
@@ -12572,8 +12956,9 @@ sealed class OcrStrategy with _$OcrStrategy {
   /// Detects that a text layer came from a scanner, not whether it is accurate,
   /// so a page carrying a good sidecar is OCR'd too.
   const factory OcrStrategy.scannedPages({
-    /// Minimum scan confidence, in `[0.0, 1.0]`. Values outside the range are
-    /// clamped. See [`DEFAULT_SCANNED_MIN_CONFIDENCE`] for how to pick one.
+    /// Minimum scan confidence, in `[0.0, 1.0]`. Configuration validation rejects
+    /// non-finite or out-of-range values. See [`DEFAULT_SCANNED_MIN_CONFIDENCE`]
+    /// for how to pick one.
     required double minConfidence,
   }) = OcrStrategy_ScannedPages;
 }
@@ -12695,11 +13080,6 @@ sealed class OutputFormat with _$OutputFormat {
 
   /// JSON tree format with heading-driven sections.
   const factory OutputFormat.json() = OutputFormat_Json;
-
-  /// Metadata-only label; content is identical to [`OutputFormat::Plain`].
-  /// No dedicated renderer exists yet, so this attaches no OCR element
-  /// metadata. See the enum-level docs above.
-  const factory OutputFormat.structured() = OutputFormat_Structured;
 
   /// Docling DocTags format (tables rendered as OTSL).
   const factory OutputFormat.docTags() = OutputFormat_DocTags;
@@ -12946,6 +13326,60 @@ class PaddleOcrConfig {
           inferenceBackend == other.inferenceBackend;
 }
 
+/// Runtime options accepted by the `candle-paddleocr-vl` backend.
+class PaddleOcrVlBackendOptions {
+  /// Optional per-call recognition task; the backend constructor's task is used when absent.
+  final PaddleOcrVlTaskKind? task;
+
+  /// Optional local model directory, which takes precedence over `model_id`.
+  final String? modelPath;
+
+  /// Optional Hugging Face repository identifier.
+  final String? modelId;
+
+  /// Optional immutable Hugging Face model revision.
+  final String? hfRevision;
+
+  /// Optional Hugging Face cache root.
+  final String? cacheDir;
+
+  /// Optional per-call device override.
+  final CandleDevicePreference? device;
+
+  const PaddleOcrVlBackendOptions({
+    this.task,
+    this.modelPath,
+    this.modelId,
+    this.hfRevision,
+    this.cacheDir,
+    this.device,
+  });
+
+  @override
+  int get hashCode =>
+      task.hashCode ^
+      modelPath.hashCode ^
+      modelId.hashCode ^
+      hfRevision.hashCode ^
+      cacheDir.hashCode ^
+      device.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PaddleOcrVlBackendOptions &&
+          runtimeType == other.runtimeType &&
+          task == other.task &&
+          modelPath == other.modelPath &&
+          modelId == other.modelId &&
+          hfRevision == other.hfRevision &&
+          cacheDir == other.cacheDir &&
+          device == other.device;
+}
+
+/// Task accepted by `candle-paddleocr-vl` backend options.
+enum PaddleOcrVlTaskKind { ocr, table, formula, chart }
+
 /// Byte offset boundary for a page.
 ///
 /// Tracks where a specific page's content starts and ends in the main content string,
@@ -13117,6 +13551,9 @@ class PageContent {
   /// Only populated when `extract_images = true` in the extraction config.
   final Int64List imageIndices;
 
+  /// OCR image preprocessing applied to this page's raster.
+  final ImagePreprocessingMetadata? imagePreprocessing;
+
   /// Hierarchy information for the page (when hierarchy extraction is enabled)
   ///
   /// Contains text hierarchy levels (H1-H6) extracted from the page content.
@@ -13160,6 +13597,7 @@ class PageContent {
     required this.content,
     required this.tables,
     required this.imageIndices,
+    this.imagePreprocessing,
     this.hierarchy,
     this.isBlank,
     this.layoutRegions,
@@ -13174,6 +13612,7 @@ class PageContent {
       content.hashCode ^
       tables.hashCode ^
       imageIndices.hashCode ^
+      imagePreprocessing.hashCode ^
       hierarchy.hashCode ^
       isBlank.hashCode ^
       layoutRegions.hashCode ^
@@ -13190,12 +13629,38 @@ class PageContent {
           content == other.content &&
           tables == other.tables &&
           imageIndices == other.imageIndices &&
+          imagePreprocessing == other.imagePreprocessing &&
           hierarchy == other.hierarchy &&
           isBlank == other.isBlank &&
           layoutRegions == other.layoutRegions &&
           speakerNotes == other.speakerNotes &&
           sectionName == other.sectionName &&
           sheetName == other.sheetName;
+}
+
+/// Metadata for individual page/slide/sheet.
+///
+/// Captures per-page information including dimensions, content counts,
+/// and visibility state (for presentations).
+class PageDimensions {
+  /// Page width in points or pixels.
+  final double width;
+
+  /// Page height in points or pixels.
+  final double height;
+
+  const PageDimensions({required this.width, required this.height});
+
+  @override
+  int get hashCode => width.hashCode ^ height.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PageDimensions &&
+          runtimeType == other.runtimeType &&
+          width == other.width &&
+          height == other.height;
 }
 
 /// Page hierarchy structure containing heading levels and block information.
@@ -13223,16 +13688,15 @@ class PageHierarchy {
           blocks == other.blocks;
 }
 
-/// Metadata for individual page/slide/sheet.
-///
-/// Captures per-page information including dimensions, content counts,
-/// and visibility state (for presentations).
 class PageInfo {
   /// Page number (1-indexed)
   final PlatformInt64 number;
 
   /// Page title (usually for presentations)
   final String? title;
+
+  /// Dimensions in points (PDF) or pixels (images).
+  final PageDimensions? dimensions;
 
   /// Number of images on this page
   final PlatformInt64? imageCount;
@@ -13265,6 +13729,7 @@ class PageInfo {
   const PageInfo({
     required this.number,
     this.title,
+    this.dimensions,
     this.imageCount,
     this.tableCount,
     this.hidden,
@@ -13276,6 +13741,7 @@ class PageInfo {
   int get hashCode =>
       number.hashCode ^
       title.hashCode ^
+      dimensions.hashCode ^
       imageCount.hashCode ^
       tableCount.hashCode ^
       hidden.hashCode ^
@@ -13289,6 +13755,7 @@ class PageInfo {
           runtimeType == other.runtimeType &&
           number == other.number &&
           title == other.title &&
+          dimensions == other.dimensions &&
           imageCount == other.imageCount &&
           tableCount == other.tableCount &&
           hidden == other.hidden &&
@@ -13744,10 +14211,16 @@ class PdfConfig {
   final bool extractAnnotations;
 
   /// Top margin fraction (0.0–1.0) of page height to exclude headers/running heads.
+  /// Ignored when `ContentFilterConfig.include_headers` is `true`.
+  /// Effective nonzero margins require per-page OCR so geometry can be filtered;
+  /// document-capable OCR backends use their image-processing path in that case.
   /// Default: 0.06 (6%)
   final double? topMarginFraction;
 
   /// Bottom margin fraction (0.0–1.0) of page height to exclude footers/page numbers.
+  /// Ignored when `ContentFilterConfig.include_footers` is `true`.
+  /// Effective nonzero margins require per-page OCR so geometry can be filtered;
+  /// document-capable OCR backends use their image-processing path in that case.
   /// Default: 0.05 (5%)
   final double? bottomMarginFraction;
 
@@ -13761,11 +14234,12 @@ class PdfConfig {
   final bool allowSingleColumnTables;
 
   /// Perform OCR on inline images extracted from PDF pages and attach the
-  /// recognized text to each `ExtractedImage.ocr_result`. Requires Tesseract
-  /// to be available; if `ExtractionConfig.ocr` is `None` the extractor
-  /// falls back to `TesseractConfig::default()`. Per-image failures degrade
-  /// gracefully (the image is returned without OCR text rather than failing
-  /// the whole extraction). Default: `false`.
+  /// recognized text to each `ExtractedImage.ocr_result`. Uses the backend
+  /// selected by `ExtractionConfig.ocr`, or the default OCR backend when no
+  /// OCR configuration is supplied. Requires the `ocr` or `ocr-pipeline`
+  /// feature. Per-image failures degrade gracefully (the image is returned
+  /// without OCR text rather than failing the whole extraction). Default:
+  /// `false`.
   final bool ocrInlineImages;
 
   /// Extract AcroForm and XFA form fields into `ExtractedDocument.form_fields`.
@@ -13855,13 +14329,11 @@ class PdfConfig {
 
 /// A form field extracted from a PDF's AcroForm or XFA structure.
 ///
-/// Populated by the PDF extractor when [`PdfConfig::extract_form_fields`] is
+/// Populated by the PDF extractor when `PdfConfig::extract_form_fields` is
 /// enabled and the document is a fillable form. Supports both AcroForm (standard)
 /// and XFA (XML Forms Architecture) layers. When both are present, AcroForm fields
 /// take priority (canonical fallback per PDF spec), and XFA-only fields are appended.
 /// The collection is empty for non-form PDFs and for non-PDF formats.
-///
-/// [`PdfConfig::extract_form_fields`]: crate::core::config::PdfConfig::extract_form_fields
 class PdfFormField {
   /// Partial field name (the leaf name within the field hierarchy).
   final String name;
@@ -14083,6 +14555,31 @@ sealed class PiiCategory with _$PiiCategory {
       PiiCategory_Custom;
 }
 
+/// Image preprocessing metadata.
+///
+/// Tracks the transformations applied to an image during OCR preprocessing,
+/// including DPI normalization, resizing, and resampling.
+class PixelDimensions {
+  /// Width in pixels.
+  final PlatformInt64 width;
+
+  /// Height in pixels.
+  final PlatformInt64 height;
+
+  const PixelDimensions({required this.width, required this.height});
+
+  @override
+  int get hashCode => width.hashCode ^ height.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PixelDimensions &&
+          runtimeType == other.runtimeType &&
+          width == other.width &&
+          height == other.height;
+}
+
 /// Post-processor configuration.
 class PostProcessorConfig {
   /// Enable post-processors
@@ -14266,6 +14763,9 @@ class PptxExtractionResult {
   /// Structured document representation
   final DocumentStructure? document;
 
+  /// Hyperlinks discovered in slides.
+  final List<PresentationHyperlink> hyperlinks;
+
   /// Office metadata extracted from docProps/core.xml and docProps/app.xml.
   ///
   /// Contains keys like "title", "author", "created_by", "subject", "keywords",
@@ -14290,6 +14790,7 @@ class PptxExtractionResult {
     this.pageStructure,
     this.pageContents,
     this.document,
+    required this.hyperlinks,
     required this.officeMetadata,
     this.revisions,
   });
@@ -14305,6 +14806,7 @@ class PptxExtractionResult {
       pageStructure.hashCode ^
       pageContents.hashCode ^
       document.hashCode ^
+      hyperlinks.hashCode ^
       officeMetadata.hashCode ^
       revisions.hashCode;
 
@@ -14322,6 +14824,7 @@ class PptxExtractionResult {
           pageStructure == other.pageStructure &&
           pageContents == other.pageContents &&
           document == other.document &&
+          hyperlinks == other.hyperlinks &&
           officeMetadata == other.officeMetadata &&
           revisions == other.revisions;
 }
@@ -14418,6 +14921,28 @@ enum PreprocessingPreset {
 
   /// Aggressive cleanup. Remove extensive non-content elements and structure.
   aggressive,
+}
+
+/// A hyperlink discovered in a presentation slide.
+class PresentationHyperlink {
+  /// Link destination.
+  final String url;
+
+  /// Optional visible label.
+  final String? label;
+
+  const PresentationHyperlink({required this.url, this.label});
+
+  @override
+  int get hashCode => url.hashCode ^ label.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PresentationHyperlink &&
+          runtimeType == other.runtimeType &&
+          url == other.url &&
+          label == other.label;
 }
 
 /// A curated structured-extraction preset loaded from the embedded library.
@@ -15205,35 +15730,17 @@ enum ReductionLevel {
 }
 
 /// Classification of a detected layout region that warrants VLM extraction.
-///
-/// Each variant maps to a specific prompt optimised for that content type.
-/// The mapping is intentionally narrow — only region kinds for which VLM
-/// extraction provides a clear quality benefit over classical suppression.
 enum RegionKind {
   /// A figure, diagram, chart, or image region.
-  ///
-  /// VLM prompt: describe the diagram / chart, including axis labels,
-  /// legend entries, and any embedded text.
   figure,
 
-  /// A densely formatted or complex table that classical extraction garbles.
-  ///
-  /// VLM prompt: extract the table as GitHub-Flavoured Markdown.
+  /// A densely formatted or complex table.
   denseTable,
 
-  /// A region whose layout the classical pipeline cannot handle (multi-column
-  /// insets, heavily annotated forms, mixed text+diagram).
-  ///
-  /// VLM prompt: extract all text and structure as markdown, preserving
-  /// reading order.
+  /// A region with complex or mixed layout.
   complexLayout,
 
-  /// A standalone image to be captioned (not extracted as figure markdown).
-  ///
-  /// VLM prompt: produce a single-sentence alt-text-style caption suitable
-  /// for accessibility tooling and downstream indexing. Used by the
-  /// captioning post-processor to populate
-  /// [`ExtractedImage::caption`](crate::types::ExtractedImage::caption).
+  /// A standalone image to caption.
   caption,
 }
 
@@ -15265,8 +15772,6 @@ enum RelationshipKind {
 ///
 /// `index` maps back to the caller's original document list, so metadata arrays
 /// (e.g. IDs, paths) can be reordered without passing them through the reranker.
-///
-/// Since v5.0.0.
 class RerankedDocument {
   /// Position of this document in the original input `documents` slice.
   final PlatformInt64 index;
@@ -15300,8 +15805,6 @@ class RerankedDocument {
 ///
 /// Controls which model to use, how many results to return, and download/cache
 /// behavior for local ONNX models.
-///
-/// Since v5.0.0.
 class RerankerConfig {
   /// The reranker model to use (defaults to "balanced" preset if not specified).
   final RerankerModelType model;
@@ -15390,8 +15893,6 @@ class RerankerConfig {
 ///   from the last token's logits over the "yes"/"no" vocabulary entries,
 ///   via a softmax over those two logits. Already a `[0, 1]` probability —
 ///   no sigmoid is applied.
-///
-/// Since v5.0.0.
 enum RerankerHead {
   /// Single-logit cross-encoder head (sigmoid applied by the caller).
   crossEncoder,
@@ -15879,8 +16380,6 @@ class SitemapUrl {
 /// `indices` are ascending vocabulary token ids; `values[i]` is the weight for
 /// `indices[i]`. The two arrays always have equal length. Only strictly-positive
 /// terms are retained, so the representation is genuinely sparse.
-///
-/// Since v5.0.0.
 class SparseEmbedding {
   /// Vocabulary token ids with non-zero weight, ascending.
   final Int64List indices;
@@ -15906,8 +16405,6 @@ class SparseEmbedding {
 ///
 /// Controls which model to use, batching, and download/cache behavior for the
 /// local ONNX SPLADE model.
-///
-/// Since v5.0.0.
 class SparseEmbeddingConfig {
   /// The sparse-embedding model to use (defaults to the "opensearch-v3-distill" preset).
   final SparseEmbeddingModelType model;
@@ -16010,8 +16507,6 @@ sealed class SparseEmbeddingModelType with _$SparseEmbeddingModelType {
 }
 
 /// Static metadata for a bundled SPLADE preset (WASM/Android-safe, no ORT).
-///
-/// Since v5.0.0.
 class SparseEmbeddingPreset {
   /// Stable preset name referenced from config.
   final String name;
@@ -16652,7 +17147,7 @@ enum TableOverlapPreference {
 /// Most users can use the defaults, but these settings allow optimization
 /// for specific document types (invoices, handwriting, etc.).
 ///
-/// **This is the public-facing counterpart of `TesseractConfig`
+/// **This is the public-facing counterpart of `ocr::types::TesseractConfig`
 /// (the internal, engine-facing representation with `u8`/`String` fields instead of
 /// `i32`/`Vec<String>`).** They are two independent struct definitions bridged only by
 /// an explicit `From<&TesseractConfig> for crate::ocr::types::TesseractConfig` impl in
@@ -16664,7 +17159,7 @@ enum TableOverlapPreference {
 /// two defaults disagree, standalone image OCR silently uses this struct's value while
 /// PDF-embedded OCR (which can reach the internal `Default` directly when no
 /// `tesseract_config` is set) uses the other. When changing a default here, also update
-/// `default`, and vice versa.
+/// `ocr::types::TesseractConfig::default`, and vice versa.
 class TesseractConfig {
   /// Language code(s) for OCR recognition. For Tesseract, languages are joined with "+".
   ///
@@ -16726,7 +17221,7 @@ class TesseractConfig {
   /// Enable N-gram language model.
   ///
   /// Kept on by default (see [`Self::default`] and
-  /// `language_model_ngram_on` for the rationale);
+  /// `ocr::types::TesseractConfig::language_model_ngram_on` for the rationale);
   /// keep this field's default in sync with the internal struct's.
   final bool languageModelNgramOn;
 
@@ -16897,12 +17392,20 @@ class TextExtractionResult {
   /// Markdown headers (text only, Markdown files only)
   final List<String>? headers;
 
+  /// Markdown links (Markdown files only).
+  final List<MarkdownLink>? links;
+
+  /// Code blocks (Markdown files only).
+  final List<MarkdownCodeBlock>? codeBlocks;
+
   const TextExtractionResult({
     required this.content,
     required this.lineCount,
     required this.wordCount,
     required this.characterCount,
     this.headers,
+    this.links,
+    this.codeBlocks,
   });
 
   @override
@@ -16911,7 +17414,9 @@ class TextExtractionResult {
       lineCount.hashCode ^
       wordCount.hashCode ^
       characterCount.hashCode ^
-      headers.hashCode;
+      headers.hashCode ^
+      links.hashCode ^
+      codeBlocks.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -16922,7 +17427,9 @@ class TextExtractionResult {
           lineCount == other.lineCount &&
           wordCount == other.wordCount &&
           characterCount == other.characterCount &&
-          headers == other.headers;
+          headers == other.headers &&
+          links == other.links &&
+          codeBlocks == other.codeBlocks;
 }
 
 /// Text/Markdown metadata.
@@ -16942,11 +17449,19 @@ class TextMetadata {
   /// Markdown headers (headings text only, for Markdown files)
   final List<String>? headers;
 
+  /// Markdown links (for Markdown files).
+  final List<MarkdownLink>? links;
+
+  /// Code blocks (for Markdown files).
+  final List<MarkdownCodeBlock>? codeBlocks;
+
   const TextMetadata({
     required this.lineCount,
     required this.wordCount,
     required this.characterCount,
     this.headers,
+    this.links,
+    this.codeBlocks,
   });
 
   @override
@@ -16954,7 +17469,9 @@ class TextMetadata {
       lineCount.hashCode ^
       wordCount.hashCode ^
       characterCount.hashCode ^
-      headers.hashCode;
+      headers.hashCode ^
+      links.hashCode ^
+      codeBlocks.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -16964,7 +17481,9 @@ class TextMetadata {
           lineCount == other.lineCount &&
           wordCount == other.wordCount &&
           characterCount == other.characterCount &&
-          headers == other.headers;
+          headers == other.headers &&
+          links == other.links &&
+          codeBlocks == other.codeBlocks;
 }
 
 /// Configuration for the token-reduction pipeline.
@@ -17463,6 +17982,45 @@ class TreeSitterProcessConfig {
           contentMode == other.contentMode;
 }
 
+/// Runtime options accepted by the `candle-trocr` backend.
+class TrocrBackendOptions {
+  /// Optional model variant; the backend constructor's variant is used when absent.
+  final CandleTrocrVariant? variant;
+
+  /// Optional per-call device override.
+  final CandleDevicePreference? device;
+
+  /// Optional Hugging Face cache root.
+  final String? cacheDir;
+
+  /// Optional immutable Hugging Face model revision.
+  final String? hfRevision;
+
+  const TrocrBackendOptions({
+    this.variant,
+    this.device,
+    this.cacheDir,
+    this.hfRevision,
+  });
+
+  @override
+  int get hashCode =>
+      variant.hashCode ^
+      device.hashCode ^
+      cacheDir.hashCode ^
+      hfRevision.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TrocrBackendOptions &&
+          runtimeType == other.runtimeType &&
+          variant == other.variant &&
+          device == other.device &&
+          cacheDir == other.cacheDir &&
+          hfRevision == other.hfRevision;
+}
+
 /// Semantic classification of an extracted URI.
 enum UriKind {
   /// A clickable hyperlink (web URL, file link).
@@ -17623,7 +18181,7 @@ sealed class VlmFallbackPolicy with _$VlmFallbackPolicy {
   /// `quality_threshold`, send the page to the VLM.
   ///
   /// `quality_threshold` is in the `[0.0, 1.0]` range produced by
-  /// `calculate_quality_score`. A value of `0.5` is a
+  /// `text::quality::calculate_quality_score`. A value of `0.5` is a
   /// reasonable starting point; calibrate with the Stage 0 benchmark harness.
   const factory VlmFallbackPolicy.onLowQuality({
     /// Minimum acceptable quality score from the classical backend.
@@ -17720,8 +18278,6 @@ sealed class XbergError with _$XbergError {
       XbergError_Embedding;
 
   /// The reranker model or reranking pipeline returned an error.
-  ///
-  /// Since v5.0.0.
   const factory XbergError.reranking({required String message}) =
       XbergError_Reranking;
 

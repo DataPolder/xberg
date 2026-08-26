@@ -42,4 +42,3 @@ interface OcrBackend
      */
     public function backend_type(): mixed;
 }
-

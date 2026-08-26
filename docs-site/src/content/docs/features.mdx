@@ -6,7 +6,7 @@ import { Tabs, TabItem } from "@astrojs/starlight/components";
 
 A map of what Xberg can do. Each section links to the guide or reference page with configuration details and code examples.
 
-![Xberg features overview -- 101 input formats flow through extraction, OCR, and processing to produce text, tables, chunks, and metadata](../../assets/feature-overview.png)
+![Xberg features overview -- 100 input formats flow through extraction, OCR, and processing to produce text, tables, chunks, and metadata](../../assets/feature-overview.png)
 
 ---
 
@@ -186,7 +186,7 @@ For a deep dive into each stage, see [Extraction Pipeline](/concepts/extraction-
 
 ### Output Formats
 
-Xberg supports five output formats: **Plain text**, **Markdown**, **Djot**, **HTML**, and **Structured (JSON)**. The HTML format includes a styled renderer with semantic `kb-*` CSS classes, five built-in themes, and CSS custom properties for full customization. See [HTML Output](/guides/html-output/) for details.
+Xberg supports six built-in output formats: **Plain text**, **Markdown**, **Djot**, **HTML**, **JSON**, and **DocTags**. Registered renderers can add custom formats such as Graphviz DOT. The HTML renderer uses semantic `kb-*` CSS classes, five built-in themes, and CSS custom properties. See [Output Formats](/guides/output-formats/) for details.
 
 ---
 
@@ -373,7 +373,7 @@ Customize the prompts sent to LLMs with Minijinja templates. Available variables
 
 </details>
 
-`LlmConfig` and `StructuredExtractionConfig` types are exposed in Python, Node.js, and PHP bindings. Five new environment variables (`XBERG_LLM_MODEL`, `XBERG_LLM_API_KEY`, `XBERG_LLM_BASE_URL`, `XBERG_VLM_OCR_MODEL`, `XBERG_VLM_EMBEDDING_MODEL`) provide zero-code configuration.
+`LlmConfig` and `StructuredExtractionConfig` are part of the generated binding surface. Use the per-language API reference to confirm representation and package support for your target. Five environment variables (`XBERG_LLM_MODEL`, `XBERG_LLM_API_KEY`, `XBERG_LLM_BASE_URL`, `XBERG_VLM_OCR_MODEL`, `XBERG_VLM_EMBEDDING_MODEL`) provide zero-code configuration.
 
 ### Document Enrichment
 
@@ -581,7 +581,7 @@ npm install @xberg-io/xberg-wasm            # WASM (browser/edge)
 
 ```toml
 [dependencies]
-xberg = { version = "5", features = ["pdf", "ocr", "chunking"] }
+xberg = { version = "1", features = ["pdf", "ocr", "chunking"] }
 ```
 
 </TabItem>

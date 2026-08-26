@@ -1,9 +1,23 @@
+#[cfg(any(
+    test,
+    feature = "candle-trocr",
+    feature = "candle-paddleocr-vl",
+    feature = "candle-glm-ocr",
+    feature = "candle-deepseek-ocr"
+))]
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use xberg_candle_ocr::DevicePreference;
 
+#[cfg(any(
+    test,
+    feature = "candle-trocr",
+    feature = "candle-paddleocr-vl",
+    feature = "candle-glm-ocr",
+    feature = "candle-deepseek-ocr"
+))]
 use crate::XbergError;
 
 /// Device selection shared by the typed candle backend option objects.
@@ -160,6 +174,13 @@ pub struct DeepseekOcrBackendOptions {
     pub version: Option<u32>,
 }
 
+#[cfg(any(
+    test,
+    feature = "candle-trocr",
+    feature = "candle-paddleocr-vl",
+    feature = "candle-glm-ocr",
+    feature = "candle-deepseek-ocr"
+))]
 pub(crate) fn parse_backend_options<T>(value: Option<&serde_json::Value>, backend_name: &str) -> crate::Result<T>
 where
     T: DeserializeOwned + Default,
@@ -176,6 +197,13 @@ where
         .map_err(|error| XbergError::validation(format!("invalid {backend_name} backend_options: {error}")))
 }
 
+#[cfg(any(
+    test,
+    feature = "candle-trocr",
+    feature = "candle-paddleocr-vl",
+    feature = "candle-glm-ocr",
+    feature = "candle-deepseek-ocr"
+))]
 pub(crate) fn validate_optional_non_empty(
     value: Option<&str>,
     backend_name: &str,

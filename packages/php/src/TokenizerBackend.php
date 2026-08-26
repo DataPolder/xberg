@@ -21,4 +21,3 @@ interface TokenizerBackend
      */
     public function count_tokens(string $text): int;
 }
-

@@ -1,6 +1,6 @@
 # Xberg
 
-[![Bindings](https://img.shields.io/badge/Bindings-alef%20%D7%90-007ec6)](https://github.com/xberg-io/alef)
+[![Built with alef](https://img.shields.io/badge/built%20with-alef%20%D7%90-007ec6)](https://github.com/xberg-io/alef)
 
 [![Rust](https://img.shields.io/crates/v/xberg?label=Rust&color=007ec6)](https://crates.io/crates/xberg)
 [![Python](https://img.shields.io/pypi/v/xberg?label=Python&color=007ec6)](https://pypi.org/project/xberg/)
