@@ -1,7 +1,5 @@
 [workspace]
-alef_version = "0.69.0"
-# -D warnings (emitted into every generated Rust binding as #![allow(...)]).
-extra_clippy_allows = ["redundant_field_names", "collapsible_if", "vec_init_then_push"]
+alef_version = "0.70.0"
 languages = [
   "python",
   "node",
@@ -264,7 +262,7 @@ manifest = "packages/kotlin-android/build.gradle.kts"
 # sixteen languages unmeasured. Kotlin's reported count is then artifact
 # absence, NOT snippet quality, and must not be read as the latter. ~keep
 before = [
-  'sdk=$(command -v sdkmanager || true); if [ -z "${ANDROID_HOME:-}" ] && [ -n "$sdk" ]; then ANDROID_HOME=$(cd "$(dirname "$sdk")/../../.." && pwd); export ANDROID_HOME; fi; if [ -z "${ANDROID_HOME:-}" ]; then echo "alef: no Android SDK (ANDROID_HOME unset, sdkmanager not on PATH); skipping gradle assembleDebug"; elif [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then echo "alef: gradle/wrapper/gradle-wrapper.jar is absent; skipping gradle assembleDebug"; else ./gradlew assembleDebug || echo "alef: gradle assembleDebug FAILED; Kotlin snippets will fail typecheck (the io.xberg classes will be absent) instead of zeroing every other language"; fi',
+  'sdk=$(command -v sdkmanager || true); if [ -z "${ANDROID_HOME:-}" ] && [ -n "$sdk" ]; then ANDROID_HOME=$(cd "$(dirname "$sdk")/../../.." && pwd); export ANDROID_HOME; fi; if [ -z "${ANDROID_HOME:-}" ]; then echo "alef: no Android SDK (ANDROID_HOME unset, sdkmanager not on PATH); skipping gradle assembleDebug"; elif [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then echo "alef: gradle/wrapper/gradle-wrapper.jar is absent; skipping gradle assembleDebug"; else ./gradlew assembleDebug; fi',
 ]
 
 [workspace.docs.snippets.sessions.kotlin_android]
@@ -290,7 +288,7 @@ manifest = "packages/kotlin-android/build.gradle.kts"
 # sixteen languages unmeasured. Kotlin's reported count is then artifact
 # absence, NOT snippet quality, and must not be read as the latter. ~keep
 before = [
-  'sdk=$(command -v sdkmanager || true); if [ -z "${ANDROID_HOME:-}" ] && [ -n "$sdk" ]; then ANDROID_HOME=$(cd "$(dirname "$sdk")/../../.." && pwd); export ANDROID_HOME; fi; if [ -z "${ANDROID_HOME:-}" ]; then echo "alef: no Android SDK (ANDROID_HOME unset, sdkmanager not on PATH); skipping gradle assembleDebug"; elif [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then echo "alef: gradle/wrapper/gradle-wrapper.jar is absent; skipping gradle assembleDebug"; else ./gradlew assembleDebug || echo "alef: gradle assembleDebug FAILED; Kotlin snippets will fail typecheck (the io.xberg classes will be absent) instead of zeroing every other language"; fi',
+  'sdk=$(command -v sdkmanager || true); if [ -z "${ANDROID_HOME:-}" ] && [ -n "$sdk" ]; then ANDROID_HOME=$(cd "$(dirname "$sdk")/../../.." && pwd); export ANDROID_HOME; fi; if [ -z "${ANDROID_HOME:-}" ]; then echo "alef: no Android SDK (ANDROID_HOME unset, sdkmanager not on PATH); skipping gradle assembleDebug"; elif [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then echo "alef: gradle/wrapper/gradle-wrapper.jar is absent; skipping gradle assembleDebug"; else ./gradlew assembleDebug; fi',
 ]
 
 [workspace.docs.snippets.sessions.swift]
@@ -321,7 +319,7 @@ manifest = "packages/swift/Package.swift"
 # and take the whole snippet run down, exactly the failure mode this guard
 # exists to prevent. ~keep
 before = [
-  'if ! command -v swift >/dev/null 2>&1; then echo "alef: swift not on PATH; skipping cargo build (Swift snippets will fail typecheck)"; elif [ -f ../../target/release/libxberg_swift.a ] && [ -f ../../target/release/libxberg_ffi.a ]; then echo "alef: release staticlibs already built; skipping cargo build"; elif [ -f ../../target/debug/libxberg_swift.a ] && [ -f ../../target/debug/libxberg_ffi.a ]; then echo "alef: debug staticlibs already built; skipping cargo build"; else cargo build --manifest-path rust/Cargo.toml -p xberg-swift -p xberg-ffi || echo "alef: cargo build -p xberg-swift -p xberg-ffi failed; Swift snippets will fail typecheck (Xberg module unavailable), other languages unaffected"; fi; true',
+  'if ! command -v swift >/dev/null 2>&1; then echo "alef: swift not on PATH; skipping cargo build (Swift snippets will fail typecheck)"; elif [ -f ../../target/release/libxberg_swift.a ] && [ -f ../../target/release/libxberg_ffi.a ]; then echo "alef: release staticlibs already built; skipping cargo build"; elif [ -f ../../target/debug/libxberg_swift.a ] && [ -f ../../target/debug/libxberg_ffi.a ]; then echo "alef: debug staticlibs already built; skipping cargo build"; else cargo build --manifest-path rust/Cargo.toml -p xberg-swift -p xberg-ffi; fi',
 ]
 
 [workspace.docs.snippets.sessions.zig]
@@ -2190,7 +2188,6 @@ dart = "packages/dart/lib/src/"
 zig = "packages/zig/src/"
 
 [crates.exclude]
-fields = ["ConversionOptions.tier_strategy"]
 types = [
   "SplitConfig",
   "SplitStrategy",
