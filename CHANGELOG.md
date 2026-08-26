@@ -111,6 +111,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed documentation-snippet fixtures that named non-existent result fields, which made the generated
+  snippets silently drop the affected presentation block: element `content` is now `text`, table `rows`
+  is now `cells`, and the result paths `keywords`, `structured_data`, and `document_structure` are now
+  `extracted_keywords`, `structured_output`, and `document`.
 - Fixed EPUB extraction for `text/html` spine items, named entities, declared non-UTF-8 encodings,
   navigation documents, SVG fallbacks, nested tables, MathML, headings, images, and malformed HTML
   (#1486, #1488-#1494).
