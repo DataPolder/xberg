@@ -4,10 +4,10 @@ target: wasm
 ---
 
 ```typescript title="Wasm"
-import { ExtractInputKind, extract, initWasm } from "@xberg-io/xberg-wasm";
+import init, { WasmExtractInputKind, extract } from "@xberg-io/xberg-wasm";
 
 async function setupFileInput() {
-  await initWasm();
+  await init();
 
   const fileInput = document.getElementById("file-input") as HTMLInputElement;
 
@@ -22,7 +22,7 @@ async function setupFileInput() {
         bytes,
         mimeType: file.type || "application/octet-stream",
         filename: file.name,
-      });
+      }, undefined);
 
       console.log("Extracted text:", output.results[0].content);
       displayResults(output.results[0]);
