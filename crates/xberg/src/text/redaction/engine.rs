@@ -1237,6 +1237,7 @@ mod tests {
                 content: format!("Page mentions {email}."),
                 tables: Vec::new(),
                 image_indices: Vec::new(),
+                image_preprocessing: None,
                 hierarchy: None,
                 is_blank: None,
                 layout_regions: None,

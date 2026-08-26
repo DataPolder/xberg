@@ -1075,6 +1075,7 @@ mod issue_214_text_coverage_tests {
             content: content.to_string(),
             tables: Vec::new(),
             image_indices: Vec::new(),
+            image_preprocessing: None,
             hierarchy: None,
             is_blank: None,
             layout_regions: None,
