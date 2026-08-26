@@ -27118,13 +27118,16 @@ char *xberg_block_type_to_json(XBERGAlefHandle handle);
  */
 char *xberg_block_type_to_string(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `BoundaryReason` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_boundary_reason_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `BoundaryReason` to a JSON string. Returns null on failure.
  * # Safety
@@ -27132,7 +27135,9 @@ void xberg_boundary_reason_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_boundary_reason_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Render a `BoundaryReason` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -27142,6 +27147,7 @@ char *xberg_boundary_reason_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_boundary_reason_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `BrowserBackend` handle.
@@ -27243,20 +27249,25 @@ char *xberg_call_mode_to_json(XBERGAlefHandle handle);
  */
 char *xberg_call_mode_to_string(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Free a `CandleDevicePreference` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_candle_device_preference_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Serialize a `CandleDevicePreference` to a JSON string. Returns null on
  * failure. # Safety `handle` must be a valid, non-zero handle returned by a
  * `xberg` function. The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_candle_device_preference_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Render a `CandleDevicePreference` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -27266,14 +27277,18 @@ char *xberg_candle_device_preference_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_candle_device_preference_to_string(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Free a `CandleTrocrVariant` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_candle_trocr_variant_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Serialize a `CandleTrocrVariant` to a JSON string. Returns null on failure.
  * # Safety
@@ -27281,7 +27296,9 @@ void xberg_candle_trocr_variant_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_candle_trocr_variant_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Render a `CandleTrocrVariant` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -27291,6 +27308,7 @@ char *xberg_candle_trocr_variant_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_candle_trocr_variant_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `ChunkSizing` handle.
@@ -27374,13 +27392,16 @@ char *xberg_chunker_type_to_string(XBERGAlefHandle handle);
  */
 void xberg_code_block_style_free(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Free a `CodeContentMode` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_code_content_mode_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Serialize a `CodeContentMode` to a JSON string. Returns null on failure.
  * # Safety
@@ -27388,7 +27409,9 @@ void xberg_code_content_mode_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_code_content_mode_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Render a `CodeContentMode` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -27398,14 +27421,18 @@ char *xberg_code_content_mode_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_code_content_mode_to_string(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Free a `CodeDataNodeKind` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_code_data_node_kind_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Serialize a `CodeDataNodeKind` to a JSON string. Returns null on failure.
  * # Safety
@@ -27413,7 +27440,9 @@ void xberg_code_data_node_kind_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_code_data_node_kind_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TREE_SITTER)
 /**
  * Render a `CodeDataNodeKind` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -27423,6 +27452,7 @@ char *xberg_code_data_node_kind_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_code_data_node_kind_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `ContentFilterKind` handle.
@@ -27746,13 +27776,16 @@ char *xberg_format_metadata_to_json(XBERGAlefHandle handle);
  */
 char *xberg_format_metadata_to_string(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Free a `FormulaModel` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_formula_model_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Serialize a `FormulaModel` to a JSON string. Returns null on failure.
  * # Safety
@@ -27760,7 +27793,9 @@ void xberg_formula_model_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_formula_model_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Render a `FormulaModel` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -27770,14 +27805,18 @@ char *xberg_formula_model_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_formula_model_to_string(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Free a `GlmOcrLayoutMode` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_glm_ocr_layout_mode_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Serialize a `GlmOcrLayoutMode` to a JSON string. Returns null on failure.
  * # Safety
@@ -27785,7 +27824,9 @@ void xberg_glm_ocr_layout_mode_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_glm_ocr_layout_mode_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Render a `GlmOcrLayoutMode` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -27795,14 +27836,18 @@ char *xberg_glm_ocr_layout_mode_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_glm_ocr_layout_mode_to_string(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Free a `GlmOcrTaskKind` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_glm_ocr_task_kind_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Serialize a `GlmOcrTaskKind` to a JSON string. Returns null on failure.
  * # Safety
@@ -27810,7 +27855,9 @@ void xberg_glm_ocr_task_kind_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_glm_ocr_task_kind_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Render a `GlmOcrTaskKind` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -27820,6 +27867,7 @@ char *xberg_glm_ocr_task_kind_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_glm_ocr_task_kind_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `HeadingStyle` handle.
@@ -27835,13 +27883,16 @@ void xberg_heading_style_free(XBERGAlefHandle handle);
  */
 void xberg_highlight_style_free(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_HTML)
 /**
  * Free a `HtmlTheme` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_html_theme_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HTML)
 /**
  * Serialize a `HtmlTheme` to a JSON string. Returns null on failure.
  * # Safety
@@ -27849,7 +27900,9 @@ void xberg_html_theme_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_html_theme_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HTML)
 /**
  * Render a `HtmlTheme` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -27859,6 +27912,7 @@ char *xberg_html_theme_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_html_theme_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `HtmlToMarkdownRsOutputFormat` handle.
@@ -27992,13 +28046,18 @@ char *xberg_jupyter_cell_rendering_to_json(XBERGAlefHandle handle);
  */
 char *xberg_jupyter_cell_rendering_to_string(XBERGAlefHandle handle);
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) ||                                   \
+     defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Free a `KeywordAlgorithm` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_keyword_algorithm_free(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) ||                                   \
+     defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Serialize a `KeywordAlgorithm` to a JSON string. Returns null on failure.
  * # Safety
@@ -28006,7 +28065,10 @@ void xberg_keyword_algorithm_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_keyword_algorithm_to_json(XBERGAlefHandle handle);
+#endif
 
+#if (defined(XBERG_FEATURE_KEYWORDS_YAKE) ||                                   \
+     defined(XBERG_FEATURE_KEYWORDS_RAKE))
 /**
  * Render a `KeywordAlgorithm` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -28016,6 +28078,7 @@ char *xberg_keyword_algorithm_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_keyword_algorithm_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `LateInteractionModelType` handle.
@@ -28041,13 +28104,16 @@ char *xberg_late_interaction_model_type_to_json(XBERGAlefHandle handle);
  */
 char *xberg_late_interaction_model_type_to_string(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Free a `LayoutClass` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_layout_class_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Serialize a `LayoutClass` to a JSON string. Returns null on failure.
  * # Safety
@@ -28055,7 +28121,9 @@ void xberg_layout_class_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_layout_class_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Render a `LayoutClass` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -28065,14 +28133,18 @@ char *xberg_layout_class_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_layout_class_to_string(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Free a `LayoutStrategy` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_layout_strategy_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Serialize a `LayoutStrategy` to a JSON string. Returns null on failure.
  * # Safety
@@ -28080,7 +28152,9 @@ void xberg_layout_strategy_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_layout_strategy_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Render a `LayoutStrategy` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -28090,6 +28164,7 @@ char *xberg_layout_strategy_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_layout_strategy_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `LinkStyle` handle.
@@ -28312,20 +28387,25 @@ char *xberg_output_format_to_json(XBERGAlefHandle handle);
  */
 char *xberg_output_format_to_string(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Free a `PaddleInferenceBackend` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_paddle_inference_backend_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Serialize a `PaddleInferenceBackend` to a JSON string. Returns null on
  * failure. # Safety `handle` must be a valid, non-zero handle returned by a
  * `xberg` function. The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_paddle_inference_backend_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PADDLE_OCR_TYPES)
 /**
  * Render a `PaddleInferenceBackend` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -28335,14 +28415,18 @@ char *xberg_paddle_inference_backend_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_paddle_inference_backend_to_string(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Free a `PaddleOcrVlTaskKind` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_paddle_ocr_vl_task_kind_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Serialize a `PaddleOcrVlTaskKind` to a JSON string. Returns null on failure.
  * # Safety
@@ -28350,7 +28434,9 @@ void xberg_paddle_ocr_vl_task_kind_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_paddle_ocr_vl_task_kind_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_CANDLE_OCR)
 /**
  * Render a `PaddleOcrVlTaskKind` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -28360,6 +28446,7 @@ char *xberg_paddle_ocr_vl_task_kind_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_paddle_ocr_vl_task_kind_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `PageUnitType` handle.
@@ -28411,13 +28498,16 @@ char *xberg_pdf_annotation_type_to_json(XBERGAlefHandle handle);
  */
 char *xberg_pdf_annotation_type_to_string(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Free a `PdfBackend` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_pdf_backend_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Serialize a `PdfBackend` to a JSON string. Returns null on failure.
  * # Safety
@@ -28425,7 +28515,9 @@ void xberg_pdf_backend_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_pdf_backend_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PDF)
 /**
  * Render a `PdfBackend` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -28435,6 +28527,7 @@ char *xberg_pdf_backend_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_pdf_backend_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `PiiCategory` handle.
@@ -28468,13 +28561,16 @@ char *xberg_pii_category_to_string(XBERGAlefHandle handle);
  */
 void xberg_preprocessing_preset_free(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Free a `PresetCategory` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_preset_category_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Serialize a `PresetCategory` to a JSON string. Returns null on failure.
  * # Safety
@@ -28482,7 +28578,9 @@ void xberg_preset_category_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_preset_category_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_PRESETS)
 /**
  * Render a `PresetCategory` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -28492,6 +28590,7 @@ char *xberg_preset_category_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_preset_category_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `ProbeStatus` handle.
@@ -28543,13 +28642,16 @@ char *xberg_redaction_strategy_to_json(XBERGAlefHandle handle);
  */
 char *xberg_redaction_strategy_to_string(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Free a `ReductionLevel` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_reduction_level_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Serialize a `ReductionLevel` to a JSON string. Returns null on failure.
  * # Safety
@@ -28557,7 +28659,9 @@ void xberg_reduction_level_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_reduction_level_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_QUALITY)
 /**
  * Render a `ReductionLevel` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -28567,6 +28671,7 @@ char *xberg_reduction_level_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_reduction_level_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `RelationshipKind` handle.
@@ -28693,13 +28798,16 @@ char *xberg_revision_kind_to_json(XBERGAlefHandle handle);
  */
 char *xberg_revision_kind_to_string(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Free a `SchemaCompliance` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_schema_compliance_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Serialize a `SchemaCompliance` to a JSON string. Returns null on failure.
  * # Safety
@@ -28707,7 +28815,9 @@ void xberg_schema_compliance_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_schema_compliance_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_HEURISTICS)
 /**
  * Render a `SchemaCompliance` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -28717,6 +28827,7 @@ char *xberg_schema_compliance_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_schema_compliance_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `SparseEmbeddingModelType` handle.
@@ -28817,13 +28928,16 @@ char *xberg_table_chunking_mode_to_json(XBERGAlefHandle handle);
  */
 char *xberg_table_chunking_mode_to_string(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Free a `TableModel` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_table_model_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Serialize a `TableModel` to a JSON string. Returns null on failure.
  * # Safety
@@ -28831,7 +28945,9 @@ void xberg_table_model_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_table_model_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Render a `TableModel` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -28841,21 +28957,27 @@ char *xberg_table_model_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_table_model_to_string(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Free a `TableOverlapPreference` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_table_overlap_preference_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Serialize a `TableOverlapPreference` to a JSON string. Returns null on
  * failure. # Safety `handle` must be a valid, non-zero handle returned by a
  * `xberg` function. The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_table_overlap_preference_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_LAYOUT_TYPES)
 /**
  * Render a `TableOverlapPreference` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -28865,6 +28987,7 @@ char *xberg_table_overlap_preference_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_table_overlap_preference_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `TextDirection` handle.
@@ -28998,13 +29121,16 @@ char *xberg_vlm_fallback_policy_to_json(XBERGAlefHandle handle);
  */
 char *xberg_vlm_fallback_policy_to_string(XBERGAlefHandle handle);
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Free a `WhisperModel` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
  */
 void xberg_whisper_model_free(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Serialize a `WhisperModel` to a JSON string. Returns null on failure.
  * # Safety
@@ -29012,7 +29138,9 @@ void xberg_whisper_model_free(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_whisper_model_to_json(XBERGAlefHandle handle);
+#endif
 
+#if defined(XBERG_FEATURE_TRANSCRIPTION_TYPES)
 /**
  * Render a `WhisperModel` as its string representation
  * (the unit-variant name as serialized by serde — e.g. `"completed"`,
@@ -29022,6 +29150,7 @@ char *xberg_whisper_model_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_whisper_model_to_string(XBERGAlefHandle handle);
+#endif
 
 /**
  * Free a `WhitespaceMode` handle.

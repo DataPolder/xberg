@@ -93,6 +93,7 @@
         ]
       },
       "schema_name": "memo_data",
+      "strict": true,
       "llm": {
         "model": "openai/gpt-4o"
       }

@@ -56,8 +56,8 @@
   ],
   "config": {
     "chunking": {
-      "max_chars": 300,
-      "max_overlap": 40,
+      "max_characters": 300,
+      "overlap": 40,
       "trim": true,
       "chunker_type": "text"
     }

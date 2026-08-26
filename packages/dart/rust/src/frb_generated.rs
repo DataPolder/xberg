@@ -1434,6 +1434,7 @@ fn wire__crate__create_attributes_from_json_impl(
         },
     )
 }
+#[cfg(feature = "transcription-types")]
 fn wire__crate__create_audio_metadata_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1462,6 +1463,7 @@ fn wire__crate__create_audio_metadata_from_json_impl(
         },
     )
 }
+#[cfg(feature = "layout-types")]
 fn wire__crate__create_b_box_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1770,6 +1772,7 @@ fn wire__crate__create_chunk_from_json_impl(
         },
     )
 }
+#[cfg(feature = "heuristics")]
 fn wire__crate__create_chunk_info_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1854,6 +1857,7 @@ fn wire__crate__create_chunking_config_from_json_impl(
         },
     )
 }
+#[cfg(feature = "markdown-footnotes")]
 fn wire__crate__create_citation_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1938,6 +1942,7 @@ fn wire__crate__create_classification_label_from_json_impl(
         },
     )
 }
+#[cfg(feature = "tree-sitter")]
 fn wire__crate__create_code_chunk_info_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1966,6 +1971,7 @@ fn wire__crate__create_code_chunk_info_from_json_impl(
         },
     )
 }
+#[cfg(feature = "tree-sitter")]
 fn wire__crate__create_code_data_attribute_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1994,6 +2000,7 @@ fn wire__crate__create_code_data_attribute_from_json_impl(
         },
     )
 }
+#[cfg(feature = "tree-sitter")]
 fn wire__crate__create_code_data_node_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2022,6 +2029,7 @@ fn wire__crate__create_code_data_node_from_json_impl(
         },
     )
 }
+#[cfg(feature = "tree-sitter")]
 fn wire__crate__create_code_metadata_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2190,6 +2198,7 @@ fn wire__crate__create_conversion_options_from_json_impl(
         },
     )
 }
+#[cfg(feature = "office")]
 fn wire__crate__create_core_properties_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2358,6 +2367,7 @@ fn wire__crate__create_dbf_metadata_from_json_impl(
         },
     )
 }
+#[cfg(feature = "api")]
 fn wire__crate__create_detect_response_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2386,6 +2396,7 @@ fn wire__crate__create_detect_response_from_json_impl(
         },
     )
 }
+#[cfg(feature = "layout-types")]
 fn wire__crate__create_detection_result_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2414,6 +2425,7 @@ fn wire__crate__create_detection_result_from_json_impl(
         },
     )
 }
+#[cfg(feature = "diff")]
 fn wire__crate__create_diff_hunk_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2442,6 +2454,7 @@ fn wire__crate__create_diff_hunk_from_json_impl(
         },
     )
 }
+#[cfg(feature = "diff")]
 fn wire__crate__create_diff_options_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2638,6 +2651,7 @@ fn wire__crate__create_doctor_report_from_json_impl(
         },
     )
 }
+#[cfg(feature = "heuristics")]
 fn wire__crate__create_document_boundary_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2743,6 +2757,7 @@ fn wire__crate__create_document_extractor_dart_impl_impl(
         },
     )
 }
+#[cfg(feature = "heuristics")]
 fn wire__crate__create_document_metadata_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2911,6 +2926,7 @@ fn wire__crate__create_document_summary_from_json_impl(
         },
     )
 }
+#[cfg(feature = "office")]
 fn wire__crate__create_docx_app_properties_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2939,6 +2955,7 @@ fn wire__crate__create_docx_app_properties_from_json_impl(
         },
     )
 }
+#[cfg(feature = "office")]
 fn wire__crate__create_docx_metadata_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3135,6 +3152,7 @@ fn wire__crate__create_email_metadata_from_json_impl(
         },
     )
 }
+#[cfg(feature = "diff")]
 fn wire__crate__create_embedded_changes_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3163,6 +3181,7 @@ fn wire__crate__create_embedded_changes_from_json_impl(
         },
     )
 }
+#[cfg(feature = "diff")]
 fn wire__crate__create_embedded_diff_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3191,6 +3210,7 @@ fn wire__crate__create_embedded_diff_from_json_impl(
         },
     )
 }
+#[cfg(feature = "pdf")]
 fn wire__crate__create_embedded_file_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3567,6 +3587,7 @@ fn wire__crate__create_extracted_uri_from_json_impl(
         },
     )
 }
+#[cfg(feature = "heuristics")]
 fn wire__crate__create_extraction_confidence_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3623,6 +3644,7 @@ fn wire__crate__create_extraction_config_from_json_impl(
         },
     )
 }
+#[cfg(feature = "diff")]
 fn wire__crate__create_extraction_diff_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3791,6 +3813,7 @@ fn wire__crate__create_file_extraction_config_from_json_impl(
         },
     )
 }
+#[cfg(feature = "markdown-footnotes")]
 fn wire__crate__create_footnote_anchor_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3819,6 +3842,7 @@ fn wire__crate__create_footnote_anchor_from_json_impl(
         },
     )
 }
+#[cfg(feature = "markdown-footnotes")]
 fn wire__crate__create_footnote_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -3847,6 +3871,7 @@ fn wire__crate__create_footnote_config_from_json_impl(
         },
     )
 }
+#[cfg(feature = "markdown-footnotes")]
 fn wire__crate__create_footnote_definition_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4071,6 +4096,7 @@ fn wire__crate__create_heading_level_from_json_impl(
         },
     )
 }
+#[cfg(feature = "heuristics")]
 fn wire__crate__create_heuristics_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4155,6 +4181,7 @@ fn wire__crate__create_hierarchical_bounding_box_from_json_impl(
         },
     )
 }
+#[cfg(feature = "pdf")]
 fn wire__crate__create_hierarchy_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4211,6 +4238,7 @@ fn wire__crate__create_html_metadata_from_json_impl(
         },
     )
 }
+#[cfg(feature = "html")]
 fn wire__crate__create_html_output_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4519,6 +4547,7 @@ fn wire__crate__create_key_value_attribute_from_json_impl(
         },
     )
 }
+#[cfg(any(feature = "keywords-yake", feature = "keywords-rake"))]
 fn wire__crate__create_keyword_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4547,6 +4576,7 @@ fn wire__crate__create_keyword_config_from_json_impl(
         },
     )
 }
+#[cfg(any(feature = "keywords-yake", feature = "keywords-rake"))]
 fn wire__crate__create_keyword_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4659,6 +4689,7 @@ fn wire__crate__create_late_interaction_config_from_json_impl(
         },
     )
 }
+#[cfg(feature = "late-interaction-presets")]
 fn wire__crate__create_late_interaction_match_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4687,6 +4718,7 @@ fn wire__crate__create_late_interaction_match_from_json_impl(
         },
     )
 }
+#[cfg(feature = "late-interaction-presets")]
 fn wire__crate__create_late_interaction_preset_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4715,6 +4747,7 @@ fn wire__crate__create_late_interaction_preset_from_json_impl(
         },
     )
 }
+#[cfg(feature = "layout-types")]
 fn wire__crate__create_layout_detection_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4743,6 +4776,7 @@ fn wire__crate__create_layout_detection_config_from_json_impl(
         },
     )
 }
+#[cfg(feature = "layout-types")]
 fn wire__crate__create_layout_detection_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -5107,6 +5141,7 @@ fn wire__crate__create_metadata_from_json_impl(
         },
     )
 }
+#[cfg(feature = "paddle-ocr-types")]
 fn wire__crate__create_model_paths_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -5135,6 +5170,7 @@ fn wire__crate__create_model_paths_from_json_impl(
         },
     )
 }
+#[cfg(feature = "late-interaction-presets")]
 fn wire__crate__create_multi_vector_embedding_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -5163,6 +5199,7 @@ fn wire__crate__create_multi_vector_embedding_from_json_impl(
         },
     )
 }
+#[cfg(feature = "heuristics")]
 fn wire__crate__create_multidoc_input_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -5191,6 +5228,7 @@ fn wire__crate__create_multidoc_input_from_json_impl(
         },
     )
 }
+#[cfg(feature = "heuristics")]
 fn wire__crate__create_multidoc_thresholds_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -5247,6 +5285,7 @@ fn wire__crate__create_ner_config_from_json_impl(
         },
     )
 }
+#[cfg(any(feature = "keywords-yake", feature = "keywords-rake"))]
 fn wire__crate__create_ngram_range_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -5717,6 +5756,7 @@ fn wire__crate__create_ocr_table_from_json_impl(
         },
     )
 }
+#[cfg(feature = "auto-rotate-types")]
 fn wire__crate__create_orientation_result_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -5745,6 +5785,7 @@ fn wire__crate__create_orientation_result_from_json_impl(
         },
     )
 }
+#[cfg(feature = "paddle-ocr-types")]
 fn wire__crate__create_paddle_ocr_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -5997,6 +6038,7 @@ fn wire__crate__create_page_info_from_json_impl(
         },
     )
 }
+#[cfg(feature = "heuristics")]
 fn wire__crate__create_page_range_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -6025,6 +6067,7 @@ fn wire__crate__create_page_range_from_json_impl(
         },
     )
 }
+#[cfg(feature = "heuristics")]
 fn wire__crate__create_page_signals_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -6165,6 +6208,7 @@ fn wire__crate__create_pdf_annotation_from_json_impl(
         },
     )
 }
+#[cfg(feature = "pdf")]
 fn wire__crate__create_pdf_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -6221,6 +6265,7 @@ fn wire__crate__create_pdf_form_field_from_json_impl(
         },
     )
 }
+#[cfg(feature = "pdf")]
 fn wire__crate__create_pdf_metadata_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -6498,6 +6543,7 @@ fn wire__crate__create_presentation_hyperlink_from_json_impl(
         },
     )
 }
+#[cfg(feature = "presets")]
 fn wire__crate__create_preset_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -6526,6 +6572,7 @@ fn wire__crate__create_preset_from_json_impl(
         },
     )
 }
+#[cfg(feature = "presets")]
 fn wire__crate__create_preset_sample_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -6554,6 +6601,7 @@ fn wire__crate__create_preset_sample_from_json_impl(
         },
     )
 }
+#[cfg(feature = "presets")]
 fn wire__crate__create_preset_summary_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -6750,6 +6798,7 @@ fn wire__crate__create_qr_code_from_json_impl(
         },
     )
 }
+#[cfg(feature = "keywords-rake")]
 fn wire__crate__create_rake_params_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -6778,6 +6827,7 @@ fn wire__crate__create_rake_params_from_json_impl(
         },
     )
 }
+#[cfg(feature = "layout-types")]
 fn wire__crate__create_recognized_table_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -6982,6 +7032,7 @@ fn wire__crate__create_renderer_dart_impl_impl(
         },
     )
 }
+#[cfg(any(feature = "reranker-presets", feature = "reranker"))]
 fn wire__crate__create_reranked_document_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7074,6 +7125,7 @@ fn wire__crate__create_reranker_config_from_json_impl(
         },
     )
 }
+#[cfg(feature = "presets")]
 fn wire__crate__create_resolved_preset_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7158,6 +7210,7 @@ fn wire__crate__create_security_limits_from_json_impl(
         },
     )
 }
+#[cfg(feature = "api-types")]
 fn wire__crate__create_server_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7242,6 +7295,7 @@ fn wire__crate__create_sparse_embedding_config_from_json_impl(
         },
     )
 }
+#[cfg(feature = "sparse-embedding-presets")]
 fn wire__crate__create_sparse_embedding_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7270,6 +7324,7 @@ fn wire__crate__create_sparse_embedding_from_json_impl(
         },
     )
 }
+#[cfg(feature = "sparse-embedding-presets")]
 fn wire__crate__create_sparse_embedding_preset_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7466,6 +7521,7 @@ fn wire__crate__create_supported_format_from_json_impl(
         },
     )
 }
+#[cfg(feature = "svg")]
 fn wire__crate__create_svg_options_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7522,6 +7578,7 @@ fn wire__crate__create_table_cell_from_json_impl(
         },
     )
 }
+#[cfg(feature = "diff")]
 fn wire__crate__create_table_diff_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7718,6 +7775,7 @@ fn wire__crate__create_text_metadata_from_json_impl(
         },
     )
 }
+#[cfg(feature = "quality")]
 fn wire__crate__create_token_reduction_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7810,6 +7868,7 @@ fn wire__crate__create_tokenizer_backend_dart_impl_impl(
         },
     )
 }
+#[cfg(feature = "transcription-types")]
 fn wire__crate__create_transcription_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7894,6 +7953,7 @@ fn wire__crate__create_translation_from_json_impl(
         },
     )
 }
+#[cfg(feature = "tree-sitter")]
 fn wire__crate__create_tree_sitter_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7922,6 +7982,7 @@ fn wire__crate__create_tree_sitter_config_from_json_impl(
         },
     )
 }
+#[cfg(feature = "tree-sitter")]
 fn wire__crate__create_tree_sitter_process_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -7978,6 +8039,7 @@ fn wire__crate__create_url_extraction_config_from_json_impl(
         },
     )
 }
+#[cfg(feature = "heuristics")]
 fn wire__crate__create_user_chunk_config_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8135,6 +8197,7 @@ fn wire__crate__create_xml_metadata_from_json_impl(
         },
     )
 }
+#[cfg(feature = "keywords-yake")]
 fn wire__crate__create_yake_params_from_json_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8283,6 +8346,7 @@ fn wire__crate__extract_batch_impl(
         },
     )
 }
+#[cfg(feature = "markdown-footnotes")]
 fn wire__crate__find_unmarked_claims_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8554,6 +8618,7 @@ fn wire__crate__list_validators_impl(
         },
     )
 }
+#[cfg(feature = "url-ingestion")]
 fn wire__crate__map_url_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8586,6 +8651,10 @@ fn wire__crate__map_url_impl(
         },
     )
 }
+#[cfg(any(
+    any(feature = "late-interaction-presets", feature = "late-interaction"),
+    feature = "late-interaction-presets"
+))]
 fn wire__crate__max_sim_rank_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -8615,6 +8684,10 @@ fn wire__crate__max_sim_rank_impl(
         },
     )
 }
+#[cfg(any(
+    any(feature = "late-interaction-presets", feature = "late-interaction"),
+    feature = "late-interaction-presets"
+))]
 fn wire__crate__max_sim_score_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -9092,6 +9165,7 @@ fn wire__crate__unregister_validator_impl(
         },
     )
 }
+#[cfg(feature = "markdown-footnotes")]
 fn wire__crate__verify_excerpt_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -22454,7 +22528,9 @@ fn pde_ffi_dispatcher_primary_impl(
         38 => wire__crate__create_archive_entry_from_json_impl(port, ptr, rust_vec_len, data_len),
         39 => wire__crate__create_archive_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         40 => wire__crate__create_attributes_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "transcription-types")]
         41 => wire__crate__create_audio_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "layout-types")]
         42 => wire__crate__create_b_box_from_json_impl(port, ptr, rust_vec_len, data_len),
         43 => wire__crate__create_bedrock_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         44 => wire__crate__create_bibtex_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22466,30 +22542,41 @@ fn pde_ffi_dispatcher_primary_impl(
         50 => wire__crate__create_chunk_classification_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         51 => wire__crate__create_chunk_classification_definition_from_json_impl(port, ptr, rust_vec_len, data_len),
         52 => wire__crate__create_chunk_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "heuristics")]
         53 => wire__crate__create_chunk_info_from_json_impl(port, ptr, rust_vec_len, data_len),
         54 => wire__crate__create_chunk_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         55 => wire__crate__create_chunking_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "markdown-footnotes")]
         56 => wire__crate__create_citation_from_json_impl(port, ptr, rust_vec_len, data_len),
         57 => wire__crate__create_citation_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         58 => wire__crate__create_classification_label_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "tree-sitter")]
         59 => wire__crate__create_code_chunk_info_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "tree-sitter")]
         60 => wire__crate__create_code_data_attribute_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "tree-sitter")]
         61 => wire__crate__create_code_data_node_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "tree-sitter")]
         62 => wire__crate__create_code_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         63 => wire__crate__create_concurrency_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         64 => wire__crate__create_content_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         65 => wire__crate__create_content_filter_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         66 => wire__crate__create_contributor_role_from_json_impl(port, ptr, rust_vec_len, data_len),
         67 => wire__crate__create_conversion_options_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "office")]
         68 => wire__crate__create_core_properties_from_json_impl(port, ptr, rust_vec_len, data_len),
         69 => wire__crate__create_crawl_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         70 => wire__crate__create_csv_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         71 => wire__crate__create_csv_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         72 => wire__crate__create_dbf_field_info_from_json_impl(port, ptr, rust_vec_len, data_len),
         73 => wire__crate__create_dbf_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "api")]
         74 => wire__crate__create_detect_response_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "layout-types")]
         75 => wire__crate__create_detection_result_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "diff")]
         76 => wire__crate__create_diff_hunk_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "diff")]
         77 => wire__crate__create_diff_options_from_json_impl(port, ptr, rust_vec_len, data_len),
         78 => wire__crate__create_djot_attribute_group_from_json_impl(port, ptr, rust_vec_len, data_len),
         79 => wire__crate__create_djot_content_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22497,16 +22584,20 @@ fn pde_ffi_dispatcher_primary_impl(
         81 => wire__crate__create_djot_link_from_json_impl(port, ptr, rust_vec_len, data_len),
         82 => wire__crate__create_doctor_check_from_json_impl(port, ptr, rust_vec_len, data_len),
         83 => wire__crate__create_doctor_report_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "heuristics")]
         84 => wire__crate__create_document_boundary_from_json_impl(port, ptr, rust_vec_len, data_len),
         85 => wire__crate__create_document_counts_from_json_impl(port, ptr, rust_vec_len, data_len),
         86 => wire__crate__create_document_extractor_dart_impl_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "heuristics")]
         87 => wire__crate__create_document_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         88 => wire__crate__create_document_node_from_json_impl(port, ptr, rust_vec_len, data_len),
         89 => wire__crate__create_document_relationship_from_json_impl(port, ptr, rust_vec_len, data_len),
         90 => wire__crate__create_document_revision_from_json_impl(port, ptr, rust_vec_len, data_len),
         91 => wire__crate__create_document_structure_from_json_impl(port, ptr, rust_vec_len, data_len),
         92 => wire__crate__create_document_summary_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "office")]
         93 => wire__crate__create_docx_app_properties_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "office")]
         94 => wire__crate__create_docx_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         95 => wire__crate__create_element_from_json_impl(port, ptr, rust_vec_len, data_len),
         96 => wire__crate__create_element_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22514,8 +22605,11 @@ fn pde_ffi_dispatcher_primary_impl(
         98 => wire__crate__create_email_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         99 => wire__crate__create_email_extraction_result_from_json_impl(port, ptr, rust_vec_len, data_len),
         100 => wire__crate__create_email_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "diff")]
         101 => wire__crate__create_embedded_changes_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "diff")]
         102 => wire__crate__create_embedded_diff_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "pdf")]
         103 => wire__crate__create_embedded_file_from_json_impl(port, ptr, rust_vec_len, data_len),
         104 => wire__crate__create_embedding_backend_dart_impl_impl(port, ptr, rust_vec_len, data_len),
         105 => wire__crate__create_embedding_config_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22529,16 +22623,21 @@ fn pde_ffi_dispatcher_primary_impl(
         113 => wire__crate__create_extracted_document_from_json_impl(port, ptr, rust_vec_len, data_len),
         114 => wire__crate__create_extracted_image_from_json_impl(port, ptr, rust_vec_len, data_len),
         115 => wire__crate__create_extracted_uri_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "heuristics")]
         116 => wire__crate__create_extraction_confidence_from_json_impl(port, ptr, rust_vec_len, data_len),
         117 => wire__crate__create_extraction_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "diff")]
         118 => wire__crate__create_extraction_diff_from_json_impl(port, ptr, rust_vec_len, data_len),
         119 => wire__crate__create_extraction_error_item_from_json_impl(port, ptr, rust_vec_len, data_len),
         120 => wire__crate__create_extraction_result_from_json_impl(port, ptr, rust_vec_len, data_len),
         121 => wire__crate__create_extraction_summary_from_json_impl(port, ptr, rust_vec_len, data_len),
         122 => wire__crate__create_fiction_book_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         123 => wire__crate__create_file_extraction_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "markdown-footnotes")]
         124 => wire__crate__create_footnote_anchor_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "markdown-footnotes")]
         125 => wire__crate__create_footnote_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "markdown-footnotes")]
         126 => wire__crate__create_footnote_definition_from_json_impl(port, ptr, rust_vec_len, data_len),
         127 => wire__crate__create_footnote_from_json_impl(port, ptr, rust_vec_len, data_len),
         128 => wire__crate__create_formatted_block_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22547,11 +22646,14 @@ fn pde_ffi_dispatcher_primary_impl(
         131 => wire__crate__create_header_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         132 => wire__crate__create_heading_context_from_json_impl(port, ptr, rust_vec_len, data_len),
         133 => wire__crate__create_heading_level_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "heuristics")]
         134 => wire__crate__create_heuristics_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         135 => wire__crate__create_hierarchical_block_from_json_impl(port, ptr, rust_vec_len, data_len),
         136 => wire__crate__create_hierarchical_bounding_box_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "pdf")]
         137 => wire__crate__create_hierarchy_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         138 => wire__crate__create_html_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "html")]
         139 => wire__crate__create_html_output_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         140 => wire__crate__create_image_dimensions_from_json_impl(port, ptr, rust_vec_len, data_len),
         141 => wire__crate__create_image_dpi_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22563,14 +22665,20 @@ fn pde_ffi_dispatcher_primary_impl(
         147 => wire__crate__create_inline_element_from_json_impl(port, ptr, rust_vec_len, data_len),
         148 => wire__crate__create_jats_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         149 => wire__crate__create_key_value_attribute_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(any(feature = "keywords-yake", feature = "keywords-rake"))]
         150 => wire__crate__create_keyword_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(any(feature = "keywords-yake", feature = "keywords-rake"))]
         151 => wire__crate__create_keyword_from_json_impl(port, ptr, rust_vec_len, data_len),
         152 => wire__crate__create_language_confidence_from_json_impl(port, ptr, rust_vec_len, data_len),
         153 => wire__crate__create_language_detection_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         154 => wire__crate__create_late_interaction_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "late-interaction-presets")]
         155 => wire__crate__create_late_interaction_match_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "late-interaction-presets")]
         156 => wire__crate__create_late_interaction_preset_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "layout-types")]
         157 => wire__crate__create_layout_detection_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "layout-types")]
         158 => wire__crate__create_layout_detection_from_json_impl(port, ptr, rust_vec_len, data_len),
         159 => wire__crate__create_layout_region_from_json_impl(port, ptr, rust_vec_len, data_len),
         160 => wire__crate__create_link_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22584,11 +22692,16 @@ fn pde_ffi_dispatcher_primary_impl(
         168 => wire__crate__create_markdown_code_block_from_json_impl(port, ptr, rust_vec_len, data_len),
         169 => wire__crate__create_markdown_link_from_json_impl(port, ptr, rust_vec_len, data_len),
         170 => wire__crate__create_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "paddle-ocr-types")]
         171 => wire__crate__create_model_paths_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "late-interaction-presets")]
         172 => wire__crate__create_multi_vector_embedding_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "heuristics")]
         173 => wire__crate__create_multidoc_input_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "heuristics")]
         174 => wire__crate__create_multidoc_thresholds_from_json_impl(port, ptr, rust_vec_len, data_len),
         175 => wire__crate__create_ner_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(any(feature = "keywords-yake", feature = "keywords-rake"))]
         176 => wire__crate__create_ngram_range_from_json_impl(port, ptr, rust_vec_len, data_len),
         177 => wire__crate__create_ocr_backend_dart_impl_impl(port, ptr, rust_vec_len, data_len),
         178 => wire__crate__create_ocr_confidence_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22604,7 +22717,9 @@ fn pde_ffi_dispatcher_primary_impl(
         188 => wire__crate__create_ocr_rotation_from_json_impl(port, ptr, rust_vec_len, data_len),
         189 => wire__crate__create_ocr_table_bounding_box_from_json_impl(port, ptr, rust_vec_len, data_len),
         190 => wire__crate__create_ocr_table_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "auto-rotate-types")]
         191 => wire__crate__create_orientation_result_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "paddle-ocr-types")]
         192 => wire__crate__create_paddle_ocr_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         193 => wire__crate__create_page_boundary_from_json_impl(port, ptr, rust_vec_len, data_len),
         194 => wire__crate__create_page_classification_config_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22614,14 +22729,18 @@ fn pde_ffi_dispatcher_primary_impl(
         198 => wire__crate__create_page_dimensions_from_json_impl(port, ptr, rust_vec_len, data_len),
         199 => wire__crate__create_page_hierarchy_from_json_impl(port, ptr, rust_vec_len, data_len),
         200 => wire__crate__create_page_info_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "heuristics")]
         201 => wire__crate__create_page_range_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "heuristics")]
         202 => wire__crate__create_page_signals_from_json_impl(port, ptr, rust_vec_len, data_len),
         203 => wire__crate__create_page_span_from_json_impl(port, ptr, rust_vec_len, data_len),
         204 => wire__crate__create_page_structure_from_json_impl(port, ptr, rust_vec_len, data_len),
         205 => wire__crate__create_pattern_match_from_json_impl(port, ptr, rust_vec_len, data_len),
         206 => wire__crate__create_pdf_annotation_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "pdf")]
         207 => wire__crate__create_pdf_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         208 => wire__crate__create_pdf_form_field_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "pdf")]
         209 => wire__crate__create_pdf_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         210 => wire__crate__create_pixel_dimensions_from_json_impl(port, ptr, rust_vec_len, data_len),
         211 => wire__crate__create_post_processor_config_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22631,8 +22750,11 @@ fn pde_ffi_dispatcher_primary_impl(
         215 => wire__crate__create_pptx_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         216 => wire__crate__create_preprocessing_options_from_json_impl(port, ptr, rust_vec_len, data_len),
         217 => wire__crate__create_presentation_hyperlink_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "presets")]
         218 => wire__crate__create_preset_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "presets")]
         219 => wire__crate__create_preset_sample_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "presets")]
         220 => wire__crate__create_preset_summary_from_json_impl(port, ptr, rust_vec_len, data_len),
         221 => wire__crate__create_processing_warning_from_json_impl(port, ptr, rust_vec_len, data_len),
         222 => wire__crate__create_property_change_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22640,7 +22762,9 @@ fn pde_ffi_dispatcher_primary_impl(
         224 => wire__crate__create_pst_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
         225 => wire__crate__create_qr_bounding_box_from_json_impl(port, ptr, rust_vec_len, data_len),
         226 => wire__crate__create_qr_code_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "keywords-rake")]
         227 => wire__crate__create_rake_params_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "layout-types")]
         228 => wire__crate__create_recognized_table_from_json_impl(port, ptr, rust_vec_len, data_len),
         229 => wire__crate__create_redaction_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         230 => wire__crate__create_redaction_finding_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22648,16 +22772,21 @@ fn pde_ffi_dispatcher_primary_impl(
         232 => wire__crate__create_redaction_report_from_json_impl(port, ptr, rust_vec_len, data_len),
         233 => wire__crate__create_redaction_term_from_json_impl(port, ptr, rust_vec_len, data_len),
         234 => wire__crate__create_renderer_dart_impl_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(any(feature = "reranker-presets", feature = "reranker"))]
         235 => wire__crate__create_reranked_document_from_json_impl(port, ptr, rust_vec_len, data_len),
         236 => wire__crate__create_reranker_backend_dart_impl_impl(port, ptr, rust_vec_len, data_len),
         237 => wire__crate__create_reranker_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "presets")]
         238 => wire__crate__create_resolved_preset_from_json_impl(port, ptr, rust_vec_len, data_len),
         239 => wire__crate__create_revision_delta_from_json_impl(port, ptr, rust_vec_len, data_len),
         240 => wire__crate__create_security_limits_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "api-types")]
         241 => wire__crate__create_server_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         242 => wire__crate__create_sitemap_url_from_json_impl(port, ptr, rust_vec_len, data_len),
         243 => wire__crate__create_sparse_embedding_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "sparse-embedding-presets")]
         244 => wire__crate__create_sparse_embedding_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "sparse-embedding-presets")]
         245 => wire__crate__create_sparse_embedding_preset_from_json_impl(port, ptr, rust_vec_len, data_len),
         246 => wire__crate__create_ssrf_policy_from_json_impl(port, ptr, rust_vec_len, data_len),
         247 => wire__crate__create_structured_data_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22665,8 +22794,10 @@ fn pde_ffi_dispatcher_primary_impl(
         249 => wire__crate__create_structured_extraction_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         250 => wire__crate__create_summarization_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         251 => wire__crate__create_supported_format_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "svg")]
         252 => wire__crate__create_svg_options_from_json_impl(port, ptr, rust_vec_len, data_len),
         253 => wire__crate__create_table_cell_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "diff")]
         254 => wire__crate__create_table_diff_from_json_impl(port, ptr, rust_vec_len, data_len),
         255 => wire__crate__create_table_from_json_impl(port, ptr, rust_vec_len, data_len),
         256 => wire__crate__create_table_grid_from_json_impl(port, ptr, rust_vec_len, data_len),
@@ -22674,25 +22805,32 @@ fn pde_ffi_dispatcher_primary_impl(
         258 => wire__crate__create_text_annotation_from_json_impl(port, ptr, rust_vec_len, data_len),
         259 => wire__crate__create_text_extraction_result_from_json_impl(port, ptr, rust_vec_len, data_len),
         260 => wire__crate__create_text_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "quality")]
         261 => wire__crate__create_token_reduction_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         262 => wire__crate__create_token_reduction_options_from_json_impl(port, ptr, rust_vec_len, data_len),
         263 => wire__crate__create_tokenizer_backend_dart_impl_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "transcription-types")]
         264 => wire__crate__create_transcription_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         265 => wire__crate__create_translation_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         266 => wire__crate__create_translation_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "tree-sitter")]
         267 => wire__crate__create_tree_sitter_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "tree-sitter")]
         268 => wire__crate__create_tree_sitter_process_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         269 => wire__crate__create_url_extraction_config_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "heuristics")]
         270 => wire__crate__create_user_chunk_config_from_json_impl(port, ptr, rust_vec_len, data_len),
         271 => wire__crate__create_validator_dart_impl_impl(port, ptr, rust_vec_len, data_len),
         272 => wire__crate__create_xlsx_app_properties_from_json_impl(port, ptr, rust_vec_len, data_len),
         273 => wire__crate__create_xml_extraction_result_from_json_impl(port, ptr, rust_vec_len, data_len),
         274 => wire__crate__create_xml_metadata_from_json_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "keywords-yake")]
         275 => wire__crate__create_yake_params_from_json_impl(port, ptr, rust_vec_len, data_len),
         276 => wire__crate__create_year_range_from_json_impl(port, ptr, rust_vec_len, data_len),
         277 => wire__crate__doctor_impl(port, ptr, rust_vec_len, data_len),
         278 => wire__crate__extract_impl(port, ptr, rust_vec_len, data_len),
         279 => wire__crate__extract_batch_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "markdown-footnotes")]
         280 => wire__crate__find_unmarked_claims_impl(port, ptr, rust_vec_len, data_len),
         281 => wire__crate__list_document_extractors_impl(port, ptr, rust_vec_len, data_len),
         282 => wire__crate__list_embedding_backends_impl(port, ptr, rust_vec_len, data_len),
@@ -22703,8 +22841,17 @@ fn pde_ffi_dispatcher_primary_impl(
         287 => wire__crate__list_supported_formats_impl(port, ptr, rust_vec_len, data_len),
         288 => wire__crate__list_tokenizer_backends_impl(port, ptr, rust_vec_len, data_len),
         289 => wire__crate__list_validators_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "url-ingestion")]
         290 => wire__crate__map_url_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(any(
+            any(feature = "late-interaction-presets", feature = "late-interaction"),
+            feature = "late-interaction-presets"
+        ))]
         291 => wire__crate__max_sim_rank_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(any(
+            any(feature = "late-interaction-presets", feature = "late-interaction"),
+            feature = "late-interaction-presets"
+        ))]
         292 => wire__crate__max_sim_score_impl(port, ptr, rust_vec_len, data_len),
         293 => wire__crate__register_document_extractor_impl(port, ptr, rust_vec_len, data_len),
         294 => wire__crate__register_embedding_backend_impl(port, ptr, rust_vec_len, data_len),
@@ -22722,6 +22869,7 @@ fn pde_ffi_dispatcher_primary_impl(
         306 => wire__crate__unregister_reranker_backend_impl(port, ptr, rust_vec_len, data_len),
         307 => wire__crate__unregister_tokenizer_backend_impl(port, ptr, rust_vec_len, data_len),
         308 => wire__crate__unregister_validator_impl(port, ptr, rust_vec_len, data_len),
+        #[cfg(feature = "markdown-footnotes")]
         309 => wire__crate__verify_excerpt_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
