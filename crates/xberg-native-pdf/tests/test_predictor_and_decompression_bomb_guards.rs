@@ -84,11 +84,7 @@ fn tiff_predictor_colors_wider_than_row_returns_err_not_panic() {
 /// Fails if: the call panics, or returns `Ok` instead of a decode error.
 #[test]
 fn object_stream_with_colors_wider_than_row_returns_err_not_panic() {
-    let stream = stream_with_filter_and_decode_parms(
-        b"00", 
-        "ASCIIHexDecode",
-        Some(decode_parms_dict(2, 1, 4, 1)),
-    );
+    let stream = stream_with_filter_and_decode_parms(b"00", "ASCIIHexDecode", Some(decode_parms_dict(2, 1, 4, 1)));
     let result = stream.decode_stream_data();
     assert!(
         result.is_err(),

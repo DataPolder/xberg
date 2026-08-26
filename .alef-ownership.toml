@@ -273,6 +273,7 @@ owned_paths = [
   "docs-site/src/snippets-generated/zig/ocr/ocr_paddle_backend.md",
   "docs-site/src/snippets-generated/zig/ocr/vlm_ocr.md",
   "e2e/java/.mvn/wrapper/maven-wrapper.properties",
+  "packages/kotlin-android/gradle.properties",
   "packages/kotlin-android/src/main/AndroidManifest.xml",
   "packages/python/xberg/_xberg.pyi",
   "packages/ruby/sig/types.rbs",
