@@ -1,6 +1,7 @@
 ```typescript title="TypeScript"
-import { spawn } from "child_process";
-import * as readline from "readline";
+/// <reference types="node" />
+import { spawn } from "node:child_process";
+import * as readline from "node:readline";
 
 const mcpProcess = spawn("xberg", ["mcp"]);
 
