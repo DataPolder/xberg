@@ -6730,6 +6730,15 @@ mod tests {
         crate::pdf::native::text::PageMarginFractions { top: 0.0, bottom: 0.0 }
     }
 
+    #[cfg(feature = "pdf")]
+    fn pdf_config_with_disabled_page_margins() -> crate::core::config::PdfConfig {
+        crate::core::config::PdfConfig {
+            top_margin_fraction: Some(0.0),
+            bottom_margin_fraction: Some(0.0),
+            ..Default::default()
+        }
+    }
+
     #[cfg(all(feature = "pdf", feature = "ocr"))]
     #[test]
     fn should_filter_positioned_ocr_paragraphs_by_pdf_page_margins() {
@@ -9580,6 +9589,7 @@ Buffers:           50000 kB
                 pipeline: Some(pipeline.clone()),
                 ..Default::default()
             }),
+            pdf_options: Some(pdf_config_with_disabled_page_margins()),
             ..Default::default()
         };
 
@@ -12463,6 +12473,7 @@ Name: ___
                 ..Default::default()
             }),
             output_format: crate::core::config::OutputFormat::Markdown,
+            pdf_options: Some(pdf_config_with_disabled_page_margins()),
             ..Default::default()
         };
 
@@ -12619,6 +12630,7 @@ Name: ___
                 ..Default::default()
             }),
             output_format: crate::core::config::OutputFormat::Markdown,
+            pdf_options: Some(pdf_config_with_disabled_page_margins()),
             ..Default::default()
         };
 
