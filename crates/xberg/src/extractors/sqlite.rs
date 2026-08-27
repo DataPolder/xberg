@@ -21,6 +21,10 @@ use crate::{Result, rendering};
 
 const SQLITE_PROGRESS_HANDLER_OPS: i32 = 1_000;
 const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
+const SQLITE_APPLICATION_ID_OFFSET: usize = 68;
+const SQLITE_APPLICATION_ID_LENGTH: usize = size_of::<u32>();
+const GEOPACKAGE_APPLICATION_ID: &[u8; SQLITE_APPLICATION_ID_LENGTH] = b"GPKG";
+const GEOPACKAGE_LEGACY_APPLICATION_ID: &[u8; SQLITE_APPLICATION_ID_LENGTH] = b"GP10";
 
 #[derive(Debug)]
 struct TableSpec {
@@ -101,12 +105,13 @@ impl InternalDocumentExtractor for SqliteExtractor {
         ensure_sqlite_magic(content)?;
         check_cancelled(config.cancel_token.as_ref())?;
 
+        let geopackage = has_geopackage_application_id(content);
         let owned_content = content.to_vec();
         let cancel_token = config.cancel_token.clone();
         let span = tracing::Span::current();
         tokio::task::spawn_blocking(move || {
             let _guard = span.entered();
-            extract_database(owned_content, &limits, cancel_token)
+            extract_database(owned_content, geopackage, &limits, cancel_token)
         })
         .await
         .map_err(|error| XbergError::parsing(format!("SQLite extraction task failed: {error}")))?
@@ -141,8 +146,18 @@ fn ensure_sqlite_magic(content: &[u8]) -> Result<()> {
     ))
 }
 
+fn has_geopackage_application_id(content: &[u8]) -> bool {
+    let Some(application_id) =
+        content.get(SQLITE_APPLICATION_ID_OFFSET..SQLITE_APPLICATION_ID_OFFSET + SQLITE_APPLICATION_ID_LENGTH)
+    else {
+        return false;
+    };
+    application_id == GEOPACKAGE_APPLICATION_ID || application_id == GEOPACKAGE_LEGACY_APPLICATION_ID
+}
+
 fn extract_database(
     content: Vec<u8>,
+    geopackage: bool,
     limits: &SecurityLimits,
     cancel_token: Option<CancellationToken>,
 ) -> Result<InternalDocument> {
@@ -155,7 +170,7 @@ fn extract_database(
     }
 
     let mut budget = SecurityBudget::from_limits(limits);
-    let (geopackage, table_specs) = user_table_specs(&connection, &mut budget, cancel_token.as_ref())?;
+    let table_specs = user_table_specs(&connection, geopackage, &mut budget, cancel_token.as_ref())?;
     let mut tables = Vec::with_capacity(table_specs.len());
     for spec in table_specs {
         check_cancelled(cancel_token.as_ref())?;
@@ -202,9 +217,10 @@ fn install_progress_handler(
 
 fn user_table_specs(
     connection: &Connection,
+    geopackage: bool,
     budget: &mut SecurityBudget,
     cancel_token: Option<&CancellationToken>,
-) -> Result<(bool, Vec<TableSpec>)> {
+) -> Result<Vec<TableSpec>> {
     let mut statement = connection
         .prepare(
             "SELECT name, wr FROM pragma_table_list \
@@ -215,7 +231,6 @@ fn user_table_specs(
         .query([])
         .map_err(|error| sqlite_error("scan the tables in", error, cancel_token))?;
     let mut tables = Vec::new();
-    let mut geopackage = false;
     while let Some(row) = rows
         .next()
         .map_err(|error| sqlite_error("read the table schema from", error, cancel_token))?
@@ -230,8 +245,7 @@ fn user_table_specs(
         budget.step()?;
         budget.check_entity(&name)?;
         budget.account_text(name.len())?;
-        geopackage |= name.eq_ignore_ascii_case("gpkg_contents");
-        if is_container_metadata_table(&name) {
+        if geopackage && is_container_metadata_table(&name) {
             continue;
         }
         let without_rowid: bool = row
@@ -239,7 +253,7 @@ fn user_table_specs(
             .map_err(|error| sqlite_error("read table properties from", error, cancel_token))?;
         tables.push(TableSpec { name, without_rowid });
     }
-    Ok((geopackage, tables))
+    Ok(tables)
 }
 
 fn is_sqlite_internal_table(name: &str) -> bool {
@@ -463,6 +477,15 @@ mod tests {
     fn should_quote_identifiers_and_reject_nul_bytes() {
         assert_eq!(quote_identifier("odd\"name").unwrap(), "\"odd\"\"name\"");
         assert!(quote_identifier("bad\0name").is_err());
+    }
+
+    #[test]
+    fn should_reject_truncated_geopackage_application_ids_without_panicking() {
+        let mut truncated_header = SQLITE_MAGIC.to_vec();
+        truncated_header.resize(SQLITE_APPLICATION_ID_OFFSET + SQLITE_APPLICATION_ID_LENGTH - 1, 0);
+
+        assert!(!has_geopackage_application_id(SQLITE_MAGIC));
+        assert!(!has_geopackage_application_id(&truncated_header));
     }
 
     #[test]

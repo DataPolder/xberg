@@ -11886,6 +11886,7 @@ dependencies = [
  "mel_spec",
  "memchr",
  "memmap2",
+ "mime",
  "mime_guess",
  "minijinja",
  "model2vec-rs",

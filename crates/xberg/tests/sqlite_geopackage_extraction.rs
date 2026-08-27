@@ -4,12 +4,16 @@ use helpers::extract_bytes_document;
 use rusqlite::Connection;
 use tempfile::TempDir;
 use xberg::{
-    ExtractInput, ExtractionConfig, OutputFormat, SecurityLimits, XbergError, detect_mime_type_from_bytes, extract,
+    ExtractInput, ExtractionConfig, OutputFormat, SecurityLimits, XbergError, detect_mime_type,
+    detect_mime_type_from_bytes, extract, get_extensions_for_mime, list_supported_formats,
 };
 
 const SQLITE_MIME: &str = "application/vnd.sqlite3";
 const GEOPACKAGE_MIME: &str = "application/geopackage+sqlite3";
+const SQLITE_ALIAS_MIME: &str = "application/x-sqlite3";
 const OCTET_STREAM_MIME: &str = "application/octet-stream";
+const GEOPACKAGE_1_0_APPLICATION_ID: u32 = 0x4750_3130;
+const GEOPACKAGE_1_2_APPLICATION_ID: u32 = 0x4750_4B47;
 
 fn database_bytes(schema_and_data: &str) -> Vec<u8> {
     let directory = TempDir::new().expect("temporary database directory should be created");
@@ -20,6 +24,10 @@ fn database_bytes(schema_and_data: &str) -> Vec<u8> {
         .expect("synthetic SQLite schema and rows should be created");
     drop(connection);
     std::fs::read(path).expect("synthetic SQLite database should be readable")
+}
+
+fn database_bytes_with_application_id(application_id: u32, schema_and_data: &str) -> Vec<u8> {
+    database_bytes(&format!("PRAGMA application_id = {application_id};\n{schema_and_data}"))
 }
 
 fn sqlite_input(bytes: Vec<u8>, filename: &str) -> ExtractInput {
@@ -44,6 +52,67 @@ fn should_detect_sqlite_magic_before_the_text_fallback() {
     let bytes = database_bytes("CREATE TABLE records (id INTEGER PRIMARY KEY, value TEXT);");
 
     assert_eq!(detect_mime_type_from_bytes(&bytes).unwrap(), SQLITE_MIME);
+}
+
+#[test]
+fn should_detect_geopackage_application_ids_from_the_sqlite_header() {
+    for application_id in [GEOPACKAGE_1_0_APPLICATION_ID, GEOPACKAGE_1_2_APPLICATION_ID] {
+        let bytes = database_bytes_with_application_id(
+            application_id,
+            "CREATE TABLE records (id INTEGER PRIMARY KEY, value TEXT);",
+        );
+
+        assert_eq!(
+            detect_mime_type_from_bytes(&bytes).unwrap(),
+            GEOPACKAGE_MIME,
+            "application ID {application_id:#010x} should identify a GeoPackage"
+        );
+    }
+}
+
+#[test]
+fn should_register_all_sqlite_and_geopackage_extensions_case_insensitively() {
+    assert_eq!(
+        get_extensions_for_mime(SQLITE_MIME).unwrap(),
+        ["db", "sqlite", "sqlite3"]
+    );
+    assert_eq!(
+        get_extensions_for_mime(SQLITE_ALIAS_MIME).unwrap(),
+        ["db", "sqlite", "sqlite3"]
+    );
+    assert_eq!(get_extensions_for_mime(GEOPACKAGE_MIME).unwrap(), ["gpkg", "gpkx"]);
+    let advertised: std::collections::HashMap<String, String> = list_supported_formats()
+        .into_iter()
+        .map(|format| (format.extension, format.mime_type))
+        .collect();
+    for (extension, expected_mime) in [
+        ("db", SQLITE_MIME),
+        ("sqlite", SQLITE_MIME),
+        ("sqlite3", SQLITE_MIME),
+        ("gpkg", GEOPACKAGE_MIME),
+        ("gpkx", GEOPACKAGE_MIME),
+    ] {
+        assert_eq!(advertised.get(extension).map(String::as_str), Some(expected_mime));
+        assert_eq!(
+            detect_mime_type(format!("fixture.{}", extension.to_ascii_uppercase()), false).unwrap(),
+            expected_mime
+        );
+    }
+}
+
+#[test]
+fn should_route_the_sqlite_mime_alias_to_the_same_extractor() {
+    xberg::extractors::ensure_initialized().expect("built-in extractor registration should succeed");
+    let registry = xberg::plugins::registry::get_document_extractor_registry();
+    let registry = registry.read();
+
+    let canonical = registry
+        .get(SQLITE_MIME)
+        .unwrap_or_else(|error| panic!("{SQLITE_MIME} should route: {error}"));
+    let alias = registry
+        .get(SQLITE_ALIAS_MIME)
+        .unwrap_or_else(|error| panic!("{SQLITE_ALIAS_MIME} should route: {error}"));
+    assert_eq!(alias.name(), canonical.name());
 }
 
 #[tokio::test]
@@ -105,24 +174,28 @@ async fn should_extract_user_tables_in_deterministic_name_and_row_order() {
 }
 
 #[tokio::test]
-async fn should_refine_geopackage_mime_from_the_schema_not_the_filename() {
-    let geopackage = database_bytes(
-        r#"
-        CREATE TABLE gpkg_contents (table_name TEXT PRIMARY KEY, data_type TEXT);
-        INSERT INTO gpkg_contents VALUES ('roads', 'features');
-        CREATE TABLE roads (id INTEGER, name TEXT);
-        INSERT INTO roads VALUES (1, 'Main Street');
-        "#,
-    );
-    let ordinary_sqlite = database_bytes("CREATE TABLE records (id INTEGER); INSERT INTO records VALUES (1);");
+async fn should_refine_geopackage_mime_from_valid_signatures_not_the_filename() {
+    for application_id in [GEOPACKAGE_1_0_APPLICATION_ID, GEOPACKAGE_1_2_APPLICATION_ID] {
+        let geopackage = database_bytes_with_application_id(
+            application_id,
+            r#"
+            CREATE TABLE gpkg_contents (table_name TEXT PRIMARY KEY, data_type TEXT);
+            INSERT INTO gpkg_contents VALUES ('roads', 'features');
+            CREATE TABLE roads (id INTEGER, name TEXT);
+            INSERT INTO roads VALUES (1, 'Main Street');
+            "#,
+        );
 
-    let geopackage_document = extract(sqlite_input(geopackage, "misleading.db"), &ExtractionConfig::default())
-        .await
-        .expect("GeoPackage extraction should return an envelope");
-    assert_eq!(geopackage_document.summary.results, 1);
-    assert_eq!(geopackage_document.results[0].mime_type, GEOPACKAGE_MIME);
-    assert_eq!(geopackage_document.results[0].tables.len(), 1);
-    assert_eq!(geopackage_document.results[0].tables[0].cells[0], vec!["id", "name"]);
+        let document = extract(sqlite_input(geopackage, "misleading.db"), &ExtractionConfig::default())
+            .await
+            .expect("GeoPackage extraction should return an envelope");
+        assert_eq!(document.summary.results, 1);
+        assert_eq!(document.results[0].mime_type, GEOPACKAGE_MIME);
+        assert_eq!(document.results[0].tables.len(), 1);
+        assert_eq!(document.results[0].tables[0].cells[0], vec!["id", "name"]);
+    }
+
+    let ordinary_sqlite = database_bytes("CREATE TABLE records (id INTEGER); INSERT INTO records VALUES (1);");
 
     let sqlite_document = extract(
         sqlite_input(ordinary_sqlite, "misleading.gpkg"),
@@ -135,8 +208,37 @@ async fn should_refine_geopackage_mime_from_the_schema_not_the_filename() {
 }
 
 #[tokio::test]
+async fn should_not_treat_a_reserved_table_name_as_a_geopackage_signature() {
+    let spoof = database_bytes(
+        r#"
+        CREATE TABLE gpkg_contents (table_name TEXT PRIMARY KEY, data_type TEXT);
+        INSERT INTO gpkg_contents VALUES ('records', 'attributes');
+        CREATE TABLE records (id INTEGER, value TEXT);
+        INSERT INTO records VALUES (1, 'ordinary SQLite');
+        "#,
+    );
+
+    assert_eq!(detect_mime_type_from_bytes(&spoof).unwrap(), SQLITE_MIME);
+    let document = extract(sqlite_input(spoof, "spoof.gpkg"), &ExtractionConfig::default())
+        .await
+        .expect("ordinary SQLite extraction should return an envelope");
+    assert_eq!(document.summary.results, 1);
+    assert_eq!(document.results[0].mime_type, SQLITE_MIME);
+    assert_eq!(document.results[0].tables.len(), 2);
+    assert_eq!(
+        document.results[0].tables[0].cells,
+        vec![vec!["table_name", "data_type"], vec!["records", "attributes"],]
+    );
+    assert_eq!(
+        document.results[0].tables[1].cells,
+        vec![vec!["id", "value"], vec!["1", "ordinary SQLite"]]
+    );
+}
+
+#[tokio::test]
 async fn should_exclude_internal_metadata_views_and_virtual_tables() {
-    let bytes = database_bytes(
+    let bytes = database_bytes_with_application_id(
+        GEOPACKAGE_1_2_APPLICATION_ID,
         r#"
         CREATE TABLE gpkg_contents (table_name TEXT PRIMARY KEY, data_type TEXT);
         INSERT INTO gpkg_contents VALUES ('public_data', 'attributes');

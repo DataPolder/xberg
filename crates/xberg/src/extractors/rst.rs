@@ -1544,7 +1544,7 @@ impl InternalDocumentExtractor for RstExtractor {
     }
 
     fn supported_mime_types(&self) -> &[&str] {
-        &["text/x-rst", "text/prs.fallenstein.rst"]
+        &["text/prs.fallenstein.rst", "text/x-rst"]
     }
 
     fn priority(&self) -> i32 {

@@ -77,6 +77,7 @@ js-sys = "0.3"
 
 lazy_static = "1.5.0"
 libc = "0.2.189"
+mime = "0.3.17"
 # Builds a bundled zlib from source (`static`) for the target, so the vendored
 # librevenge RVNGZipStream.cpp can `#include <zlib.h>` and link zlib even under
 # cross-compilation (zigbuild aarch64/musl) where no host libz is usable.

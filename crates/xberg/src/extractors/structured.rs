@@ -300,6 +300,7 @@ impl InternalDocumentExtractor for StructuredExtractor {
             "text/json",
             "application/csl+json",
             GEOJSON_MIME_TYPE,
+            "application/vnd.geo+json",
             "application/x-ndjson",
             "application/jsonl",
             "application/x-jsonlines",
@@ -390,7 +391,7 @@ mod tests {
     fn test_structured_extractor_supported_mime_types() {
         let extractor = StructuredExtractor::new();
         let mime_types = extractor.supported_mime_types();
-        assert_eq!(mime_types.len(), 13);
+        assert_eq!(mime_types.len(), 14);
         assert!(mime_types.contains(&"application/json"));
         assert!(mime_types.contains(&"application/x-ndjson"));
         assert!(mime_types.contains(&"application/jsonl"));

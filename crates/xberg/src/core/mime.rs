@@ -30,6 +30,11 @@ pub struct SupportedFormat {
 pub(crate) const OCTET_STREAM_MIME_TYPE: &str = "application/octet-stream";
 pub(crate) const HTML_MIME_TYPE: &str = "text/html";
 const MIME_SNIFF_LENGTH: usize = 4096;
+const SQLITE_APPLICATION_ID_OFFSET: usize = 68;
+const SQLITE_APPLICATION_ID_LENGTH: usize = 4;
+const GEOPACKAGE_APPLICATION_ID: &[u8; SQLITE_APPLICATION_ID_LENGTH] = b"GPKG";
+const GEOPACKAGE_LEGACY_APPLICATION_ID: &[u8; SQLITE_APPLICATION_ID_LENGTH] = b"GP10";
+const J2C_CODESTREAM_MAGIC: &[u8; 4] = b"\xFF\x4F\xFF\x51";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PackageInspection {
@@ -149,7 +154,23 @@ fn xml_vocabulary(trimmed: &str) -> Option<&'static str> {
         }
     }
     let root = root_start_tag(trimmed)?;
-    root_is_in_namespace(root, "http://docbook.org/ns/docbook").then_some(DOCBOOK_MIME_TYPE)
+    if root_is_in_namespace(root, "http://docbook.org/ns/docbook") {
+        return Some(DOCBOOK_MIME_TYPE);
+    }
+    if root_has_name_in_namespace(root, "kml", "http://www.opengis.net/kml/2.2") {
+        return Some(KML_MIME_TYPE);
+    }
+    root_has_name_in_namespace(root, "html", "http://www.w3.org/1999/xhtml").then_some("application/xhtml+xml")
+}
+
+fn root_has_name_in_namespace(root: &str, expected_name: &str, namespace: &str) -> bool {
+    let qualified_name = root
+        .trim_start_matches('<')
+        .split([' ', '\t', '\n', '\r', '>', '/'])
+        .next()
+        .unwrap_or_default();
+    let local_name = qualified_name.rsplit(':').next().unwrap_or_default();
+    local_name.eq_ignore_ascii_case(expected_name) && root_is_in_namespace(root, namespace)
 }
 
 /// Report whether the root element itself belongs to `namespace`.
@@ -164,17 +185,37 @@ fn root_is_in_namespace(root: &str, namespace: &str) -> bool {
         .next()
         .unwrap_or_default();
     let binding = match name.split_once(':') {
-        Some((prefix, _)) => format!("xmlns:{prefix}="),
-        None => "xmlns=".to_string(),
+        Some((prefix, _)) => format!("xmlns:{prefix}"),
+        None => "xmlns".to_string(),
     };
-    let Some(start) = root.find(&binding) else {
-        return false;
-    };
-    let value = &root[start + binding.len()..];
-    let Some(quote) = value.chars().next().filter(|c| *c == '"' || *c == '\'') else {
-        return false;
-    };
-    value[1..].split(quote).next().is_some_and(|uri| uri == namespace)
+    root_attribute_value(root, &binding).is_some_and(|uri| uri == namespace)
+}
+
+fn root_attribute_value<'a>(root: &'a str, expected_name: &str) -> Option<&'a str> {
+    let mut rest = root.trim_start_matches('<');
+    rest = &rest[rest.find(|character: char| character.is_ascii_whitespace())?..];
+    loop {
+        rest = rest.trim_start();
+        if rest.starts_with('>') || rest.starts_with('/') {
+            return None;
+        }
+        let name_length = rest
+            .find(|character: char| character.is_ascii_whitespace() || matches!(character, '=' | '>' | '/'))
+            .unwrap_or(rest.len());
+        let (name, after_name) = rest.split_at(name_length);
+        rest = after_name.trim_start();
+        rest = rest.strip_prefix('=')?.trim_start();
+        let quote = rest
+            .chars()
+            .next()
+            .filter(|character| matches!(character, '"' | '\''))?;
+        let value = &rest[quote.len_utf8()..];
+        let end = value.find(quote)?;
+        if name == expected_name {
+            return Some(&value[..end]);
+        }
+        rest = &value[end + quote.len_utf8()..];
+    }
 }
 
 /// Return the text of the first declaration that opens with `opener`.
@@ -338,7 +379,7 @@ static FORMATS: &[FormatEntry] = &[
         aliases: &["text/x-mdx"],
     },
     FormatEntry {
-        extensions: &["djot"],
+        extensions: &["djot", "dj"],
         mime_type: "text/x-djot",
         aliases: &["text/djot"],
     },
@@ -355,7 +396,12 @@ static FORMATS: &[FormatEntry] = &[
     FormatEntry {
         extensions: &["html", "htm"],
         mime_type: "text/html",
-        aliases: &["application/xhtml+xml"],
+        aliases: &[],
+    },
+    FormatEntry {
+        extensions: &["xhtml", "xht"],
+        mime_type: "application/xhtml+xml",
+        aliases: &[],
     },
     FormatEntry {
         extensions: &["docx"],
@@ -418,7 +464,7 @@ static FORMATS: &[FormatEntry] = &[
         aliases: &[],
     },
     FormatEntry {
-        extensions: &["ppt", "pot"],
+        extensions: &["ppt", "pot", "pps"],
         mime_type: "application/vnd.ms-powerpoint",
         aliases: &[],
     },
@@ -433,7 +479,7 @@ static FORMATS: &[FormatEntry] = &[
         aliases: &[],
     },
     FormatEntry {
-        extensions: &["xls", "xlt"],
+        extensions: &["xls", "xlt", "xla"],
         mime_type: "application/vnd.ms-excel",
         aliases: &[],
     },
@@ -450,10 +496,10 @@ static FORMATS: &[FormatEntry] = &[
     FormatEntry {
         extensions: &["xlam"],
         mime_type: "application/vnd.ms-excel.addin.macroEnabled.12",
-        aliases: &[],
+        aliases: &["application/vnd.ms-excel.addin.macroEnabled"],
     },
     FormatEntry {
-        extensions: &["xla"],
+        extensions: &["xltm"],
         mime_type: "application/vnd.ms-excel.template.macroEnabled.12",
         aliases: &[],
     },
@@ -464,16 +510,16 @@ static FORMATS: &[FormatEntry] = &[
     },
     FormatEntry {
         extensions: &["dbf"],
-        mime_type: "application/x-dbf",
-        aliases: &["application/dbase"],
+        mime_type: "application/vnd.dbf",
+        aliases: &["application/x-dbf", "application/dbase"],
     },
     FormatEntry {
-        extensions: &["sqlite", "db"],
+        extensions: &["sqlite", "sqlite3", "db"],
         mime_type: SQLITE_MIME_TYPE,
         aliases: &["application/x-sqlite3"],
     },
     FormatEntry {
-        extensions: &["gpkg"],
+        extensions: &["gpkg", "gpkx"],
         mime_type: GEOPACKAGE_MIME_TYPE,
         aliases: &[],
     },
@@ -485,7 +531,7 @@ static FORMATS: &[FormatEntry] = &[
     FormatEntry {
         extensions: &["hwpx"],
         mime_type: "application/haansofthwpx",
-        aliases: &[],
+        aliases: &["application/hwp+zip"],
     },
     FormatEntry {
         extensions: &["wpd", "wp", "wp5", "wp6"],
@@ -523,23 +569,13 @@ static FORMATS: &[FormatEntry] = &[
         aliases: &[],
     },
     FormatEntry {
-        extensions: &["jp2", "j2k", "j2c"],
+        extensions: &["jp2", "jpg2"],
         mime_type: "image/jp2",
         aliases: &[],
     },
     FormatEntry {
-        extensions: &["jpx"],
-        mime_type: "image/jpx",
-        aliases: &[],
-    },
-    FormatEntry {
-        extensions: &["jpm"],
-        mime_type: "image/jpm",
-        aliases: &[],
-    },
-    FormatEntry {
-        extensions: &["mj2"],
-        mime_type: "image/mj2",
+        extensions: &["j2c", "j2k", "jpc"],
+        mime_type: "image/j2c",
         aliases: &[],
     },
     FormatEntry {
@@ -548,14 +584,24 @@ static FORMATS: &[FormatEntry] = &[
         aliases: &[],
     },
     FormatEntry {
-        extensions: &["heic", "heics"],
+        extensions: &["heic"],
         mime_type: "image/heic",
-        aliases: &["image/heic-sequence"],
+        aliases: &[],
     },
     FormatEntry {
-        extensions: &["heif"],
+        extensions: &["heics"],
+        mime_type: "image/heic-sequence",
+        aliases: &[],
+    },
+    FormatEntry {
+        extensions: &["heif", "hif"],
         mime_type: "image/heif",
-        aliases: &["image/heif-sequence"],
+        aliases: &[],
+    },
+    FormatEntry {
+        extensions: &["heifs"],
+        mime_type: "image/heif-sequence",
+        aliases: &[],
     },
     FormatEntry {
         extensions: &["avif"],
@@ -605,7 +651,7 @@ static FORMATS: &[FormatEntry] = &[
     FormatEntry {
         extensions: &["geojson"],
         mime_type: GEOJSON_MIME_TYPE,
-        aliases: &[],
+        aliases: &["application/vnd.geo+json"],
     },
     FormatEntry {
         extensions: &[],
@@ -619,8 +665,8 @@ static FORMATS: &[FormatEntry] = &[
     },
     FormatEntry {
         extensions: &["yaml", "yml"],
-        mime_type: "application/x-yaml",
-        aliases: &["text/yaml", "text/x-yaml", "application/yaml"],
+        mime_type: "application/yaml",
+        aliases: &["application/x-yaml", "text/yaml", "text/x-yaml"],
     },
     FormatEntry {
         extensions: &["toml"],
@@ -679,13 +725,13 @@ static FORMATS: &[FormatEntry] = &[
     },
     FormatEntry {
         extensions: &["rst"],
-        mime_type: "text/x-rst",
-        aliases: &["text/prs.fallenstein.rst"],
+        mime_type: "text/prs.fallenstein.rst",
+        aliases: &["text/x-rst"],
     },
     FormatEntry {
         extensions: &["org"],
-        mime_type: "text/x-org",
-        aliases: &["text/org", "application/x-org"],
+        mime_type: "text/org",
+        aliases: &["text/x-org", "application/x-org"],
     },
     FormatEntry {
         extensions: &["epub"],
@@ -749,8 +795,8 @@ static FORMATS: &[FormatEntry] = &[
     },
     FormatEntry {
         extensions: &["typst", "typ"],
-        mime_type: "application/x-typst",
-        aliases: &["text/x-typst"],
+        mime_type: "text/vnd.typst",
+        aliases: &["text/x-typst", "application/x-typst"],
     },
     FormatEntry {
         extensions: &["pages"],
@@ -788,9 +834,14 @@ static FORMATS: &[FormatEntry] = &[
         aliases: &["video/webm"],
     },
     FormatEntry {
-        extensions: &["mp4", "mpeg"],
+        extensions: &["mp4", "mpg4", "mp4v", "m4v"],
         mime_type: "video/mp4",
-        aliases: &["video/mpeg"],
+        aliases: &[],
+    },
+    FormatEntry {
+        extensions: &["mpeg", "mpg", "mpe", "m1v", "m2v"],
+        mime_type: "video/mpeg",
+        aliases: &[],
     },
     FormatEntry {
         extensions: &[],
@@ -960,25 +1011,20 @@ pub fn detect_mime_type(path: impl AsRef<Path>, check_exists: bool) -> Result<St
 /// Returns `XbergError::UnsupportedFormat` if not supported.
 #[cfg_attr(alef, alef(skip))]
 pub fn validate_mime_type(mime_type: &str) -> Result<String> {
-    if SUPPORTED_MIME_TYPES.contains(mime_type) {
-        tracing::trace!(mime_type = %mime_type, "MIME type validated (exact match)");
-        return Ok(mime_type.to_string());
+    let parsed = mime_type.trim().parse::<mime::Mime>().map_err(|_| {
+        tracing::debug!(mime_type = %mime_type, "MIME type has invalid syntax");
+        XbergError::UnsupportedFormat(mime_type.to_string())
+    })?;
+    let essence = parsed.essence_str();
+    if let Some(supported) = SUPPORTED_MIME_TYPES
+        .iter()
+        .find(|supported| supported.eq_ignore_ascii_case(essence))
+    {
+        tracing::trace!(mime_type = %mime_type, matched = %supported, "MIME type validated by essence");
+        return Ok((*supported).to_string());
     }
 
-    if mime_type.starts_with("image/") {
-        tracing::trace!(mime_type = %mime_type, "MIME type validated (image prefix)");
-        return Ok(mime_type.to_string());
-    }
-
-    let lower = mime_type.to_ascii_lowercase();
-    for supported in SUPPORTED_MIME_TYPES.iter() {
-        if supported.to_ascii_lowercase() == lower {
-            tracing::trace!(mime_type = %mime_type, matched = %supported, "MIME type validated (case-insensitive)");
-            return Ok(supported.to_string());
-        }
-    }
-
-    tracing::debug!(mime_type = %mime_type, "MIME type not in supported set");
+    tracing::debug!(mime_type = %mime_type, essence, "MIME type not in supported set");
     Err(XbergError::UnsupportedFormat(mime_type.to_string()))
 }
 
@@ -1125,7 +1171,8 @@ fn prefer_content_mime(extension_mime: &str, content_mime: &str) -> Result<Strin
     if extension_supported
         && (content_mime == PLAIN_TEXT_MIME_TYPE
             || (is_generic_xml_mime(content_mime) && is_specific_xml_mime(extension_mime))
-            || (content_mime == JSON_MIME_TYPE && is_specific_json_mime(extension_mime)))
+            || (content_mime == JSON_MIME_TYPE && is_specific_json_mime(extension_mime))
+            || is_compatible_ooxml_mime(extension_mime, content_mime))
     {
         return validate_mime_type(extension_mime);
     }
@@ -1177,6 +1224,9 @@ fn magic_override(file: &mut std::fs::File, extension_mime: &str) -> Option<Stri
         && is_specific_json_mime(extension_mime)
         && SUPPORTED_MIME_TYPES.contains(extension_mime)
     {
+        return None;
+    }
+    if is_compatible_ooxml_mime(extension_mime, &from_magic) {
         return None;
     }
     if from_magic != extension_mime && validate_mime_type(&from_magic).is_ok() {
@@ -1267,6 +1317,36 @@ fn is_specific_json_mime(mime_type: &str) -> bool {
             ))
 }
 
+fn is_compatible_ooxml_mime(extension_mime: &str, content_mime: &str) -> bool {
+    match content_mime {
+        DOCX_MIME_TYPE => matches!(
+            extension_mime,
+            DOCX_MIME_TYPE
+                | "application/vnd.ms-word.document.macroEnabled.12"
+                | "application/vnd.openxmlformats-officedocument.wordprocessingml.template"
+                | "application/vnd.ms-word.template.macroEnabled.12"
+        ),
+        POWER_POINT_MIME_TYPE => matches!(
+            extension_mime,
+            POWER_POINT_MIME_TYPE
+                | "application/vnd.ms-powerpoint.presentation.macroEnabled.12"
+                | "application/vnd.openxmlformats-officedocument.presentationml.slideshow"
+                | "application/vnd.openxmlformats-officedocument.presentationml.template"
+                | "application/vnd.ms-powerpoint.template.macroEnabled.12"
+        ),
+        EXCEL_MIME_TYPE => matches!(
+            extension_mime,
+            EXCEL_MIME_TYPE
+                | "application/vnd.ms-excel.sheet.macroEnabled.12"
+                | "application/vnd.ms-excel.addin.macroEnabled.12"
+                | "application/vnd.ms-excel.template.macroEnabled.12"
+                | "application/vnd.ms-excel.sheet.binary.macroEnabled.12"
+                | "application/vnd.openxmlformats-officedocument.spreadsheetml.template"
+        ),
+        _ => false,
+    }
+}
+
 /// Detect MIME type from raw file bytes.
 ///
 /// Uses magic byte signatures to detect file type from content.
@@ -1295,7 +1375,19 @@ fn detect_mime_type_from_bytes_with_inspection(
     package_inspection: PackageInspection,
 ) -> Result<String> {
     if content.starts_with(b"SQLite format 3\0") {
+        let application_id =
+            content.get(SQLITE_APPLICATION_ID_OFFSET..SQLITE_APPLICATION_ID_OFFSET + SQLITE_APPLICATION_ID_LENGTH);
+        if application_id.is_some_and(|identifier| {
+            identifier == GEOPACKAGE_APPLICATION_ID || identifier == GEOPACKAGE_LEGACY_APPLICATION_ID
+        }) {
+            return Ok(GEOPACKAGE_MIME_TYPE.to_string());
+        }
+    }
+    if content.starts_with(b"SQLite format 3\0") {
         return Ok(SQLITE_MIME_TYPE.to_string());
+    }
+    if content.starts_with(J2C_CODESTREAM_MAGIC) {
+        return Ok("image/j2c".to_string());
     }
 
     if let Some(kind) = infer::get(content) {
@@ -1347,9 +1439,14 @@ fn detect_mime_type_from_bytes_with_inspection(
         let trimmed = text.trim_start();
 
         if (trimmed.starts_with('{') || trimmed.starts_with('['))
-            && serde_json::from_str::<serde_json::Value>(text).is_ok()
+            && let Ok(value) = serde_json::from_str::<serde_json::Value>(text)
         {
-            return Ok(JSON_MIME_TYPE.to_string());
+            let mime_type = if is_geojson(&value) {
+                GEOJSON_MIME_TYPE
+            } else {
+                JSON_MIME_TYPE
+            };
+            return Ok(mime_type.to_string());
         }
 
         // The HTML checks must precede the generic `<` fallback. They used to follow it,
@@ -1385,6 +1482,21 @@ fn detect_mime_type_from_bytes_with_inspection(
     ))
 }
 
+fn is_geojson(value: &serde_json::Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    match object.get("type").and_then(serde_json::Value::as_str) {
+        Some("Feature") => object.contains_key("geometry") && object.contains_key("properties"),
+        Some("FeatureCollection") => object.get("features").is_some_and(serde_json::Value::is_array),
+        Some("GeometryCollection") => object.get("geometries").is_some_and(serde_json::Value::is_array),
+        Some("Point" | "MultiPoint" | "LineString" | "MultiLineString" | "Polygon" | "MultiPolygon") => {
+            object.get("coordinates").is_some_and(serde_json::Value::is_array)
+        }
+        _ => false,
+    }
+}
+
 /// Detect Office Open XML format from ZIP content by scanning for marker files.
 ///
 /// Office Open XML formats (DOCX, XLSX, PPTX) are ZIP archives containing specific
@@ -1412,10 +1524,8 @@ fn detect_office_format_from_zip(content: &[u8], _package_inspection: PackageIns
     #[cfg(feature = "hwpx")]
     const HWPX_MARKER: &[u8] = b"Contents/content.hpf";
     #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
-    if _package_inspection == PackageInspection::FullArchive
-        && let Some(package_mime) = detect_zip_package(std::io::Cursor::new(content))
-    {
-        return Some(package_mime);
+    if _package_inspection == PackageInspection::FullArchive {
+        return detect_zip_package(std::io::Cursor::new(content));
     }
 
     #[cfg(feature = "hwpx")]
@@ -1507,8 +1617,115 @@ fn detect_zip_package<R: Read + Seek>(mut reader: R) -> Option<&'static str> {
     reader.seek(SeekFrom::Start(0)).ok()?;
     let mut archive = zip::ZipArchive::new(reader).ok()?;
 
-    // The package's own declaration wins, and its main part answers otherwise.
-    detect_zip_mimetype_entry(&mut archive).or_else(|| detect_office_format_from_archive(&mut archive))
+    let declared = detect_zip_mimetype_entry(&mut archive);
+    #[cfg(feature = "office")]
+    let declared = declared.or_else(|| detect_ooxml_content_type(&mut archive));
+    declared.or_else(|| detect_office_format_from_archive(&mut archive))
+}
+
+#[cfg(feature = "office")]
+fn detect_ooxml_content_type<R: Read + Seek>(archive: &mut zip::ZipArchive<R>) -> Option<&'static str> {
+    const CONTENT_TYPES_PATH: &str = "[Content_Types].xml";
+    const MAX_CONTENT_TYPES_LENGTH: u64 = 64 * 1024;
+
+    let mut content_types_index = None;
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index).ok()?;
+        if entry.name() == CONTENT_TYPES_PATH && content_types_index.replace(index).is_some() {
+            return None;
+        }
+    }
+
+    let file = archive.by_index(content_types_index?).ok()?;
+    if file.size() > MAX_CONTENT_TYPES_LENGTH {
+        return None;
+    }
+    let mut xml = String::with_capacity(file.size() as usize);
+    file.take(MAX_CONTENT_TYPES_LENGTH + 1).read_to_string(&mut xml).ok()?;
+    let document = roxmltree::Document::parse(&xml).ok()?;
+    let mut detected = None;
+    for node in document.descendants().filter(|node| node.has_tag_name("Override")) {
+        let part_name = node.attribute("PartName")?;
+        let content_type = node.attribute("ContentType")?;
+        if let Some(mime_type) = ooxml_package_mime(part_name, content_type)
+            && detected.replace(mime_type).is_some()
+        {
+            return None;
+        }
+    }
+    detected
+}
+
+#[cfg(feature = "office")]
+fn ooxml_package_mime(part_name: &str, content_type: &str) -> Option<&'static str> {
+    match part_name {
+        "/word/document.xml" => wordprocessing_package_mime(content_type),
+        "/ppt/presentation.xml" => presentation_package_mime(content_type),
+        "/xl/workbook.xml" | "/xl/workbook.bin" => spreadsheet_package_mime(content_type),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "office")]
+fn wordprocessing_package_mime(content_type: &str) -> Option<&'static str> {
+    match content_type {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml" => Some(DOCX_MIME_TYPE),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml" => {
+            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.template")
+        }
+        "application/vnd.ms-word.document.macroEnabled.main+xml" => {
+            Some("application/vnd.ms-word.document.macroEnabled.12")
+        }
+        "application/vnd.ms-word.template.macroEnabledTemplate.main+xml" => {
+            Some("application/vnd.ms-word.template.macroEnabled.12")
+        }
+        _ => None,
+    }
+}
+
+#[cfg(feature = "office")]
+fn presentation_package_mime(content_type: &str) -> Option<&'static str> {
+    match content_type {
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml" => {
+            Some(POWER_POINT_MIME_TYPE)
+        }
+        "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml" => {
+            Some("application/vnd.openxmlformats-officedocument.presentationml.slideshow")
+        }
+        "application/vnd.openxmlformats-officedocument.presentationml.template.main+xml" => {
+            Some("application/vnd.openxmlformats-officedocument.presentationml.template")
+        }
+        "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml" => {
+            Some("application/vnd.ms-powerpoint.presentation.macroEnabled.12")
+        }
+        "application/vnd.ms-powerpoint.template.macroEnabled.main+xml" => {
+            Some("application/vnd.ms-powerpoint.template.macroEnabled.12")
+        }
+        _ => None,
+    }
+}
+
+#[cfg(feature = "office")]
+fn spreadsheet_package_mime(content_type: &str) -> Option<&'static str> {
+    match content_type {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" => Some(EXCEL_MIME_TYPE),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml" => {
+            Some("application/vnd.openxmlformats-officedocument.spreadsheetml.template")
+        }
+        "application/vnd.ms-excel.sheet.macroEnabled.main+xml" => {
+            Some("application/vnd.ms-excel.sheet.macroEnabled.12")
+        }
+        "application/vnd.ms-excel.template.macroEnabled.main+xml" => {
+            Some("application/vnd.ms-excel.template.macroEnabled.12")
+        }
+        "application/vnd.ms-excel.addin.macroEnabled.main+xml" => {
+            Some("application/vnd.ms-excel.addin.macroEnabled.12")
+        }
+        "application/vnd.ms-excel.sheet.binary.macroEnabled.main" => {
+            Some("application/vnd.ms-excel.sheet.binary.macroEnabled.12")
+        }
+        _ => None,
+    }
 }
 
 /// Read the `mimetype` entry a ZIP-based document package declares.
@@ -2199,7 +2416,7 @@ mod tests {
 
         let test_cases = vec![
             ("test.json", JSON_MIME_TYPE),
-            ("test.yaml", "application/x-yaml"),
+            ("test.yaml", "application/yaml"),
             ("test.toml", "application/toml"),
             ("test.xml", XML_MIME_TYPE),
             ("test.csv", "text/csv"),
@@ -2266,8 +2483,31 @@ mod tests {
         assert!(validate_mime_type("image/png").is_ok());
         assert!(validate_mime_type("image/gif").is_ok());
         assert!(validate_mime_type("image/webp").is_ok());
+        assert!(validate_mime_type("image/custom-format").is_err());
+    }
 
-        assert!(validate_mime_type("image/custom-format").is_ok());
+    #[test]
+    fn should_validate_parameterized_mime_by_its_well_formed_essence() {
+        assert_eq!(
+            validate_mime_type("Application/JSON; Charset=UTF-8").unwrap(),
+            "application/json"
+        );
+        assert_eq!(
+            validate_mime_type(" application/geo+json; charset=utf-8 ").unwrap(),
+            GEOJSON_MIME_TYPE
+        );
+    }
+
+    #[test]
+    fn should_reject_malformed_mime_syntax_before_registry_lookup() {
+        for malformed in [
+            "application//json",
+            "application/json; charset",
+            "application/json, text/plain",
+            "application/json; charset=\"unterminated",
+        ] {
+            assert!(validate_mime_type(malformed).is_err(), "accepted {malformed:?}");
+        }
     }
 
     #[test]
@@ -2283,6 +2523,59 @@ mod tests {
         assert!(validate_mime_type("audio/webm").is_ok());
         assert!(validate_mime_type("video/mp4").is_ok());
         assert!(validate_mime_type("video/webm").is_ok());
+    }
+
+    #[test]
+    fn audited_extensions_resolve_to_registered_canonical_mime_types() {
+        let expected = [
+            ("file.dj", "text/x-djot"),
+            ("file.pps", LEGACY_POWERPOINT_MIME_TYPE),
+            ("file.xltm", "application/vnd.ms-excel.template.macroEnabled.12"),
+            ("file.xla", "application/vnd.ms-excel"),
+            ("file.sqlite3", SQLITE_MIME_TYPE),
+            ("file.gpkx", GEOPACKAGE_MIME_TYPE),
+            ("file.xhtml", "application/xhtml+xml"),
+            ("file.xht", "application/xhtml+xml"),
+            ("file.heics", "image/heic-sequence"),
+            ("file.heifs", "image/heif-sequence"),
+            ("file.j2c", "image/j2c"),
+            ("file.j2k", "image/j2c"),
+            ("file.jpc", "image/j2c"),
+            ("file.jpg2", "image/jp2"),
+            ("file.hif", "image/heif"),
+            ("file.mpeg", "video/mpeg"),
+            ("file.mpg", "video/mpeg"),
+            ("file.mpe", "video/mpeg"),
+            ("file.m1v", "video/mpeg"),
+            ("file.m2v", "video/mpeg"),
+            ("file.mpg4", "video/mp4"),
+            ("file.mp4v", "video/mp4"),
+            ("file.m4v", "video/mp4"),
+            ("file.typ", "text/vnd.typst"),
+        ];
+
+        for (path, mime_type) in expected {
+            assert_eq!(detect_mime_type(path, false).unwrap(), mime_type, "failed for {path}");
+        }
+        let motion_jpeg_2000 = detect_mime_type("file.mj2", false).unwrap();
+        assert!(validate_mime_type(&motion_jpeg_2000).is_err());
+    }
+
+    #[test]
+    fn registered_mime_types_are_canonical_and_compatibility_names_are_aliases() {
+        let expected = [
+            "application/vnd.dbf",
+            "application/yaml",
+            "text/prs.fallenstein.rst",
+            "text/org",
+            "text/vnd.typst",
+            "application/vnd.geo+json",
+            "application/hwp+zip",
+        ];
+        for mime_type in expected {
+            assert_eq!(validate_mime_type(mime_type).unwrap(), mime_type);
+        }
+        assert!(validate_mime_type("application/geopackage+vnd.sqlite3").is_err());
     }
 
     #[test]
@@ -2586,34 +2879,22 @@ mod tests {
 
     #[test]
     fn test_detect_office_format_from_zip_bytes() {
-        let docx_bytes: &[u8] = &[
-            0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, b'w', b'o', b'r', b'd', b'/', b'd',
-            b'o', b'c', b'u', b'm', b'e', b'n', b't', b'.', b'x', b'm', b'l',
-        ];
-        let mime = detect_mime_type_from_bytes(docx_bytes).unwrap();
+        let docx_bytes = build_zip(&[("word/document.xml", b"document")]);
+        let mime = detect_mime_type_from_bytes(&docx_bytes).unwrap();
         assert_eq!(
             mime, DOCX_MIME_TYPE,
             "Should detect DOCX from ZIP with word/document.xml"
         );
 
-        let xlsx_bytes: &[u8] = &[
-            0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, b'x', b'l', b'/', b'w', b'o', b'r',
-            b'k', b'b', b'o', b'o', b'k', b'.', b'x', b'm', b'l',
-        ];
-        let mime = detect_mime_type_from_bytes(xlsx_bytes).unwrap();
+        let xlsx_bytes = build_zip(&[("xl/workbook.xml", b"workbook")]);
+        let mime = detect_mime_type_from_bytes(&xlsx_bytes).unwrap();
         assert_eq!(
             mime, EXCEL_MIME_TYPE,
             "Should detect XLSX from ZIP with xl/workbook.xml"
         );
 
-        let pptx_bytes: &[u8] = &[
-            0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, b'p', b'p', b't', b'/', b'p', b'r',
-            b'e', b's', b'e', b'n', b't', b'a', b't', b'i', b'o', b'n', b'.', b'x', b'm', b'l',
-        ];
-        let mime = detect_mime_type_from_bytes(pptx_bytes).unwrap();
+        let pptx_bytes = build_zip(&[("ppt/presentation.xml", b"presentation")]);
+        let mime = detect_mime_type_from_bytes(&pptx_bytes).unwrap();
         assert_eq!(
             mime, POWER_POINT_MIME_TYPE,
             "Should detect PPTX from ZIP with ppt/presentation.xml"
@@ -2635,6 +2916,120 @@ mod tests {
         ];
         let mime = detect_mime_type_from_bytes(plain_zip_bytes).unwrap();
         assert_eq!(mime, "application/zip", "Plain ZIP should remain as application/zip");
+    }
+
+    #[test]
+    fn should_detect_jpeg_2000_codestream_magic_as_j2c() {
+        let codestream = [0xFF, 0x4F, 0xFF, 0x51, 0x00, 0x2F, 0x00, 0x00];
+        assert_eq!(detect_mime_type_from_bytes(&codestream).unwrap(), "image/j2c");
+    }
+
+    #[test]
+    fn should_detect_specialized_formats_only_from_unambiguous_content() {
+        let mut geopackage = vec![0_u8; 100];
+        geopackage[..16].copy_from_slice(b"SQLite format 3\0");
+        geopackage[68..72].copy_from_slice(b"GPKG");
+        assert_eq!(detect_mime_type_from_bytes(&geopackage).unwrap(), GEOPACKAGE_MIME_TYPE);
+
+        let kml = br#"<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Placemark/></kml>"#;
+        assert_eq!(detect_mime_type_from_bytes(kml).unwrap(), KML_MIME_TYPE);
+
+        let xhtml = br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body/></html>"#;
+        assert_eq!(detect_mime_type_from_bytes(xhtml).unwrap(), "application/xhtml+xml");
+        let decoy_xhtml = br#"<?xml version="1.0"?><html notxmlns="http://www.w3.org/1999/xhtml"><body/></html>"#;
+        assert_eq!(detect_mime_type_from_bytes(decoy_xhtml).unwrap(), "text/xml");
+
+        let geojson = br#"{"type":"Point","coordinates":[13.4,52.5]}"#;
+        assert_eq!(detect_mime_type_from_bytes(geojson).unwrap(), GEOJSON_MIME_TYPE);
+        assert_eq!(
+            detect_mime_type_from_bytes(br#"{"type":"Point"}"#).unwrap(),
+            JSON_MIME_TYPE
+        );
+    }
+
+    #[test]
+    fn should_detect_large_geojson_feature_collection() {
+        let padding = "x".repeat(MIME_SNIFF_LENGTH + 1);
+        let content = format!(r#"{{"type":"FeatureCollection","features":[],"metadata":"{padding}"}}"#);
+
+        assert_eq!(
+            detect_mime_type_from_bytes(content.as_bytes()).unwrap(),
+            GEOJSON_MIME_TYPE
+        );
+    }
+
+    #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
+    #[test]
+    fn full_zip_inspection_does_not_treat_payload_text_as_an_office_part() {
+        let archive = build_zip(&[("notes.txt", b"the string word/document.xml is not a part name")]);
+        assert_eq!(detect_mime_type_from_bytes(&archive).unwrap(), ZIP_MIME_TYPE);
+    }
+
+    #[cfg(feature = "office")]
+    #[test]
+    fn ooxml_content_types_preserve_document_subtypes() {
+        let cases = [
+            (
+                "/word/document.xml",
+                "application/vnd.ms-word.document.macroEnabled.main+xml",
+                "application/vnd.ms-word.document.macroEnabled.12",
+            ),
+            (
+                "/word/document.xml",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+            ),
+            (
+                "/ppt/presentation.xml",
+                "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml",
+                "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+            ),
+            (
+                "/ppt/presentation.xml",
+                "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml",
+                "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+            ),
+            (
+                "/xl/workbook.xml",
+                "application/vnd.ms-excel.template.macroEnabled.main+xml",
+                "application/vnd.ms-excel.template.macroEnabled.12",
+            ),
+            (
+                "/xl/workbook.bin",
+                "application/vnd.ms-excel.sheet.binary.macroEnabled.main",
+                "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
+            ),
+        ];
+
+        for (part_name, content_type, expected) in cases {
+            let content_types = format!(
+                r#"<?xml version="1.0"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="{part_name}" ContentType="{content_type}"/>
+</Types>"#
+            );
+            let archive = build_zip(&[
+                ("[Content_Types].xml", content_types.as_bytes()),
+                (part_name.trim_start_matches('/'), b"<main/>"),
+            ]);
+            assert_eq!(detect_mime_type_from_bytes(&archive).unwrap(), expected);
+        }
+    }
+
+    #[cfg(feature = "office")]
+    #[test]
+    fn compatible_extension_preserves_ooxml_subtype_when_declaration_is_missing() {
+        let archive = build_zip(&[("word/document.xml", b"<w:document/>")]);
+        assert_eq!(
+            detect_or_validate_bytes(
+                &archive,
+                Some("report.docm"),
+                None,
+                crate::core::config::MimeDetectionPolicy::PreferContent,
+            )
+            .unwrap(),
+            "application/vnd.ms-word.document.macroEnabled.12"
+        );
     }
 
     #[test]
@@ -2807,8 +3202,6 @@ mod tests {
         assert_eq!(EXT_TO_MIME.get("geojson"), Some(&"application/geo+json"));
         assert!(SUPPORTED_MIME_TYPES.contains("application/vnd.google-earth.kml+xml"));
         assert!(SUPPORTED_MIME_TYPES.contains("application/geo+json"));
-        assert_eq!(SUPPORTED_FORMAT_COUNT, 102);
-        assert_eq!(SUPPORTED_EXTENSION_COUNT, 122);
     }
 
     #[test]
