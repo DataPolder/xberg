@@ -929,8 +929,27 @@ pub(crate) fn evaluate_per_page_ocr(
             && native_text.is_char_boundary(boundary.byte_end)
     });
     let boundaries_are_ordered = boundaries.windows(2).all(|pair| pair[0].byte_end <= pair[1].byte_start);
-    let can_defer_absolute_garbage_threshold =
-        boundaries.len() > 1 && boundary_count_matches_pages && all_boundaries_are_valid && boundaries_are_ordered;
+    let page_numbers_are_complete = boundaries.iter().enumerate().all(|(index, boundary)| {
+        usize::try_from(boundary.page_number).is_ok_and(|page_number| page_number == index + 1)
+    });
+    let all_garbage_is_covered = all_boundaries_are_valid
+        && boundaries_are_ordered
+        && boundaries
+            .iter()
+            .map(|boundary| {
+                native_text[boundary.byte_start..boundary.byte_end]
+                    .chars()
+                    .filter(|character| *character == '\u{FFFD}')
+                    .count()
+            })
+            .sum::<usize>()
+            == native_text.chars().filter(|character| *character == '\u{FFFD}').count();
+    let can_defer_absolute_garbage_threshold = boundaries.len() > 1
+        && boundary_count_matches_pages
+        && all_boundaries_are_valid
+        && boundaries_are_ordered
+        && page_numbers_are_complete
+        && all_garbage_is_covered;
 
     // Defer the aggregate absolute count only when every page can be evaluated; otherwise
     // the document-level check is the only way to preserve the configured fallback threshold. ~keep
@@ -7430,6 +7449,36 @@ mod tests {
                 page_number: 2,
                 byte_start: text.len() + 2,
                 byte_end: text.len() + 3,
+            },
+        ];
+
+        let decision = evaluate_per_page_ocr(&text, Some(&boundaries), Some(2), &thresholds);
+
+        assert!(decision.fallback);
+        assert!(decision.whole_doc_failure);
+        assert!(decision.failing_pages.is_empty());
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_multi_page_garbage_threshold_outside_boundaries_uses_aggregate_fallback() {
+        use crate::types::PageBoundary;
+
+        let thresholds = t();
+        let first_page = "This first page contains reliable searchable measurements and explanatory text.";
+        let garbage = "\u{FFFD}".repeat(thresholds.min_garbage_chars);
+        let second_page = "This second page also contains reliable searchable measurements and explanatory text.";
+        let text = format!("{first_page}{garbage}{second_page}");
+        let boundaries = vec![
+            PageBoundary {
+                page_number: 1,
+                byte_start: 0,
+                byte_end: first_page.len(),
+            },
+            PageBoundary {
+                page_number: 2,
+                byte_start: first_page.len() + garbage.len(),
+                byte_end: text.len(),
             },
         ];
 
