@@ -2747,6 +2747,12 @@ jobs:
   verify-binstall:
     name: Verify cargo-binstall
     needs: [prepare, upload-cli-release]
+    # Not runnable on a dry run, and not adaptable to local artifacts: `cargo binstall` resolves
+    # and downloads its archive over HTTP from a real, published GitHub Release, which a dry run
+    # never creates (see the "Ensure GitHub Release exists" step). This is the reusable workflow's
+    # entire job -- proving the public download URL resolves -- so there is no local-artifact
+    # substitute that would still test the thing this job exists to test. A dry run therefore does
+    # NOT verify that a consumer can actually `cargo binstall xberg-cli` against this release. ~keep
     if: ${{ needs.prepare.outputs.is_tag == 'true' && needs.upload-cli-release.result == 'success' && needs.prepare.outputs.dry_run != 'true' }}
     permissions:
       contents: read
@@ -2973,7 +2979,15 @@ jobs:
       - upload-c-ffi-release
       - upload-elixir-release
       - upload-php-pie-release
-    if: ${{ always() && needs.prepare.outputs.is_tag == 'true' && needs.prepare.outputs.dry_run != 'true' && !contains(needs.*.result, 'failure') }}
+    # Runs on dry runs too, but checks different evidence. A real tag verifies against the
+    # live GitHub Release (verify-release-assets queries it by tag, which does not exist on a
+    # dry run — nothing is ever created at line ~150). A dry run instead verifies the same
+    # cli/go-ffi/c-ffi run-artifacts that upload-*-release would have uploaded, which DO get
+    # built on a dry run. Elixir and PHP are NOT covered here: elixir-natives and php-extension
+    # both skip producing real artifacts on a dry run (see their own ~keep comments), so
+    # upload-elixir-release/upload-php-pie-release have nothing to check and a dry run does not
+    # verify NIF or PHP-PIE asset packaging. ~keep
+    if: ${{ always() && needs.prepare.outputs.is_tag == 'true' && !contains(needs.*.result, 'failure') }}
     runs-on: ubuntu-latest
     steps:
       # Mint the App token for release asset lookups (push access), consistent
@@ -2982,12 +2996,14 @@ jobs:
       # cascading into a skipped Homebrew bottle build (issue #1247). ~keep
       - uses: actions/create-github-app-token@v3
         id: app-token
+        if: ${{ needs.prepare.outputs.dry_run != 'true' }}
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
           owner: xberg-io
 
       - uses: xberg-io/actions/verify-release-assets@v1
+        if: ${{ needs.prepare.outputs.dry_run != 'true' }}
         with:
           tag: ${{ needs.prepare.outputs.tag }}
           token: ${{ steps.app-token.outputs.token }}
@@ -3001,6 +3017,56 @@ jobs:
             xberg-ffi-*.tar.gz
             # Elixir NIF
             libxberg_nif-*.tar.gz
+
+      - uses: actions/download-artifact@v8
+        if: ${{ needs.prepare.outputs.dry_run == 'true' }}
+        with:
+          pattern: cli-*
+          path: dist/verify-assets/cli
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        if: ${{ needs.prepare.outputs.dry_run == 'true' }}
+        with:
+          pattern: go-ffi-*
+          path: dist/verify-assets/go-ffi
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        if: ${{ needs.prepare.outputs.dry_run == 'true' }}
+        with:
+          pattern: c-ffi-*
+          path: dist/verify-assets/c-ffi
+          merge-multiple: true
+
+      # Same expected-assets globs as the live-release check above, minus Elixir/PHP (not
+      # built on a dry run -- see the job comment). Checks the run-artifacts directly rather
+      # than a GitHub Release, since a dry run never creates one. ~keep
+      - name: Verify locally built release assets
+        if: ${{ needs.prepare.outputs.dry_run == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          declare -A globs=(
+            ["dist/verify-assets/cli"]="xberg-cli-*.tar.gz xberg-cli-*.zip"
+            ["dist/verify-assets/go-ffi"]="xberg-go-*.tar.gz"
+            ["dist/verify-assets/c-ffi"]="xberg-ffi-*.tar.gz"
+          )
+          missing=0
+          for dir in "${!globs[@]}"; do
+            for pattern in ${globs[$dir]}; do
+              if ! compgen -G "${dir}/${pattern}" >/dev/null; then
+                echo "::error::no local asset matched ${dir}/${pattern}" >&2
+                missing=1
+              else
+                echo "OK: ${dir}/${pattern}"
+              fi
+            done
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            echo "::error::one or more expected dry-run release assets were not built" >&2
+            exit 1
+          fi
 
   publish-crates:
     name: Publish crates.io packages
@@ -3623,6 +3689,9 @@ jobs:
     # uploads on same-tag retries — a skipped upload means the asset is already on
     # the release, so finalize must still run. `== 'success'` here previously
     # stuck every retry in draft, cascading into skipped hex/zig/homebrew. ~keep
+    # Excluded from dry runs on purpose: finalize-release un-drafts (publishes) the real
+    # GitHub Release, an outward-facing, irreversible action with no dry-run mode of its own,
+    # and there is no such release to finalize on a dry run in the first place. ~keep
     if: >-
       ${{ always()
       && needs.prepare.outputs.is_tag == 'true'
@@ -3709,6 +3778,9 @@ jobs:
   trigger-pubdev:
     name: Trigger pub.dev publish workflow
     needs: [prepare, check-pub, upload-dart-release, publish-crates]
+    # Excluded from dry runs on purpose: `gh workflow run` dispatches a separate, real
+    # publish-pubdev.yaml run with no dry-run awareness of its own -- an external, irreversible
+    # side effect this workflow cannot take back once dispatched. ~keep
     if: ${{ needs.publish-crates.result != 'failure' && needs.prepare.outputs.release_dart == 'true' && needs.prepare.outputs.is_tag == 'true' && needs.prepare.outputs.dry_run != 'true' && (needs.check-pub.outputs.exists != 'true' || needs.prepare.outputs.force_republish == 'true') && needs.upload-dart-release.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
@@ -4096,6 +4168,10 @@ jobs:
       - publish-zig
       - publish-homebrew-formula
       - publish-homebrew-bottles
+    # Excluded from dry runs on purpose: this is a second finalize-release call (go-module-path
+    # flavor) that updates the same real, published GitHub Release as finalize-github-release-
+    # after-uploads -- outward-facing and irreversible, and again there is no such release to
+    # finalize on a dry run. ~keep
     if: |
       always() &&
       !cancelled() &&
@@ -4155,6 +4231,9 @@ jobs:
       - upload-php-pie-release
       - upload-swift-bundle
       - release-finalize
+    # Excluded from dry runs on purpose: posts a real, outward-facing announcement to a public
+    # Discord channel with no dry-run mode of its own -- irreversible once sent, and would be
+    # actively misleading during a dry run (announcing a release that was never published). ~keep
     if: |
       always() &&
       !cancelled() &&
@@ -4194,11 +4273,16 @@ jobs:
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org/"
+      # dry-run must be threaded explicitly: prepare synthesizes a dry-run tag, so this job's
+      # `is_tag == 'true'` gate does not exclude dry runs (same reasoning as the elixir-natives
+      # upload-artifact step elsewhere in this file), and check-cli.outputs.exists only guards
+      # re-run idempotency -- it happens to be true today but is not a dry-run safeguard. ~keep
       - uses: xberg-io/actions/publish-npm@v1
         with:
           package-dir: cli-proxy/npm
           access: public
           provenance: "true"
+          dry-run: ${{ needs.prepare.outputs.dry_run }}
 
   # --- First-party integrations (lockstep with core; see integrations/README.md) ---
   # These are additive best-effort stages: they publish the integrations that ship
@@ -4314,14 +4398,17 @@ jobs:
   publish-integrations-npm:
     name: Publish ${{ matrix.package }} to npm
     needs: [prepare, publish-node, publish-crates]
-    # Also skipped on dry runs: each integration package pins `@xberg-io/xberg` to the exact release
-    # version, and a dry-run `publish-node` never puts that version on npm, so `npm install` dies with
-    # ETARGET "No matching version found for @xberg-io/xberg@<version>" before anything is published.
+    # Runs on dry runs too. Each integration package pins `@xberg-io/xberg` to the exact release
+    # version, and a dry-run `publish-node` never puts that version on npm, so `npm install` would die
+    # with ETARGET "No matching version found for @xberg-io/xberg@<version>" before anything ran. The
+    # "Resolve core dependency for dry run" step below repoints the pin at whatever version is
+    # currently on npm, so the dry run still exercises install/build/pack against a real, resolvable
+    # dependency -- it just isn't proof this exact release version resolves (publish-node's own
+    # dry-run pack step is what covers that). ~keep
     if: >-
       ${{ !cancelled() && needs.publish-node.result != 'failure'
       && needs.publish-crates.result != 'failure'
       && needs.prepare.outputs.release_node == 'true'
-      && needs.prepare.outputs.dry_run != 'true'
       && needs.prepare.outputs.is_tag == 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -4342,6 +4429,23 @@ jobs:
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org/"
+      # Dry runs never publish the release version to npm (see the job comment above), so pin
+      # to whatever IS on npm right now instead of the unresolvable release version. Best-effort:
+      # if nothing has ever been published for this package, leave the pin alone and let `npm
+      # install` fail exactly as it would without this step. ~keep
+      - name: Resolve core dependency for dry run
+        if: ${{ needs.prepare.outputs.dry_run == 'true' }}
+        working-directory: integrations/node/${{ matrix.package }}
+        run: |
+          set -euo pipefail
+          published_version="$(npm view @xberg-io/xberg version 2>/dev/null || true)"
+          if [[ -z "$published_version" ]]; then
+            echo "::warning::@xberg-io/xberg has no published version on npm; leaving the pin as-is"
+          else
+            jq --arg v "$published_version" '.dependencies["@xberg-io/xberg"] = $v' package.json > package.json.tmp
+            mv package.json.tmp package.json
+            echo "Pinned @xberg-io/xberg to published version ${published_version} for this dry run"
+          fi
       - name: Build
         working-directory: integrations/node/${{ matrix.package }}
         # `npm install` (not `npm ci`): the integration pins `@xberg-io/xberg` to the exact rc,
@@ -4358,6 +4462,7 @@ jobs:
           access: public
           npm-tag: ${{ needs.prepare.outputs.npm_tag }}
           provenance: "true"
+          dry-run: ${{ needs.prepare.outputs.dry_run }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
