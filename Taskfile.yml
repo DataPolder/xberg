@@ -304,7 +304,7 @@ tasks:
   supported-counts:verify:
     desc: "Test and verify published format counts against the MIME registry"
     cmds:
-      - python3 -m unittest scripts/test_sync_supported_counts.py
+      - uv run --frozen --only-dev python -m pytest -q scripts/test_sync_supported_counts.py
       - python3 scripts/sync_supported_counts.py verify
 
   verify:feature-parity:

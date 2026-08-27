@@ -13,8 +13,10 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 REGISTRY_PATH = Path("crates/xberg/src/core/mime.rs")
 MINIMUM_PRODUCT_FORMAT_COUNT = 50
@@ -22,9 +24,21 @@ MAXIMUM_PRODUCT_FORMAT_COUNT = 999
 MINIMUM_PRODUCT_EXTENSION_COUNT = 50
 MAXIMUM_PRODUCT_EXTENSION_COUNT = 999
 NON_PUBLICATION_PATH_PARTS = frozenset(
-    {"e2e", "test", "tests", "fixtures", "snapshot", "snapshots", "vendor", "vendored", "test_documents"}
+    {
+        "e2e",
+        "test",
+        "tests",
+        "fixtures",
+        "snapshot",
+        "snapshots",
+        "vendor",
+        "vendored",
+        "test_documents",
+    }
 )
-GENERATED_PLUGIN_ROOTS = frozenset({".claude-plugin", ".codex-plugin", ".cursor-plugin", ".factory-plugin"})
+GENERATED_PLUGIN_ROOTS = frozenset(
+    {".claude-plugin", ".codex-plugin", ".cursor-plugin", ".factory-plugin"}
+)
 PUBLICATION_TEXT_SUFFIXES = frozenset(
     {
         ".c",
@@ -64,7 +78,9 @@ PRODUCT_ATTRIBUTION = re.compile(
     r"\b(?:xberg|documents?|extract(?:s|ed|ing|ion)?|pdfs?|office|ocr|content[- ]intelligence)\b",
     re.IGNORECASE,
 )
-FORMAT_STRUCTURE = re.compile(r"\bformats\s+(?:across|including|with)\b|\bformats\s*[·(]", re.IGNORECASE)
+FORMAT_STRUCTURE = re.compile(
+    r"\bformats\s+(?:across|including|with)\b|\bformats\s*[·(]", re.IGNORECASE
+)
 DIRECT_SUPPORT_CLAIM = re.compile(r"\bSupports\s+\d+\s+file formats\b")
 FORMAT_HEADLINE = re.compile(
     r"^\s*(?:\d+\.\s*)?\*\*\d+\s+(?:file\s+)?formats\*\*\s*:",
@@ -72,8 +88,12 @@ FORMAT_HEADLINE = re.compile(
 )
 EXTENSION_HEADLINE = re.compile(r"\*\*\d+\s+file extensions\*\*", re.IGNORECASE)
 CLAUSE_BOUNDARY = re.compile(r";|[!?](?=\s|$)|\.(?=\s+[A-Z]|\s*$)")
-FORMAT_CLAIM = re.compile(r"(?<![\d~])(?P<count>\d+)\s+(?:file\s+)?formats\b", re.IGNORECASE)
-EXTENSION_CLAIM = re.compile(r"(?<!\d)(?P<count>\d+)\s+file extensions\b", re.IGNORECASE)
+FORMAT_CLAIM = re.compile(
+    r"(?<![\d~])(?P<count>\d+)\s+(?:file\s+)?formats\b", re.IGNORECASE
+)
+EXTENSION_CLAIM = re.compile(
+    r"(?<!\d)(?P<count>\d+)\s+file extensions\b", re.IGNORECASE
+)
 REGISTRY_START = re.compile(r"\b(?:static|const)\s+FORMATS\s*:[^=]+?=\s*&\[")
 ENTRY_START = re.compile(r"\bFormatEntry\s*\{")
 ENTRY_FIELDS = re.compile(
@@ -180,33 +200,58 @@ def parse_registry(source: str) -> Counts:
         _parse_string_array(fields.group("aliases"), "aliases")
         for extension in entry_extensions:
             if extension in extensions:
-                raise ValueError(f"duplicate extension in FORMATS registry: {extension}")
+                raise ValueError(
+                    f"duplicate extension in FORMATS registry: {extension}"
+                )
             extensions.add(extension)
 
     return Counts(formats=len(entry_starts), extensions=len(extensions))
 
 
 def _format_claim_is_product(line: str, advertised: int) -> bool:
-    if advertised < MINIMUM_PRODUCT_FORMAT_COUNT or advertised > MAXIMUM_PRODUCT_FORMAT_COUNT:
+    if (
+        advertised < MINIMUM_PRODUCT_FORMAT_COUNT
+        or advertised > MAXIMUM_PRODUCT_FORMAT_COUNT
+    ):
         return False
     return any(
         pattern.search(line) is not None
-        for pattern in (PRODUCT_ATTRIBUTION, FORMAT_STRUCTURE, DIRECT_SUPPORT_CLAIM, FORMAT_HEADLINE)
+        for pattern in (
+            PRODUCT_ATTRIBUTION,
+            FORMAT_STRUCTURE,
+            DIRECT_SUPPORT_CLAIM,
+            FORMAT_HEADLINE,
+        )
     )
 
 
 def _extension_claim_is_product(line: str, advertised: int) -> bool:
-    if advertised < MINIMUM_PRODUCT_EXTENSION_COUNT or advertised > MAXIMUM_PRODUCT_EXTENSION_COUNT:
+    if (
+        advertised < MINIMUM_PRODUCT_EXTENSION_COUNT
+        or advertised > MAXIMUM_PRODUCT_EXTENSION_COUNT
+    ):
         return False
-    if PRODUCT_ATTRIBUTION.search(line) is not None or EXTENSION_HEADLINE.search(line) is not None:
+    if (
+        PRODUCT_ATTRIBUTION.search(line) is not None
+        or EXTENSION_HEADLINE.search(line) is not None
+    ):
         return True
-    return any(_format_claim_is_product(line, int(match.group("count"))) for match in FORMAT_CLAIM.finditer(line))
+    return any(
+        _format_claim_is_product(line, int(match.group("count")))
+        for match in FORMAT_CLAIM.finditer(line)
+    )
 
 
 def _claim_clause(line: str, claim_start: int, claim_end: int) -> str:
     boundaries = list(CLAUSE_BOUNDARY.finditer(line))
-    start = max((boundary.end() for boundary in boundaries if boundary.end() <= claim_start), default=0)
-    end = min((boundary.start() for boundary in boundaries if boundary.start() >= claim_end), default=len(line))
+    start = max(
+        (boundary.end() for boundary in boundaries if boundary.end() <= claim_start),
+        default=0,
+    )
+    end = min(
+        (boundary.start() for boundary in boundaries if boundary.start() >= claim_end),
+        default=len(line),
+    )
     return line[start:end]
 
 
@@ -221,7 +266,13 @@ def _claims(text_file: TextFile) -> list[Claim]:
             if not _format_claim_is_product(clause, advertised):
                 continue
             claims.append(
-                Claim(offset + match.start("count"), offset + match.end("count"), line_index + 1, "formats", advertised)
+                Claim(
+                    offset + match.start("count"),
+                    offset + match.end("count"),
+                    line_index + 1,
+                    "formats",
+                    advertised,
+                )
             )
         for match in EXTENSION_CLAIM.finditer(line):
             advertised = int(match.group("count"))
@@ -243,7 +294,12 @@ def _claims(text_file: TextFile) -> list[Claim]:
 
 def _is_test_file(path: Path) -> bool:
     name = path.name.lower()
-    return name.startswith("test_") or name.endswith("_test.py") or ".test." in name or ".spec." in name
+    return (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or ".test." in name
+        or ".spec." in name
+    )
 
 
 def _is_publication_path(path: Path) -> bool:
@@ -260,7 +316,10 @@ def _is_publication_surface(text_file: TextFile) -> bool:
 
 
 def _is_generated_output(text_file: TextFile) -> bool:
-    if "alef:hash:" in text_file.content or "AI-RULEZ :: GENERATED FILE" in text_file.content:
+    if (
+        "alef:hash:" in text_file.content
+        or "AI-RULEZ :: GENERATED FILE" in text_file.content
+    ):
         return True
     parts = text_file.path.parts
     if parts and parts[0] in GENERATED_PLUGIN_ROOTS:
@@ -284,13 +343,15 @@ def _atomic_write(root: Path, relative_path: Path, content: str) -> None:
 
     temporary_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(mode="wb", dir=parent, prefix=f".{destination.name}.", delete=False) as handle:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=parent, prefix=f".{destination.name}.", delete=False
+        ) as handle:
             temporary_path = Path(handle.name)
             handle.write(content.encode("utf-8"))
             handle.flush()
             os.fsync(handle.fileno())
-        os.chmod(temporary_path, stat.S_IMODE(destination_stat.st_mode))
-        os.replace(temporary_path, destination)
+        temporary_path.chmod(stat.S_IMODE(destination_stat.st_mode))
+        temporary_path.replace(destination)
         temporary_path = None
     finally:
         if temporary_path is not None:
@@ -316,7 +377,9 @@ def verify_files(counts: Counts, files: Iterable[TextFile]) -> tuple[list[str], 
     return errors, advertisements
 
 
-def synchronize_files(counts: Counts, files: Iterable[TextFile], root: Path) -> tuple[list[Path], int]:
+def synchronize_files(
+    counts: Counts, files: Iterable[TextFile], root: Path
+) -> tuple[list[Path], int]:
     changed: list[Path] = []
     advertisements = 0
     for text_file in files:
@@ -334,7 +397,9 @@ def synchronize_files(counts: Counts, files: Iterable[TextFile], root: Path) -> 
             _atomic_write(root, text_file.path, content)
             changed.append(text_file.path)
     if advertisements == 0:
-        raise ValueError("no supported-format advertisements found in tracked UTF-8 files")
+        raise ValueError(
+            "no supported-format advertisements found in tracked UTF-8 files"
+        )
     return changed, advertisements
 
 
@@ -354,34 +419,47 @@ def tracked_text_files(root: Path) -> list[TextFile]:
             mode = metadata.split(b" ", 1)[0]
             path = Path(raw_path.decode("utf-8"))
         except (UnicodeDecodeError, ValueError) as exception:
-            raise ValueError("malformed path or index record from git ls-files") from exception
+            raise ValueError(
+                "malformed path or index record from git ls-files"
+            ) from exception
         if not _is_publication_path(path):
             continue
         if mode == b"120000":
-            raise ValueError(f"refusing to read tracked symlink on a publication path: {path}")
+            raise ValueError(
+                f"refusing to read tracked symlink on a publication path: {path}"
+            )
         if mode not in {b"100644", b"100755"}:
             continue
         absolute = root / path
         try:
             working_tree_stat = os.lstat(absolute)
         except OSError as exception:
-            raise ValueError(f"cannot inspect tracked publication file: {path}") from exception
+            raise ValueError(
+                f"cannot inspect tracked publication file: {path}"
+            ) from exception
         if not stat.S_ISREG(working_tree_stat.st_mode):
-            raise ValueError(f"tracked publication working-tree file is not regular: {path}")
+            raise ValueError(
+                f"tracked publication working-tree file is not regular: {path}"
+            )
 
         descriptor: int | None = None
         try:
             descriptor = os.open(absolute, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
             opened_stat = os.fstat(descriptor)
             if not stat.S_ISREG(opened_stat.st_mode) or (
-                opened_stat.st_dev != working_tree_stat.st_dev or opened_stat.st_ino != working_tree_stat.st_ino
+                opened_stat.st_dev != working_tree_stat.st_dev
+                or opened_stat.st_ino != working_tree_stat.st_ino
             ):
-                raise ValueError(f"tracked publication working-tree file changed while opening: {path}")
+                raise ValueError(
+                    f"tracked publication working-tree file changed while opening: {path}"
+                )
             with os.fdopen(descriptor, "rb") as handle:
                 descriptor = None
                 raw_content = handle.read()
         except OSError as exception:
-            raise ValueError(f"cannot safely open tracked publication file: {path}") from exception
+            raise ValueError(
+                f"cannot safely open tracked publication file: {path}"
+            ) from exception
         finally:
             if descriptor is not None:
                 os.close(descriptor)
@@ -390,7 +468,9 @@ def tracked_text_files(root: Path) -> list[TextFile]:
             content = raw_content.decode("utf-8")
         except UnicodeDecodeError as exception:
             if path.suffix.lower() in PUBLICATION_TEXT_SUFFIXES:
-                raise ValueError(f"tracked publication file is invalid UTF-8: {path}") from exception
+                raise ValueError(
+                    f"tracked publication file is invalid UTF-8: {path}"
+                ) from exception
             continue
         if "\0" in content:
             if path.suffix.lower() in PUBLICATION_TEXT_SUFFIXES:
@@ -412,7 +492,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     root = arguments.root.resolve()
     try:
-        registry = arguments.registry if arguments.registry.is_absolute() else root / arguments.registry
+        registry = (
+            arguments.registry
+            if arguments.registry.is_absolute()
+            else root / arguments.registry
+        )
         counts = parse_registry(registry.read_text(encoding="utf-8"))
         files = tracked_text_files(root)
         if arguments.mode == "sync":
@@ -434,7 +518,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"FAIL: {message}", file=sys.stderr)
         print(f"FAIL: checked {advertisements} advertisements", file=sys.stderr)
         return 1
-    print(f"verified {advertisements} advertisements: {counts.formats} formats / {counts.extensions} file extensions")
+    print(
+        f"verified {advertisements} advertisements: {counts.formats} formats / {counts.extensions} file extensions"
+    )
     return 0
 
 
