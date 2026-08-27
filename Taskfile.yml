@@ -387,7 +387,17 @@ tasks:
   wasm:e2e:
     desc: "Run WASM e2e tests (builds wasm-pack bundle first)"
     cmds:
-      - alef test --e2e --lang wasm
+      # A RUSTFLAGS set anywhere in the environment REPLACES .cargo/config.toml's
+      # [target.wasm32-unknown-unknown] rustflags outright -- cargo does not merge the two.
+      # CI's setup-onnx-runtime action exports a job-wide RUSTFLAGS carrying
+      # `-C link-arg=-Wl,-rpath,$ORIGIN`, which rust-lld rejects outright, and the override
+      # simultaneously drops the bulk-memory / getrandom_backend / --allow-multiple-definition
+      # flags the wasm build needs. Emptying is not enough -- an empty-but-set RUSTFLAGS still
+      # wins over the config file -- and CARGO_ENCODED_RUSTFLAGS must go too, since it takes
+      # precedence over RUSTFLAGS when present. Unset here rather than in the workflow so every
+      # caller inherits it; scripts/ci/wasm/run-crate-tests.sh already had to learn this
+      # separately for the other wasm entry point. ~keep
+      - unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS && alef test --e2e --lang wasm
 
   elixir:e2e:
     desc: "Run Elixir e2e tests (compiles NIF first)"
