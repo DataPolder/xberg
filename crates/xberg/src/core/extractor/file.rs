@@ -8,7 +8,7 @@
 
 use crate::Result;
 use crate::XbergError;
-use crate::core::config::ExtractionConfig;
+use crate::core::config::{ExtractionConfig, MimeDetectionPolicy};
 use crate::core::mime::{LEGACY_POWERPOINT_MIME_TYPE, LEGACY_WORD_MIME_TYPE};
 use crate::plugins::InternalDocumentExtractor;
 use crate::plugins::registry::RegisteredDocumentExtractor;
@@ -46,7 +46,12 @@ fn open_regular_file(path: &Path) -> Result<File> {
     Ok(file)
 }
 
-fn detect_file_mime_blocking(path: &Path, mime_type: Option<&str>, checks: FileDetectionChecks) -> Result<String> {
+fn detect_file_mime_blocking(
+    path: &Path,
+    mime_type: Option<&str>,
+    policy: MimeDetectionPolicy,
+    checks: FileDetectionChecks,
+) -> Result<String> {
     let mut file = open_regular_file(path)?;
     if checks.force_ocr_conflict {
         return Err(XbergError::validation(
@@ -58,24 +63,36 @@ fn detect_file_mime_blocking(path: &Path, mime_type: Option<&str>, checks: FileD
             "ocr_strategy selects scanned pages for OCR, but disable_ocr is true".to_string(),
         ));
     }
-    crate::core::mime::detect_or_validate_file(path, &mut file, mime_type)
+    crate::core::mime::detect_or_validate_file(path, &mut file, mime_type, policy)
 }
 
 #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
-async fn detect_file_mime(path: &Path, mime_type: Option<&str>, checks: FileDetectionChecks) -> Result<String> {
+async fn detect_file_mime(
+    path: &Path,
+    mime_type: Option<&str>,
+    policy: MimeDetectionPolicy,
+    checks: FileDetectionChecks,
+) -> Result<String> {
     let owned_path = path.to_path_buf();
     let owned_mime_type = mime_type.map(str::to_owned);
-    tokio::task::spawn_blocking(move || detect_file_mime_blocking(&owned_path, owned_mime_type.as_deref(), checks))
-        .await
-        .map_err(|error| {
-            tracing::error!(%error, "file MIME detection task failed");
-            XbergError::Other("File MIME detection task failed".to_string())
-        })?
+    tokio::task::spawn_blocking(move || {
+        detect_file_mime_blocking(&owned_path, owned_mime_type.as_deref(), policy, checks)
+    })
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, "file MIME detection task failed");
+        XbergError::Other("File MIME detection task failed".to_string())
+    })?
 }
 
 #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
-async fn detect_file_mime(path: &Path, mime_type: Option<&str>, checks: FileDetectionChecks) -> Result<String> {
-    detect_file_mime_blocking(path, mime_type, checks)
+async fn detect_file_mime(
+    path: &Path,
+    mime_type: Option<&str>,
+    policy: MimeDetectionPolicy,
+    checks: FileDetectionChecks,
+) -> Result<String> {
+    detect_file_mime_blocking(path, mime_type, policy, checks)
 }
 
 /// Extract content from a file.
@@ -173,7 +190,7 @@ pub(crate) async fn extract_file(
                 crate::core::config::OcrStrategy::ScannedPages { .. }
             ) && ocr_disabled,
         };
-        let detected_mime = detect_file_mime(path, mime_type, checks).await?;
+        let detected_mime = detect_file_mime(path, mime_type, config.mime_detection_policy, checks).await?;
 
         #[cfg(not(feature = "office"))]
         match detected_mime.as_str() {

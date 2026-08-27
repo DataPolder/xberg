@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added configurable MIME inference policies for preferring content signatures, trusting supported filename
+  extensions, or ignoring extensions, with per-input overrides (#1509).
 - Added native KML and GeoJSON extraction with canonical MIME routing (#1508).
 - Added Rust `SUPPORTED_FORMAT_COUNT` and `SUPPORTED_EXTENSION_COUNT` constants derived from the
   MIME registry, plus automated synchronization for published format-count claims (#1511).

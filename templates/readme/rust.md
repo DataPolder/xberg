@@ -109,6 +109,16 @@ async fn main() -> xberg::Result<()> {
 }
 ```
 
+### MIME Detection Policy
+
+`ExtractionConfig::mime_detection_policy` defaults to `MimeDetectionPolicy::PreferContent`. Use
+`TrustExtension` to skip content sniffing when the filename has a supported extension, or `ContentOnly` to ignore
+filename extensions. A specific explicit `ExtractInput::mime_type` remains authoritative; `application/octet-stream`
+is treated as a generic placeholder and falls back to policy-based detection. A `FileExtractionConfig` override can
+select a different policy for one batch item. Because uploaded and downloaded filenames are
+attacker-controlled, use `TrustExtension` only for trusted sources; a misleading extension can otherwise route content
+to the wrong extractor.
+
 ## OCR with Table Extraction
 
 ```rust

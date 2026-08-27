@@ -777,38 +777,91 @@ async fn extract_py_local_uri_returns_source_code_mime() {
     assert!(output.results[0].content.len() >= 5, "content must be non-trivial");
 }
 
-#[cfg(feature = "url-ingestion")]
 #[test]
-fn refine_downloaded_mime_type_passthrough_non_octet_stream() {
-    let refined = refine_downloaded_mime_type("application/pdf", Some("document.py"), "http://example.com/document.py");
-    assert_eq!(
-        refined, "application/pdf",
-        "explicit server MIME type must not be overridden by filename"
-    );
+fn downloaded_specific_http_mime_remains_authoritative_under_every_policy() {
+    for policy in [
+        crate::MimeDetectionPolicy::PreferContent,
+        crate::MimeDetectionPolicy::TrustExtension,
+        crate::MimeDetectionPolicy::ContentOnly,
+    ] {
+        let config = ExtractionConfig {
+            mime_detection_policy: policy,
+            ..Default::default()
+        };
+        let resolved = resolve_bytes_mime_type(
+            Some("application/pdf"),
+            Some("document.txt"),
+            br#"{"kind":"json"}"#,
+            &config,
+        )
+        .unwrap();
+        assert_eq!(resolved, "application/pdf", "unexpected MIME for {policy:?}");
+    }
 }
 
-#[cfg(all(feature = "url-ingestion", feature = "tree-sitter"))]
 #[test]
-fn refine_downloaded_mime_type_py_extension_resolves_to_source_code() {
-    let refined = refine_downloaded_mime_type(
-        "application/octet-stream",
-        Some("hello.py"),
-        "http://example.com/code/hello.py",
-    );
-    assert_eq!(
-        refined, "text/x-source-code",
-        "octet-stream with .py filename must resolve to text/x-source-code"
-    );
+fn downloaded_octet_stream_uses_policy_with_derived_filename() {
+    let cases = [
+        (crate::MimeDetectionPolicy::PreferContent, "application/json"),
+        (crate::MimeDetectionPolicy::TrustExtension, "text/plain"),
+        (crate::MimeDetectionPolicy::ContentOnly, "application/json"),
+    ];
+    for (policy, expected) in cases {
+        let config = ExtractionConfig {
+            mime_detection_policy: policy,
+            ..Default::default()
+        };
+        let resolved = resolve_bytes_mime_type(
+            Some("application/octet-stream"),
+            Some("download.txt"),
+            br#"{"kind":"json"}"#,
+            &config,
+        )
+        .unwrap();
+        assert_eq!(resolved, expected, "unexpected MIME for {policy:?}");
+    }
 }
 
-#[cfg(feature = "url-ingestion")]
 #[test]
-fn refine_downloaded_mime_type_no_filename_returns_octet_stream() {
-    let refined = refine_downloaded_mime_type("application/octet-stream", None, "http://example.com/download");
-    assert_eq!(
-        refined, "application/octet-stream",
-        "no filename means no refinement; extract_bytes handles sniffing"
-    );
+fn prefer_content_bytes_falls_back_from_unsupported_specialized_extension_to_plain_text() {
+    let config = ExtractionConfig {
+        mime_detection_policy: crate::MimeDetectionPolicy::PreferContent,
+        ..Default::default()
+    };
+
+    let resolved = resolve_bytes_mime_type(None, Some("feed.atom"), b"ordinary prose without markup", &config).unwrap();
+
+    assert_eq!(resolved, "text/plain");
+}
+
+#[test]
+fn content_only_bytes_ignores_a_supported_filename_extension() {
+    let config = ExtractionConfig {
+        mime_detection_policy: crate::MimeDetectionPolicy::ContentOnly,
+        ..Default::default()
+    };
+
+    let resolved = resolve_bytes_mime_type(None, Some("document.txt"), br#"{"kind":"content"}"#, &config).unwrap();
+
+    assert_eq!(resolved, "application/json");
+}
+
+#[cfg(feature = "tree-sitter")]
+#[test]
+fn generic_text_keeps_tree_sitter_content_detection_without_bypassing_trusted_extensions() {
+    use crate::core::config::TreeSitterConfig;
+
+    let source = b"#!/usr/bin/env python3\nprint('hello')\n";
+    let mut config = ExtractionConfig {
+        tree_sitter: Some(TreeSitterConfig::default()),
+        ..Default::default()
+    };
+    let detected = resolve_bytes_mime_type(None, Some("script.unknown"), source, &config).unwrap();
+    assert_eq!(detected, "text/x-source-code");
+
+    config.mime_detection_policy = crate::MimeDetectionPolicy::TrustExtension;
+    let trusted = resolve_bytes_mime_type(None, Some("script.txt"), source, &config).unwrap();
+    assert_eq!(trusted, "text/plain");
 }
 
 /// Regression: a shared-URL batch result that maps to no input slot (e.g.

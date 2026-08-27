@@ -9,6 +9,26 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::ExtractedDocument;
 
+/// ~keep: Selects which evidence is authoritative when Xberg infers a MIME type.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+#[serde(rename_all = "snake_case")]
+pub enum MimeDetectionPolicy {
+    /// ~keep: Prefer a supported content signature, falling back to the filename extension.
+    #[default]
+    PreferContent,
+    /// ~keep: Trust a supported filename extension without reading content for detection.
+    ///
+    /// # Security
+    ///
+    /// Filenames are attacker-controlled input in uploads and downloads. Use this only for trusted sources;
+    /// otherwise a misleading extension can route arbitrary content to the wrong extractor.
+    TrustExtension,
+    /// ~keep: Ignore the filename extension and require content-based detection.
+    ContentOnly,
+}
+
 /// Target format for re-encoding extracted images.
 ///
 /// Controls whether and how extracted images are normalised to a uniform

@@ -64,6 +64,7 @@ use utoipa::OpenApi;
             crate::api::types::WarmRequest,
             crate::api::types::WarmResponse,
             crate::core::mime::SupportedFormat,
+            crate::core::config::MimeDetectionPolicy,
             crate::core::config::ExtractionResult,
             crate::core::config::ExtractionSummary,
             crate::core::config::ExtractionErrorItem,
@@ -389,6 +390,20 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&schema).expect("Invalid JSON");
         assert!(parsed.is_object());
         assert!(parsed["openapi"].is_string());
+    }
+
+    #[test]
+    #[cfg(feature = "api")]
+    fn should_publish_mime_detection_policy_as_a_snake_case_enum_component() {
+        let document: serde_json::Value =
+            serde_json::from_str(&openapi_json()).expect("OpenAPI document must be valid JSON");
+        let schema = &document["components"]["schemas"]["MimeDetectionPolicy"];
+
+        assert_eq!(schema["type"], "string");
+        assert_eq!(
+            schema["enum"],
+            serde_json::json!(["prefer_content", "trust_extension", "content_only"])
+        );
     }
 
     #[test]

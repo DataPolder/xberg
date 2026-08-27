@@ -13,7 +13,9 @@ use super::super::ocr::{OcrConfig, OcrStrategy};
 use super::super::page::PageConfig;
 use super::super::processing::{ChunkingConfig, PostProcessorConfig};
 use super::file_config::FileExtractionConfig;
-use super::types::{ImageExtractionConfig, LanguageDetectionConfig, TokenReductionOptions, UrlExtractionConfig};
+use super::types::{
+    ImageExtractionConfig, LanguageDetectionConfig, MimeDetectionPolicy, TokenReductionOptions, UrlExtractionConfig,
+};
 
 /// Main extraction configuration.
 ///
@@ -34,6 +36,11 @@ use super::types::{ImageExtractionConfig, LanguageDetectionConfig, TokenReductio
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtractionConfig {
+    /// ~keep: Controls whether MIME inference prefers content, a supported extension, or content alone.
+    #[serde(default)]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub mime_detection_policy: MimeDetectionPolicy,
+
     /// Enable caching of extraction results
     #[serde(default = "default_true")]
     pub use_cache: bool,
@@ -503,6 +510,7 @@ impl ExtractionConfig {
 impl Default for ExtractionConfig {
     fn default() -> Self {
         Self {
+            mime_detection_policy: MimeDetectionPolicy::default(),
             use_cache: true,
             enable_quality_processing: true,
             ocr: None,
@@ -642,6 +650,7 @@ impl ExtractionConfig {
     /// ```
     pub(crate) fn with_file_overrides(&self, overrides: &FileExtractionConfig) -> Self {
         let FileExtractionConfig {
+            ref mime_detection_policy,
             ref enable_quality_processing,
             ref ocr,
             ref force_ocr,
@@ -686,6 +695,10 @@ impl ExtractionConfig {
         } = *overrides;
 
         let mut config = self.clone();
+
+        if let Some(v) = mime_detection_policy {
+            config.mime_detection_policy = *v;
+        }
 
         if let Some(v) = enable_quality_processing {
             config.enable_quality_processing = *v;

@@ -27,7 +27,6 @@ pub struct SupportedFormat {
     pub mime_type: String,
 }
 
-#[cfg(feature = "api")]
 pub(crate) const OCTET_STREAM_MIME_TYPE: &str = "application/octet-stream";
 pub(crate) const HTML_MIME_TYPE: &str = "text/html";
 const MIME_SNIFF_LENGTH: usize = 4096;
@@ -1003,13 +1002,122 @@ pub(crate) fn detect_or_validate_file(
     path: &Path,
     file: &mut std::fs::File,
     mime_type: Option<&str>,
+    policy: crate::core::config::MimeDetectionPolicy,
+) -> Result<String> {
+    if let Some(mime) = mime_type.filter(|mime| *mime != OCTET_STREAM_MIME_TYPE) {
+        tracing::debug!(mime_type = %mime, "validating caller-provided MIME type");
+        return validate_mime_type(mime);
+    }
+
+    use crate::core::config::MimeDetectionPolicy;
+
+    match policy {
+        MimeDetectionPolicy::PreferContent => resolve_file_mime(path, detect_mime_type(path, false), Some(file)),
+        MimeDetectionPolicy::TrustExtension => {
+            let extension = detect_mime_type(path, false);
+            if let Ok(ref detected) = extension
+                && let Ok(validated) = validate_mime_type(detected)
+            {
+                return Ok(validated);
+            }
+            resolve_file_mime(path, extension, Some(file))
+        }
+        MimeDetectionPolicy::ContentOnly => detect_mime_type_from_file_content(file, PackageInspection::FullArchive)
+            .ok_or_else(|| XbergError::validation("Could not detect MIME type from file content".to_string()))
+            .and_then(|detected| validate_mime_type(&detected)),
+    }
+}
+
+pub(crate) fn detect_or_validate_bytes(
+    content: &[u8],
+    filename: Option<&str>,
+    mime_type: Option<&str>,
+    policy: crate::core::config::MimeDetectionPolicy,
 ) -> Result<String> {
     if let Some(mime) = mime_type {
         tracing::debug!(mime_type = %mime, "validating caller-provided MIME type");
         return validate_mime_type(mime);
     }
 
-    resolve_file_mime(path, detect_mime_type(path, false), Some(file))
+    use crate::core::config::MimeDetectionPolicy;
+    match policy {
+        MimeDetectionPolicy::TrustExtension => {
+            let extension = filename.and_then(|name| detect_mime_type(name, false).ok());
+            if let Some(ref detected) = extension
+                && let Ok(validated) = validate_mime_type(detected)
+            {
+                return Ok(validated);
+            }
+            detect_mime_type_from_bytes(content).and_then(|detected| validate_mime_type(&detected))
+        }
+        MimeDetectionPolicy::ContentOnly => {
+            detect_mime_type_from_bytes(content).and_then(|detected| validate_mime_type(&detected))
+        }
+        MimeDetectionPolicy::PreferContent => {
+            let extension = filename.and_then(|name| detect_mime_type(name, false).ok());
+            let from_content = detect_mime_type_from_bytes(content);
+            match (extension, from_content) {
+                (Some(extension), Ok(content_mime)) => prefer_content_mime(&extension, &content_mime),
+                (Some(extension), Err(_)) => validate_mime_type(&extension),
+                (None, Ok(content_mime)) => validate_mime_type(&content_mime),
+                (None, Err(error)) => Err(error),
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
+pub(crate) async fn resolve_owned_bytes_mime(
+    content: Vec<u8>,
+    filename: Option<String>,
+    mime_type: Option<String>,
+    policy: crate::core::config::MimeDetectionPolicy,
+) -> Result<(Vec<u8>, String)> {
+    if let Some(explicit) = mime_type.as_deref().filter(|mime| *mime != OCTET_STREAM_MIME_TYPE) {
+        return validate_mime_type(explicit).map(|validated| (content, validated));
+    }
+    if policy == crate::core::config::MimeDetectionPolicy::TrustExtension
+        && let Some(filename) = filename.as_deref()
+        && let Ok(detected) = detect_mime_type(filename, false)
+        && let Ok(validated) = validate_mime_type(&detected)
+    {
+        return Ok((content, validated));
+    }
+
+    tokio::task::spawn_blocking(move || {
+        let explicit = mime_type.as_deref().filter(|mime| *mime != OCTET_STREAM_MIME_TYPE);
+        let detected = detect_or_validate_bytes(&content, filename.as_deref(), explicit, policy)?;
+        Ok((content, detected))
+    })
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, "byte MIME detection task failed");
+        XbergError::Other("Byte MIME detection task failed".to_string())
+    })?
+}
+
+#[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
+pub(crate) async fn resolve_owned_bytes_mime(
+    content: Vec<u8>,
+    filename: Option<String>,
+    mime_type: Option<String>,
+    policy: crate::core::config::MimeDetectionPolicy,
+) -> Result<(Vec<u8>, String)> {
+    let explicit = mime_type.as_deref().filter(|mime| *mime != OCTET_STREAM_MIME_TYPE);
+    let detected = detect_or_validate_bytes(&content, filename.as_deref(), explicit, policy)?;
+    Ok((content, detected))
+}
+
+fn prefer_content_mime(extension_mime: &str, content_mime: &str) -> Result<String> {
+    let extension_supported = SUPPORTED_MIME_TYPES.contains(extension_mime);
+    if extension_supported
+        && (content_mime == PLAIN_TEXT_MIME_TYPE
+            || (is_generic_xml_mime(content_mime) && is_specific_xml_mime(extension_mime))
+            || (content_mime == JSON_MIME_TYPE && is_specific_json_mime(extension_mime)))
+    {
+        return validate_mime_type(extension_mime);
+    }
+    validate_mime_type(content_mime).or_else(|_| validate_mime_type(extension_mime))
 }
 
 fn resolve_file_mime(path: &Path, path_detection: Result<String>, file: Option<&mut std::fs::File>) -> Result<String> {
@@ -1044,7 +1152,7 @@ fn resolve_file_mime(path: &Path, path_detection: Result<String>, file: Option<&
 fn magic_override(file: &mut std::fs::File, extension_mime: &str) -> Option<String> {
     let from_magic = detect_mime_type_from_file_content(file, PackageInspection::FullArchive)?;
 
-    if from_magic == PLAIN_TEXT_MIME_TYPE {
+    if from_magic == PLAIN_TEXT_MIME_TYPE && SUPPORTED_MIME_TYPES.contains(extension_mime) {
         return None;
     }
     if is_generic_xml_mime(&from_magic)
@@ -1077,7 +1185,21 @@ fn detect_mime_type_from_file_content(
         return None;
     }
 
-    let from_magic = detect_mime_type_from_bytes_with_inspection(&header[..bytes_read], package_inspection).ok()?;
+    let header = &header[..bytes_read];
+    let content_continues = bytes_read == MIME_SNIFF_LENGTH
+        && file
+            .metadata()
+            .ok()
+            .is_some_and(|metadata| metadata.len() > bytes_read as u64);
+    let json_candidate = header_may_start_json(file, header, content_continues);
+    let mut from_magic = match detect_mime_type_from_bytes_with_inspection(header, package_inspection) {
+        Ok(detected) => detected,
+        Err(_) if json_candidate => JSON_MIME_TYPE.to_string(),
+        Err(_) => return None,
+    };
+    if matches!(from_magic.as_str(), PLAIN_TEXT_MIME_TYPE | OCTET_STREAM_MIME_TYPE) && json_candidate {
+        from_magic = JSON_MIME_TYPE.to_string();
+    }
     #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
     if package_inspection == PackageInspection::FullArchive
         && (from_magic == ZIP_MIME_TYPE || from_magic.starts_with("application/vnd.oasis.opendocument."))
@@ -1087,6 +1209,28 @@ fn detect_mime_type_from_file_content(
     }
 
     Some(from_magic)
+}
+
+fn header_may_start_json(file: &mut std::fs::File, header: &[u8], content_continues: bool) -> bool {
+    if let Some(byte) = header
+        .iter()
+        .copied()
+        .find(|byte| !matches!(byte, b' ' | b'\n' | b'\r' | b'\t'))
+    {
+        return content_continues && matches!(byte, b'{' | b'[');
+    }
+    if !content_continues {
+        return false;
+    }
+
+    let mut continuation = [0_u8; MIME_SNIFF_LENGTH];
+    let bytes_read = file.read(&mut continuation).unwrap_or_default();
+    let _ = file.seek(SeekFrom::Start(header.len() as u64));
+    continuation[..bytes_read]
+        .iter()
+        .copied()
+        .find(|byte| !matches!(byte, b' ' | b'\n' | b'\r' | b'\t'))
+        .is_some_and(|byte| matches!(byte, b'{' | b'['))
 }
 
 /// Generic XML signatures cannot distinguish specialized XML vocabularies.
@@ -2277,6 +2421,130 @@ mod tests {
         std::fs::write(&path, br#"{"asset":{"version":"2.0"}}"#).unwrap();
 
         assert_eq!(detect_or_validate(path.to_str(), None).unwrap(), JSON_MIME_TYPE);
+    }
+
+    #[test]
+    fn prefer_content_bytes_falls_back_from_unsupported_specialized_extension_to_plain_text() {
+        let detected = detect_or_validate_bytes(
+            b"ordinary prose without markup",
+            Some("feed.atom"),
+            None,
+            crate::core::config::MimeDetectionPolicy::PreferContent,
+        )
+        .unwrap();
+
+        assert_eq!(detected, PLAIN_TEXT_MIME_TYPE);
+    }
+
+    #[test]
+    fn prefer_content_file_falls_back_from_unsupported_specialized_extension_to_plain_text() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("feed.atom");
+        std::fs::write(&path, b"ordinary prose without markup").unwrap();
+        let mut file = File::open(&path).unwrap();
+
+        let detected = detect_or_validate_file(
+            &path,
+            &mut file,
+            None,
+            crate::core::config::MimeDetectionPolicy::PreferContent,
+        )
+        .unwrap();
+
+        assert_eq!(detected, PLAIN_TEXT_MIME_TYPE);
+    }
+
+    #[test]
+    fn content_only_bytes_ignores_a_supported_filename_extension() {
+        let detected = detect_or_validate_bytes(
+            br#"{"kind":"content"}"#,
+            Some("document.txt"),
+            None,
+            crate::core::config::MimeDetectionPolicy::ContentOnly,
+        )
+        .unwrap();
+
+        assert_eq!(detected, JSON_MIME_TYPE);
+    }
+
+    #[test]
+    fn content_only_file_ignores_a_supported_filename_extension() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("document.txt");
+        std::fs::write(&path, br#"{"kind":"content"}"#).unwrap();
+        let mut file = File::open(&path).unwrap();
+
+        let detected = detect_or_validate_file(
+            &path,
+            &mut file,
+            None,
+            crate::core::config::MimeDetectionPolicy::ContentOnly,
+        )
+        .unwrap();
+
+        assert_eq!(detected, JSON_MIME_TYPE);
+    }
+
+    #[test]
+    fn octet_stream_file_hint_falls_back_to_each_detection_policy() {
+        use crate::core::config::MimeDetectionPolicy;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("document.txt");
+        std::fs::write(&path, br#"{"kind":"content"}"#).unwrap();
+
+        for (policy, expected) in [
+            (MimeDetectionPolicy::PreferContent, JSON_MIME_TYPE),
+            (MimeDetectionPolicy::TrustExtension, PLAIN_TEXT_MIME_TYPE),
+            (MimeDetectionPolicy::ContentOnly, JSON_MIME_TYPE),
+        ] {
+            let mut file = File::open(&path).unwrap();
+            let detected = detect_or_validate_file(&path, &mut file, Some(OCTET_STREAM_MIME_TYPE), policy).unwrap();
+            assert_eq!(detected, expected, "unexpected MIME for {policy:?}");
+        }
+    }
+
+    #[test]
+    fn content_detection_parses_complete_json_beyond_the_header() {
+        use crate::core::config::MimeDetectionPolicy;
+
+        let dir = tempdir().unwrap();
+        let prefix = r#"{"payload":""#;
+        let split_multibyte = format!("{}{}é\"}}", prefix, "x".repeat(MIME_SNIFF_LENGTH - prefix.len() - 1));
+        let cases = [
+            format!(r#"{{"payload":"{}"}}"#, "x".repeat(MIME_SNIFF_LENGTH)),
+            format!("{}{{\"payload\":true}}", " ".repeat(MIME_SNIFF_LENGTH + 1)),
+            split_multibyte,
+        ];
+
+        for (index, content) in cases.iter().enumerate() {
+            let path = dir.path().join(format!("document-{index}.txt"));
+            std::fs::write(&path, content).unwrap();
+            for policy in [MimeDetectionPolicy::PreferContent, MimeDetectionPolicy::ContentOnly] {
+                let mut file = File::open(&path).unwrap();
+                let detected = detect_or_validate_file(&path, &mut file, None, policy).unwrap();
+                assert_eq!(
+                    detected, JSON_MIME_TYPE,
+                    "unexpected MIME for case {index} with {policy:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn content_detection_does_not_treat_whitespace_prefixed_prose_as_json() {
+        use crate::core::config::MimeDetectionPolicy;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("document.txt");
+        let content = format!("{}ordinary prose", " ".repeat(MIME_SNIFF_LENGTH));
+        std::fs::write(&path, content).unwrap();
+
+        for policy in [MimeDetectionPolicy::PreferContent, MimeDetectionPolicy::ContentOnly] {
+            let mut file = File::open(&path).unwrap();
+            let detected = detect_or_validate_file(&path, &mut file, None, policy).unwrap();
+            assert_eq!(detected, PLAIN_TEXT_MIME_TYPE, "unexpected MIME for {policy:?}");
+        }
     }
 
     #[test]
