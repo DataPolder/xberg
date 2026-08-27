@@ -307,11 +307,14 @@ manifest = "packages/swift/Package.swift"
 # xberg_swift.a and libxberg_ffi.a explicitly, and neither exists until
 # `cargo build -p xberg-swift` has run at least once. Skip that build when
 # it is already satisfied (release preferred, matching resolvedStaticLib's
-# own preference) so repeat runs stay fast. If the build itself fails,
-# report it and move on instead of letting the `before` hook fail: a Swift
-# build failure should leave Swift's snippets failing typecheck (the
-# `Xberg` module still won't exist), not silently zero the other 14
-# languages. The trailing `; true` is load-bearing: with no `set -e`, a
+# own preference) so repeat runs stay fast. Always run `swift build` after
+# that check: SwiftPM incrementally refreshes Xberg.swiftmodule when the
+# installed Swift compiler changes, preventing an older `.build` module
+# from poisoning every snippet import. If either build fails, report it and
+# move on instead of letting the `before` hook fail: a Swift build failure
+# should leave Swift's snippets failing typecheck (the `Xberg` module still
+# won't exist), not silently zero the other 14 languages. The trailing
+# `; true` is load-bearing: with no `set -e`, a
 # `sh -c` one-liner's exit status is that of its LAST command, and an
 # `if/elif/.../fi` with no matching branch inherits the exit status of the
 # last condition it tested -- without `; true`, a chain that ends by
@@ -319,7 +322,7 @@ manifest = "packages/swift/Package.swift"
 # and take the whole snippet run down, exactly the failure mode this guard
 # exists to prevent. ~keep
 before = [
-  'if ! command -v swift >/dev/null 2>&1; then echo "alef: swift not on PATH; skipping cargo build (Swift snippets will fail typecheck)"; elif [ -f ../../target/release/libxberg_swift.a ] && [ -f ../../target/release/libxberg_ffi.a ]; then echo "alef: release staticlibs already built; skipping cargo build"; elif [ -f ../../target/debug/libxberg_swift.a ] && [ -f ../../target/debug/libxberg_ffi.a ]; then echo "alef: debug staticlibs already built; skipping cargo build"; else cargo build --manifest-path rust/Cargo.toml -p xberg-swift -p xberg-ffi; fi',
+  'if ! command -v swift >/dev/null 2>&1; then echo "alef: swift not on PATH; skipping Swift session build (Swift snippets will fail typecheck)"; else if { [ -f ../../target/release/libxberg_swift.a ] || [ -f ../../target/debug/libxberg_swift.a ]; } && { [ -f ../../target/release/libxberg_ffi.a ] || [ -f ../../target/debug/libxberg_ffi.a ]; }; then echo "alef: required staticlibs already built; skipping cargo build"; else cargo build --manifest-path rust/Cargo.toml -p xberg-swift -p xberg-ffi || echo "alef: cargo build failed (Swift snippets will fail typecheck)"; fi; swift build || echo "alef: swift build failed (Swift snippets will fail typecheck)"; fi; true',
 ]
 
 [workspace.docs.snippets.sessions.zig]
