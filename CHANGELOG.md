@@ -124,6 +124,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `xberg batch` so mixed-success runs emit every successful document and every attributed
   per-input error before returning a nonzero status; JSON and TOON timing slots remain aligned with
   inputs, and TOON now uses the documented batch envelope.
+- Fixed Tesseract preprocessing so deskew, denoise, contrast enhancement, and Otsu, adaptive, and
+  Sauvola binarization settings transform the OCR raster on native and WebAssembly backends;
+  WebAssembly Tesseract now rejects images exceeding 4096 × 4096 pixels before decoding.
 - Fixed the OpenAPI document's dangling Djot attribute reference so schema validators and client generators can
   resolve every advertised component (#1505).
 - XML and JSON content with unsupported specialized extensions now routes through the supported generic extractor

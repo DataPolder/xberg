@@ -7,7 +7,7 @@ use crate::ocr::error::OcrError;
 use crate::ocr::types::TesseractConfig;
 use xberg_tesseract::TesseractAPI;
 
-const TESSERACT_RESULT_SCHEMA_VERSION: u8 = 3;
+const TESSERACT_RESULT_SCHEMA_VERSION: u8 = 4;
 
 /// Compute a deterministic hash of the OCR configuration.
 ///
@@ -265,6 +265,10 @@ mod tests {
         let config = create_test_config();
 
         assert_ne!(hash_config_for_schema(&config, 1), hash_config_for_schema(&config, 2));
+        assert_ne!(
+            hash_config(&config),
+            hash_config_for_schema(&config, TESSERACT_RESULT_SCHEMA_VERSION - 1)
+        );
     }
 
     #[test]

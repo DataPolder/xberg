@@ -14,6 +14,9 @@ use crate::ocr::cache::OcrCache;
 use crate::ocr::conversion::{TsvRow, iterator_word_to_element, tsv_row_to_element};
 use crate::ocr::error::OcrError;
 use crate::ocr::hocr_parser::{DictionaryLineFilter, parse_hocr_to_internal_document_with_page_offset};
+use crate::ocr::preprocessing::preprocess_pix;
+#[cfg(test)]
+use crate::ocr::preprocessing::should_invert_for_polarity;
 #[cfg(feature = "pdf")]
 use crate::ocr::table::post_process_table;
 use crate::ocr::table::{extract_words_from_tsv, reconstruct_table, table_to_markdown};
@@ -389,36 +392,6 @@ const MIN_ORIENTATION_CONFIDENCE: f32 = 0.35;
 #[cfg(auto_rotate)]
 const _: () = assert!(MIN_ORIENTATION_CONFIDENCE == crate::doc_orientation::MIN_CONFIDENCE);
 
-/// Grayscale mean (0–255) below which the image is considered background-
-/// dark rather than background-light.
-///
-/// Scanned documents are background-dominated (background typically covers
-/// 85–95% of pixel area), so the grayscale mean tracks background tone far
-/// more than foreground text tone. A mean below this value means most of the
-/// image is dark, i.e. a plausible dark background.
-const DARK_BACKGROUND_MEAN_THRESHOLD: f64 = 100.0;
-
-/// Grayscale value (0–255) at or above which a pixel counts as "light" when
-/// computing the light-pixel fraction used to guard polarity auto-detection.
-const LIGHT_PIXEL_VALUE_THRESHOLD: u8 = 180;
-
-/// Minimum fraction of light pixels required, alongside a dark mean, before
-/// auto-detection treats an image as light-text-on-dark-background.
-///
-/// Without this guard, a naive `mean < threshold` check would also fire on
-/// uniformly dark, non-text images (e.g. a dark photograph or a heavily
-/// shadowed scan) where inverting would corrupt the image rather than fix
-/// it. Real text/foreground content typically covers at least a small
-/// fraction of a page, so requiring *some* light pixels alongside the dark
-/// mean distinguishes "light text on a dark background" from "uniformly
-/// dark image".
-const MIN_LIGHT_PIXEL_FRACTION_FOR_INVERT: f64 = 0.01;
-
-/// Sampling grid spacing (pixels) used when computing polarity statistics.
-/// Keeps polarity detection cheap on large scans while remaining
-/// representative.
-const POLARITY_SAMPLE_STRIDE: i32 = 4;
-
 /// Source resolution assumed when OCR receives the original image unchanged and the caller did
 /// not tell us what resolution it really is.
 ///
@@ -446,6 +419,7 @@ struct PreparedOcrImage {
     height: u32,
     source_dpi: i32,
     apply_pix_preprocessing: bool,
+    preprocessing: Option<crate::types::ImagePreprocessingConfig>,
     image_preprocessing: Option<crate::types::ImagePreprocessingMetadata>,
 }
 
@@ -485,6 +459,7 @@ fn prepare_ocr_image(
             // says it is; 72 remains the assumption only when nobody knows.
             source_dpi: known_source_dpi.map_or(RAW_IMAGE_SOURCE_DPI, |dpi| dpi.round() as i32),
             apply_pix_preprocessing: false,
+            preprocessing: None,
             image_preprocessing: None,
         };
     };
@@ -576,6 +551,7 @@ fn prepare_preprocessed_ocr_image(
                 height: normalized_height,
                 source_dpi,
                 apply_pix_preprocessing: true,
+                preprocessing: Some(preprocessing.clone()),
                 image_preprocessing: Some(result.metadata),
             }
         }
@@ -589,62 +565,11 @@ fn prepare_preprocessed_ocr_image(
                 // one. The 300 fallback is a guess for when there is nothing better.
                 source_dpi: known_source_dpi.map_or(PREPROCESSING_FALLBACK_SOURCE_DPI, |dpi| dpi.round() as i32),
                 apply_pix_preprocessing: true,
+                preprocessing: Some(preprocessing.clone()),
                 image_preprocessing: None,
             }
         }
     }
-}
-
-/// Decide whether an image should be inverted before OCR.
-///
-/// `force_invert` mirrors `ImagePreprocessingConfig.invert_colors`: `true`
-/// unconditionally forces inversion (an explicit override for cases where
-/// auto-detection disagrees); `false` (the default) falls back to
-/// auto-detection from `mean_gray` and `light_fraction` — see
-/// `DARK_BACKGROUND_MEAN_THRESHOLD` and `MIN_LIGHT_PIXEL_FRACTION_FOR_INVERT`.
-///
-/// This is a pure function so the polarity decision can be unit-tested
-/// without linking native Tesseract/Leptonica.
-fn should_invert_for_polarity(mean_gray: f64, light_fraction: f64, force_invert: bool) -> bool {
-    force_invert
-        || (mean_gray < DARK_BACKGROUND_MEAN_THRESHOLD && light_fraction >= MIN_LIGHT_PIXEL_FRACTION_FOR_INVERT)
-}
-
-/// Preprocess a raw Pix before handing it to Tesseract.
-///
-/// Order matters: polarity (light-on-dark vs. dark-on-light) is detected and
-/// corrected *first*, because `background_normalize` assumes a light
-/// background and Tesseract's own binarizer assumes dark text on a light
-/// background. `force_invert` mirrors `ImagePreprocessingConfig.invert_colors`
-/// (see [`should_invert_for_polarity`]).
-fn preprocess_pix(pix: xberg_tesseract::Pix, force_invert: bool) -> xberg_tesseract::Result<xberg_tesseract::Pix> {
-    let polarity_stats = pix
-        .to_grayscale()
-        .and_then(|gray| gray.grayscale_stats(LIGHT_PIXEL_VALUE_THRESHOLD, POLARITY_SAMPLE_STRIDE))
-        .ok();
-
-    let invert = match polarity_stats {
-        Some((mean_gray, light_fraction)) => should_invert_for_polarity(mean_gray, light_fraction, force_invert),
-        None => force_invert,
-    };
-
-    let source = if invert {
-        let inverted = pix.invert()?;
-        drop(pix);
-        inverted
-    } else {
-        pix
-    };
-
-    let normalized = source.background_normalize()?;
-    drop(source);
-
-    let sharpened = normalized.unsharp_mask(3, 0.5)?;
-    drop(normalized);
-
-    let grayscale = sharpened.to_grayscale()?;
-    drop(sharpened);
-    Ok(grayscale)
 }
 
 /// Check whether a center point (x, y) lies within a bounding box.
@@ -971,10 +896,14 @@ pub(super) fn perform_ocr(
         ci_debug_enabled,
         config.source_dpi,
     );
-    let image_data = prepared_image.data;
-    let width = prepared_image.width;
-    let height = prepared_image.height;
+    #[cfg_attr(not(auto_rotate), allow(unused_mut))]
+    let mut image_data = prepared_image.data;
+    #[cfg_attr(not(auto_rotate), allow(unused_mut))]
+    let mut width = prepared_image.width;
+    #[cfg_attr(not(auto_rotate), allow(unused_mut))]
+    let mut height = prepared_image.height;
     let source_dpi = prepared_image.source_dpi;
+    let preprocessing = prepared_image.preprocessing;
     let image_preprocessing = prepared_image.image_preprocessing;
     #[cfg_attr(not(auto_rotate), allow(unused_mut))]
     let mut ocr_image_width = width;
@@ -982,7 +911,6 @@ pub(super) fn perform_ocr(
     let mut ocr_image_height = height;
 
     let bytes_per_pixel: u32 = 3;
-    let bytes_per_line = width * bytes_per_pixel;
 
     let languages: Vec<String> = config.language.split('+').map(|lang| lang.trim().to_string()).collect();
     let tessdata_path = resolve_tessdata_path(&languages, config.tessdata_path.as_deref())?;
@@ -1047,61 +975,7 @@ pub(super) fn perform_ocr(
     psm_result.map_err(|e| OcrError::InvalidConfiguration(format!("Failed to set PSM mode: {}", e)))?;
 
     apply_tesseract_variables(&api, config)?;
-
-    let force_invert_colors = config.preprocessing.as_ref().map(|p| p.invert_colors).unwrap_or(false);
-
-    let processed_pix: Option<xberg_tesseract::Pix> = if prepared_image.apply_pix_preprocessing {
-        match xberg_tesseract::Pix::from_raw_rgb(&image_data, width, height) {
-            Ok(mut pix) => {
-                if let Ok((xres, yres)) = pix.get_resolution()
-                    && (xres == 0 || yres == 0)
-                {
-                    let _ = pix.set_resolution(72, 72);
-                }
-
-                let processed = preprocess_pix(pix, force_invert_colors);
-                match processed {
-                    Ok(p) => Some(p),
-                    Err(e) => {
-                        tracing::debug!("Leptonica preprocessing failed, using raw image: {}", e);
-                        None
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::debug!("Leptonica Pix creation failed, using raw image: {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    if let Some(ref pix) = processed_pix {
-        api.set_image_2(pix.as_ptr())
-            .map_err(|e| OcrError::ProcessingFailed(format!("Failed to set preprocessed image: {}", e)))?;
-    } else {
-        api.set_image(
-            &image_data,
-            width as i32,
-            height as i32,
-            bytes_per_pixel as i32,
-            bytes_per_line as i32,
-        )
-        .map_err(|e| OcrError::ProcessingFailed(format!("Failed to set image: {}", e)))?;
-    }
-    drop(processed_pix);
-
     let source_dpi = source_dpi.max(70);
-    api.set_source_resolution(source_dpi)
-        .map_err(|e| OcrError::ProcessingFailed(format!("Failed to set source resolution: {}", e)))?;
-
-    log_ci_debug(ci_debug_enabled, "set_image", || {
-        format!(
-            "width={} height={} bytes_per_pixel={} bytes_per_line={} source_dpi={}",
-            width, height, bytes_per_pixel, bytes_per_line, source_dpi
-        )
-    });
 
     // Only (degrees, confidence): the ONNX PP-LCNet orientation classifier used
     // here has no script-detection capability, unlike Tesseract's own
@@ -1129,12 +1003,26 @@ pub(super) fn perform_ocr(
 
     #[cfg(auto_rotate)]
     if auto_rotate_enabled {
-        let orientation_result = image::RgbImage::from_raw(width, height, image_data.clone())
-            .ok_or_else(|| crate::error::XbergError::Ocr {
+        let expected_rgb_len = usize::try_from(width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(bytes_per_pixel as usize));
+        let orientation_result = if expected_rgb_len != Some(image_data.len()) {
+            Err(crate::error::XbergError::Ocr {
                 message: "auto_rotate: image buffer does not match dimensions".to_string(),
                 source: None,
             })
-            .and_then(|img| doc_orientation_detector().detect(&img));
+        } else {
+            let image = image::RgbImage::from_raw(width, height, std::mem::take(&mut image_data))
+                .expect("validated RGB buffer length must match dimensions");
+            let result = doc_orientation_detector().detect(&image);
+            image_data = image.into_raw();
+            result
+        };
 
         match orientation_result {
             Err(e) => {
@@ -1158,36 +1046,9 @@ pub(super) fn perform_ocr(
                     let correction_deg = (360 - orient_deg).rem_euclid(360);
                     let (rotated_data, new_width, new_height) =
                         rotate_rgb_image_data(&image_data, width, height, correction_deg);
-                    let new_bytes_per_line = new_width * bytes_per_pixel;
-
-                    let rotated_pix = if prepared_image.apply_pix_preprocessing {
-                        xberg_tesseract::Pix::from_raw_rgb(&rotated_data, new_width, new_height)
-                            .ok()
-                            .and_then(|pix| preprocess_pix(pix, force_invert_colors).ok())
-                    } else {
-                        None
-                    };
-
-                    if let Some(ref pix) = rotated_pix {
-                        api.set_image_2(pix.as_ptr()).map_err(|e| {
-                            OcrError::ProcessingFailed(format!("Failed to set rotated preprocessed image: {}", e))
-                        })?;
-                    } else {
-                        api.set_image(
-                            &rotated_data,
-                            new_width as i32,
-                            new_height as i32,
-                            bytes_per_pixel as i32,
-                            new_bytes_per_line as i32,
-                        )
-                        .map_err(|e| OcrError::ProcessingFailed(format!("Failed to set rotated image: {}", e)))?;
-                    }
-
-                    drop(rotated_pix);
-
-                    api.set_source_resolution(source_dpi).map_err(|e| {
-                        OcrError::ProcessingFailed(format!("Failed to set source resolution after rotation: {}", e))
-                    })?;
+                    image_data = rotated_data;
+                    width = new_width;
+                    height = new_height;
                     ocr_image_width = new_width;
                     ocr_image_height = new_height;
 
@@ -1205,6 +1066,51 @@ pub(super) fn perform_ocr(
             }
         }
     }
+
+    let processed_pix: Option<xberg_tesseract::Pix> =
+        if let (true, Some(preprocessing)) = (prepared_image.apply_pix_preprocessing, preprocessing.as_ref()) {
+            match xberg_tesseract::Pix::from_raw_rgb(&image_data, width, height) {
+                Ok(pix) => match preprocess_pix(pix, preprocessing) {
+                    Ok(processed) => Some(processed),
+                    Err(error) => {
+                        tracing::debug!(%error, "Leptonica preprocessing failed; using raw image");
+                        None
+                    }
+                },
+                Err(error) => {
+                    tracing::debug!(%error, "Leptonica Pix creation failed; using raw image");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+    if let Some(ref pix) = processed_pix {
+        api.set_image_2(pix.as_ptr())
+            .map_err(|error| OcrError::ProcessingFailed(format!("Failed to set preprocessed image: {error}")))?;
+    } else {
+        let bytes_per_line = width * bytes_per_pixel;
+        api.set_image(
+            &image_data,
+            width as i32,
+            height as i32,
+            bytes_per_pixel as i32,
+            bytes_per_line as i32,
+        )
+        .map_err(|error| OcrError::ProcessingFailed(format!("Failed to set image: {error}")))?;
+    }
+    drop(processed_pix);
+
+    api.set_source_resolution(source_dpi)
+        .map_err(|error| OcrError::ProcessingFailed(format!("Failed to set source resolution: {error}")))?;
+
+    log_ci_debug(ci_debug_enabled, "set_image", || {
+        format!(
+            "width={} height={} bytes_per_pixel={} source_dpi={}",
+            width, height, bytes_per_pixel, source_dpi
+        )
+    });
 
     drop(image_data);
 
@@ -2243,12 +2149,187 @@ mod tests {
         let mut pix = xberg_tesseract::Pix::from_raw_rgb(&rgb_data, width, height).unwrap();
         pix.set_resolution(300, 300).unwrap();
 
-        let processed = preprocess_pix(pix, false).unwrap();
+        let processed = preprocess_pix(pix, &preprocessing_config()).unwrap();
 
         assert_eq!(processed.width(), width as i32);
         assert_eq!(processed.height(), height as i32);
-        assert_eq!(processed.depth(), 8);
-        assert_eq!(processed.get_resolution().unwrap(), (72, 72));
+        assert_eq!(processed.depth(), 1);
+        assert_eq!(processed.get_resolution().unwrap(), (300, 300));
+    }
+
+    fn preprocessing_fixture() -> (Vec<u8>, u32, u32) {
+        const WIDTH: u32 = 640;
+        const HEIGHT: u32 = 480;
+        const CHANNELS: usize = 3;
+        let mut rgb_data = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * CHANNELS);
+
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let background = 176 + ((x * 48) / WIDTH) as u8;
+                let skewed_line = (40..=390).step_by(50).any(|line_y| y.abs_diff(line_y + x / 16) <= 2);
+                let noise = (x * 37 + y * 19).is_multiple_of(97);
+                let value = if noise {
+                    16
+                } else if skewed_line && (20..620).contains(&x) {
+                    72
+                } else {
+                    background
+                };
+                rgb_data.extend_from_slice(&[value, value, value]);
+            }
+        }
+
+        (rgb_data, WIDTH, HEIGHT)
+    }
+
+    fn preprocessing_config() -> crate::types::ImagePreprocessingConfig {
+        crate::types::ImagePreprocessingConfig {
+            target_dpi: 300,
+            auto_rotate: false,
+            deskew: false,
+            denoise: false,
+            contrast_enhance: false,
+            binarization_method: "otsu".to_string(),
+            invert_colors: false,
+        }
+    }
+
+    fn preprocess_fixture_with_config(config: &crate::types::ImagePreprocessingConfig) -> xberg_tesseract::Pix {
+        let (rgb_data, width, height) = preprocessing_fixture();
+        preprocess_rgb_with_config(rgb_data, width, height, config)
+    }
+
+    fn preprocess_rgb_with_config(
+        rgb_data: Vec<u8>,
+        width: u32,
+        height: u32,
+        config: &crate::types::ImagePreprocessingConfig,
+    ) -> xberg_tesseract::Pix {
+        let pix = xberg_tesseract::Pix::from_raw_rgb(&rgb_data, width, height).unwrap();
+        preprocess_pix(pix, config).unwrap()
+    }
+
+    fn sampled_pixel_signature(pix: &xberg_tesseract::Pix) -> Vec<u32> {
+        const SAMPLE_STEP: usize = 8;
+        let mut signature = vec![pix.width() as u32, pix.height() as u32, pix.depth() as u32];
+        for y in (0..pix.height()).step_by(SAMPLE_STEP) {
+            for x in (0..pix.width()).step_by(SAMPLE_STEP) {
+                let sample = pix.clip_rectangle(x, y, 1, 1).unwrap();
+                let (mean, _) = sample.grayscale_stats(1, 1).unwrap();
+                signature.push(mean.round() as u32);
+            }
+        }
+        signature
+    }
+
+    fn binary_pixel_value(pix: &xberg_tesseract::Pix, x: i32, y: i32) -> u32 {
+        let sample = pix.clip_rectangle(x, y, 1, 1).unwrap();
+        let (mean, _) = sample.grayscale_stats(1, 1).unwrap();
+        mean.round() as u32
+    }
+
+    #[test]
+    fn should_change_preprocessed_pixels_when_deskew_is_enabled() {
+        let disabled = preprocessing_config();
+        let enabled = crate::types::ImagePreprocessingConfig {
+            deskew: true,
+            ..disabled.clone()
+        };
+
+        let disabled_signature = sampled_pixel_signature(&preprocess_fixture_with_config(&disabled));
+        let enabled_signature = sampled_pixel_signature(&preprocess_fixture_with_config(&enabled));
+
+        assert_ne!(
+            enabled_signature, disabled_signature,
+            "deskew must affect the OCR raster"
+        );
+    }
+
+    #[test]
+    fn should_change_preprocessed_pixels_when_denoise_is_enabled() {
+        let disabled = preprocessing_config();
+        let enabled = crate::types::ImagePreprocessingConfig {
+            denoise: true,
+            ..disabled.clone()
+        };
+
+        let disabled_signature = sampled_pixel_signature(&preprocess_fixture_with_config(&disabled));
+        let enabled_signature = sampled_pixel_signature(&preprocess_fixture_with_config(&enabled));
+
+        assert_ne!(
+            enabled_signature, disabled_signature,
+            "denoise must affect the OCR raster"
+        );
+    }
+
+    #[test]
+    fn should_change_preprocessed_pixels_when_contrast_enhance_is_enabled() {
+        let disabled = crate::types::ImagePreprocessingConfig {
+            binarization_method: "adaptive".to_string(),
+            ..preprocessing_config()
+        };
+        let enabled = crate::types::ImagePreprocessingConfig {
+            contrast_enhance: true,
+            ..disabled.clone()
+        };
+
+        let disabled_signature = sampled_pixel_signature(&preprocess_fixture_with_config(&disabled));
+        let enabled_signature = sampled_pixel_signature(&preprocess_fixture_with_config(&enabled));
+
+        assert_ne!(
+            enabled_signature, disabled_signature,
+            "contrast enhancement must affect the OCR raster"
+        );
+    }
+
+    #[test]
+    fn should_change_preprocessed_pixels_when_binarization_method_changes() {
+        let otsu = preprocessing_config();
+        let adaptive = crate::types::ImagePreprocessingConfig {
+            binarization_method: "adaptive".to_string(),
+            ..otsu.clone()
+        };
+
+        let otsu_signature = sampled_pixel_signature(&preprocess_fixture_with_config(&otsu));
+        let adaptive_signature = sampled_pixel_signature(&preprocess_fixture_with_config(&adaptive));
+
+        assert_ne!(
+            adaptive_signature, otsu_signature,
+            "binarization_method must select a distinct preprocessing operation"
+        );
+    }
+
+    #[test]
+    fn should_change_preprocessed_pixels_when_sauvola_is_selected() {
+        const WIDTH: u32 = 256;
+        const HEIGHT: u32 = 128;
+        let mut rgb_data = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let background = 72 + ((x * 168) / WIDTH) as u8;
+                let is_text = (20..=100).step_by(20).any(|line| y.abs_diff(line) <= 1) && (8..248).contains(&x);
+                let value = if is_text {
+                    background.saturating_sub(32)
+                } else {
+                    background
+                };
+                rgb_data.extend_from_slice(&[value, value, value]);
+            }
+        }
+        let otsu = preprocessing_config();
+        let sauvola = crate::types::ImagePreprocessingConfig {
+            binarization_method: "sauvola".to_string(),
+            ..otsu.clone()
+        };
+
+        let otsu_signature =
+            sampled_pixel_signature(&preprocess_rgb_with_config(rgb_data.clone(), WIDTH, HEIGHT, &otsu));
+        let sauvola_signature = sampled_pixel_signature(&preprocess_rgb_with_config(rgb_data, WIDTH, HEIGHT, &sauvola));
+
+        assert_ne!(
+            sauvola_signature, otsu_signature,
+            "Sauvola must select a distinct operation"
+        );
     }
 
     #[test]
@@ -2281,6 +2362,11 @@ mod tests {
         let prepared = prepare_ocr_image(rgb_data, WIDTH, HEIGHT, None, None, false, None);
 
         assert!(prepared.apply_pix_preprocessing);
+        let preprocessing = prepared
+            .preprocessing
+            .expect("implicit preprocessing must retain its effective configuration");
+        assert!(preprocessing.deskew);
+        assert_eq!(preprocessing.binarization_method, "otsu");
     }
 
     #[test]
@@ -2303,6 +2389,7 @@ mod tests {
         let prepared = prepare_ocr_image(rgb_data, 2, 2, Some(&preprocessing), None, false, None);
 
         assert!(prepared.apply_pix_preprocessing);
+        assert_eq!(prepared.preprocessing.unwrap().target_dpi, 72);
     }
 
     /// #209: when a caller supplies `ImageExtractionConfig`, its `max_image_dimension`
@@ -2510,8 +2597,6 @@ mod tests {
 
     #[test]
     fn test_preprocess_pix_inverts_light_on_dark_image() {
-        // Synthetic light-text-on-dark-background image: dark background (20)
-        // with a bright "text" region covering ~6% of the image.
         let width = 40u32;
         let height = 40u32;
         let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
@@ -2524,31 +2609,15 @@ mod tests {
         }
 
         let pix = xberg_tesseract::Pix::from_raw_rgb(&rgb_data, width, height).unwrap();
-        let original_gray = pix.to_grayscale().unwrap();
-        let (original_mean, _) = original_gray
-            .grayscale_stats(LIGHT_PIXEL_VALUE_THRESHOLD, POLARITY_SAMPLE_STRIDE)
-            .unwrap();
-        drop(original_gray);
+        let processed = preprocess_pix(pix, &preprocessing_config()).unwrap();
 
-        // Auto-detection with no explicit override should invert: the result's
-        // background (post background_normalize + grayscale) should be light,
-        // i.e. brighter on average than the raw dark-background source.
-        let processed = preprocess_pix(pix, false).unwrap();
-        let (processed_mean, _) = processed
-            .grayscale_stats(LIGHT_PIXEL_VALUE_THRESHOLD, POLARITY_SAMPLE_STRIDE)
-            .unwrap();
-
-        assert!(
-            processed_mean > original_mean,
-            "expected inverted+normalized output to be brighter than the dark-background \
-             source (original_mean={original_mean}, processed_mean={processed_mean})"
-        );
+        assert_eq!(processed.depth(), 1);
+        assert_eq!(binary_pixel_value(&processed, 0, 0), 0, "background must be white");
+        assert_eq!(binary_pixel_value(&processed, 10, 11), 1, "text must be black");
     }
 
     #[test]
     fn test_preprocess_pix_does_not_invert_dark_on_light_image() {
-        // A normal dark-text-on-light-paper image should not be inverted:
-        // processing should keep (or increase) brightness, not flip polarity.
         let width = 40u32;
         let height = 40u32;
         let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
@@ -2561,15 +2630,11 @@ mod tests {
         }
 
         let pix = xberg_tesseract::Pix::from_raw_rgb(&rgb_data, width, height).unwrap();
-        let processed = preprocess_pix(pix, false).unwrap();
-        let (processed_mean, _) = processed
-            .grayscale_stats(LIGHT_PIXEL_VALUE_THRESHOLD, POLARITY_SAMPLE_STRIDE)
-            .unwrap();
+        let processed = preprocess_pix(pix, &preprocessing_config()).unwrap();
 
-        assert!(
-            processed_mean > DARK_BACKGROUND_MEAN_THRESHOLD,
-            "expected light-background image to stay light after preprocessing (mean={processed_mean})"
-        );
+        assert_eq!(processed.depth(), 1);
+        assert_eq!(binary_pixel_value(&processed, 0, 0), 0, "background must be white");
+        assert_eq!(binary_pixel_value(&processed, 10, 11), 1, "text must be black");
     }
 
     #[cfg(auto_rotate)]

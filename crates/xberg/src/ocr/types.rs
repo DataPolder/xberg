@@ -242,13 +242,24 @@ impl Default for TesseractConfig {
 impl TesseractConfig {
     #[cfg(feature = "ocr")]
     pub(crate) fn validate(&self) -> Result<(), String> {
-        match self.output_format.as_str() {
-            "text" | "markdown" | "hocr" | "tsv" => Ok(()),
-            _ => Err(format!(
+        if !matches!(self.output_format.as_str(), "text" | "markdown" | "hocr" | "tsv") {
+            return Err(format!(
                 "Invalid output_format: '{}'. Must be one of: text, markdown, hocr, tsv",
                 self.output_format
-            )),
+            ));
         }
+        if let Some(preprocessing) = &self.preprocessing
+            && !matches!(
+                preprocessing.binarization_method.to_ascii_lowercase().as_str(),
+                "otsu" | "adaptive" | "sauvola"
+            )
+        {
+            return Err(format!(
+                "Invalid binarization method '{}'. Must be one of: otsu, adaptive, sauvola",
+                preprocessing.binarization_method
+            ));
+        }
+        Ok(())
     }
 }
 
