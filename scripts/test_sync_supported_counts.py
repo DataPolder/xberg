@@ -95,6 +95,36 @@ def test_verify_recognizes_supports_file_formats() -> None:
     assert errors == ["tool.py:1: advertises 101 formats; registry has 100"]
 
 
+def test_verify_recognizes_document_formats_and_mime_extension_claims() -> None:
+    errors, advertisements = verify_files(
+        Counts(100, 120),
+        [
+            TextFile(Path("reader.ts"), "Reader for 101 document formats powered by Xberg.\n"),
+            TextFile(Path("lib.rs"), "Comprehensive MIME type detection (119 file extensions)\n"),
+        ],
+    )
+    assert advertisements == 2
+    assert errors == [
+        "reader.ts:1: advertises 101 formats; registry has 100",
+        "lib.rs:1: advertises 119 file extensions; registry has 120",
+    ]
+
+
+def test_verify_does_not_self_attribute_competitor_document_or_mime_claims() -> None:
+    errors, advertisements = verify_files(
+        Counts(100, 120),
+        [
+            TextFile(
+                Path("comparison.md"),
+                "Xberg supports 100 document formats; Competitor supports 80 document formats.\n"
+                "Xberg supports 100 formats; Competitor MIME supports 80 file extensions.\n",
+            )
+        ],
+    )
+    assert errors == []
+    assert advertisements == 2
+
+
 def test_verify_does_not_borrow_context_from_an_adjacent_competitor_claim() -> None:
     errors, advertisements = verify_files(
         Counts(100, 120),

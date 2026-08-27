@@ -78,14 +78,18 @@ PRODUCT_ATTRIBUTION = re.compile(
     re.IGNORECASE,
 )
 FORMAT_STRUCTURE = re.compile(r"\bformats\s+(?:across|including|with)\b|\bformats\s*[·(]", re.IGNORECASE)
-DIRECT_SUPPORT_CLAIM = re.compile(r"\bSupports\s+\d+\s+file formats\b")
+DIRECT_SUPPORT_CLAIM = re.compile(r"\bSupports\s+\d+\s+(?:file|document) formats\b")
 FORMAT_HEADLINE = re.compile(
-    r"^\s*(?:\d+\.\s*)?\*\*\d+\s+(?:file\s+)?formats\*\*\s*:",
+    r"^\s*(?:\d+\.\s*)?\*\*\d+\s+(?:(?:file|document)\s+)?formats\*\*\s*:",
     re.IGNORECASE,
 )
 EXTENSION_HEADLINE = re.compile(r"\*\*\d+\s+file extensions\*\*", re.IGNORECASE)
+EXTENSION_STRUCTURE = re.compile(
+    r"\bComprehensive MIME type detection\s*\(\s*\d+\s+file extensions\s*\)",
+    re.IGNORECASE,
+)
 CLAUSE_BOUNDARY = re.compile(r";|[!?](?=\s|$)|\.(?=\s+[A-Z]|\s*$)")
-FORMAT_CLAIM = re.compile(r"(?<![\d~])(?P<count>\d+)\s+(?:file\s+)?formats\b", re.IGNORECASE)
+FORMAT_CLAIM = re.compile(r"(?<![\d~])(?P<count>\d+)\s+(?:(?:file|document)\s+)?formats\b", re.IGNORECASE)
 EXTENSION_CLAIM = re.compile(r"(?<!\d)(?P<count>\d+)\s+file extensions\b", re.IGNORECASE)
 REGISTRY_START = re.compile(r"\b(?:static|const)\s+FORMATS\s*:[^=]+?=\s*&\[")
 ENTRY_START = re.compile(r"\bFormatEntry\s*\{")
@@ -199,16 +203,17 @@ def parse_registry(source: str) -> Counts:
     return Counts(formats=len(entry_starts), extensions=len(extensions))
 
 
-def _format_claim_is_product(line: str, advertised: int) -> bool:
+def _format_claim_is_product(line: str, advertised: int, attribution_text: str | None = None) -> bool:
     if advertised < MINIMUM_PRODUCT_FORMAT_COUNT or advertised > MAXIMUM_PRODUCT_FORMAT_COUNT:
         return False
+    attribution_text = line if attribution_text is None else attribution_text
     return any(
-        pattern.search(line) is not None
-        for pattern in (
-            PRODUCT_ATTRIBUTION,
-            FORMAT_STRUCTURE,
-            DIRECT_SUPPORT_CLAIM,
-            FORMAT_HEADLINE,
+        pattern.search(text) is not None
+        for pattern, text in (
+            (PRODUCT_ATTRIBUTION, attribution_text),
+            (FORMAT_STRUCTURE, line),
+            (DIRECT_SUPPORT_CLAIM, line),
+            (FORMAT_HEADLINE, line),
         )
     )
 
@@ -216,12 +221,16 @@ def _format_claim_is_product(line: str, advertised: int) -> bool:
 def _extension_claim_is_product(line: str, advertised: int) -> bool:
     if advertised < MINIMUM_PRODUCT_EXTENSION_COUNT or advertised > MAXIMUM_PRODUCT_EXTENSION_COUNT:
         return False
-    if PRODUCT_ATTRIBUTION.search(line) is not None or EXTENSION_HEADLINE.search(line) is not None:
+    if (
+        PRODUCT_ATTRIBUTION.search(line) is not None
+        or EXTENSION_HEADLINE.search(line) is not None
+        or EXTENSION_STRUCTURE.search(line) is not None
+    ):
         return True
     return any(_format_claim_is_product(line, int(match.group("count"))) for match in FORMAT_CLAIM.finditer(line))
 
 
-def _claim_clause(line: str, claim_start: int, claim_end: int) -> str:
+def _claim_clause(line: str, claim_start: int, claim_end: int) -> tuple[str, int]:
     boundaries = list(CLAUSE_BOUNDARY.finditer(line))
     start = max(
         (boundary.end() for boundary in boundaries if boundary.end() <= claim_start),
@@ -231,7 +240,7 @@ def _claim_clause(line: str, claim_start: int, claim_end: int) -> str:
         (boundary.start() for boundary in boundaries if boundary.start() >= claim_end),
         default=len(line),
     )
-    return line[start:end]
+    return line[start:end], start
 
 
 def _claims(text_file: TextFile) -> list[Claim]:
@@ -241,8 +250,11 @@ def _claims(text_file: TextFile) -> list[Claim]:
     for line_index, line in enumerate(lines):
         for match in FORMAT_CLAIM.finditer(line):
             advertised = int(match.group("count"))
-            clause = _claim_clause(line, match.start(), match.end())
-            if not _format_claim_is_product(clause, advertised):
+            clause, clause_start = _claim_clause(line, match.start(), match.end())
+            relative_start = match.start() - clause_start
+            relative_end = match.end() - clause_start
+            attribution_text = f"{clause[:relative_start]}{clause[relative_end:]}"
+            if not _format_claim_is_product(clause, advertised, attribution_text):
                 continue
             claims.append(
                 Claim(
@@ -255,7 +267,7 @@ def _claims(text_file: TextFile) -> list[Claim]:
             )
         for match in EXTENSION_CLAIM.finditer(line):
             advertised = int(match.group("count"))
-            clause = _claim_clause(line, match.start(), match.end())
+            clause, _ = _claim_clause(line, match.start(), match.end())
             if not _extension_claim_is_product(clause, advertised):
                 continue
             claims.append(
