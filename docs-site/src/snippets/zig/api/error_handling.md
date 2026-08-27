@@ -9,6 +9,7 @@ pub fn main() !void {
         switch (err) {
             error.OutOfMemory => std.debug.print("Out of memory\n", .{}),
             error.UnknownFfiError => std.debug.print("Extraction failed: {s}\n", .{@errorName(err)}),
+            else => std.debug.print("Extraction failed: {s}\n", .{@errorName(err)}),
         }
         if (xberg._last_error()) |context| {
             std.debug.print("  context: {s}\n", .{context});

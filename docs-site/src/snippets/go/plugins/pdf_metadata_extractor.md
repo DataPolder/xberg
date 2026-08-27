@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"sync/atomic"
 
@@ -30,9 +31,21 @@ func (processor *pdfMetadataExtractor) EstimatedDurationMs(_ xberg.ExtractedDocu
 	return 1
 }
 func (processor *pdfMetadataExtractor) Process(
-	_ xberg.ExtractedDocument,
+	result xberg.ExtractedDocument,
 	_ xberg.ExtractionConfig,
 ) error {
+	if result.Metadata == nil {
+		result.Metadata = &xberg.Metadata{}
+	}
+	if result.Metadata.Additional == nil {
+		result.Metadata.Additional = make(map[string]json.RawMessage)
+	}
+	contentLength, err := json.Marshal(len(result.Content))
+	if err != nil {
+		return err
+	}
+	result.Metadata.Additional["pdf_content_length"] = contentLength
+	result.Metadata.Additional["pdf_processor_version"] = json.RawMessage(`"1.0.0"`)
 	processor.processedCount.Add(1)
 	return nil
 }

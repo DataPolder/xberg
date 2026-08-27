@@ -11,7 +11,20 @@ const rl = readline.createInterface({
   terminal: false,
 });
 
-const request = {
+const initializeRequest = {
+  jsonrpc: "2.0",
+  id: 1,
+  method: "initialize",
+  params: {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "xberg-example", version: "1.0.0" },
+  },
+};
+
+const extractionRequest = {
+  jsonrpc: "2.0",
+  id: 2,
   method: "tools/call",
   params: {
     name: "extract",
@@ -22,12 +35,21 @@ const request = {
   },
 };
 
-mcpProcess.stdin.write(JSON.stringify(request) + "\n");
+mcpProcess.stdin.write(`${JSON.stringify(initializeRequest)}\n`);
 
 rl.on("line", (line) => {
-  const response = JSON.parse(line);
+  const response: unknown = JSON.parse(line);
   console.log(response);
-  mcpProcess.kill();
+
+  if (typeof response !== "object" || response === null || !("id" in response)) {
+    return;
+  }
+  if (response.id === 1) {
+    mcpProcess.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    mcpProcess.stdin.write(`${JSON.stringify(extractionRequest)}\n`);
+  } else if (response.id === 2) {
+    mcpProcess.kill();
+  }
 });
 
 mcpProcess.on("error", (err) => {
