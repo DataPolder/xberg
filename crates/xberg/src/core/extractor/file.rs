@@ -13,11 +13,70 @@ use crate::core::mime::{LEGACY_POWERPOINT_MIME_TYPE, LEGACY_WORD_MIME_TYPE};
 use crate::plugins::InternalDocumentExtractor;
 use crate::plugins::registry::RegisteredDocumentExtractor;
 use crate::types::ExtractedDocument;
+use std::fs::{File, OpenOptions};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 #[cfg(feature = "otel")]
 use tracing::Instrument;
 
 use super::helpers::get_extractor;
+
+#[derive(Clone, Copy)]
+struct FileDetectionChecks {
+    force_ocr_conflict: bool,
+    scanned_pages_ocr_conflict: bool,
+}
+
+fn open_regular_file(path: &Path) -> Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        // ~keep: NONBLOCK prevents a FIFO open from pinning the detection task before handle metadata rejects it.
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+
+    let file = options.open(path).map_err(XbergError::from)?;
+    if !file.metadata().map_err(XbergError::from)?.is_file() {
+        return Err(XbergError::validation(
+            "Extraction input must be a regular file".to_string(),
+        ));
+    }
+    Ok(file)
+}
+
+fn detect_file_mime_blocking(path: &Path, mime_type: Option<&str>, checks: FileDetectionChecks) -> Result<String> {
+    let mut file = open_regular_file(path)?;
+    if checks.force_ocr_conflict {
+        return Err(XbergError::validation(
+            "force_ocr and disable_ocr cannot both be true".to_string(),
+        ));
+    }
+    if checks.scanned_pages_ocr_conflict {
+        return Err(XbergError::validation(
+            "ocr_strategy selects scanned pages for OCR, but disable_ocr is true".to_string(),
+        ));
+    }
+    crate::core::mime::detect_or_validate_file(path, &mut file, mime_type)
+}
+
+#[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
+async fn detect_file_mime(path: &Path, mime_type: Option<&str>, checks: FileDetectionChecks) -> Result<String> {
+    let owned_path = path.to_path_buf();
+    let owned_mime_type = mime_type.map(str::to_owned);
+    tokio::task::spawn_blocking(move || detect_file_mime_blocking(&owned_path, owned_mime_type.as_deref(), checks))
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "file MIME detection task failed");
+            XbergError::Other("File MIME detection task failed".to_string())
+        })?
+}
+
+#[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
+async fn detect_file_mime(path: &Path, mime_type: Option<&str>, checks: FileDetectionChecks) -> Result<String> {
+    detect_file_mime_blocking(path, mime_type, checks)
+}
 
 /// Extract content from a file.
 ///
@@ -74,8 +133,6 @@ pub(crate) async fn extract_file(
     mime_type: Option<&str>,
     config: &ExtractionConfig,
 ) -> Result<ExtractedDocument> {
-    use crate::core::{io, mime};
-
     let path = path.as_ref();
 
     #[cfg(feature = "otel")]
@@ -108,27 +165,15 @@ pub(crate) async fn extract_file(
     };
 
     let extraction_future = Box::pin(async {
-        io::validate_file_exists(path)?;
-
-        if config.force_ocr && config.effective_disable_ocr() {
-            return Err(crate::XbergError::Validation {
-                message: "force_ocr and disable_ocr cannot both be true".to_string(),
-                source: None,
-            });
-        }
-
-        if matches!(
-            config.ocr_strategy,
-            crate::core::config::OcrStrategy::ScannedPages { .. }
-        ) && config.effective_disable_ocr()
-        {
-            return Err(crate::XbergError::Validation {
-                message: "ocr_strategy selects scanned pages for OCR, but disable_ocr is true".to_string(),
-                source: None,
-            });
-        }
-
-        let detected_mime = mime::detect_or_validate(path.to_str(), mime_type)?;
+        let ocr_disabled = config.effective_disable_ocr();
+        let checks = FileDetectionChecks {
+            force_ocr_conflict: config.force_ocr && ocr_disabled,
+            scanned_pages_ocr_conflict: matches!(
+                config.ocr_strategy,
+                crate::core::config::OcrStrategy::ScannedPages { .. }
+            ) && ocr_disabled,
+        };
+        let detected_mime = detect_file_mime(path, mime_type, checks).await?;
 
         #[cfg(not(feature = "office"))]
         match detected_mime.as_str() {
@@ -354,6 +399,47 @@ pub(crate) async fn extract_with_candidates(
     }
 
     Err(last_error.unwrap_or_else(|| XbergError::UnsupportedFormat(mime_type.to_string())))
+}
+
+#[cfg(all(test, feature = "tokio-runtime", not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn should_reject_non_regular_file_before_extraction() {
+        let directory = tempdir().unwrap();
+        let config = ExtractionConfig::default();
+
+        let error = extract_file(directory.path(), Some("text/plain"), &config)
+            .await
+            .expect_err("a directory is not a document file");
+
+        assert!(matches!(
+            error,
+            XbergError::Validation { message, .. } if message == "Extraction input must be a regular file"
+        ));
+    }
+
+    #[tokio::test]
+    async fn should_report_missing_file_before_invalid_ocr_configuration() {
+        let directory = tempdir().unwrap();
+        let missing_file = directory.path().join("missing.txt");
+        let config = ExtractionConfig {
+            force_ocr: true,
+            disable_ocr: true,
+            ..Default::default()
+        };
+
+        let error = extract_file(&missing_file, None, &config)
+            .await
+            .expect_err("a missing file must fail before OCR configuration validation");
+
+        assert!(matches!(
+            error,
+            XbergError::Io(source) if source.kind() == std::io::ErrorKind::NotFound
+        ));
+    }
 }
 
 /// Clear the cache-control field on an `LlmConfig` before it is folded into the

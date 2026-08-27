@@ -11,9 +11,7 @@ use crate::extractors::security::SecurityLimits;
 use crate::{Result, XbergError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
-#[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
-use std::io::{Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -32,6 +30,13 @@ pub struct SupportedFormat {
 #[cfg(feature = "api")]
 pub(crate) const OCTET_STREAM_MIME_TYPE: &str = "application/octet-stream";
 pub(crate) const HTML_MIME_TYPE: &str = "text/html";
+const MIME_SNIFF_LENGTH: usize = 4096;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PackageInspection {
+    HeaderOnly,
+    FullArchive,
+}
 
 /// Element names that identify a markup fragment as HTML rather than generic XML.
 ///
@@ -908,21 +913,15 @@ pub fn validate_mime_type(mime_type: &str) -> Result<String> {
 /// # Returns
 ///
 /// The validated MIME type string.
+#[cfg(test)]
 pub(crate) fn detect_or_validate(path: Option<&str>, mime_type: Option<&str>) -> Result<String> {
     if let Some(mime) = mime_type {
         tracing::debug!(mime_type = %mime, "validating caller-provided MIME type");
         validate_mime_type(mime)
     } else if let Some(p) = path.map(Path::new) {
-        let detected = detect_mime_type(p, true)?;
-        let resolved = match magic_override(p, &detected) {
-            Some(from_magic) => {
-                tracing::debug!(path = %p.display(), extension_mime = %detected, magic_mime = %from_magic,
-                    "extension/content MIME disagree; preferring content");
-                from_magic
-            }
-            None => detected,
-        };
-        validate_mime_type(&resolved)
+        let detected = detect_mime_type(p, true);
+        let mut file = std::fs::File::open(p).ok();
+        resolve_file_mime(p, detected, file.as_mut())
     } else {
         Err(XbergError::validation(
             "Must provide either path or mime_type".to_string(),
@@ -930,30 +929,50 @@ pub(crate) fn detect_or_validate(path: Option<&str>, mime_type: Option<&str>) ->
     }
 }
 
+pub(crate) fn detect_or_validate_file(
+    path: &Path,
+    file: &mut std::fs::File,
+    mime_type: Option<&str>,
+) -> Result<String> {
+    if let Some(mime) = mime_type {
+        tracing::debug!(mime_type = %mime, "validating caller-provided MIME type");
+        return validate_mime_type(mime);
+    }
+
+    resolve_file_mime(path, detect_mime_type(path, false), Some(file))
+}
+
+fn resolve_file_mime(path: &Path, path_detection: Result<String>, file: Option<&mut std::fs::File>) -> Result<String> {
+    let detected = match path_detection {
+        Ok(detected) => detected,
+        Err(path_error) => {
+            if let Some(from_content) =
+                file.and_then(|file| detect_mime_type_from_file_content(file, PackageInspection::HeaderOnly))
+                && let Ok(validated) = validate_mime_type(&from_content)
+            {
+                tracing::debug!(path = %path.display(), mime_type = %validated,
+                        "path MIME unavailable; matched via content");
+                return Ok(validated);
+            }
+            return Err(path_error);
+        }
+    };
+    let resolved = match file.and_then(|file| magic_override(file, &detected)) {
+        Some(from_magic) => {
+            tracing::debug!(path = %path.display(), extension_mime = %detected, magic_mime = %from_magic,
+                    "extension/content MIME disagree; preferring content");
+            from_magic
+        }
+        None => detected,
+    };
+    validate_mime_type(&resolved)
+}
+
 /// If the file's magic bytes confidently indicate a different supported MIME
 /// type than the extension did, return it. Returns `None` when the content has
 /// no signature, the read fails, or content and extension agree.
-fn magic_override(path: &Path, extension_mime: &str) -> Option<String> {
-    let mut file = std::fs::File::open(path).ok()?;
-    let mut header = vec![0u8; 4096];
-    let n = file.read(&mut header).ok()?;
-    header.truncate(n);
-    if header.is_empty() {
-        return None;
-    }
-
-    let from_magic = detect_mime_type_from_bytes(&header).ok()?;
-    #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
-    if from_magic == ZIP_MIME_TYPE || from_magic.starts_with("application/vnd.oasis.opendocument.") {
-        // The header holds only the first entries of the archive, and a real
-        // document names its main part far later: `ppt/presentation.xml` sits
-        // 107 KB into a 27-slide deck. The archive directory finds the part
-        // wherever it is, so the document is not mistaken for a plain ZIP. One
-        // open answers both questions.
-        if let Some(package_mime) = detect_zip_package(std::fs::File::open(path).ok()?) {
-            return (package_mime != extension_mime).then(|| package_mime.to_string());
-        }
-    }
+fn magic_override(file: &mut std::fs::File, extension_mime: &str) -> Option<String> {
+    let from_magic = detect_mime_type_from_file_content(file, PackageInspection::FullArchive)?;
 
     if from_magic == PLAIN_TEXT_MIME_TYPE {
         return None;
@@ -969,6 +988,29 @@ fn magic_override(path: &Path, extension_mime: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+fn detect_mime_type_from_file_content(
+    file: &mut std::fs::File,
+    package_inspection: PackageInspection,
+) -> Option<String> {
+    file.seek(SeekFrom::Start(0)).ok()?;
+    let mut header = [0_u8; MIME_SNIFF_LENGTH];
+    let bytes_read = file.read(&mut header).ok()?;
+    if bytes_read == 0 {
+        return None;
+    }
+
+    let from_magic = detect_mime_type_from_bytes_with_inspection(&header[..bytes_read], package_inspection).ok()?;
+    #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
+    if package_inspection == PackageInspection::FullArchive
+        && (from_magic == ZIP_MIME_TYPE || from_magic.starts_with("application/vnd.oasis.opendocument."))
+        && let Some(package_mime) = detect_zip_package(&mut *file)
+    {
+        return Some(package_mime.to_string());
+    }
+
+    Some(from_magic)
 }
 
 /// Generic XML signatures cannot distinguish specialized XML vocabularies.
@@ -1013,18 +1055,28 @@ fn is_specific_json_mime(mime_type: &str) -> bool {
 ///
 /// Returns `XbergError::UnsupportedFormat` if MIME type cannot be determined.
 pub fn detect_mime_type_from_bytes(content: &[u8]) -> Result<String> {
+    detect_mime_type_from_bytes_with_inspection(content, PackageInspection::FullArchive)
+}
+
+fn detect_mime_type_from_bytes_with_inspection(
+    content: &[u8],
+    package_inspection: PackageInspection,
+) -> Result<String> {
     if let Some(kind) = infer::get(content) {
         let mime_type = kind.mime_type();
 
         #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
         if mime_type.starts_with("application/vnd.oasis.opendocument.") {
+            if package_inspection == PackageInspection::HeaderOnly {
+                return Ok(ZIP_MIME_TYPE.to_string());
+            }
             return Ok(detect_zip_package(std::io::Cursor::new(content))
                 .unwrap_or(ZIP_MIME_TYPE)
                 .to_string());
         }
 
         if mime_type == "application/zip"
-            && let Some(office_mime) = detect_office_format_from_zip(content)
+            && let Some(office_mime) = detect_office_format_from_zip(content, package_inspection)
         {
             return Ok(office_mime.to_string());
         }
@@ -1112,7 +1164,7 @@ pub fn detect_mime_type_from_bytes(content: &[u8]) -> Result<String> {
 ///
 /// This function scans the ZIP's local file headers without fully parsing the archive,
 /// making it efficient for MIME type detection.
-fn detect_office_format_from_zip(content: &[u8]) -> Option<&'static str> {
+fn detect_office_format_from_zip(content: &[u8], _package_inspection: PackageInspection) -> Option<&'static str> {
     const DOCX_MARKER: &[u8] = b"word/document.xml";
     const XLSX_MARKER: &[u8] = b"xl/workbook.xml";
     const PPTX_MARKER: &[u8] = b"ppt/presentation.xml";
@@ -1124,7 +1176,9 @@ fn detect_office_format_from_zip(content: &[u8]) -> Option<&'static str> {
     #[cfg(feature = "hwpx")]
     const HWPX_MARKER: &[u8] = b"Contents/content.hpf";
     #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
-    if let Some(package_mime) = detect_zip_package(std::io::Cursor::new(content)) {
+    if _package_inspection == PackageInspection::FullArchive
+        && let Some(package_mime) = detect_zip_package(std::io::Cursor::new(content))
+    {
         return Some(package_mime);
     }
 
@@ -1984,6 +2038,63 @@ mod tests {
         let result = detect_or_validate(file_path.to_str(), None);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "application/pdf");
+    }
+
+    #[test]
+    fn should_detect_content_when_extension_is_unknown() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("document.unknown");
+        std::fs::write(&file_path, b"%PDF-1.7\n").unwrap();
+
+        assert_eq!(detect_or_validate(file_path.to_str(), None).unwrap(), PDF_MIME_TYPE);
+    }
+
+    #[test]
+    fn should_detect_content_when_path_has_no_extension() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("document");
+        std::fs::write(&file_path, b"%PDF-1.7\n").unwrap();
+
+        assert_eq!(detect_or_validate(file_path.to_str(), None).unwrap(), PDF_MIME_TYPE);
+    }
+
+    #[test]
+    fn should_preserve_unknown_extension_error_when_content_is_unrecognized() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("document.unknown");
+        File::create(&file_path).unwrap();
+
+        let error = detect_or_validate(file_path.to_str(), None).unwrap_err();
+        assert!(matches!(
+            error,
+            XbergError::UnsupportedFormat(message) if message == "Unknown extension: .unknown"
+        ));
+    }
+
+    #[test]
+    fn should_preserve_path_error_when_extensionless_content_is_unrecognized() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("document");
+        File::create(&file_path).unwrap();
+
+        let error = detect_or_validate(file_path.to_str(), None).unwrap_err();
+        assert!(matches!(
+            error,
+            XbergError::Validation { message, .. }
+                if message == format!("Could not determine MIME type from file path: {}", file_path.display())
+        ));
+    }
+
+    #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
+    #[test]
+    fn should_limit_unknown_zip_fallback_to_the_bounded_header() {
+        const PADDING: &[u8] = &[b'x'; MIME_SNIFF_LENGTH + 1];
+        let archive = build_zip(&[("padding.bin", PADDING), ("word/document.xml", b"<document/>")]);
+        let directory = tempdir().unwrap();
+        let file_path = directory.path().join("document.unknown");
+        std::fs::write(&file_path, archive).unwrap();
+
+        assert_eq!(detect_or_validate(file_path.to_str(), None).unwrap(), ZIP_MIME_TYPE);
     }
 
     /// Regression for #1223: a file whose content is a DOCX but whose extension
