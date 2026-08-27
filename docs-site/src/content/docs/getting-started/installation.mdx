@@ -400,9 +400,9 @@ auto-install-peers=true
 
 ```html
 <script type="module">
-  import { ExtractInputKind, initWasm, extract } from "@xberg-io/xberg-wasm";
+  import init, { ExtractInputKind, extract } from "@xberg-io/xberg-wasm";
 
-  await initWasm();
+  await init();
 
   const input = document.getElementById("file");
   input.addEventListener("change", async (e) => {
@@ -427,9 +427,9 @@ auto-install-peers=true
 :::note[Wasm — Deno]
 
 ```typescript
-import { ExtractInputKind, initWasm, extract } from "npm:@xberg-io/xberg-wasm";
+import init, { ExtractInputKind, extract } from "npm:@xberg-io/xberg-wasm";
 
-await initWasm();
+await init();
 const output = await extract({
   kind: ExtractInputKind.Uri,
   uri: "./document.pdf",
@@ -442,11 +442,11 @@ console.log(output.results[0].content);
 :::note[Wasm — Cloudflare Workers]
 
 ```typescript
-import { ExtractInputKind, initWasm, extract } from "@xberg-io/xberg-wasm";
+import init, { ExtractInputKind, extract } from "@xberg-io/xberg-wasm";
 
 export default {
   async fetch(request: Request): Promise<Response> {
-    await initWasm();
+    await init();
     const bytes = new Uint8Array(await request.arrayBuffer());
     const output = await extract({
       kind: ExtractInputKind.Bytes,
@@ -469,7 +469,7 @@ Workers, and in Node.js 22+ (ESM). Dedicated `bundler`, Node-CommonJS, and Deno 
 **not** shipped: each is a full copy of the ~100MB wasm binary, and shipping all four pushed the
 npm package past jsDelivr's 150MB per-package CDN limit (which broke the live demo's CDN load).
 Modern bundlers (Vite, webpack 5, Rollup, esbuild) consume the `web` target directly. Initialize
-with `await initWasm()` (or the default `init()` export) before calling `extract`.
+with the package's default `init()` export before calling `extract`.
 :::
 
 :::caution[Wasm Platform Limitations]

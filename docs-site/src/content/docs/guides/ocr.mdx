@@ -133,9 +133,12 @@ tesseract --list-langs
 
 ### Tesseract in Wasm
 
-The Wasm package ships Tesseract as a separate module. Call `enableOcr()` after `initWasm()` to load it, then pass the `tesseract-wasm` backend in the config:
-
-<Snip_wasm_ocr_enable_ocr />
+The Wasm package has no packaged helper that wires up a Tesseract backend for you (there is no
+`enableOcr()` export). The primitive it does export is `registerOcrBackend()` — you supply a
+JavaScript object implementing the `OcrBackend` trait bridge and register it under the name
+`"tesseract-wasm"` before calling `extract` with `{ ocr: { backend: "tesseract-wasm" } }`. See
+[Trait Bridges](/reference/api-wasm/#trait-bridges) in the WASM API Reference for the registration
+API.
 
 ### Verify Tesseract from your binding
 
@@ -347,10 +350,15 @@ Specify multiple language codes separated by `+` (Tesseract) or as a list (Paddl
 <TabItem label="Wasm">
 
 ```typescript
-import { ExtractInputKind, enableOcr, extract, initWasm } from '@xberg-io/xberg-wasm';
+// NOTE: The Wasm package does not ship a ready-made Tesseract adapter or an
+// enableOcr() helper. Before calling extract, register your own OcrBackend
+// trait bridge object (name/supportedLanguages/processImage) under the name
+// "tesseract-wasm" via registerOcrBackend() — see the WASM API Reference's
+// Trait Bridges section.
+import init, { ExtractInputKind, extract, registerOcrBackend } from '@xberg-io/xberg-wasm';
 
-await initWasm();
-await enableOcr();
+await init();
+registerOcrBackend(myTesseractWasmBackend);
 
 const file = fileInput.files?.[0];
 if (file) {
