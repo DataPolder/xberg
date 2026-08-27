@@ -8,8 +8,8 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'lib.freezed.dart';
 
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ChunkClassificationEnrichmentConfig`, `DeepseekOcrBackendOptions`, `DocumentExtractorDartCallbacks`, `EmbeddingBackendDartCallbacks`, `GlmOcrBackendOptions`, `OcrBackendDartCallbacks`, `PaddleOcrVlBackendOptions`, `PostProcessorDartCallbacks`, `RendererDartCallbacks`, `RerankerBackendDartCallbacks`, `TokenizerBackendDartCallbacks`, `TrocrBackendOptions`, `ValidatorDartCallbacks`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `confidence_semantics`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `page_orientation_handling`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ChunkClassificationEnrichmentConfig`, `DocumentExtractorDartCallbacks`, `EmbeddingBackendDartCallbacks`, `OcrBackendDartCallbacks`, `PostProcessorDartCallbacks`, `RendererDartCallbacks`, `RerankerBackendDartCallbacks`, `TokenizerBackendDartCallbacks`, `ValidatorDartCallbacks`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `confidence_semantics`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `page_orientation_handling`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
 
 /// Extract content from a single bytes or URI input.
 Future<ExtractionResult> extract({
@@ -946,6 +946,26 @@ Future<PaddleOcrConfig> createPaddleOcrConfigFromJson({required String json}) =>
 
 Future<ModelPaths> createModelPathsFromJson({required String json}) =>
     RustLib.instance.api.crateCreateModelPathsFromJson(json: json);
+
+Future<TrocrBackendOptions> createTrocrBackendOptionsFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateTrocrBackendOptionsFromJson(json: json);
+
+Future<PaddleOcrVlBackendOptions> createPaddleOcrVlBackendOptionsFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreatePaddleOcrVlBackendOptionsFromJson(
+  json: json,
+);
+
+Future<GlmOcrBackendOptions> createGlmOcrBackendOptionsFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateGlmOcrBackendOptionsFromJson(json: json);
+
+Future<DeepseekOcrBackendOptions> createDeepseekOcrBackendOptionsFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateDeepseekOcrBackendOptionsFromJson(
+  json: json,
+);
 
 Future<OrientationResult> createOrientationResultFromJson({
   required String json,
@@ -4652,6 +4672,32 @@ class DbfMetadata {
           recordCount == other.recordCount &&
           fieldCount == other.fieldCount &&
           fields == other.fields;
+}
+
+/// Runtime options accepted by the `candle-deepseek-ocr` backend.
+class DeepseekOcrBackendOptions {
+  /// Local DeepSeek-OCR model directory. The backend requires this option.
+  final String? modelPath;
+
+  /// Optional per-call device override.
+  final CandleDevicePreference? device;
+
+  /// DeepSeek-OCR model generation, either 1 or 2. Defaults to 2.
+  final PlatformInt64? version;
+
+  const DeepseekOcrBackendOptions({this.modelPath, this.device, this.version});
+
+  @override
+  int get hashCode => modelPath.hashCode ^ device.hashCode ^ version.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DeepseekOcrBackendOptions &&
+          runtimeType == other.runtimeType &&
+          modelPath == other.modelPath &&
+          device == other.device &&
+          version == other.version;
 }
 
 /// MIME type detection response.
@@ -8542,6 +8588,51 @@ enum FormulaModel {
   /// RapidLaTeXOCR (MIT, pix2tex-derived): resizer + encoder + decoder ONNX,
   /// ~180 MB total, downloaded on demand.
   latexOcr,
+}
+
+/// Runtime options accepted by the `candle-glm-ocr` backend.
+class GlmOcrBackendOptions {
+  /// Optional recognition task; the backend constructor's task is used when absent.
+  final GlmOcrTaskKind? task;
+
+  /// Optional per-call device override.
+  final CandleDevicePreference? device;
+
+  /// Optional whole-page or layout-paired dispatch mode.
+  final GlmOcrLayoutMode? layoutMode;
+
+  /// Whether chart regions use chart understanding instead of captioning.
+  final bool? enableChartUnderstanding;
+
+  /// Optional Hugging Face cache root.
+  final String? cacheDir;
+
+  const GlmOcrBackendOptions({
+    this.task,
+    this.device,
+    this.layoutMode,
+    this.enableChartUnderstanding,
+    this.cacheDir,
+  });
+
+  @override
+  int get hashCode =>
+      task.hashCode ^
+      device.hashCode ^
+      layoutMode.hashCode ^
+      enableChartUnderstanding.hashCode ^
+      cacheDir.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GlmOcrBackendOptions &&
+          runtimeType == other.runtimeType &&
+          task == other.task &&
+          device == other.device &&
+          layoutMode == other.layoutMode &&
+          enableChartUnderstanding == other.enableChartUnderstanding &&
+          cacheDir == other.cacheDir;
 }
 
 /// Page layout mode accepted by `candle-glm-ocr` backend options.
@@ -13245,6 +13336,57 @@ class PaddleOcrConfig {
           inferenceBackend == other.inferenceBackend;
 }
 
+/// Runtime options accepted by the `candle-paddleocr-vl` backend.
+class PaddleOcrVlBackendOptions {
+  /// Optional per-call recognition task; the backend constructor's task is used when absent.
+  final PaddleOcrVlTaskKind? task;
+
+  /// Optional local model directory, which takes precedence over `model_id`.
+  final String? modelPath;
+
+  /// Optional Hugging Face repository identifier.
+  final String? modelId;
+
+  /// Optional immutable Hugging Face model revision.
+  final String? hfRevision;
+
+  /// Optional Hugging Face cache root.
+  final String? cacheDir;
+
+  /// Optional per-call device override.
+  final CandleDevicePreference? device;
+
+  const PaddleOcrVlBackendOptions({
+    this.task,
+    this.modelPath,
+    this.modelId,
+    this.hfRevision,
+    this.cacheDir,
+    this.device,
+  });
+
+  @override
+  int get hashCode =>
+      task.hashCode ^
+      modelPath.hashCode ^
+      modelId.hashCode ^
+      hfRevision.hashCode ^
+      cacheDir.hashCode ^
+      device.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PaddleOcrVlBackendOptions &&
+          runtimeType == other.runtimeType &&
+          task == other.task &&
+          modelPath == other.modelPath &&
+          modelId == other.modelId &&
+          hfRevision == other.hfRevision &&
+          cacheDir == other.cacheDir &&
+          device == other.device;
+}
+
 /// Task accepted by `candle-paddleocr-vl` backend options.
 enum PaddleOcrVlTaskKind { ocr, table, formula, chart }
 
@@ -17865,6 +18007,45 @@ class TreeSitterProcessConfig {
           dataExtraction == other.dataExtraction &&
           chunkMaxSize == other.chunkMaxSize &&
           contentMode == other.contentMode;
+}
+
+/// Runtime options accepted by the `candle-trocr` backend.
+class TrocrBackendOptions {
+  /// Optional model variant; the backend constructor's variant is used when absent.
+  final CandleTrocrVariant? variant;
+
+  /// Optional per-call device override.
+  final CandleDevicePreference? device;
+
+  /// Optional Hugging Face cache root.
+  final String? cacheDir;
+
+  /// Optional immutable Hugging Face model revision.
+  final String? hfRevision;
+
+  const TrocrBackendOptions({
+    this.variant,
+    this.device,
+    this.cacheDir,
+    this.hfRevision,
+  });
+
+  @override
+  int get hashCode =>
+      variant.hashCode ^
+      device.hashCode ^
+      cacheDir.hashCode ^
+      hfRevision.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TrocrBackendOptions &&
+          runtimeType == other.runtimeType &&
+          variant == other.variant &&
+          device == other.device &&
+          cacheDir == other.cacheDir &&
+          hfRevision == other.hfRevision;
 }
 
 /// Semantic classification of an extracted URI.

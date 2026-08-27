@@ -641,6 +641,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BoundingBox dco_decode_box_autoadd_bounding_box(dynamic raw);
 
   @protected
+  CandleDevicePreference dco_decode_box_autoadd_candle_device_preference(
+    dynamic raw,
+  );
+
+  @protected
+  CandleTrocrVariant dco_decode_box_autoadd_candle_trocr_variant(dynamic raw);
+
+  @protected
   CaptioningConfig dco_decode_box_autoadd_captioning_config(dynamic raw);
 
   @protected
@@ -762,6 +770,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FormulaModel dco_decode_box_autoadd_formula_model(dynamic raw);
 
   @protected
+  GlmOcrLayoutMode dco_decode_box_autoadd_glm_ocr_layout_mode(dynamic raw);
+
+  @protected
+  GlmOcrTaskKind dco_decode_box_autoadd_glm_ocr_task_kind(dynamic raw);
+
+  @protected
   HeadingContext dco_decode_box_autoadd_heading_context(dynamic raw);
 
   @protected
@@ -878,6 +892,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PaddleInferenceBackend dco_decode_box_autoadd_paddle_inference_backend(
+    dynamic raw,
+  );
+
+  @protected
+  PaddleOcrVlTaskKind dco_decode_box_autoadd_paddle_ocr_vl_task_kind(
     dynamic raw,
   );
 
@@ -1146,6 +1165,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DbfMetadata dco_decode_dbf_metadata(dynamic raw);
 
   @protected
+  DeepseekOcrBackendOptions dco_decode_deepseek_ocr_backend_options(
+    dynamic raw,
+  );
+
+  @protected
   DetectResponse dco_decode_detect_response(dynamic raw);
 
   @protected
@@ -1347,6 +1371,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FormulaModel dco_decode_formula_model(dynamic raw);
+
+  @protected
+  GlmOcrBackendOptions dco_decode_glm_ocr_backend_options(dynamic raw);
 
   @protected
   GlmOcrLayoutMode dco_decode_glm_ocr_layout_mode(dynamic raw);
@@ -1970,6 +1997,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BoundingBox? dco_decode_opt_box_autoadd_bounding_box(dynamic raw);
 
   @protected
+  CandleDevicePreference? dco_decode_opt_box_autoadd_candle_device_preference(
+    dynamic raw,
+  );
+
+  @protected
+  CandleTrocrVariant? dco_decode_opt_box_autoadd_candle_trocr_variant(
+    dynamic raw,
+  );
+
+  @protected
   CaptioningConfig? dco_decode_opt_box_autoadd_captioning_config(dynamic raw);
 
   @protected
@@ -2060,6 +2097,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FormulaModel? dco_decode_opt_box_autoadd_formula_model(dynamic raw);
+
+  @protected
+  GlmOcrLayoutMode? dco_decode_opt_box_autoadd_glm_ocr_layout_mode(dynamic raw);
+
+  @protected
+  GlmOcrTaskKind? dco_decode_opt_box_autoadd_glm_ocr_task_kind(dynamic raw);
 
   @protected
   HeadingContext? dco_decode_opt_box_autoadd_heading_context(dynamic raw);
@@ -2169,6 +2212,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PaddleInferenceBackend? dco_decode_opt_box_autoadd_paddle_inference_backend(
+    dynamic raw,
+  );
+
+  @protected
+  PaddleOcrVlTaskKind? dco_decode_opt_box_autoadd_paddle_ocr_vl_task_kind(
     dynamic raw,
   );
 
@@ -2387,6 +2435,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PaddleOcrConfig dco_decode_paddle_ocr_config(dynamic raw);
+
+  @protected
+  PaddleOcrVlBackendOptions dco_decode_paddle_ocr_vl_backend_options(
+    dynamic raw,
+  );
 
   @protected
   PaddleOcrVlTaskKind dco_decode_paddle_ocr_vl_task_kind(dynamic raw);
@@ -2712,6 +2765,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   TreeSitterProcessConfig dco_decode_tree_sitter_process_config(dynamic raw);
+
+  @protected
+  TrocrBackendOptions dco_decode_trocr_backend_options(dynamic raw);
 
   @protected
   int dco_decode_u_8(dynamic raw);
@@ -3225,6 +3281,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BoundingBox sse_decode_box_autoadd_bounding_box(SseDeserializer deserializer);
 
   @protected
+  CandleDevicePreference sse_decode_box_autoadd_candle_device_preference(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  CandleTrocrVariant sse_decode_box_autoadd_candle_trocr_variant(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   CaptioningConfig sse_decode_box_autoadd_captioning_config(
     SseDeserializer deserializer,
   );
@@ -3398,6 +3464,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  GlmOcrLayoutMode sse_decode_box_autoadd_glm_ocr_layout_mode(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  GlmOcrTaskKind sse_decode_box_autoadd_glm_ocr_task_kind(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   HeadingContext sse_decode_box_autoadd_heading_context(
     SseDeserializer deserializer,
   );
@@ -3544,6 +3620,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PaddleInferenceBackend sse_decode_box_autoadd_paddle_inference_backend(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PaddleOcrVlTaskKind sse_decode_box_autoadd_paddle_ocr_vl_task_kind(
     SseDeserializer deserializer,
   );
 
@@ -3880,6 +3961,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DbfMetadata sse_decode_dbf_metadata(SseDeserializer deserializer);
 
   @protected
+  DeepseekOcrBackendOptions sse_decode_deepseek_ocr_backend_options(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   DetectResponse sse_decode_detect_response(SseDeserializer deserializer);
 
   @protected
@@ -4105,6 +4191,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FormulaModel sse_decode_formula_model(SseDeserializer deserializer);
+
+  @protected
+  GlmOcrBackendOptions sse_decode_glm_ocr_backend_options(
+    SseDeserializer deserializer,
+  );
 
   @protected
   GlmOcrLayoutMode sse_decode_glm_ocr_layout_mode(SseDeserializer deserializer);
@@ -4894,6 +4985,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  CandleDevicePreference? sse_decode_opt_box_autoadd_candle_device_preference(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  CandleTrocrVariant? sse_decode_opt_box_autoadd_candle_trocr_variant(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   CaptioningConfig? sse_decode_opt_box_autoadd_captioning_config(
     SseDeserializer deserializer,
   );
@@ -5020,6 +5121,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FormulaModel? sse_decode_opt_box_autoadd_formula_model(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  GlmOcrLayoutMode? sse_decode_opt_box_autoadd_glm_ocr_layout_mode(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  GlmOcrTaskKind? sse_decode_opt_box_autoadd_glm_ocr_task_kind(
     SseDeserializer deserializer,
   );
 
@@ -5165,6 +5276,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PaddleInferenceBackend? sse_decode_opt_box_autoadd_paddle_inference_backend(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  PaddleOcrVlTaskKind? sse_decode_opt_box_autoadd_paddle_ocr_vl_task_kind(
     SseDeserializer deserializer,
   );
 
@@ -5467,6 +5583,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PaddleOcrConfig sse_decode_paddle_ocr_config(SseDeserializer deserializer);
+
+  @protected
+  PaddleOcrVlBackendOptions sse_decode_paddle_ocr_vl_backend_options(
+    SseDeserializer deserializer,
+  );
 
   @protected
   PaddleOcrVlTaskKind sse_decode_paddle_ocr_vl_task_kind(
@@ -5846,6 +5967,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   TreeSitterProcessConfig sse_decode_tree_sitter_process_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  TrocrBackendOptions sse_decode_trocr_backend_options(
     SseDeserializer deserializer,
   );
 
@@ -6586,6 +6712,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_candle_device_preference(
+    CandleDevicePreference self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_candle_trocr_variant(
+    CandleTrocrVariant self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_captioning_config(
     CaptioningConfig self,
     SseSerializer serializer,
@@ -6805,6 +6943,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_glm_ocr_layout_mode(
+    GlmOcrLayoutMode self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_glm_ocr_task_kind(
+    GlmOcrTaskKind self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_heading_context(
     HeadingContext self,
     SseSerializer serializer,
@@ -6999,6 +7149,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_paddle_inference_backend(
     PaddleInferenceBackend self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_paddle_ocr_vl_task_kind(
+    PaddleOcrVlTaskKind self,
     SseSerializer serializer,
   );
 
@@ -7441,6 +7597,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_dbf_metadata(DbfMetadata self, SseSerializer serializer);
 
   @protected
+  void sse_encode_deepseek_ocr_backend_options(
+    DeepseekOcrBackendOptions self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_detect_response(
     DetectResponse self,
     SseSerializer serializer,
@@ -7754,6 +7916,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_formula_model(FormulaModel self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_glm_ocr_backend_options(
+    GlmOcrBackendOptions self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_glm_ocr_layout_mode(
@@ -8758,6 +8926,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_candle_device_preference(
+    CandleDevicePreference? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_candle_trocr_variant(
+    CandleTrocrVariant? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_captioning_config(
     CaptioningConfig? self,
     SseSerializer serializer,
@@ -8907,6 +9087,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_formula_model(
     FormulaModel? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_glm_ocr_layout_mode(
+    GlmOcrLayoutMode? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_glm_ocr_task_kind(
+    GlmOcrTaskKind? self,
     SseSerializer serializer,
   );
 
@@ -9081,6 +9273,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_paddle_inference_backend(
     PaddleInferenceBackend? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_paddle_ocr_vl_task_kind(
+    PaddleOcrVlTaskKind? self,
     SseSerializer serializer,
   );
 
@@ -9465,6 +9663,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_paddle_ocr_config(
     PaddleOcrConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_paddle_ocr_vl_backend_options(
+    PaddleOcrVlBackendOptions self,
     SseSerializer serializer,
   );
 
@@ -9963,6 +10167,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_tree_sitter_process_config(
     TreeSitterProcessConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_trocr_backend_options(
+    TrocrBackendOptions self,
     SseSerializer serializer,
   );
 
