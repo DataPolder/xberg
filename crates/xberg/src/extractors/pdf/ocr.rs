@@ -287,9 +287,9 @@ pub(crate) fn evaluate_native_text_for_ocr(
     }
 
     let stats = NativeTextStats::compute(trimmed, thresholds);
-    let pages = page_count.unwrap_or(1).max(1) as f64;
-    let avg_non_whitespace = stats.non_whitespace as f64 / pages;
-    let avg_alnum = stats.alnum as f64 / pages;
+    let pages = page_count.unwrap_or(1).max(1);
+    let avg_non_whitespace = stats.non_whitespace as f64 / f64::from(pages);
+    let avg_alnum = stats.alnum as f64 / f64::from(pages);
 
     let has_substantial_text = stats.non_whitespace >= thresholds.min_total_non_whitespace
         && avg_non_whitespace >= thresholds.min_non_whitespace_per_page
@@ -304,9 +304,13 @@ pub(crate) fn evaluate_native_text_for_ocr(
     let has_undecodable_text_layer = stats.non_whitespace >= thresholds.min_total_non_whitespace
         && stats.undecodable_ratio >= thresholds.min_undecodable_ratio;
 
+    // An absolute replacement-character count is meaningful per page, not across
+    // concatenated multi-page text. The per-page caller reruns this check for each boundary. ~keep
+    let has_excessive_garbage = pages == 1 && stats.garbage_char_count >= thresholds.min_garbage_chars;
+
     let definitive_failure = stats.non_whitespace == 0
         || stats.alnum == 0
-        || stats.garbage_char_count >= thresholds.min_garbage_chars
+        || has_excessive_garbage
         || stats.fragmented_word_ratio >= thresholds.critical_fragmented_word_ratio
         || has_undecodable_text_layer
         || (!has_substantial_content
@@ -7316,6 +7320,50 @@ mod tests {
         ];
         let decision = evaluate_per_page_ocr(text, Some(&boundaries), Some(2), &t());
         assert!(decision.fallback);
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_multi_page_garbage_threshold_routes_only_failing_page() {
+        use crate::types::PageBoundary;
+
+        let thresholds = t();
+        let garbage = "\u{FFFD}".repeat(thresholds.min_garbage_chars);
+        let first_page = format!(
+            "This first page contains reliable searchable measurements and explanatory text. \
+             The native layer remains useful despite a few replacement characters {garbage}."
+        );
+        let second_page = "This second page contains reliable searchable measurements and explanatory text. \
+                           Its native text layer should remain untouched by OCR.";
+        let text = format!("{first_page}{second_page}");
+        let boundaries = vec![
+            PageBoundary {
+                page_number: 1,
+                byte_start: 0,
+                byte_end: first_page.len(),
+            },
+            PageBoundary {
+                page_number: 2,
+                byte_start: first_page.len(),
+                byte_end: text.len(),
+            },
+        ];
+
+        let decision = evaluate_per_page_ocr(&text, Some(&boundaries), Some(2), &thresholds);
+
+        assert!(
+            decision.fallback,
+            "the page at the configured threshold must still route to OCR"
+        );
+        assert_eq!(decision.failing_pages, vec![1]);
+        assert!(
+            !decision.whole_doc_failure,
+            "aggregate replacement characters must not force whole-document OCR"
+        );
+        assert_eq!(
+            evaluate_ocr_skip_gate(false, text.len(), 0.9, &decision, &thresholds),
+            OcrGateOutcome::RunFallbackOnPages(vec![1])
+        );
     }
 
     #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
