@@ -4476,7 +4476,7 @@ package_manager = ["pnpm"]
 features = { ocr = true, async = true, plugin_system = true, embeddings = false, code_intelligence = false }
 ocr_backends = ["tesseract-wasm", "sceptre (opt-in worker API)"]
 optional_sections = ["ocr_support", "performance_comparison"]
-snippets = { basic_extraction = "getting-started/basic-extract.md", browser_extraction = "getting-started/browser-file-input.md", node_extraction = "getting-started/basic-extract.md", async_extraction = "getting-started/async-extraction.md", cloudflare_workers = "getting-started/runtime-detection.md", batch_processing = "getting-started/batch-processing.md", ocr_configuration = "ocr/enable-ocr.md" }
+snippets = { basic_extraction = "getting-started/basic-extract.md", browser_extraction = "getting-started/browser-file-input.md", node_extraction = "getting-started/basic-extract.md", async_extraction = "getting-started/async-extraction.md", batch_processing = "getting-started/batch-processing.md", ocr_configuration = "ocr/enable-ocr.md" }
 
 [crates.readme.languages.ffi]
 template = "language_package.md"

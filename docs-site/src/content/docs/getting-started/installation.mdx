@@ -13,7 +13,6 @@ import { Content as Snip_python_getting_started_hello_world } from "../../../sni
 import { Content as Snip_ruby_getting_started_install_verify } from "../../../snippets/ruby/getting-started/install_verify.md";
 import { Content as Snip_elixir_getting_started_basic_usage } from "../../../snippets/elixir/getting-started/basic_usage.md";
 import { Content as Snip_wasm_getting_started_basic_extract } from "../../../snippets/wasm/getting-started/basic-extract.md";
-import { Content as Snip_wasm_getting_started_runtime_detection } from "../../../snippets/wasm/getting-started/runtime-detection.md";
 
 Polyglot SDKs plus a standalone CLI. Most packages ship **prebuilt binaries** for Linux (x86_64/aarch64), macOS, and Windows — no compile step needed.
 
@@ -462,10 +461,6 @@ export default {
 :::
 
 **Supported runtimes:** Chrome 74+, Firefox 79+, Safari 14+, Edge 79+, Node.js 22+, Deno 1.35+, Cloudflare Workers.
-
-The package reports the host runtime and its Wasm capabilities. Read them before you call `initWasm` if your code must branch on workers or `SharedArrayBuffer`:
-
-<Snip_wasm_getting_started_runtime_detection />
 
 :::note[Wasm — package layout (`web` target only)]
 `@xberg-io/xberg-wasm` publishes a single wasm-pack **`web`** target — a standard ES module you
