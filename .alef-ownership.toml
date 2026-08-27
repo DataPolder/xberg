@@ -276,6 +276,7 @@ owned_paths = [
   "docs-site/src/snippets-generated/zig/ocr/ocr_paddle_backend.md",
   "docs-site/src/snippets-generated/zig/ocr/vlm_ocr.md",
   "e2e/java/.mvn/wrapper/maven-wrapper.properties",
+  "e2e/node/.npmrc",
   "packages/csharp/README.md",
   "packages/dart/README.md",
   "packages/elixir/README.md",
@@ -288,5 +289,6 @@ owned_paths = [
   "packages/ruby/sig/types.rbs",
   "packages/swift/README.md",
   "packages/zig/README.md",
+  "test_apps/node/.npmrc",
   "test_apps/php/phpunit.xml",
 ]
