@@ -143,6 +143,8 @@ jobs:
       # AND the generated manifest both carry the formats. ~keep
       - name: Verify the native FFI build still selects every document format
         run: task alef:verify:ffi-formats
+      - name: Verify published format counts match the MIME registry
+        run: task supported-counts:verify
       # GH#1443: per-target feature aggregates in crates/xberg/Cargo.toml (windows-target,
       # formats-no-heic, full-no-heic, macos-intel-target, windows-gnu-target) are hand-maintained
       # supersets/subsets of `full` and silently drift when a feature is added to `full` without

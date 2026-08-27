@@ -294,6 +294,19 @@ tasks:
     cmds:
       - python3 scripts/ci/check-ffi-format-features.py alef.toml
 
+  supported-counts:sync:
+    desc: "Synchronize published format counts with the MIME registry"
+    cmds:
+      - python3 scripts/sync_supported_counts.py sync
+      - alef readme
+      - task: plugin:generate
+
+  supported-counts:verify:
+    desc: "Test and verify published format counts against the MIME registry"
+    cmds:
+      - python3 -m unittest scripts/test_sync_supported_counts.py
+      - python3 scripts/sync_supported_counts.py verify
+
   verify:feature-parity:
     desc: "Check per-target feature aggregates still match `full` (GH#1443)"
     cmds:

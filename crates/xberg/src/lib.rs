@@ -27,7 +27,7 @@
 //!
 //! - Fast parallel processing with async/await
 //! - Priority-based extractor selection
-//! - Comprehensive MIME type detection (115 file extensions)
+//! - Comprehensive MIME type detection (120 file extensions)
 //! - Configurable caching and quality processing
 //! - Cross-language plugin support (Python, Node.js planned)
 
@@ -351,7 +351,10 @@ pub use tree_sitter_language_pack::{
     CommentKind, DiagnosticSeverity, ExportKind, FileMetrics, ProcessConfig, StructureKind,
 };
 
-pub use core::mime::{SupportedFormat, detect_mime_type_from_bytes, get_extensions_for_mime, list_supported_formats};
+pub use core::mime::{
+    SUPPORTED_EXTENSION_COUNT, SUPPORTED_FORMAT_COUNT, SupportedFormat, detect_mime_type_from_bytes,
+    get_extensions_for_mime, list_supported_formats,
+};
 
 /// Detect the MIME type of a file at the given path.
 ///

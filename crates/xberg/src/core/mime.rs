@@ -776,6 +776,64 @@ static FORMATS: &[FormatEntry] = &[
     },
 ];
 
+const fn extensions_equal(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+const fn count_unique_extensions() -> usize {
+    let mut count = 0;
+    let mut format_index = 0;
+    while format_index < FORMATS.len() {
+        let mut extension_index = 0;
+        while extension_index < FORMATS[format_index].extensions.len() {
+            let extension = FORMATS[format_index].extensions[extension_index];
+            let mut duplicate = false;
+            let mut earlier_format = 0;
+            while earlier_format <= format_index {
+                let limit = if earlier_format == format_index {
+                    extension_index
+                } else {
+                    FORMATS[earlier_format].extensions.len()
+                };
+                let mut earlier_extension = 0;
+                while earlier_extension < limit {
+                    if extensions_equal(extension, FORMATS[earlier_format].extensions[earlier_extension]) {
+                        duplicate = true;
+                    }
+                    earlier_extension += 1;
+                }
+                earlier_format += 1;
+            }
+            if !duplicate {
+                count += 1;
+            }
+            extension_index += 1;
+        }
+        format_index += 1;
+    }
+    count
+}
+
+/// Number of formats in Xberg's static MIME registry. ~keep
+#[cfg_attr(alef, alef(skip))]
+pub const SUPPORTED_FORMAT_COUNT: usize = FORMATS.len();
+
+/// Number of unique file extensions in Xberg's static MIME registry. ~keep
+#[cfg_attr(alef, alef(skip))]
+pub const SUPPORTED_EXTENSION_COUNT: usize = count_unique_extensions();
+
 /// Extension to MIME type mapping, derived from [`FORMATS`].
 static EXT_TO_MIME: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::new();
@@ -2334,45 +2392,15 @@ mod tests {
         assert!(!formats.is_empty(), "Supported formats list should not be empty");
     }
 
-    /// The headline "N formats · M file extensions" is hand-typed in the README
-    /// templates and the docs site, and nothing derived it from [`FORMATS`] — so it
-    /// drifted to "101 formats · 115 file extensions" against a table holding 100
-    /// entries and 120 extensions, and propagated into every generated README.
-    ///
-    /// Mirrors `core::formats::tests::test_known_formats_count`. If this fails because
-    /// a format was legitimately added or removed, update the numbers here **and** in
-    /// the copy listed below, which is where the published figures come from:
-    ///
-    /// - `templates/readme/root.md`, `cli.md`, `rust.md`,
-    ///   `templates/readme/partials/features.md.jinja`, `templates/docs/llms-body.md.jinja`
-    /// - `docs-site/src/content/docs/`: `index.mdx`, `features.mdx`, `ecosystem.md`,
-    ///   `cli/usage.mdx`, `guides/extraction.mdx`, `guides/rust-core-api.md`,
-    ///   `integrations/langchain.mdx`, `integrations/txtai.md`
-    ///
-    /// The generated READMEs (root `README.md`, `packages/*/README.md`, the crate
-    /// READMEs) pick the change up on the next alef regen -- do not hand-edit those.
     #[test]
-    fn format_and_extension_counts_match_the_published_headline() {
-        const PUBLISHED_FORMATS: usize = 100;
-        const PUBLISHED_EXTENSIONS: usize = 120;
-
+    fn supported_counts_are_derived_from_the_registry() {
         let extensions: HashSet<&str> = FORMATS
             .iter()
             .flat_map(|entry| entry.extensions.iter().copied())
             .collect();
 
-        assert_eq!(
-            FORMATS.len(),
-            PUBLISHED_FORMATS,
-            "FORMATS has {} entries but the docs advertise {PUBLISHED_FORMATS} formats",
-            FORMATS.len()
-        );
-        assert_eq!(
-            extensions.len(),
-            PUBLISHED_EXTENSIONS,
-            "FORMATS covers {} unique extensions but the docs advertise {PUBLISHED_EXTENSIONS}",
-            extensions.len()
-        );
+        assert_eq!(SUPPORTED_FORMAT_COUNT, FORMATS.len());
+        assert_eq!(SUPPORTED_EXTENSION_COUNT, extensions.len());
     }
 
     #[test]
