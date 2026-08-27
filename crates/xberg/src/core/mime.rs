@@ -1987,13 +1987,10 @@ pub fn list_supported_formats() -> Vec<SupportedFormat> {
 mod tests {
     use super::*;
     use std::fs::File;
-    #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
     use std::io::{Cursor, Write};
     use tempfile::tempdir;
-    #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
     use zip::write::FileOptions;
 
-    #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
     fn build_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
         let options = FileOptions::<'_, ()>::default().compression_method(zip::CompressionMethod::Stored);
