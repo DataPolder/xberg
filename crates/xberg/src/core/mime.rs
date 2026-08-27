@@ -977,10 +977,16 @@ fn magic_override(file: &mut std::fs::File, extension_mime: &str) -> Option<Stri
     if from_magic == PLAIN_TEXT_MIME_TYPE {
         return None;
     }
-    if is_generic_xml_mime(&from_magic) && is_specific_xml_mime(extension_mime) {
+    if is_generic_xml_mime(&from_magic)
+        && is_specific_xml_mime(extension_mime)
+        && SUPPORTED_MIME_TYPES.contains(extension_mime)
+    {
         return None;
     }
-    if from_magic == JSON_MIME_TYPE && is_specific_json_mime(extension_mime) {
+    if from_magic == JSON_MIME_TYPE
+        && is_specific_json_mime(extension_mime)
+        && SUPPORTED_MIME_TYPES.contains(extension_mime)
+    {
         return None;
     }
     if from_magic != extension_mime && validate_mime_type(&from_magic).is_ok() {
@@ -2141,6 +2147,24 @@ mod tests {
                 "{filename} should retain its extension-specific JSON MIME type"
             );
         }
+    }
+
+    #[test]
+    fn unsupported_specialized_xml_extension_does_not_override_supported_content() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("feed.atom");
+        std::fs::write(&path, br#"<?xml version="1.0"?><feed/>"#).unwrap();
+
+        assert_eq!(detect_or_validate(path.to_str(), None).unwrap(), "text/xml");
+    }
+
+    #[test]
+    fn unsupported_specialized_json_extension_does_not_override_supported_content() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("model.gltf");
+        std::fs::write(&path, br#"{"asset":{"version":"2.0"}}"#).unwrap();
+
+        assert_eq!(detect_or_validate(path.to_str(), None).unwrap(), JSON_MIME_TYPE);
     }
 
     #[test]

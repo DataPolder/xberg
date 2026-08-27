@@ -111,6 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- XML and JSON content with unsupported specialized extensions now routes through the supported generic extractor
+  instead of failing MIME validation (#1507).
 - File extraction now falls back to bounded content sniffing when a path has an unknown or missing extension (#1506).
 - Fixed documentation-snippet fixtures that named non-existent result fields, which made the generated
   snippets silently drop the affected presentation block: element `content` is now `text`, table `rows`
