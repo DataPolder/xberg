@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added bounded, cancellable SQLite and GeoPackage table extraction with schema-based GeoPackage
+  detection and defensive handling for untrusted databases (#1510).
 - Added configurable MIME inference policies for preferring content signatures, trusting supported filename
   extensions, or ignoring extensions, with per-input overrides (#1509).
 - Added native KML and GeoJSON extraction with canonical MIME routing (#1508).

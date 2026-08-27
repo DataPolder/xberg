@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-description = "High-performance document intelligence library for Rust. Extract text, metadata, and structured data from PDFs, Office documents, images, and 100 formats and 371 programming languages via tree-sitter code intelligence with async/sync APIs."
+description = "High-performance document intelligence library for Rust. Extract text, metadata, and structured data from PDFs, Office documents, images, and 104 formats and 371 programming languages via tree-sitter code intelligence with async/sync APIs."
 license.workspace = true
 repository = "https://github.com/xberg-io/xberg"
 homepage = "https://xberg.io"
@@ -117,6 +117,7 @@ email = [
 html = ["dep:html-to-markdown-rs", "dep:v_htmlescape"]
 xml = ["dep:quick-xml", "dep:roxmltree"]
 archives = ["dep:zip", "dep:tar", "dep:sevenz-rust2", "dep:flate2"]
+sqlite = ["dep:rusqlite", "tokio-runtime"]
 mdx = []
 
 liter-llm = ["dep:liter-llm", "dep:minijinja", "dep:ureq", "dep:secrecy", "ocr-pipeline"]
@@ -747,6 +748,7 @@ wasm-target = [
 # by the pure-Rust `paddle-ocr-tract` variant instead of the ORT-backed `paddle-ocr`.
 android-target = [
     "no-ort-target",
+    "sqlite",
     "excel",
     "tree-sitter",
     "ocr",
@@ -811,6 +813,7 @@ windows-target = [
     "html",
     "tree-sitter",
     "office",
+    "sqlite",
     # excel = [dep:calamine, tokio-runtime]: calamine is pure Rust (Windows-safe)
     # and tokio-runtime is already enabled above. Without this, the static format
     # registry still advertises XLSX (EXT_TO_MIME is ungated) but the excel
@@ -979,6 +982,7 @@ windows-gnu-target = [
     "html",
     "tree-sitter",
     "office",
+    "sqlite",
     "excel",
     "hwp",
     "hwpx",
@@ -1078,6 +1082,7 @@ formats = [
     "html",
     "xml",
     "archives",
+    "sqlite",
     "mdx",
     "svg",
     "heic",
@@ -1099,6 +1104,7 @@ formats-no-heic = [
     "html",
     "xml",
     "archives",
+    "sqlite",
     "mdx",
     "svg",
     "wordperfect",
@@ -1331,6 +1337,7 @@ quick-xml = { version = "0.42.0", features = ["serialize"], optional = true }
 rake = { version = "0.3.6", optional = true }
 rayon = { workspace = true }
 regex = "1.13.1"
+rusqlite = { workspace = true, optional = true }
 resvg = { workspace = true, optional = true }
 rmcp = { version = "3.1.4", features = [
     "server",
@@ -1679,6 +1686,10 @@ required-features = ["structured"]
 [[test]]
 name = "structured_live"
 required-features = ["structured", "pdf"]
+
+[[test]]
+name = "sqlite_geopackage_extraction"
+required-features = ["sqlite"]
 
 [[bench]]
 name = "text_quality"

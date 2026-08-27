@@ -4,7 +4,7 @@ title: "Format Support"
 
 import { Tabs, TabItem } from "@astrojs/starlight/components";
 
-Xberg supports 100 file formats across 120 file extensions across major categories through native Rust extractors.
+Xberg supports 104 file formats across 125 file extensions across major categories through native Rust extractors.
 
 ## Overview
 
@@ -71,6 +71,8 @@ All formats support async/await and batch processing. Image formats and PDFs sup
 | TOML   | `.toml`         | `application/toml`, `text/toml`                  | Native Rust (toml crate) | No          | Configuration file support                  |
 | CSV    | `.csv`          | `text/csv`                                       | Native Rust              | No          | Tabular data extraction                     |
 | TSV    | `.tsv`          | `text/tab-separated-values`                      | Native Rust              | No          | Tab-separated data extraction               |
+| SQLite | `.sqlite`, `.db` | `application/vnd.sqlite3`                       | Native Rust (`sqlite`)   | No          | User tables; internal metadata excluded; BLOB size placeholders |
+| GeoPackage | `.gpkg`     | `application/geopackage+sqlite3`                  | Native Rust (`sqlite`)   | No          | Schema-based detection; user tables without GeoPackage metadata |
 
 ### Email
 

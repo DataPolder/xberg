@@ -74,6 +74,9 @@ pub mod security;
 #[cfg(test)]
 mod security_tests;
 
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
+
 #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
 pub mod image;
 
@@ -193,6 +196,9 @@ pub use markdown::MarkdownExtractor;
 pub use structured::StructuredExtractor;
 pub use text::PlainTextExtractor;
 pub use vtt::WebVttExtractor;
+
+#[cfg(feature = "sqlite")]
+pub use sqlite::SqliteExtractor;
 
 #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
 pub use image::ImageExtractor;
@@ -356,6 +362,9 @@ pub(crate) fn register_default_extractors() -> Result<()> {
     registry.register_internal(Arc::new(StructuredExtractor::new()))?;
     registry.register_internal(Arc::new(CsvExtractor::new()))?;
     registry.register_internal(Arc::new(DocTagsExtractor::new()))?;
+
+    #[cfg(feature = "sqlite")]
+    registry.register_internal(Arc::new(SqliteExtractor::new()))?;
 
     #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
     registry.register_internal(Arc::new(ImageExtractor::new()))?;

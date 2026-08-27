@@ -227,6 +227,8 @@ pub(crate) const PST_MIME_TYPE: &str = "application/vnd.ms-outlook-pst";
 pub(crate) const WPD_MIME_TYPE: &str = "application/vnd.wordperfect";
 pub(crate) const JSON_MIME_TYPE: &str = "application/json";
 pub(crate) const GEOJSON_MIME_TYPE: &str = "application/geo+json";
+pub(crate) const SQLITE_MIME_TYPE: &str = "application/vnd.sqlite3";
+pub(crate) const GEOPACKAGE_MIME_TYPE: &str = "application/geopackage+sqlite3";
 pub(crate) const XML_MIME_TYPE: &str = "application/xml";
 pub(crate) const KML_MIME_TYPE: &str = "application/vnd.google-earth.kml+xml";
 #[cfg(feature = "tree-sitter")]
@@ -464,6 +466,16 @@ static FORMATS: &[FormatEntry] = &[
         extensions: &["dbf"],
         mime_type: "application/x-dbf",
         aliases: &["application/dbase"],
+    },
+    FormatEntry {
+        extensions: &["sqlite", "db"],
+        mime_type: SQLITE_MIME_TYPE,
+        aliases: &["application/x-sqlite3"],
+    },
+    FormatEntry {
+        extensions: &["gpkg"],
+        mime_type: GEOPACKAGE_MIME_TYPE,
+        aliases: &[],
     },
     FormatEntry {
         extensions: &["hwp"],
@@ -1282,6 +1294,10 @@ fn detect_mime_type_from_bytes_with_inspection(
     content: &[u8],
     package_inspection: PackageInspection,
 ) -> Result<String> {
+    if content.starts_with(b"SQLite format 3\0") {
+        return Ok(SQLITE_MIME_TYPE.to_string());
+    }
+
     if let Some(kind) = infer::get(content) {
         let mime_type = kind.mime_type();
 
