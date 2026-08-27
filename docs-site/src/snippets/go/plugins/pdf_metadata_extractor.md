@@ -1,57 +1,48 @@
-```go title="Go"
+```go title="Go - PDF metadata observer"
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"sync/atomic"
 
 	"github.com/xberg-io/xberg/packages/go"
 )
 
-type pdfMetadataExtractor struct {
+type pdfMetadataObserver struct {
 	processedCount atomic.Int64
 }
 
-func (processor *pdfMetadataExtractor) Name() string       { return "pdf_metadata_extractor" }
-func (processor *pdfMetadataExtractor) Version() string    { return "1.0.0" }
-func (processor *pdfMetadataExtractor) Initialize() error  { return nil }
-func (processor *pdfMetadataExtractor) Shutdown() error    { return nil }
-func (processor *pdfMetadataExtractor) Priority() int32    { return 80 }
-func (processor *pdfMetadataExtractor) ProcessingStage() xberg.ProcessingStage {
+func (processor *pdfMetadataObserver) Name() string       { return "pdf_metadata_observer" }
+func (processor *pdfMetadataObserver) Version() string    { return "1.0.0" }
+func (processor *pdfMetadataObserver) Initialize() error  { return nil }
+func (processor *pdfMetadataObserver) Shutdown() error    { return nil }
+func (processor *pdfMetadataObserver) Priority() int32    { return 80 }
+func (processor *pdfMetadataObserver) ProcessingStage() xberg.ProcessingStage {
 	return xberg.ProcessingStageEarly
 }
-func (processor *pdfMetadataExtractor) ShouldProcess(
+func (processor *pdfMetadataObserver) ShouldProcess(
 	result xberg.ExtractedDocument,
 	_ xberg.ExtractionConfig,
 ) bool {
 	return result.MimeType == "application/pdf"
 }
-func (processor *pdfMetadataExtractor) EstimatedDurationMs(_ xberg.ExtractedDocument) uint64 {
+func (processor *pdfMetadataObserver) EstimatedDurationMs(_ xberg.ExtractedDocument) uint64 {
 	return 1
 }
-func (processor *pdfMetadataExtractor) Process(
+func (processor *pdfMetadataObserver) Process(
 	result xberg.ExtractedDocument,
 	_ xberg.ExtractionConfig,
 ) error {
-	if result.Metadata == nil {
-		result.Metadata = &xberg.Metadata{}
+	if result.Metadata != nil && result.Metadata.Title != nil {
+		log.Printf("PDF title: %s", *result.Metadata.Title)
 	}
-	if result.Metadata.Additional == nil {
-		result.Metadata.Additional = make(map[string]json.RawMessage)
-	}
-	contentLength, err := json.Marshal(len(result.Content))
-	if err != nil {
-		return err
-	}
-	result.Metadata.Additional["pdf_content_length"] = contentLength
-	result.Metadata.Additional["pdf_processor_version"] = json.RawMessage(`"1.0.0"`)
+	log.Printf("PDF content length: %d", len(result.Content))
 	processor.processedCount.Add(1)
 	return nil
 }
 
 func main() {
-	processor := &pdfMetadataExtractor{}
+	processor := &pdfMetadataObserver{}
 	if err := xberg.RegisterPostProcessor(processor); err != nil {
 		log.Fatalf("register post-processor: %v", err)
 	}

@@ -29,8 +29,7 @@ const extractionRequest = {
   params: {
     name: "extract",
     arguments: {
-      path: "document.pdf",
-      async: true,
+      input: { kind: "uri", uri: "document.pdf" },
     },
   },
 };
