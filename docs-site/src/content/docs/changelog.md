@@ -41,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added bounded, cancellable SQLite and GeoPackage table extraction with schema-based GeoPackage
+  detection, `.sqlite3` and `.gpkx` filename support, and defensive handling for untrusted
+  databases (#1510).
+- Added configurable MIME inference policies for preferring content signatures, trusting supported filename
+  extensions, or ignoring extensions, with per-input overrides (#1509).
+- Added native KML and GeoJSON extraction with canonical MIME routing (#1508).
+- Added Rust `SUPPORTED_FORMAT_COUNT` and `SUPPORTED_EXTENSION_COUNT` constants derived from the
+  MIME registry, plus automated synchronization for published format-count claims (#1511).
 - Added reusable Rust PDF render sessions for querying page counts and rendering multiple pages
   without reopening the document (#1485).
 - Added cooperative cancellation for single and batch extraction (#1476).
@@ -112,6 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parsing and configuration deserialization now reject invalid region, redaction, and reranker values.
 - Corrected and expanded installation, CLI, configuration, extraction, migration, integration, and
   cross-language API documentation.
+- Corrected canonical MIME and extension routing for DBF, YAML, reStructuredText, Org, Typst,
+  XHTML, Djot, JPEG 2000, HEIC/HEIF, MP4, and MPEG inputs.
 
 ### Removed
 
@@ -141,6 +151,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed the OpenAPI document's dangling Djot attribute reference so schema validators and client generators can
+  resolve every advertised component (#1505).
+- XML and JSON content with unsupported specialized extensions now routes through the supported generic extractor
+  instead of failing MIME validation (#1507).
+- File extraction now falls back to bounded content sniffing when a path has an unknown or missing extension (#1506).
+- Explicit `application/octet-stream` hints now trigger configured MIME detection instead of being
+  treated as an authoritative document type.
 - Fixed documentation-snippet fixtures that named non-existent result fields, which made the generated
   snippets silently drop the affected presentation block: element `content` is now `text`, table `rows`
   is now `cells`, and the result paths `keywords`, `structured_data`, and `document_structure` are now
