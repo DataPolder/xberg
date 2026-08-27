@@ -85,6 +85,7 @@ use utoipa::OpenApi;
             crate::types::tables::Table,
             crate::types::page::PageContent,
             crate::types::djot::DjotContent,
+            crate::types::djot::DjotAttributeGroup,
             // Nested schemas reachable from the types above. utoipa emits a `$ref`
             // for each of these but only defines a component for types listed here,
             // so omitting one produces a dangling pointer (#251). ~keep
