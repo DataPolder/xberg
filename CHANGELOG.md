@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added native KML and GeoJSON extraction with canonical MIME routing (#1508).
 - Added Rust `SUPPORTED_FORMAT_COUNT` and `SUPPORTED_EXTENSION_COUNT` constants derived from the
   MIME registry, plus automated synchronization for published format-count claims (#1511).
 - Added reusable Rust PDF render sessions for querying page counts and rendering multiple pages

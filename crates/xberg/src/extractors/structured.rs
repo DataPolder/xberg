@@ -2,6 +2,7 @@
 
 use crate::Result;
 use crate::core::config::ExtractionConfig;
+use crate::core::mime::GEOJSON_MIME_TYPE;
 use crate::extractors::security::SecurityBudget;
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::internal::InternalDocument;
@@ -27,7 +28,7 @@ fn build_internal_document(
     budget: &mut SecurityBudget,
 ) -> Result<InternalDocument> {
     let source_format = match mime_type {
-        "application/json" | "text/json" | "application/csl+json" => "json",
+        "application/json" | "text/json" | "application/csl+json" | GEOJSON_MIME_TYPE => "json",
         "application/x-ndjson" | "application/jsonl" | "application/x-jsonlines" => "jsonl",
         "application/yaml" | "application/x-yaml" | "text/yaml" | "text/x-yaml" => "yaml",
         "application/toml" | "text/toml" => "toml",
@@ -232,7 +233,7 @@ impl InternalDocumentExtractor for StructuredExtractor {
         config: &ExtractionConfig,
     ) -> Result<InternalDocument> {
         let structured_result = match mime_type {
-            "application/json" | "text/json" | "application/csl+json" => {
+            "application/json" | "text/json" | "application/csl+json" | GEOJSON_MIME_TYPE => {
                 crate::extraction::structured::parse_json(content, None)?
             }
             "application/x-ndjson" | "application/jsonl" | "application/x-jsonlines" => {
@@ -298,6 +299,7 @@ impl InternalDocumentExtractor for StructuredExtractor {
             "application/json",
             "text/json",
             "application/csl+json",
+            GEOJSON_MIME_TYPE,
             "application/x-ndjson",
             "application/jsonl",
             "application/x-jsonlines",
@@ -388,7 +390,7 @@ mod tests {
     fn test_structured_extractor_supported_mime_types() {
         let extractor = StructuredExtractor::new();
         let mime_types = extractor.supported_mime_types();
-        assert_eq!(mime_types.len(), 12);
+        assert_eq!(mime_types.len(), 13);
         assert!(mime_types.contains(&"application/json"));
         assert!(mime_types.contains(&"application/x-ndjson"));
         assert!(mime_types.contains(&"application/jsonl"));
@@ -396,5 +398,28 @@ mod tests {
         assert!(mime_types.contains(&"application/x-yaml"));
         assert!(mime_types.contains(&"application/toml"));
         assert!(mime_types.contains(&"application/csl+json"));
+        assert!(mime_types.contains(&GEOJSON_MIME_TYPE));
+    }
+
+    #[tokio::test]
+    async fn geojson_uses_json_extraction_and_preserves_its_mime_type() {
+        let extractor = StructuredExtractor::new();
+        let content = br#"{"type":"Point","coordinates":[13.4,52.5]}"#;
+
+        assert!(extractor.supported_mime_types().contains(&"application/geo+json"));
+        let result = extractor
+            .extract_content(content, "application/geo+json", &ExtractionConfig::default())
+            .await
+            .unwrap();
+
+        assert_eq!(result.mime_type, "application/geo+json");
+        assert_eq!(
+            result.metadata.additional.get("data_format"),
+            Some(&serde_json::json!("json"))
+        );
+        assert_eq!(
+            crate::rendering::render_plain(&result),
+            "type: Point\n\ncoordinates\n13.4\n52.5"
+        );
     }
 }

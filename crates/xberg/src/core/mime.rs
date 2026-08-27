@@ -227,7 +227,9 @@ pub(crate) const LEGACY_POWERPOINT_MIME_TYPE: &str = "application/vnd.ms-powerpo
 pub(crate) const PST_MIME_TYPE: &str = "application/vnd.ms-outlook-pst";
 pub(crate) const WPD_MIME_TYPE: &str = "application/vnd.wordperfect";
 pub(crate) const JSON_MIME_TYPE: &str = "application/json";
+pub(crate) const GEOJSON_MIME_TYPE: &str = "application/geo+json";
 pub(crate) const XML_MIME_TYPE: &str = "application/xml";
+pub(crate) const KML_MIME_TYPE: &str = "application/vnd.google-earth.kml+xml";
 #[cfg(feature = "tree-sitter")]
 pub(crate) const SOURCE_CODE_MIME_TYPE: &str = "text/x-source-code";
 
@@ -590,6 +592,11 @@ static FORMATS: &[FormatEntry] = &[
         aliases: &["text/json"],
     },
     FormatEntry {
+        extensions: &["geojson"],
+        mime_type: GEOJSON_MIME_TYPE,
+        aliases: &[],
+    },
+    FormatEntry {
         extensions: &[],
         mime_type: "application/csl+json",
         aliases: &[],
@@ -613,6 +620,11 @@ static FORMATS: &[FormatEntry] = &[
         extensions: &["xml"],
         mime_type: "application/xml",
         aliases: &["text/xml"],
+    },
+    FormatEntry {
+        extensions: &["kml"],
+        mime_type: KML_MIME_TYPE,
+        aliases: &[],
     },
     FormatEntry {
         extensions: &["svg"],
@@ -1883,6 +1895,48 @@ mod tests {
         .await;
     }
 
+    #[cfg(all(feature = "xml", feature = "tokio-runtime", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn should_route_kml_through_the_xml_extractor() {
+        let content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Placemark><name>Berlin</name></Placemark>
+</kml>"#;
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("placemark.kml");
+        std::fs::write(&path, content).unwrap();
+        let config = crate::core::config::ExtractionConfig {
+            use_cache: false,
+            ..Default::default()
+        };
+
+        let result = crate::core::extractor::extract_file(&path, None, &config)
+            .await
+            .unwrap();
+
+        assert_eq!(result.mime_type, "application/vnd.google-earth.kml+xml");
+        assert_eq!(result.content, "kml\n  Placemark\n    name\n    Berlin");
+    }
+
+    #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
+    #[tokio::test]
+    async fn should_route_geojson_through_the_structured_extractor() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("point.geojson");
+        std::fs::write(&path, br#"{"type":"Point","coordinates":[13.4,52.5]}"#).unwrap();
+        let config = crate::core::config::ExtractionConfig {
+            use_cache: false,
+            ..Default::default()
+        };
+
+        let result = crate::core::extractor::extract_file(&path, None, &config)
+            .await
+            .unwrap();
+
+        assert_eq!(result.mime_type, "application/geo+json");
+        assert_eq!(result.content, "type: Point\n\ncoordinates\n13.4\n52.5");
+    }
+
     #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
     #[tokio::test]
     async fn should_route_benchmark_text_extensions_to_plain_text_extractor() {
@@ -2461,6 +2515,16 @@ mod tests {
         assert_eq!(EXT_TO_MIME.get("mdx"), Some(&"text/mdx"));
         assert!(SUPPORTED_MIME_TYPES.contains("text/mdx"));
         assert!(SUPPORTED_MIME_TYPES.contains("text/x-mdx"));
+    }
+
+    #[test]
+    fn geographic_formats_use_their_canonical_mime_types() {
+        assert_eq!(EXT_TO_MIME.get("kml"), Some(&"application/vnd.google-earth.kml+xml"));
+        assert_eq!(EXT_TO_MIME.get("geojson"), Some(&"application/geo+json"));
+        assert!(SUPPORTED_MIME_TYPES.contains("application/vnd.google-earth.kml+xml"));
+        assert!(SUPPORTED_MIME_TYPES.contains("application/geo+json"));
+        assert_eq!(SUPPORTED_FORMAT_COUNT, 102);
+        assert_eq!(SUPPORTED_EXTENSION_COUNT, 122);
     }
 
     #[test]
