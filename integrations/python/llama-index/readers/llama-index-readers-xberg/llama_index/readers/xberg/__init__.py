@@ -1,4 +1,4 @@
-"""LlamaIndex reader for 101 document formats powered by xberg."""
+"""LlamaIndex reader for 104 document formats powered by xberg."""
 
 from llama_index.readers.xberg.base import XbergReader
 
