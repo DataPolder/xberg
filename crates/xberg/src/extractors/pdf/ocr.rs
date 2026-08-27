@@ -261,6 +261,16 @@ pub(crate) fn evaluate_native_text_for_ocr(
     page_count: Option<u32>,
     thresholds: &OcrQualityThresholds,
 ) -> OcrFallbackDecision {
+    evaluate_native_text_for_ocr_with_garbage_threshold(native_text, page_count, thresholds, true)
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn evaluate_native_text_for_ocr_with_garbage_threshold(
+    native_text: &str,
+    page_count: Option<u32>,
+    thresholds: &OcrQualityThresholds,
+    apply_absolute_garbage_threshold: bool,
+) -> OcrFallbackDecision {
     let trimmed = native_text.trim();
 
     if trimmed.is_empty() {
@@ -304,9 +314,8 @@ pub(crate) fn evaluate_native_text_for_ocr(
     let has_undecodable_text_layer = stats.non_whitespace >= thresholds.min_total_non_whitespace
         && stats.undecodable_ratio >= thresholds.min_undecodable_ratio;
 
-    // An absolute replacement-character count is meaningful per page, not across
-    // concatenated multi-page text. The per-page caller reruns this check for each boundary. ~keep
-    let has_excessive_garbage = pages == 1 && stats.garbage_char_count >= thresholds.min_garbage_chars;
+    let has_excessive_garbage =
+        apply_absolute_garbage_threshold && stats.garbage_char_count >= thresholds.min_garbage_chars;
 
     let definitive_failure = stats.non_whitespace == 0
         || stats.alnum == 0
@@ -913,7 +922,24 @@ pub(crate) fn evaluate_per_page_ocr(
         _ => return evaluate_native_text_for_ocr(native_text, page_count, thresholds),
     };
 
-    let mut document_decision = evaluate_native_text_for_ocr(native_text, page_count, thresholds);
+    let boundary_count_matches_pages = page_count.is_none_or(|count| count as usize == boundaries.len());
+    let all_boundaries_are_valid = boundaries.iter().all(|boundary| {
+        boundary.byte_start <= boundary.byte_end
+            && native_text.is_char_boundary(boundary.byte_start)
+            && native_text.is_char_boundary(boundary.byte_end)
+    });
+    let boundaries_are_ordered = boundaries.windows(2).all(|pair| pair[0].byte_end <= pair[1].byte_start);
+    let can_defer_absolute_garbage_threshold =
+        boundaries.len() > 1 && boundary_count_matches_pages && all_boundaries_are_valid && boundaries_are_ordered;
+
+    // Defer the aggregate absolute count only when every page can be evaluated; otherwise
+    // the document-level check is the only way to preserve the configured fallback threshold. ~keep
+    let mut document_decision = evaluate_native_text_for_ocr_with_garbage_threshold(
+        native_text,
+        page_count,
+        thresholds,
+        !can_defer_absolute_garbage_threshold,
+    );
 
     if document_decision.whole_doc_failure {
         return document_decision;
@@ -7364,6 +7390,54 @@ mod tests {
             evaluate_ocr_skip_gate(false, text.len(), 0.9, &decision, &thresholds),
             OcrGateOutcome::RunFallbackOnPages(vec![1])
         );
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_multi_page_garbage_threshold_without_boundaries_uses_aggregate_fallback() {
+        let thresholds = t();
+        let garbage = "\u{FFFD}".repeat(thresholds.min_garbage_chars);
+        let text = format!(
+            "This multi-page document contains reliable searchable measurements and explanatory text. \
+             Its replacement characters still require aggregate fallback without page boundaries {garbage}."
+        );
+
+        let decision = evaluate_per_page_ocr(&text, None, Some(2), &thresholds);
+
+        assert!(decision.fallback);
+        assert!(decision.whole_doc_failure);
+        assert!(decision.failing_pages.is_empty());
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_multi_page_garbage_threshold_with_invalid_boundaries_uses_aggregate_fallback() {
+        use crate::types::PageBoundary;
+
+        let thresholds = t();
+        let garbage = "\u{FFFD}".repeat(thresholds.min_garbage_chars);
+        let text = format!(
+            "This multi-page document contains reliable searchable measurements and explanatory text. \
+             Its replacement characters still require aggregate fallback with stale boundaries {garbage}."
+        );
+        let boundaries = vec![
+            PageBoundary {
+                page_number: 1,
+                byte_start: text.len() + 1,
+                byte_end: text.len() + 2,
+            },
+            PageBoundary {
+                page_number: 2,
+                byte_start: text.len() + 2,
+                byte_end: text.len() + 3,
+            },
+        ];
+
+        let decision = evaluate_per_page_ocr(&text, Some(&boundaries), Some(2), &thresholds);
+
+        assert!(decision.fallback);
+        assert!(decision.whole_doc_failure);
+        assert!(decision.failing_pages.is_empty());
     }
 
     #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
