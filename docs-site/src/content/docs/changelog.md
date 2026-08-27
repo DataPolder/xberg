@@ -151,6 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed runtime crashes in system-linked Tesseract OCR builds by linking the required native exception-safety
+  shim.
 - Fixed the OpenAPI document's dangling Djot attribute reference so schema validators and client generators can
   resolve every advertised component (#1505).
 - XML and JSON content with unsupported specialized extensions now routes through the supported generic extractor

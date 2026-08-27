@@ -12266,8 +12266,10 @@ dependencies = [
  "cc",
  "cmake",
  "image 0.25.10",
+ "pkg-config",
  "reqwest",
  "thiserror 2.0.20",
+ "vcpkg",
  "zip 8.6.0",
 ]
 

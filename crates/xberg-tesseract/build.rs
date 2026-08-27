@@ -1878,6 +1878,62 @@ Installation instructions:
     }
 }
 
+#[cfg(all(feature = "dynamic-linking", not(feature = "build-tesseract-wasm")))]
+fn build_pkg_config_shim() {
+    let tesseract = pkg_config::Config::new()
+        .cargo_metadata(false)
+        .probe("tesseract")
+        .unwrap_or_else(|error| panic!("failed to discover the system Tesseract headers with pkg-config: {error}"));
+    let leptonica = pkg_config::Config::new()
+        .cargo_metadata(false)
+        .probe("lept")
+        .unwrap_or_else(|error| panic!("failed to discover the system Leptonica headers with pkg-config: {error}"));
+
+    let mut shim = cc::Build::new();
+    shim.file("src/shim.cpp").cpp(true).std("c++17");
+    for include_path in tesseract.include_paths.iter().chain(&leptonica.include_paths) {
+        shim.include(include_path);
+    }
+    shim.compile("xberg_shim");
+
+    pkg_config::Config::new()
+        .probe("tesseract")
+        .unwrap_or_else(|error| panic!("failed to link system Tesseract with pkg-config: {error}"));
+    pkg_config::Config::new()
+        .probe("lept")
+        .unwrap_or_else(|error| panic!("failed to link system Leptonica with pkg-config: {error}"));
+}
+
+#[cfg(all(feature = "dynamic-linking", not(feature = "build-tesseract-wasm")))]
+fn build_vcpkg_shim() {
+    let tesseract = vcpkg::Config::new()
+        .cargo_metadata(false)
+        .find_package("tesseract")
+        .unwrap_or_else(|error| panic!("failed to discover system Tesseract with vcpkg: {error}"));
+
+    let mut shim = cc::Build::new();
+    shim.file("src/shim.cpp").cpp(true).std("c++17");
+    for include_path in &tesseract.include_paths {
+        shim.include(include_path);
+    }
+    shim.compile("xberg_shim");
+
+    for metadata in &tesseract.cargo_metadata {
+        println!("{metadata}");
+    }
+}
+
+#[cfg(all(feature = "dynamic-linking", not(feature = "build-tesseract-wasm")))]
+fn build_system_shim() {
+    let target_environment =
+        std::env::var("CARGO_CFG_TARGET_ENV").expect("Cargo must set CARGO_CFG_TARGET_ENV for build scripts");
+    if target_environment == "msvc" {
+        build_vcpkg_shim();
+    } else {
+        build_pkg_config_shim();
+    }
+}
+
 fn main() {
     // `dynamic-linking` is an explicit opt out of the vendored build, so it outranks the
     // default `build-tesseract` rather than being ignored beside it. Cargo features are
@@ -1896,7 +1952,7 @@ fn main() {
     #[cfg(all(feature = "dynamic-linking", not(feature = "build-tesseract-wasm")))]
     {
         eprintln!("Using dynamic linking with system-installed Tesseract libraries");
-        println!("cargo:rustc-link-lib=dylib=tesseract");
-        println!("cargo:rustc-link-lib=dylib=leptonica");
+        println!("cargo:rerun-if-changed=src/shim.cpp");
+        build_system_shim();
     }
 }

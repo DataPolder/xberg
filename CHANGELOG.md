@@ -121,6 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed runtime crashes in system-linked Tesseract OCR builds by linking the required native exception-safety
+  shim.
 - Fixed `xberg batch` so mixed-success runs emit every successful document and every attributed
   per-input error before returning a nonzero status; JSON and TOON timing slots remain aligned with
   inputs, and TOON now uses the documented batch envelope.
