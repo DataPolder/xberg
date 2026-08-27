@@ -8240,7 +8240,7 @@ mod tests {
     /// The writing-axis continuation test, quadrant by quadrant.
     ///
     /// Upright cases must be no stricter than the raw `e`/`f` tests they are
-    /// ANDed with — that implication is why unrotated output cannot move.
+    /// combined with — that implication is why unrotated output cannot move.
     /// Rotated along-axis cases pin the helper alone: in the composed
     /// predicate the raw `f` band still gates them, so there the helper is
     /// veto-only.
