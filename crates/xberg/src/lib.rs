@@ -224,12 +224,12 @@ pub use core::config::{
     ChunkClassificationDefinition, ChunkSizing, ChunkerType, ChunkingConfig, ConcurrencyConfig, ContentFilterConfig,
     CredentialProviderConfig, CsvConfig, EmailConfig, EmbeddingConfig, EmbeddingModelType, ExecutionProviderType,
     ExtractInput, ExtractInputKind, ExtractionConfig, ExtractionErrorItem, ExtractionResult, ExtractionSummary,
-    FileExtractionConfig, ImageExtractionConfig, JupyterCellRendering, LanguageDetectionConfig, LlmBudgetConfig,
-    LlmCacheConfig, LlmConfig, LlmProviderConfig, LlmRateLimitConfig, MergeMode, MimeDetectionPolicy, NerBackendKind,
-    NerConfig, OcrConfig, OutputFormat, PageClassificationConfig, PageConfig, PostProcessorConfig, RedactionConfig,
-    RedactionPattern, RedactionTerm, RerankerConfig, RerankerHead, RerankerModelType, StructuredExtractionConfig,
-    SummarizationConfig, TableChunkingMode, TokenReductionOptions, TranslationConfig, UrlExtractionConfig,
-    UrlExtractionMode,
+    FileExtractionConfig, GeoJsonExtractionConfig, ImageExtractionConfig, JupyterCellRendering,
+    LanguageDetectionConfig, LlmBudgetConfig, LlmCacheConfig, LlmConfig, LlmProviderConfig, LlmRateLimitConfig,
+    MergeMode, MimeDetectionPolicy, NerBackendKind, NerConfig, OcrConfig, OutputFormat, PageClassificationConfig,
+    PageConfig, PostProcessorConfig, RedactionConfig, RedactionPattern, RedactionTerm, RerankerConfig, RerankerHead,
+    RerankerModelType, StructuredExtractionConfig, SummarizationConfig, TableChunkingMode, TokenReductionOptions,
+    TranslationConfig, UrlExtractionConfig, UrlExtractionMode,
 };
 pub use core::config::{
     LateInteractionConfig, LateInteractionModelType, SparseEmbeddingConfig, SparseEmbeddingModelType,

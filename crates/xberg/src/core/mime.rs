@@ -2300,6 +2300,9 @@ mod tests {
         std::fs::write(&path, br#"{"type":"Point","coordinates":[13.4,52.5]}"#).unwrap();
         let config = crate::core::config::ExtractionConfig {
             use_cache: false,
+            geojson: Some(crate::core::config::GeoJsonExtractionConfig {
+                include_full_coordinates: true,
+            }),
             ..Default::default()
         };
 

@@ -354,6 +354,16 @@ pub struct ExtractionConfig {
     #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
     pub csv: Option<super::super::csv::CsvConfig>,
 
+    /// GeoJSON extraction configuration (None = bounded summary).
+    ///
+    /// By default, GeoJSON coordinates are replaced by aggregate counts and bounds
+    /// so large geometry arrays do not become unbounded rendered output. Set
+    /// [`crate::core::config::GeoJsonExtractionConfig::include_full_coordinates`]
+    /// explicitly to retain the legacy full-coordinate output.
+    #[serde(default)]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.1.0"))]
+    pub geojson: Option<super::super::geojson::GeoJsonExtractionConfig>,
+
     /// Concurrency limits for constrained environments (None = use defaults).
     ///
     /// Controls Rayon thread pool size, ONNX Runtime intra-op threads, and the
@@ -553,6 +563,7 @@ impl Default for ExtractionConfig {
             cache_ttl_secs: None,
             email: None,
             csv: None,
+            geojson: None,
             concurrency: None,
             url: UrlExtractionConfig::default(),
             max_archive_depth: ExtractionConfig::default_archive_depth(),
