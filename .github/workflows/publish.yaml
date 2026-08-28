@@ -1960,6 +1960,11 @@ jobs:
         shell: bash
         run: command -v cargo-zigbuild || cargo install --locked cargo-zigbuild
 
+      - name: Build liblzma statically for glibc floor
+        if: contains(matrix.target, '-linux-gnu')
+        shell: bash
+        run: echo "LZMA_API_STATIC=1" >> "$GITHUB_ENV"
+
       - uses: xberg-io/actions/build-csharp-natives@v1
         with:
           target: ${{ matrix.target }}
@@ -1967,6 +1972,13 @@ jobs:
           lib-name: xberg_ffi
           rid: ${{ matrix.rid }}
           glibc-version: ${{ contains(matrix.target, '-linux-gnu') && env.GLIBC_FLOOR || '' }}
+
+      - name: Ship and verify native closure (glibc Linux)
+        if: contains(matrix.target, '-linux-gnu')
+        shell: bash
+        run: |
+          bash scripts/ci/vendor-native-closure.sh dist/csharp-natives
+          bash scripts/ci/verify-glibc-floor.sh dist/csharp-natives "$GLIBC_FLOOR"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -2091,6 +2103,11 @@ jobs:
         if: contains(matrix.target, '-linux-gnu')
         shell: bash
         run: command -v cargo-zigbuild || cargo install --locked cargo-zigbuild
+
+      - name: Build liblzma statically for glibc floor
+        if: contains(matrix.target, '-linux-gnu')
+        shell: bash
+        run: echo "LZMA_API_STATIC=1" >> "$GITHUB_ENV"
 
       - name: Disable sccache wrapper on Windows
         if: contains(matrix.target, 'windows')
@@ -2285,6 +2302,10 @@ jobs:
         if: contains(matrix.target, '-linux-gnu')
         shell: bash
         run: command -v cargo-zigbuild || cargo install --locked cargo-zigbuild
+      - name: Build liblzma statically for glibc floor
+        if: contains(matrix.target, '-linux-gnu')
+        shell: bash
+        run: echo "LZMA_API_STATIC=1" >> "$GITHUB_ENV"
       - name: Disable sccache wrapper on Windows
         if: contains(matrix.target, 'windows')
         shell: bash
@@ -2339,6 +2360,7 @@ jobs:
             *-unknown-linux-gnu)
               # patchelf the $ORIGIN rpath and copy the .so closure (libonnxruntime + codecs).
               bash scripts/ci/vendor-native-closure.sh "$STAGE/${LIB}"
+              bash scripts/ci/verify-glibc-floor.sh "$STAGE" "$GLIBC_FLOOR"
               compgen -G "$STAGE/libonnxruntime.so*" >/dev/null \
                 || { echo "::error::libonnxruntime not vendored beside dart native"; exit 1; }
               ;;
