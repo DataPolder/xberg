@@ -91,8 +91,7 @@ let package = Package(
     ),
     .target(
       name: "Xberg", dependencies: ["RustBridge"],
-      path: "Sources/Xberg",
-      exclude: ["LICENSE"]),
+      path: "Sources/Xberg"),
     .testTarget(
       name: "XbergTests", dependencies: ["Xberg"],
       path: "Tests/XbergTests"),

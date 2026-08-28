@@ -158,6 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mandatory cross-reference failures emit a single operation-boundary error without changing the returned error type.
 - Fixed annotation-only PDFs so visible FreeText content is recovered into page-aware document text without
   exposing hidden, transparent, cropped, or disabled annotations when annotation extraction is off.
+- Fixed the Swift package manifest so SwiftPM no longer warns about a nonexistent target-relative license file.
 - Fixed scanned PDF extraction so CCITT parameters align with their filter in multi-filter streams,
   referenced JBIG2 image masks are available to OCR, and stencil-mask polarity renders text as opaque.
 - Fixed PDF reading order for dense two-column layouts, hanging clause numbers, split list markers,
