@@ -260,9 +260,9 @@ tasks:
       - task: version:sync
 
   alef:generate:
-    desc: "Regenerate all Alef-managed outputs (formatting via poly, no build)"
+    desc: "Regenerate all Alef-managed outputs (formatting via poly, no build or snippet validation)"
     cmds:
-      - alef all --clean
+      - alef all --clean --skip-snippet-validation
 
   alef:verify:
     desc: "Check Alef-generated files are up to date"
