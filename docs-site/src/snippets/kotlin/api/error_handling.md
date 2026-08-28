@@ -1,8 +1,15 @@
 ```kotlin title="Kotlin"
 import io.xberg.*
 
+private const val DEFAULT_MAX_ARCHIVE_DEPTH = 3L
+
 fun main() {
-    val config = ExtractionConfig.builder().build()
+    val config = ExtractionConfig(
+        extractionTimeoutSecs = null,
+        maxEmbeddedFileBytes = null,
+        url = UrlExtractionConfig(crawl = CrawlConfig(ssrf = SsrfPolicy())),
+        maxArchiveDepth = DEFAULT_MAX_ARCHIVE_DEPTH,
+    )
     try {
         val resultOutput = Xberg.extract(
             ExtractInput(kind = ExtractInputKind.URI, uri = "document.pdf"),
@@ -10,11 +17,8 @@ fun main() {
         )
         val result = resultOutput.results.first()
         println(result.content)
-    } catch (e: XbergRsException) {
-        System.err.println("Extraction failed: ${e.message}")
-        System.err.println("Error code: ${e.code}")
-    } catch (e: Exception) {
-        System.err.println("Unexpected error: ${e.message}")
+    } catch (error: XbergBridgeException) {
+        System.err.println("Extraction failed: ${error.message}")
     }
 }
 ```

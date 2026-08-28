@@ -1,16 +1,17 @@
 ```kotlin title="Kotlin"
 import io.xberg.*
-import java.util.Optional
+
+private const val DEFAULT_MAX_ARCHIVE_DEPTH = 3L
 
 fun main() {
-    val ocr = OcrConfig.builder()
-        .withBackend("tesseract")
-        .withLanguage("eng")
-        .build()
-
-    val config = ExtractionConfig.builder()
-        .withOcr(Optional.of(ocr))
-        .build()
+    val ocr = OcrConfig(backend = "tesseract", language = listOf("eng"))
+    val config = ExtractionConfig(
+        ocr = ocr,
+        extractionTimeoutSecs = null,
+        maxEmbeddedFileBytes = null,
+        url = UrlExtractionConfig(crawl = CrawlConfig(ssrf = SsrfPolicy())),
+        maxArchiveDepth = DEFAULT_MAX_ARCHIVE_DEPTH,
+    )
 
     val resultOutput = Xberg.extract(
         ExtractInput(kind = ExtractInputKind.URI, uri = "scanned.pdf"),
