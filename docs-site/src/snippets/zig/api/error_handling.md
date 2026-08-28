@@ -6,10 +6,10 @@ pub fn main() !void {
     const config_json = "{}";
     const input_json = "{\"kind\":\"uri\",\"uri\":\"document.pdf\"}";
     const output_json = xberg.extract(input_json, config_json) catch |err| {
-        switch (err) {
-            error.OutOfMemory => std.debug.print("Out of memory\n", .{}),
-            error.UnknownFfiError => std.debug.print("Extraction failed: {s}\n", .{@errorName(err)}),
-            else => std.debug.print("Extraction failed: {s}\n", .{@errorName(err)}),
+        if (err == error.OutOfMemory) {
+            std.debug.print("Out of memory\n", .{});
+        } else {
+            std.debug.print("Extraction failed: {s}\n", .{@errorName(err)});
         }
         if (xberg._last_error()) |context| {
             std.debug.print("  context: {s}\n", .{context});
