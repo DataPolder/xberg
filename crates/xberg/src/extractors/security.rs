@@ -53,7 +53,10 @@ pub struct SecurityLimits {
     /// Maximum XML depth (1024 levels)
     pub max_xml_depth: usize,
 
-    /// Maximum cells per table (100,000)
+    /// Maximum aggregate table cells per document (100,000).
+    ///
+    /// Raise this for trusted large tabular inputs. Higher values permit
+    /// proportionally more parsing work and output allocation.
     pub max_table_cells: usize,
 
     /// Maximum number of pages (or slides, or frames) in a single document.
@@ -239,7 +242,13 @@ impl std::fmt::Display for SecurityError {
                 write!(f, "XML depth exceeded: {} (max: {})", depth, max)
             }
             SecurityError::TooManyCells { cells, max } => {
-                write!(f, "Too many table cells: {} (max: {})", cells, max)
+                write!(
+                    f,
+                    "Table cell limit exceeded: observed {} cells, but \
+                     `security_limits.max_table_cells` is {}. If this input is trusted, raise \
+                     `security_limits.max_table_cells`; otherwise reduce or split the table.",
+                    cells, max
+                )
             }
             SecurityError::TooManyPages { count, max } => {
                 write!(
@@ -906,6 +915,7 @@ mod tests {
         assert_eq!(limits.max_archive_size, 500 * 1024 * 1024);
         assert_eq!(limits.max_nesting_depth, 1024);
         assert_eq!(limits.max_entity_length, 1024 * 1024);
+        assert_eq!(limits.max_table_cells, 100_000);
     }
 
     #[test]
@@ -1013,10 +1023,15 @@ mod tests {
         assert_eq!(v.current_cells, 5);
         assert!(v.add_cells(5).is_ok());
         assert_eq!(v.current_cells, 10);
-        assert!(matches!(
-            v.add_cells(1),
-            Err(SecurityError::TooManyCells { cells: 11, max: 10 })
-        ));
+        let error = v
+            .add_cells(1)
+            .expect_err("the eleventh cell must exceed a ten-cell budget");
+        assert!(matches!(&error, SecurityError::TooManyCells { cells: 11, max: 10 }));
+        assert_eq!(
+            error.to_string(),
+            "Table cell limit exceeded: observed 11 cells, but `security_limits.max_table_cells` is 10. \
+             If this input is trusted, raise `security_limits.max_table_cells`; otherwise reduce or split the table."
+        );
     }
 
     #[test]
