@@ -20,6 +20,9 @@ importers:
       '@textlint-rule/textlint-rule-no-invalid-control-character':
         specifier: ^3.0.0
         version: 3.0.0
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
       '@vitest/coverage-v8':
         specifier: ^4.1.11
         version: 4.1.11(vitest@4.1.11)
