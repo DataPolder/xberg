@@ -137,6 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `xberg batch` so mixed-success runs emit every successful document and every attributed
   per-input error before returning a nonzero status; JSON and TOON timing slots remain aligned with
   inputs, and TOON now uses the documented batch envelope.
+- Fixed `xberg extract --ocr false` so it authoritatively disables implicit OCR fallback, overrides
+  conflicting loaded OCR routing, and rejects contradictory OCR flags.
 - Fixed Tesseract preprocessing so deskew, denoise, contrast enhancement, and Otsu, adaptive, and
   Sauvola binarization settings transform the OCR raster on native and WebAssembly backends;
   `none` (with `off` as an alias) preserves unthresholded grayscale when deskew is disabled,
