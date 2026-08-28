@@ -27,6 +27,35 @@ fn get_test_file(relative_path: &str) -> String {
 }
 
 #[test]
+fn doctor_json_reports_sorted_ocr_capabilities_and_layout_checks() {
+    let output = Command::new(get_binary_path())
+        .args(["doctor", "--no-config-discovery", "--format", "json"])
+        .output()
+        .expect("failed to execute doctor command");
+    assert!(
+        output.status.success(),
+        "doctor failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("doctor stdout must be valid JSON");
+    let checks = report["checks"].as_array().expect("doctor JSON must contain checks");
+    let ocr_names: Vec<_> = checks
+        .iter()
+        .filter_map(|check| check["name"].as_str())
+        .filter(|name| name.starts_with("ocr."))
+        .collect();
+    let mut sorted = ocr_names.clone();
+    sorted.sort_unstable();
+    assert_eq!(ocr_names, sorted, "OCR capability checks must have deterministic order");
+    assert!(!ocr_names.is_empty(), "doctor must describe the OCR capability shape");
+    #[cfg(feature = "ocr")]
+    assert!(checks.iter().any(|check| check["name"] == "ocr.tesseract"));
+    #[cfg(feature = "layout-detection")]
+    assert!(checks.iter().any(|check| check["name"] == "layout.rtdetr"));
+}
+
+#[test]
 fn test_extract_text_file() {
     let test_file = get_test_file("text/simple.txt");
     if !PathBuf::from(&test_file).exists() {
