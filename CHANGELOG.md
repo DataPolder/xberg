@@ -28,8 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redacted from debug output.
 - Added reasoning-effort, provider-specific request-body, and Bedrock configuration for LLM
   extraction.
-- Added `xberg doctor` and the Rust `doctor()` API for checking OCR, layout-detection, and cache
-  configuration. `xberg doctor --clean` removes stray files only from Xberg-owned caches (#1347).
+- Added `xberg doctor` and the Rust `doctor()` API for validating configuration and probing every
+  compiled OCR, VLM, layout, table, formula-recognition, and cache capability without downloading
+  models or contacting remote providers. `xberg doctor --clean` removes stray files only from
+  Xberg-owned caches (#1347).
 - Added the Sceptre EasyOCR Gen2 backend for desktop, mobile, and WebAssembly.
 - Added sparse and late-interaction embeddings to chunk output.
 - Added a Prometheus `/metrics` endpoint to the API server (#1391).
@@ -94,6 +96,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cross-language API documentation.
 - Corrected canonical MIME and extension routing for DBF, YAML, reStructuredText, Org, Typst,
   XHTML, Djot, JPEG 2000, HEIC/HEIF, MP4, and MPEG inputs.
+- GeoJSON extraction now returns a bounded aggregate summary by default, including feature,
+  geometry, property-key, position, and bounds metadata. Set
+  `geojson.include_full_coordinates = true` to retain the complete document and coordinate arrays.
+- `quality_score` now explicitly measures the cleanliness and readability of retained text, not
+  extraction completeness; inspect `processing_warnings` for known partial or degraded results.
+- The default `security_limits.max_table_cells` remains 100,000 aggregate cells per document;
+  limit errors now explain how to raise it for trusted inputs or reduce the source table.
 
 ### Removed
 
@@ -131,8 +140,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed Tesseract preprocessing so deskew, denoise, contrast enhancement, and Otsu, adaptive, and
   Sauvola binarization settings transform the OCR raster on native and WebAssembly backends;
   `none` (with `off` as an alias) preserves unthresholded grayscale when deskew is disabled,
-  sparse receipt-image fallback no longer loses faint text to global thresholding, and WebAssembly
-  Tesseract now rejects images exceeding 4096 × 4096 pixels before decoding.
+  sparse receipt-image fallback and low-contrast colored text no longer lose faint content to
+  global thresholding, and WebAssembly Tesseract now rejects images exceeding 4096 × 4096
+  pixels before decoding.
+- Fixed OCR measurement tooling so line-filter comparisons score the intended ground-truth lines
+  and report filtering regressions accurately.
 - Fixed the OpenAPI document's dangling Djot attribute reference so schema validators and client generators can
   resolve every advertised component (#1505).
 - XML and JSON content with unsupported specialized extensions now routes through the supported generic extractor
@@ -156,13 +168,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extraction.
 - Fixed native PDF tracing so corrupt optional content is reported as a recoverable warning, while
   mandatory cross-reference failures emit a single operation-boundary error without changing the returned error type.
-- Fixed annotation-only PDFs so visible FreeText content is recovered into page-aware document text without
-  exposing hidden, transparent, cropped, or disabled annotations when annotation extraction is off.
+- Fixed annotation-only PDFs so visible FreeText content is recovered into page-aware document text,
+  including when OCR replaces the page text, without exposing hidden, transparent, cropped, or
+  disabled annotations when annotation extraction is off.
 - Fixed the Swift package manifest so SwiftPM no longer warns about a nonexistent target-relative license file.
 - Fixed scanned PDF extraction so CCITT parameters align with their filter in multi-filter streams,
   referenced JBIG2 image masks are available to OCR, and stencil-mask polarity renders text as opaque.
 - Fixed PDF reading order for dense two-column layouts, hanging clause numbers, split list markers,
   and modest font-size changes on one baseline.
+- Fixed PDF heading recovery for repeated bold section titles set at body font size while retaining
+  short bold labels as body text (#1513).
 - Fixed PDF table extraction so multi-word cells, rule-less prose regions, OCR-derived tables, and
   page-local table failures are handled correctly (#688, #1358).
 - Fixed PDF Markdown and Djot output so native text is retained when structured conversion is
@@ -173,6 +188,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bounding boxes, page boundaries, and partial page results are preserved consistently across output
   formats and OCR backends (#1444).
 - Fixed Tesseract caching, configuration, preprocessing, page segmentation, and font-size extraction.
+- Tesseract Markdown extraction now reports a `ProcessingWarning` when dictionary filtering removes
+  physical text lines, including the number removed.
 - OCR element hierarchy output now honors `build_hierarchy` and contains only resolvable parent
   references.
 - Fixed Sceptre and PaddleOCR line grouping, region ordering, per-page resizing, table validation,
@@ -217,6 +234,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed extraction configuration validation so invalid nested values, including OCR quality and
   scanned-page thresholds, are rejected consistently by every public entry point.
 - Fixed error classification so callers can distinguish all documented extraction failure categories.
+- Built-in path and byte extraction now always reports a recognized `extraction_method`; custom
+  extractors retain explicit provenance and otherwise leave it unspecified.
 - Fixed owned document classification so detected labels are written back to the returned document.
 - Fixed `ContentFilterConfig.include_watermarks` so enabling it retains watermark content.
 - Fixed `JsonExtractionConfig.flatten_nested_objects` so disabling it preserves nested objects instead of
