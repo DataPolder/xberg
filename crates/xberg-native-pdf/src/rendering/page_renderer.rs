@@ -3713,8 +3713,8 @@ impl PageRenderer {
         let dynamic_image = pdf_image.to_dynamic_image()?;
         let mut rgba_image = dynamic_image.to_rgba8();
 
-        // Handle /Mask (stencil mask image) — PDF spec section 8.9.6.2
-        // The mask is a separate image whose samples define opacity (1=opaque, 0=transparent) ~keep
+        // A referenced ImageMask uses stencil polarity: default /Decode [0 1]
+        // makes sample 0 opaque, while [1 0] reverses it. ~keep
         if let Some(mask_ref) = mask_obj {
             if let Some(ref_obj) = mask_ref.as_reference() {
                 if let Ok(mask_stream) = doc.load_object(ref_obj) {
@@ -3722,6 +3722,10 @@ impl PageRenderer {
                         Ok(mask_image) => {
                             if let Ok(mask_dyn) = mask_image.to_dynamic_image() {
                                 let mask_gray = mask_dyn.to_luma8();
+                                let is_image_mask = mask_stream
+                                    .as_dict()
+                                    .and_then(|dict| dict.get("ImageMask"))
+                                    .is_some_and(|value| matches!(value, Object::Boolean(true)));
                                 let mw = mask_gray.width();
                                 let mh = mask_gray.height();
                                 let iw = rgba_image.width();
@@ -3738,7 +3742,11 @@ impl PageRenderer {
                                         let my = ((y as u64 * mh as u64 / ih as u64) as u32).min(mh - 1);
                                         for x in 0..iw {
                                             let mx = ((x as u64 * mw as u64 / iw as u64) as u32).min(mw - 1);
-                                            let mask_val = mask_gray.get_pixel(mx, my)[0];
+                                            let sample = mask_gray.get_pixel(mx, my)[0];
+                                            // Extracted ImageMask luma is black for the painting sample,
+                                            // including after an inverted /Decode is folded in. Alpha has
+                                            // the opposite polarity: black ink must be fully opaque. ~keep
+                                            let mask_val = if is_image_mask { 255 - sample } else { sample };
                                             let pixel = rgba_image.get_pixel_mut(x, y);
                                             pixel[3] = ((pixel[3] as u32 * mask_val as u32) / 255) as u8;
                                         }
@@ -3829,6 +3837,15 @@ impl PageRenderer {
                                             let iw = rgba_image.width();
                                             let ih = rgba_image.height();
                                             let row_bytes = (mw as usize + 7) / 8;
+                                            let inverted_decode = mask_dict
+                                                .get("Decode")
+                                                .and_then(Object::as_array)
+                                                .and_then(|decode| decode.first())
+                                                .is_some_and(|first| match first {
+                                                    Object::Integer(value) => *value > 0,
+                                                    Object::Real(value) => *value > 0.5,
+                                                    _ => false,
+                                                });
                                             for y in 0..ih {
                                                 let my =
                                                     ((y as u64 * mh as u64 / ih as u64) as u32).min(mh - 1) as usize;
@@ -3837,10 +3854,11 @@ impl PageRenderer {
                                                         as usize;
                                                     let byte_idx = my * row_bytes + mx / 8;
                                                     let bit_idx = 7 - (mx % 8);
-                                                    // PDF spec 8.9.6.2: mask bit 1 = paint (opaque), 0 = don't paint (transparent)
-                                                    // ~keep
+                                                    // ImageMask default /Decode maps sample 0 to paint;
+                                                    // [1 0] reverses that polarity. ~keep
                                                     let mask_val = if byte_idx < mask_data.len() {
-                                                        if (mask_data[byte_idx] >> bit_idx) & 1 == 1 {
+                                                        let bit = (mask_data[byte_idx] >> bit_idx) & 1 == 1;
+                                                        if if inverted_decode { bit } else { !bit } {
                                                             255u8
                                                         } else {
                                                             0u8

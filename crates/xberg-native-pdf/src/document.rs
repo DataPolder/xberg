@@ -18379,7 +18379,9 @@ impl PdfDocument {
                     match image_handle_from_xobject(self, ref_obj, xobj_dict, ctm, *paint_order, &cs_map) {
                         Some(h) => {
                             *paint_order += 1;
-                            Ok(vec![h])
+                            let mut handles = vec![h];
+                            handles.extend(self.collect_referenced_mask_handles(xobj_dict, ctm, paint_order, &cs_map));
+                            Ok(handles)
                         }
                         _ => Ok(Vec::new()),
                     }
@@ -18403,6 +18405,38 @@ impl PdfDocument {
             }
             _ => Ok(Vec::new()),
         }
+    }
+
+    fn collect_referenced_mask_handles<'s>(
+        &'s self,
+        image_dict: &std::collections::HashMap<String, Object>,
+        ctm: crate::content::Matrix,
+        paint_order: &mut usize,
+        color_spaces: &std::collections::HashMap<String, Object>,
+    ) -> Vec<crate::extractors::images::PdfImageHandle<'s>> {
+        use crate::extractors::images::image_handle_from_xobject;
+
+        let mut handles = Vec::new();
+        for key in ["Mask", "SMask"] {
+            let Some(mask_ref) = image_dict.get(key).and_then(Object::as_reference) else {
+                continue;
+            };
+            let Ok(mask) = self.load_object(mask_ref) else {
+                continue;
+            };
+            let Some(mask_dict) = mask.as_dict() else {
+                continue;
+            };
+            if mask_dict.get("Subtype").and_then(Object::as_name) != Some("Image") {
+                continue;
+            }
+            if let Some(handle) = image_handle_from_xobject(self, mask_ref, mask_dict, ctm, *paint_order, color_spaces)
+            {
+                handles.push(handle);
+                *paint_order += 1;
+            }
+        }
+        handles
     }
 
     /// Recursively collect image handles from a Form XObject.
