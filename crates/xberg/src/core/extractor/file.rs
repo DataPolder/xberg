@@ -22,6 +22,25 @@ use tracing::Instrument;
 
 use super::helpers::get_extractor;
 
+fn ensure_builtin_extraction_method(doc: &mut crate::types::internal::InternalDocument, is_builtin: bool) {
+    if !is_builtin {
+        return;
+    }
+
+    let method = doc
+        .metadata
+        .additional
+        .get("extraction_method")
+        .and_then(serde_json::Value::as_str)
+        .and_then(crate::types::ExtractionMethod::from_metadata_value);
+    if method.is_none() {
+        doc.metadata.additional.insert(
+            std::borrow::Cow::Borrowed("extraction_method"),
+            serde_json::Value::String(crate::types::ExtractionMethod::Native.as_str().to_string()),
+        );
+    }
+}
+
 #[derive(Clone, Copy)]
 struct FileDetectionChecks {
     force_ocr_conflict: bool,
@@ -387,6 +406,7 @@ pub(crate) async fn extract_with_candidates(
 
         match extraction {
             Ok(mut doc) => {
+                ensure_builtin_extraction_method(&mut doc, candidate.is_builtin());
                 if index > 0 {
                     let name = candidate.plugin().name();
                     crate::core::diagnostics::push_warning(
@@ -584,17 +604,19 @@ pub(in crate::core::extractor) async fn extract_bytes_with_extractor(
 
     crate::extractors::ensure_initialized()?;
 
-    let extractor = get_extractor(mime_type)?;
+    let (extractor, is_builtin) = get_extractor(mime_type)?;
 
     #[cfg(feature = "otel")]
-    let doc = {
+    let mut doc = {
         let stage_span = crate::telemetry::spans::extraction_stage_span(extractor.name(), extractor.priority());
         Box::pin(extractor.extract_content(content, mime_type, config))
             .instrument(stage_span)
             .await?
     };
     #[cfg(not(feature = "otel"))]
-    let doc = Box::pin(extractor.extract_content(content, mime_type, config)).await?;
+    let mut doc = Box::pin(extractor.extract_content(content, mime_type, config)).await?;
+
+    ensure_builtin_extraction_method(&mut doc, is_builtin);
 
     let result = Box::pin(crate::core::pipeline::run_pipeline(doc, config)).await?;
     Ok(result)
@@ -602,8 +624,61 @@ pub(in crate::core::extractor) async fn extract_bytes_with_extractor(
 
 #[cfg(test)]
 mod cache_key_tests {
-    use super::hash_extraction_config;
+    use super::{ensure_builtin_extraction_method, hash_extraction_config};
     use crate::core::config::ExtractionConfig;
+
+    #[test]
+    fn should_default_builtin_extraction_method_to_native() {
+        let mut document = crate::types::internal::InternalDocument::new("text");
+
+        ensure_builtin_extraction_method(&mut document, true);
+
+        assert_eq!(
+            document.metadata.additional.get("extraction_method"),
+            Some(&serde_json::Value::String("native".to_string()))
+        );
+    }
+
+    #[test]
+    fn should_leave_custom_plugin_extraction_method_unspecified() {
+        let mut document = crate::types::internal::InternalDocument::new("custom");
+
+        ensure_builtin_extraction_method(&mut document, false);
+
+        assert!(!document.metadata.additional.contains_key("extraction_method"));
+    }
+
+    #[test]
+    fn should_preserve_recognized_builtin_extraction_method() {
+        let mut document = crate::types::internal::InternalDocument::new("pdf");
+        document.metadata.additional.insert(
+            std::borrow::Cow::Borrowed("extraction_method"),
+            serde_json::Value::String("mixed".to_string()),
+        );
+
+        ensure_builtin_extraction_method(&mut document, true);
+
+        assert_eq!(
+            document.metadata.additional.get("extraction_method"),
+            Some(&serde_json::Value::String("mixed".to_string()))
+        );
+    }
+
+    #[test]
+    fn should_replace_unrecognized_builtin_extraction_method_with_native() {
+        let mut document = crate::types::internal::InternalDocument::new("doc");
+        document.metadata.additional.insert(
+            std::borrow::Cow::Borrowed("extraction_method"),
+            serde_json::Value::String("native_ole".to_string()),
+        );
+
+        ensure_builtin_extraction_method(&mut document, true);
+
+        assert_eq!(
+            document.metadata.additional.get("extraction_method"),
+            Some(&serde_json::Value::String("native".to_string()))
+        );
+    }
 
     #[test]
     fn source_name_changes_the_cache_key() {
