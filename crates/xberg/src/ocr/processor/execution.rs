@@ -13,7 +13,7 @@ use crate::image::normalize_image_dpi_owned;
 use crate::ocr::cache::OcrCache;
 use crate::ocr::conversion::{TsvRow, iterator_word_to_element, tsv_row_to_element};
 use crate::ocr::error::OcrError;
-use crate::ocr::hocr_parser::{DictionaryLineFilter, parse_hocr_to_internal_document_with_page_offset};
+use crate::ocr::hocr_parser::{DictionaryLineFilter, parse_hocr_to_internal_document_with_page_offset_and_stats};
 use crate::ocr::preprocessing::preprocess_pix;
 #[cfg(test)]
 use crate::ocr::preprocessing::should_invert_for_polarity;
@@ -1182,6 +1182,7 @@ pub(super) fn perform_ocr(
     };
 
     let mut hocr_document: Option<InternalDocument> = None;
+    let mut dictionary_filtered_line_count = 0usize;
 
     let (raw_content, mime_type) = match config.output_format.as_str() {
         "text" => {
@@ -1209,10 +1210,14 @@ pub(super) fn perform_ocr(
                 max_invalid_ratio: crate::ocr::hocr_parser::DEFAULT_DICT_INVALID_LINE_RATIO,
             };
 
-            let internal_doc =
-                parse_hocr_to_internal_document_with_page_offset(&hocr, Some(&dictionary_filter), config.page_number);
-            let content = flatten_hocr_elements_to_text(&internal_doc.elements);
-            hocr_document = Some(internal_doc);
+            let parse_result = parse_hocr_to_internal_document_with_page_offset_and_stats(
+                &hocr,
+                Some(&dictionary_filter),
+                config.page_number,
+            );
+            dictionary_filtered_line_count = parse_result.dictionary_filtered_line_count;
+            let content = flatten_hocr_elements_to_text(&parse_result.document.elements);
+            hocr_document = Some(parse_result.document);
 
             let mime_type = extraction_config
                 .map(|c| match c.output_format {
@@ -1277,6 +1282,12 @@ pub(super) fn perform_ocr(
     }
     if auto_rotate_unavailable {
         metadata.insert("auto_rotate_unavailable".to_string(), serde_json::Value::Bool(true));
+    }
+    if dictionary_filtered_line_count > 0 {
+        metadata.insert(
+            "dictionary_filtered_line_count".to_string(),
+            serde_json::Value::Number(dictionary_filtered_line_count.into()),
+        );
     }
 
     if mean_text_conf >= 0 {

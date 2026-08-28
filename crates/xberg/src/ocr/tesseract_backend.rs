@@ -607,6 +607,9 @@ const WORD_ITERATOR_SKIPPED_COUNT_METADATA_KEY: &str = "word_iterator_skipped_co
 /// never ran. Mirrors the literal written in `ocr::processor::execution::perform_ocr`.
 const AUTO_ROTATE_UNAVAILABLE_METADATA_KEY: &str = "auto_rotate_unavailable";
 
+/// Metadata key carrying the exact number of hOCR lines removed by dictionary filtering. ~keep
+const DICTIONARY_FILTERED_LINE_COUNT_METADATA_KEY: &str = "dictionary_filtered_line_count";
+
 /// Metadata key `perform_ocr` sets when it rebuilds `content` with inline
 /// table markdown at each table's original vertical position (see
 /// `perform_ocr`'s `build_content_with_inline_tables` step). Promoted to
@@ -691,6 +694,21 @@ fn warnings_from_ocr_metadata(
         );
     }
 
+    if let Some(filtered_lines) = metadata
+        .get(DICTIONARY_FILTERED_LINE_COUNT_METADATA_KEY)
+        .and_then(serde_json::Value::as_u64)
+        && filtered_lines > 0
+    {
+        crate::core::diagnostics::push_warning(
+            &mut warnings,
+            "tesseract",
+            format!(
+                "Tesseract removed {filtered_lines} OCR line(s) because their dictionary-checkable words were mostly \
+                 not real words"
+            ),
+        );
+    }
+
     warnings
 }
 
@@ -711,6 +729,7 @@ fn warnings_from_ocr_metadata(
 fn strip_ocr_scratch_metadata_keys(metadata: &mut std::collections::HashMap<String, serde_json::Value>) {
     metadata.remove(WORD_ITERATOR_SKIPPED_COUNT_METADATA_KEY);
     metadata.remove(AUTO_ROTATE_UNAVAILABLE_METADATA_KEY);
+    metadata.remove(DICTIONARY_FILTERED_LINE_COUNT_METADATA_KEY);
 }
 
 fn compact_cjk_horizontal_spacing(text: &str) -> String {
@@ -1172,6 +1191,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn warnings_from_ocr_metadata_flags_dictionary_filtered_lines_with_exact_count() {
+        let metadata = std::collections::HashMap::from([(
+            "dictionary_filtered_line_count".to_string(),
+            serde_json::Value::Number(2.into()),
+        )]);
+
+        let warnings = warnings_from_ocr_metadata(&metadata);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].source, "tesseract");
+        assert_eq!(
+            warnings[0].message,
+            "Tesseract removed 2 OCR line(s) because their dictionary-checkable words were mostly not real words"
+        );
+    }
+
     /// A `word_iterator_skipped_count` of exactly zero must not produce a
     /// warning -- the metadata-insertion side already omits the key in that
     /// case, but this guards the consumption side independently (#309).
@@ -1231,7 +1267,6 @@ mod tests {
             AUTO_ROTATE_UNAVAILABLE_METADATA_KEY.to_string(),
             serde_json::Value::Bool(true),
         );
-
         assert_eq!(warnings_from_ocr_metadata(&metadata).len(), 2);
     }
 
@@ -1253,6 +1288,10 @@ mod tests {
             AUTO_ROTATE_UNAVAILABLE_METADATA_KEY.to_string(),
             serde_json::Value::Bool(true),
         );
+        metadata.insert(
+            DICTIONARY_FILTERED_LINE_COUNT_METADATA_KEY.to_string(),
+            serde_json::Value::Number(3.into()),
+        );
 
         let serialized = rmp_serde::to_vec_named(&metadata).expect("metadata must serialize for the OCR cache");
         let round_tripped: std::collections::HashMap<String, serde_json::Value> =
@@ -1260,12 +1299,12 @@ mod tests {
 
         let before = warnings_from_ocr_metadata(&metadata);
         let after = warnings_from_ocr_metadata(&round_tripped);
-        assert_eq!(before.len(), 2);
-        assert_eq!(after.len(), 2);
-        assert_eq!(before[0].source, after[0].source);
-        assert_eq!(before[0].message, after[0].message);
-        assert_eq!(before[1].source, after[1].source);
-        assert_eq!(before[1].message, after[1].message);
+        assert_eq!(before.len(), 3);
+        assert_eq!(after.len(), 3);
+        for (before_warning, after_warning) in before.iter().zip(&after) {
+            assert_eq!(before_warning.source, after_warning.source);
+            assert_eq!(before_warning.message, after_warning.message);
+        }
     }
 
     /// #354: `word_iterator_skipped_count` is pipeline plumbing consumed by
@@ -1375,6 +1414,10 @@ mod tests {
         metadata.insert(
             AUTO_ROTATE_UNAVAILABLE_METADATA_KEY.to_string(),
             serde_json::Value::Bool(true),
+        );
+        metadata.insert(
+            DICTIONARY_FILTERED_LINE_COUNT_METADATA_KEY.to_string(),
+            serde_json::Value::Number(1.into()),
         );
 
         strip_ocr_scratch_metadata_keys(&mut metadata);

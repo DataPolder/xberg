@@ -82,16 +82,33 @@ pub(crate) fn parse_hocr_to_internal_document_with_dictionary_filter(
 /// it gets back can never know the true page number on its own. Callers that OCR one page at a
 /// time out of a larger document (the PDF OCR route) pass the real 1-indexed page number here,
 /// via `TesseractConfig::page_number`, instead of letting every page collapse to `1`.
+#[cfg(test)]
 pub(crate) fn parse_hocr_to_internal_document_with_page_offset(
     hocr_html: &str,
     dictionary_filter: Option<&DictionaryLineFilter<'_>>,
     page_offset: u32,
 ) -> InternalDocument {
+    parse_hocr_to_internal_document_with_page_offset_and_stats(hocr_html, dictionary_filter, page_offset).document
+}
+
+/// Parsed hOCR plus bounded counters needed by the OCR warning pipeline. ~keep
+pub(crate) struct HocrParseResult {
+    pub document: InternalDocument,
+    pub dictionary_filtered_line_count: usize,
+}
+
+/// Parse hOCR and report how many physical lines dictionary filtering removed. ~keep
+pub(crate) fn parse_hocr_to_internal_document_with_page_offset_and_stats(
+    hocr_html: &str,
+    dictionary_filter: Option<&DictionaryLineFilter<'_>>,
+    page_offset: u32,
+) -> HocrParseResult {
     let mut doc = InternalDocument::new("ocr");
     doc.mime_type = "application/x-hocr".to_string();
 
     let mut element_index: u32 = 0;
     let mut last_page: Option<u32> = None;
+    let mut dictionary_filtered_line_count = 0usize;
 
     let bytes = hocr_html.as_bytes();
     let mut pos = 0;
@@ -148,7 +165,7 @@ pub(crate) fn parse_hocr_to_internal_document_with_page_offset(
                 .next()
                 .unwrap_or("p")
                 .to_ascii_lowercase();
-            let (paragraph, end_pos) = parse_paragraph(
+            let (paragraph, end_pos, filtered_lines) = parse_paragraph(
                 hocr_html,
                 pos,
                 last_page.unwrap_or(page_offset),
@@ -157,6 +174,7 @@ pub(crate) fn parse_hocr_to_internal_document_with_page_offset(
                 dictionary_filter,
             );
             pos = end_pos;
+            dictionary_filtered_line_count = dictionary_filtered_line_count.saturating_add(filtered_lines);
 
             if let Some(mut elem) = paragraph {
                 if let Some(block) = block_extents.last() {
@@ -177,7 +195,10 @@ pub(crate) fn parse_hocr_to_internal_document_with_page_offset(
         "hOCR parse complete"
     );
 
-    doc
+    HocrParseResult {
+        document: doc,
+        dictionary_filtered_line_count,
+    }
 }
 
 /// Parsed properties from an hOCR `title` attribute.
@@ -575,7 +596,7 @@ fn parse_paragraph(
     element_index: u32,
     par_tag: &str,
     dictionary_filter: Option<&DictionaryLineFilter<'_>>,
-) -> (Option<InternalElement>, usize) {
+) -> (Option<InternalElement>, usize, usize) {
     let bytes = html.as_bytes();
     let mut pos = start;
 
@@ -666,10 +687,11 @@ fn parse_paragraph(
         }
     }
 
+    let mut removed_line_count = 0usize;
     if let Some(filter) = dictionary_filter {
         let lines_before = lines.len();
         lines.retain(|line| !is_dictionary_noise_line(line, filter));
-        let removed_line_count = lines_before - lines.len();
+        removed_line_count = lines_before - lines.len();
         if removed_line_count > 0 {
             tracing::warn!(
                 page,
@@ -682,7 +704,7 @@ fn parse_paragraph(
 
     let all_words: Vec<&HocrWordInfo> = lines.iter().flat_map(|l| l.words.iter()).collect();
     if all_words.is_empty() {
-        return (None, pos);
+        return (None, pos, removed_line_count);
     }
 
     let style = aggregate_word_style(&all_words);
@@ -891,7 +913,7 @@ fn parse_paragraph(
         }
     }
 
-    (Some(elem), pos)
+    (Some(elem), pos, removed_line_count)
 }
 
 /// Check if a tag's class attribute contains the given class name.
@@ -2066,6 +2088,31 @@ mod tests {
                 text, "RIGHT ELEVATION\nLEFT ELEVATION",
                 "exactly the two real lines remain, in order"
             );
+        }
+
+        #[test]
+        fn reports_the_exact_number_of_dictionary_filtered_lines() {
+            let hocr = ELEVATIONS_PAGE_HOCR.replacen(
+                r#"<span class="ocr_line">
+                    <span class="ocrx_word" title="bbox 10 90 100 120">LEFT</span>"#,
+                r#"<span class="ocr_line">
+                    <span class="ocrx_word" title="bbox 10 82 100 88">OWATS</span>
+                    <span class="ocrx_word" title="bbox 110 82 220 88">DNDEVET</span>
+                    <span class="ocrx_word" title="bbox 230 82 320 88">OPMENT</span>
+                </span>
+                <span class="ocr_line">
+                    <span class="ocrx_word" title="bbox 10 90 100 120">LEFT</span>"#,
+                1,
+            );
+            let filter = DictionaryLineFilter {
+                is_valid_word: &measured_is_valid_word,
+                max_invalid_ratio: TEST_THRESHOLD,
+            };
+
+            let result = parse_hocr_to_internal_document_with_page_offset_and_stats(&hocr, Some(&filter), 1);
+
+            assert_eq!(result.dictionary_filtered_line_count, 2);
+            assert_eq!(result.document.elements[0].text, "RIGHT ELEVATION\nLEFT ELEVATION");
         }
 
         /// A line with only ONE dictionary-checkable word must never be scored, even when
