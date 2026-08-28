@@ -44,6 +44,11 @@ user_owned = [
   "test_apps/wasm/package.json",
 ]
 
+[workspace.build_commands.python]
+precondition = "command -v uv >/dev/null 2>&1"
+build = "cd packages/python && uv run --project ../.. --frozen --only-dev maturin develop --manifest-path ../../crates/xberg-py/Cargo.toml --features extension-module"
+build_release = "cd packages/python && uv run --project ../.. --frozen --only-dev maturin develop --manifest-path ../../crates/xberg-py/Cargo.toml --features extension-module --release"
+
 # Alef currently has two Kotlin Android defaults: its resolved config uses the
 # variant-scoped assemble tasks, while the CLI fallback uses umbrella `gradle
 # build`, which also runs release validation before Android ABI libraries have
