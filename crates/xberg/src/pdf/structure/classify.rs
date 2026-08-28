@@ -99,7 +99,14 @@ pub(super) fn classify_paragraphs(paragraphs: &mut [PdfParagraph], heading_map: 
         .find(|(_, level)| level.is_none())
         .map(|(centroid, _)| *centroid)
         .unwrap_or(0.0);
-    for para in paragraphs.iter_mut() {
+    let assigned_heading_levels = paragraphs
+        .iter()
+        .map(|paragraph| paragraph.heading_level)
+        .collect::<Vec<_>>();
+    for (para, assigned_heading_level) in paragraphs.iter_mut().zip(&assigned_heading_levels) {
+        if assigned_heading_level.is_some() {
+            continue;
+        }
         let word_count = para.word_count;
 
         let layout_says_text = para.layout_class == Some(super::types::LayoutHintClass::Text);
@@ -246,6 +253,11 @@ pub(super) fn classify_paragraphs(paragraphs: &mut [PdfParagraph], heading_map: 
     }
 
     demote_continuation_headings(paragraphs);
+    for (paragraph, assigned_heading_level) in paragraphs.iter_mut().zip(assigned_heading_levels) {
+        if assigned_heading_level.is_some() {
+            paragraph.heading_level = assigned_heading_level;
+        }
+    }
 
     for para in paragraphs.iter_mut() {
         if para.heading_level.is_some()
@@ -1260,6 +1272,36 @@ fn paragraph_plain_text(para: &PdfParagraph) -> String {
         .map(|s| s.text.as_str())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+pub(super) fn is_body_size_bold_signal(para: &PdfParagraph, body_font_size: f32) -> bool {
+    if para.heading_level.is_some()
+        || !para.is_bold
+        || para.is_list_item
+        || para.is_code_block
+        || para.is_formula
+        || para.is_page_furniture
+        || para.lines.len() != 1
+        || !body_font_size.is_finite()
+        || body_font_size <= 0.0
+        || (para.dominant_font_size - body_font_size).abs() > 0.5
+        || para.word_count > MAX_BOLD_HEADING_WORD_COUNT
+    {
+        return false;
+    }
+
+    let text = paragraph_plain_text(para);
+    let trimmed = text.trim();
+    !trimmed.is_empty()
+        && (!ends_with_sentence_period(trimmed) || is_section_pattern(trimmed))
+        && (!trimmed.ends_with(':') || is_all_caps_text(trimmed))
+        && !looks_like_figure_label(trimmed)
+        && !looks_like_bare_url(trimmed)
+        && !super::layout_classify::is_separator_text(trimmed)
+}
+
+pub(super) fn is_body_size_bold_heading_candidate(para: &PdfParagraph, body_font_size: f32) -> bool {
+    is_body_size_bold_signal(para, body_font_size) && para.word_count > 2
 }
 
 /// Preserve peer H2 sections when a sparse document repeats their font tier at

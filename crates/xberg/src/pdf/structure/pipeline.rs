@@ -11,7 +11,8 @@ use rayon::prelude::*;
 use super::assembly::assemble_internal_document;
 use super::classify::{
     classify_paragraphs, demote_heading_runs, demote_structure_annotation_headings, demote_unnumbered_subsections,
-    mark_arxiv_noise, mark_cross_page_repeating_short_text, mark_cross_page_repeating_text, refine_heading_hierarchy,
+    is_body_size_bold_heading_candidate, is_body_size_bold_signal, mark_arxiv_noise,
+    mark_cross_page_repeating_short_text, mark_cross_page_repeating_text, refine_heading_hierarchy,
 };
 use super::constants::{FULL_LINE_FRACTION, MIN_BLOCKS_FOR_FONT_HEADING, MIN_HEADING_FONT_GAP, MIN_HEADING_FONT_RATIO};
 use super::lines::{is_cjk_char, segments_need_space};
@@ -25,6 +26,8 @@ use super::types::{LayoutHint, PdfParagraph};
 
 const SPARSE_REPEATED_TIER_MIN_PAGES: usize = 2;
 const SPARSE_FONT_TIER_CLUSTER_COUNT: usize = 2;
+const MIN_BODY_SIZE_BOLD_SIGNALS: usize = 3;
+const MAX_OTHER_HEADING_RATIO: usize = 2;
 /// Font-size "same tier" tolerance (absolute, in the unit `font_size` happens to carry —
 /// points for native PDFs, a render-DPI-dependent pixel measurement for OCR segments).
 ///
@@ -128,7 +131,10 @@ fn build_heading_map(
         .filter_map(|(i, result)| {
             result.as_ref().and_then(|paragraphs| {
                 let has_headings = paragraphs.iter().any(|p| p.heading_level.is_some());
-                if !has_headings && has_font_size_variation(paragraphs) {
+                let has_untagged_bold = paragraphs
+                    .iter()
+                    .any(|p| p.heading_level.is_none() && p.is_bold && !p.is_list_item);
+                if (!has_headings && has_font_size_variation(paragraphs)) || has_untagged_bold {
                     Some(i)
                 } else {
                     None
@@ -249,6 +255,29 @@ fn build_heading_map(
     };
 
     Ok((heading_map, struct_tree_needs_classify))
+}
+
+fn promote_repeated_body_size_bold_headings(all_pages: &mut [Vec<PdfParagraph>], body_font_size: Option<f32>) {
+    let Some(body_font_size) = body_font_size else {
+        return;
+    };
+    let paragraphs = all_pages.iter().flat_map(|page| page.iter());
+    let signal_count = paragraphs
+        .clone()
+        .filter(|paragraph| is_body_size_bold_signal(paragraph, body_font_size))
+        .count();
+    let other_heading_count = paragraphs.filter(|paragraph| paragraph.heading_level.is_some()).count();
+    if signal_count < MIN_BODY_SIZE_BOLD_SIGNALS
+        || signal_count <= other_heading_count.saturating_mul(MAX_OTHER_HEADING_RATIO)
+    {
+        return;
+    }
+
+    for paragraph in all_pages.iter_mut().flat_map(|page| page.iter_mut()) {
+        if is_body_size_bold_heading_candidate(paragraph, body_font_size) {
+            paragraph.heading_level = Some(3);
+        }
+    }
 }
 
 /// Build a heading map from structure-tree-assigned roles on segments.
@@ -3002,6 +3031,7 @@ pub(crate) fn extract_document_structure_from_segments(
         deduplicate_paragraphs(&mut all_page_paragraphs);
     }
     compact_final_heading_hierarchy(&mut all_page_paragraphs);
+    promote_repeated_body_size_bold_headings(&mut all_page_paragraphs, doc_body_font_size);
     #[cfg(feature = "layout-detection")]
     for (page, projection) in all_page_paragraphs.iter_mut().zip(native_layout_projections) {
         let Some(projection) = projection else {
@@ -7602,6 +7632,78 @@ mod tests {
         paragraph
     }
 
+    fn body_size_paragraph(text: &str, is_bold: bool, heading_level: Option<u8>) -> PdfParagraph {
+        let mut paragraph = outline_para(text);
+        paragraph.dominant_font_size = 12.0;
+        paragraph.is_bold = is_bold;
+        paragraph.heading_level = heading_level;
+        for line in &mut paragraph.lines {
+            line.dominant_font_size = 12.0;
+            line.is_bold = is_bold;
+            for segment in &mut line.segments {
+                segment.font_size = 12.0;
+                segment.is_bold = is_bold;
+            }
+        }
+        paragraph
+    }
+
+    fn heading_page(heading: &str, heading_size: f32, body: &str) -> Vec<SegmentData> {
+        let mut heading_segment = seg_heuristic(heading, heading_size, 700.0);
+        heading_segment.is_bold = true;
+        vec![heading_segment, seg_heuristic(body, 12.0, 650.0)]
+    }
+
+    fn extract_heading_test_document(
+        pages: Vec<Vec<SegmentData>>,
+        used_structure_tree: bool,
+    ) -> crate::types::internal::InternalDocument {
+        extract_document_structure_from_segments(
+            pages,
+            SegmentStructureConfig {
+                k_clusters: 4,
+                tables: &[],
+                outline_entries: &[],
+                strip_repeating_text: false,
+                include_headers: true,
+                include_footers: true,
+                include_footnotes: true,
+                include_watermarks: true,
+                used_structure_tree,
+                image_positions: &[],
+                images: None,
+                inject_placeholders: false,
+                layout_hints: None,
+                allow_single_column: true,
+                cancel_token: None,
+                #[cfg(feature = "layout-detection")]
+                layout_images: None,
+                #[cfg(feature = "layout-detection")]
+                layout_results: None,
+                #[cfg(feature = "layout-detection")]
+                table_model: crate::core::config::layout::TableModel::Disabled,
+                #[cfg(feature = "layout-detection")]
+                table_overlap_preference: crate::core::config::layout::TableOverlapPreference::Content,
+                #[cfg(feature = "layout-detection")]
+                acceleration: None,
+                #[cfg(feature = "layout-detection")]
+                session_thread_budget: 0,
+            },
+        )
+        .expect("document structure extraction must succeed")
+    }
+
+    fn element_kind_for(
+        document: &crate::types::internal::InternalDocument,
+        text: &str,
+    ) -> Option<crate::types::internal::ElementKind> {
+        document
+            .elements
+            .iter()
+            .find(|element| element.text == text)
+            .map(|element| element.kind)
+    }
+
     fn table_with_body_rows(body_rows: usize, cell: &str) -> crate::types::Table {
         let mut cells = vec![vec!["Column".to_string()]];
         cells.extend((0..body_rows).map(|_| vec![cell.to_string()]));
@@ -9418,6 +9520,205 @@ where new shares are issued;";
             heading_map.iter().all(|(_, level)| level.is_none()),
             "uniform-font doc must produce no headings; got: {heading_map:?}"
         );
+    }
+
+    #[test]
+    fn should_classify_untagged_bold_body_size_paragraphs_on_tagged_pages() {
+        let paragraphs = vec![
+            body_size_paragraph("Existing tagged section", true, Some(2)),
+            body_size_paragraph("Overige en specifieke bepalingen", true, None),
+            body_size_paragraph("Datalekprotocol", true, None),
+            body_size_paragraph("First body paragraph ends here.", false, None),
+            body_size_paragraph("Second body paragraph ends here.", false, None),
+        ];
+        let all_page_segments = vec![Vec::new()];
+        let struct_tree_results = vec![Some(paragraphs.clone())];
+
+        let (heading_map, pages_needing_classification) =
+            build_heading_map(&all_page_segments, &struct_tree_results, &[], 4)
+                .expect("build_heading_map must succeed");
+
+        assert_eq!(
+            pages_needing_classification.into_iter().collect::<Vec<_>>(),
+            [0],
+            "a uniform-font tagged page with an untagged bold paragraph must reach classification"
+        );
+
+        let classified = process_single_page(
+            PageInput {
+                page_index: 0,
+                struct_paragraphs: Some(paragraphs),
+                heuristic_segments: Vec::new(),
+                page_hints: None,
+                table_bboxes: Vec::new(),
+                preserve_native_semantics: true,
+                use_layout_reading_order: false,
+                #[cfg(feature = "layout-detection")]
+                hint_validations: Vec::new(),
+                #[cfg(feature = "layout-detection")]
+                page_width_pts: None,
+                needs_classify: true,
+                paragraph_gap_ys: Vec::new(),
+                include_headers: true,
+                include_footers: true,
+                include_footnotes: true,
+            },
+            &heading_map,
+            Some(12.0),
+        );
+        let level_for = |text: &str| {
+            classified
+                .iter()
+                .find(|paragraph| paragraph_segment_text(paragraph) == text)
+                .and_then(|paragraph| paragraph.heading_level)
+        };
+
+        assert_eq!(level_for("Existing tagged section"), Some(2));
+        assert_eq!(level_for("Overige en specifieke bepalingen"), Some(3));
+        assert_eq!(level_for("Datalekprotocol"), None);
+    }
+
+    #[test]
+    fn should_promote_repeated_untagged_body_size_bold_sections_document_wide() {
+        let mut tagged_control = heading_page(
+            "Existing tagged heading",
+            18.0,
+            "The control page ordinary body paragraph ends here.",
+        );
+        tagged_control[0].assigned_role = Some(1);
+        let pages = vec![
+            tagged_control,
+            heading_page(
+                "Overige en specifieke bepalingen",
+                12.0,
+                "The first ordinary body paragraph ends here.",
+            ),
+            heading_page(
+                "Beveiligingsbeleid en toezicht",
+                12.0,
+                "The second ordinary body paragraph ends here.",
+            ),
+            heading_page(
+                "Aanvullende technische bepalingen",
+                12.0,
+                "The third ordinary body paragraph ends here.",
+            ),
+            heading_page(
+                "Datalekprotocol",
+                12.0,
+                "The short-title control remains ordinary text.",
+            ),
+        ];
+
+        for used_structure_tree in [false, true] {
+            let document = extract_heading_test_document(pages.clone(), used_structure_tree);
+            assert_eq!(
+                element_kind_for(&document, "Existing tagged heading"),
+                Some(crate::types::internal::ElementKind::Heading { level: 1 })
+            );
+            for heading in [
+                "Overige en specifieke bepalingen",
+                "Beveiligingsbeleid en toezicht",
+                "Aanvullende technische bepalingen",
+            ] {
+                assert_eq!(
+                    element_kind_for(&document, heading),
+                    Some(crate::types::internal::ElementKind::Heading { level: 3 }),
+                    "a repeated whole-line bold body-size convention must classify {heading:?} as H3"
+                );
+            }
+            assert_eq!(
+                element_kind_for(&document, "Datalekprotocol"),
+                Some(crate::types::internal::ElementKind::Paragraph),
+                "the existing one-word body-size ambiguity guard must remain intact"
+            );
+        }
+    }
+
+    #[test]
+    fn should_not_promote_fewer_than_three_body_size_bold_sections() {
+        let candidates = ["First repeated body size section", "Second repeated body size section"];
+        for candidate_count in 1..=2 {
+            let mut pages: Vec<Vec<SegmentData>> = candidates[..candidate_count]
+                .iter()
+                .enumerate()
+                .map(|(index, candidate)| {
+                    heading_page(
+                        candidate,
+                        12.0,
+                        &format!("Ordinary body paragraph number {} ends here.", index + 1),
+                    )
+                })
+                .collect();
+            pages.extend((0..3).map(|index| {
+                vec![seg_heuristic(
+                    &format!("Filler paragraph number {} ends here.", index + 1),
+                    12.0,
+                    700.0,
+                )]
+            }));
+            let document = extract_heading_test_document(pages, false);
+
+            for candidate in &candidates[..candidate_count] {
+                assert_eq!(
+                    element_kind_for(&document, candidate),
+                    Some(crate::types::internal::ElementKind::Paragraph),
+                    "one or two body-size bold occurrences are emphasis, not a document convention"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn should_require_body_size_candidates_to_outnumber_other_headings_two_to_one() {
+        let document = extract_heading_test_document(
+            vec![
+                heading_page(
+                    "First existing larger heading",
+                    18.0,
+                    "The first ordinary body paragraph ends here.",
+                ),
+                heading_page(
+                    "Second existing larger heading",
+                    18.0,
+                    "The second ordinary body paragraph ends here.",
+                ),
+                heading_page(
+                    "First body size candidate section",
+                    12.0,
+                    "The third ordinary body paragraph ends here.",
+                ),
+                heading_page(
+                    "Second body size candidate section",
+                    12.0,
+                    "The fourth ordinary body paragraph ends here.",
+                ),
+                heading_page(
+                    "Third body size candidate section",
+                    12.0,
+                    "The fifth ordinary body paragraph ends here.",
+                ),
+            ],
+            false,
+        );
+
+        for heading in ["First existing larger heading", "Second existing larger heading"] {
+            assert!(matches!(
+                element_kind_for(&document, heading),
+                Some(crate::types::internal::ElementKind::Heading { .. })
+            ));
+        }
+        for candidate in [
+            "First body size candidate section",
+            "Second body size candidate section",
+            "Third body size candidate section",
+        ] {
+            assert_eq!(
+                element_kind_for(&document, candidate),
+                Some(crate::types::internal::ElementKind::Paragraph),
+                "three candidates are not more than twice two independently detected headings"
+            );
+        }
     }
 
     /// Fallback title detection: 5-paragraph doc where first segment is 14pt,
