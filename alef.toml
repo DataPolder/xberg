@@ -176,7 +176,7 @@ rust_features = ["api", "keywords-yake", "embedding-presets", "pdf"]
 rust_dependencies = { tokio = { version = "1.53.1", features = [
   "macros",
   "rt-multi-thread",
-] }, serde_json = { version = "1.0.151" }, async-trait = { version = "0.1.92" }, reqwest = { version = "0.13.4", default_features = false, features = [
+] }, serde_json = { version = "1.0.151" }, async-trait = { version = "0.1.92" }, tracing = { version = "0.1" }, reqwest = { version = "0.13.4", default_features = false, features = [
   "json",
   "multipart",
 ] } }
