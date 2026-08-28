@@ -408,6 +408,8 @@ const CLEAN_PAGE_MEAN_LUMINANCE_THRESHOLD: f64 = 0.90;
 const CLEAN_PAGE_LIGHT_PIXEL_THRESHOLD: f64 = 0.90;
 /// Minimum near-white sample fraction for automatic document-page preprocessing.
 const CLEAN_PAGE_LIGHT_PIXEL_FRACTION_THRESHOLD: f64 = 0.80;
+/// Minimum separation between sampled background and foreground modes. ~keep
+const CLEAN_PAGE_MIN_FOREGROUND_CONTRAST: f64 = 0.20;
 /// Maximum value of an 8-bit RGB channel.
 const RGB_CHANNEL_MAX: f64 = u8::MAX as f64;
 /// Number of channels in an RGB pixel.
@@ -478,7 +480,10 @@ fn prepare_ocr_image(
 /// Classify bright, page-like RGB images that benefit from the default OCR preprocessing path.
 fn should_apply_default_preprocessing(rgb_data: &[u8]) -> bool {
     let mut luminance_sum = 0.0;
+    let mut light_luminance_sum = 0.0;
+    let mut foreground_luminance_sum = 0.0;
     let mut light_pixels = 0usize;
+    let mut foreground_pixels = 0usize;
     let mut sample_count = 0usize;
 
     for pixel in rgb_data
@@ -488,7 +493,13 @@ fn should_apply_default_preprocessing(rgb_data: &[u8]) -> bool {
         let luminance =
             pixel.iter().map(|channel| f64::from(*channel)).sum::<f64>() / (RGB_CHANNEL_MAX * RGB_CHANNEL_COUNT as f64);
         luminance_sum += luminance;
-        light_pixels += usize::from(luminance >= CLEAN_PAGE_LIGHT_PIXEL_THRESHOLD);
+        if luminance >= CLEAN_PAGE_LIGHT_PIXEL_THRESHOLD {
+            light_luminance_sum += luminance;
+            light_pixels += 1;
+        } else {
+            foreground_luminance_sum += luminance;
+            foreground_pixels += 1;
+        }
         sample_count += 1;
     }
 
@@ -496,8 +507,18 @@ fn should_apply_default_preprocessing(rgb_data: &[u8]) -> bool {
         return false;
     }
     let sample_count = sample_count as f64;
-    luminance_sum / sample_count >= CLEAN_PAGE_MEAN_LUMINANCE_THRESHOLD
-        && light_pixels as f64 / sample_count >= CLEAN_PAGE_LIGHT_PIXEL_FRACTION_THRESHOLD
+    if luminance_sum / sample_count < CLEAN_PAGE_MEAN_LUMINANCE_THRESHOLD
+        || light_pixels as f64 / sample_count < CLEAN_PAGE_LIGHT_PIXEL_FRACTION_THRESHOLD
+    {
+        return false;
+    }
+    if foreground_pixels == 0 {
+        return true;
+    }
+
+    let background_luminance = light_luminance_sum / light_pixels as f64;
+    let foreground_luminance = foreground_luminance_sum / foreground_pixels as f64;
+    background_luminance - foreground_luminance >= CLEAN_PAGE_MIN_FOREGROUND_CONTRAST
 }
 
 fn prepare_preprocessed_ocr_image(
@@ -2349,6 +2370,67 @@ mod tests {
     fn test_clean_white_rgb_selects_default_preprocessing() {
         const SAMPLE_PIXEL_COUNT: usize = 16;
         let rgb_data = vec![u8::MAX; SAMPLE_PIXEL_COUNT * RGB_CHANNEL_COUNT];
+
+        assert!(should_apply_default_preprocessing(&rgb_data));
+    }
+
+    #[test]
+    fn should_skip_default_otsu_for_bright_low_contrast_blue_text() {
+        const WIDTH: u32 = 80;
+        const HEIGHT: u32 = 20;
+        const FOREGROUND_WIDTH: u32 = 4;
+        const LOW_CONTRAST_BLUE: [u8; RGB_CHANNEL_COUNT] = [200, 220, 245];
+        let mut rgb_data = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT);
+        for _y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let pixel = if x < FOREGROUND_WIDTH {
+                    LOW_CONTRAST_BLUE
+                } else {
+                    [u8::MAX; RGB_CHANNEL_COUNT]
+                };
+                rgb_data.extend_from_slice(&pixel);
+            }
+        }
+
+        let prepared = prepare_ocr_image(rgb_data.clone(), WIDTH, HEIGHT, None, None, false, None);
+
+        assert!(!prepared.apply_pix_preprocessing);
+        assert_eq!(
+            prepared.data, rgb_data,
+            "implicit preprocessing must preserve low-contrast RGB pixels"
+        );
+
+        let explicit = prepare_ocr_image(
+            rgb_data,
+            WIDTH,
+            HEIGHT,
+            Some(&crate::types::ImagePreprocessingConfig::default()),
+            None,
+            false,
+            None,
+        );
+        assert!(
+            explicit.apply_pix_preprocessing,
+            "explicit Otsu preprocessing must remain enabled"
+        );
+    }
+
+    #[test]
+    fn should_select_default_preprocessing_for_black_text_on_white_page() {
+        const WIDTH: u32 = 80;
+        const HEIGHT: u32 = 20;
+        const FOREGROUND_WIDTH: u32 = 4;
+        let mut rgb_data = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT);
+        for _y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let pixel = if x < FOREGROUND_WIDTH {
+                    [0; RGB_CHANNEL_COUNT]
+                } else {
+                    [u8::MAX; RGB_CHANNEL_COUNT]
+                };
+                rgb_data.extend_from_slice(&pixel);
+            }
+        }
 
         assert!(should_apply_default_preprocessing(&rgb_data));
     }
