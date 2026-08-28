@@ -1602,6 +1602,11 @@ jobs:
         shell: bash
         run: command -v cargo-zigbuild || cargo install --locked cargo-zigbuild
 
+      - name: Build liblzma statically for glibc floor
+        if: contains(matrix.target, '-linux-gnu')
+        shell: bash
+        run: echo "LZMA_API_STATIC=1" >> "$GITHUB_ENV"
+
       - uses: xberg-io/actions/build-go-ffi@v1
         with:
           target: ${{ matrix.target }}
@@ -1673,6 +1678,11 @@ jobs:
         if: contains(matrix.target, '-linux-gnu')
         shell: bash
         run: command -v cargo-zigbuild || cargo install --locked cargo-zigbuild
+
+      - name: Build liblzma statically for glibc floor
+        if: contains(matrix.target, '-linux-gnu')
+        shell: bash
+        run: echo "LZMA_API_STATIC=1" >> "$GITHUB_ENV"
 
       - uses: xberg-io/actions/build-rust-ffi@v1
         with:
@@ -1775,6 +1785,11 @@ jobs:
         if: contains(matrix.target, '-linux-gnu')
         shell: bash
         run: command -v cargo-zigbuild || cargo install --locked cargo-zigbuild
+
+      - name: Build liblzma statically for glibc floor
+        if: contains(matrix.target, '-linux-gnu')
+        shell: bash
+        run: echo "LZMA_API_STATIC=1" >> "$GITHUB_ENV"
 
       - uses: xberg-io/actions/build-java-natives@v1
         with:
@@ -2462,11 +2477,9 @@ jobs:
 
   update-swift-package-manifest:
     name: Update Swift Package.swift manifest with version and checksum
-    # Depends on the UPLOAD (not just the build) so the checksum is computed from
-    # the exact bytes on the release — the same asset SwiftPM downloads. This
-    # eliminates the class of failure where a rebuilt/re-uploaded bundle (checksum
-    # non-determinism) or a flaky `download-artifact` digest check left Package.swift
-    # pinning a checksum that no longer matched the released bundle. ~keep
+    # A real release checks the exact uploaded asset; a dry run checks the run artifact
+    # because upload-release-assets intentionally creates no release. Only the real
+    # release may rewrite Package.swift or move remote refs. ~keep
     needs: [prepare, upload-swift-bundle]
     if: ${{ needs.prepare.outputs.release_swift == 'true' && needs.upload-swift-bundle.result == 'success' }}
     runs-on: ubuntu-latest
@@ -2485,24 +2498,28 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           persist-credentials: true
 
-      - name: Compute checksum from the released artifact bundle
+      - uses: actions/download-artifact@v8
+        if: ${{ needs.prepare.outputs.dry_run == 'true' }}
+        with:
+          name: swift-artifactbundle
+          path: bundle-dl
+
+      - name: Compute checksum from the artifact bundle
         id: checksum
         env:
+          DRY_RUN: ${{ needs.prepare.outputs.dry_run }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          # Compute the checksum from the EXACT bytes on the release (the asset
-          # SwiftPM downloads), not from a separate run-artifact. SwiftPM's
-          # binaryTarget checksum is the plain SHA-256 of the zip, which equals
-          # `swift package compute-checksum`. Using the released asset guarantees
-          # Package.swift matches what consumers fetch, regardless of rebuild
-          # non-determinism, and avoids the flaky download-artifact digest check.
-          gh release download "$TAG" --repo "${{ github.repository }}" \
-            --pattern 'Xberg-rs.artifactbundle.zip' --dir bundle-dl --clobber
+          if [ "$DRY_RUN" != "true" ]; then
+            gh release download "$TAG" --repo "${{ github.repository }}" \
+              --pattern 'Xberg-rs.artifactbundle.zip' --dir bundle-dl --clobber
+          fi
           CHECKSUM=$(sha256sum bundle-dl/Xberg-rs.artifactbundle.zip | cut -d' ' -f1)
           echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
 
       - name: Update Package.swift with version and checksum
+        if: ${{ needs.prepare.outputs.dry_run != 'true' }}
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           CHECKSUM="${{ steps.checksum.outputs.checksum }}"
@@ -2517,6 +2534,7 @@ jobs:
           head -40 Package.swift
 
       - name: Commit and push Package.swift
+        if: ${{ needs.prepare.outputs.dry_run != 'true' }}
         run: |
           git config user.name "xberg-dev-publisher[bot]"
           git config user.email "291994444+xberg-dev-publisher[bot]@users.noreply.github.com"
