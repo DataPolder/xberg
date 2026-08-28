@@ -410,6 +410,12 @@ const CLEAN_PAGE_LIGHT_PIXEL_THRESHOLD: f64 = 0.90;
 const CLEAN_PAGE_LIGHT_PIXEL_FRACTION_THRESHOLD: f64 = 0.80;
 /// Minimum separation between sampled background and foreground modes. ~keep
 const CLEAN_PAGE_MIN_FOREGROUND_CONTRAST: f64 = 0.20;
+/// Upper luminance bound for a dark text mode that remains distinct from bright fills. ~keep
+const CLEAN_PAGE_DARK_PIXEL_THRESHOLD: f64 = 0.50;
+/// Minimum sampled fraction required before dark pixels count as significant rather than noise. ~keep
+const CLEAN_PAGE_DARK_PIXEL_FRACTION_THRESHOLD: f64 = 0.005;
+/// Minimum sampled population required for the dark-pixel override on small rasters. ~keep
+const CLEAN_PAGE_DARK_PIXEL_COUNT_THRESHOLD: usize = 8;
 /// Maximum value of an 8-bit RGB channel.
 const RGB_CHANNEL_MAX: f64 = u8::MAX as f64;
 /// Number of channels in an RGB pixel.
@@ -484,6 +490,7 @@ fn should_apply_default_preprocessing(rgb_data: &[u8]) -> bool {
     let mut foreground_luminance_sum = 0.0;
     let mut light_pixels = 0usize;
     let mut foreground_pixels = 0usize;
+    let mut dark_pixels = 0usize;
     let mut sample_count = 0usize;
 
     for pixel in rgb_data
@@ -500,6 +507,7 @@ fn should_apply_default_preprocessing(rgb_data: &[u8]) -> bool {
             foreground_luminance_sum += luminance;
             foreground_pixels += 1;
         }
+        dark_pixels += usize::from(luminance <= CLEAN_PAGE_DARK_PIXEL_THRESHOLD);
         sample_count += 1;
     }
 
@@ -518,7 +526,9 @@ fn should_apply_default_preprocessing(rgb_data: &[u8]) -> bool {
 
     let background_luminance = light_luminance_sum / light_pixels as f64;
     let foreground_luminance = foreground_luminance_sum / foreground_pixels as f64;
-    background_luminance - foreground_luminance >= CLEAN_PAGE_MIN_FOREGROUND_CONTRAST
+    let has_significant_dark_population = dark_pixels >= CLEAN_PAGE_DARK_PIXEL_COUNT_THRESHOLD
+        && dark_pixels as f64 / sample_count >= CLEAN_PAGE_DARK_PIXEL_FRACTION_THRESHOLD;
+    background_luminance - foreground_luminance >= CLEAN_PAGE_MIN_FOREGROUND_CONTRAST || has_significant_dark_population
 }
 
 fn prepare_preprocessed_ocr_image(
@@ -2423,6 +2433,94 @@ mod tests {
         assert!(
             explicit.apply_pix_preprocessing,
             "explicit Otsu preprocessing must remain enabled"
+        );
+    }
+
+    #[test]
+    fn should_select_default_otsu_for_dark_text_over_bright_color_fill() {
+        const WIDTH: u32 = 400;
+        const HEIGHT: u32 = 20;
+        const BRIGHT_FILL_WIDTH: u32 = 64;
+        const GLYPH_STROKE_WIDTH: u32 = 4;
+        const GLYPH_BAR_WIDTH: u32 = 40;
+        const GLYPH_TOP: u32 = 4;
+        const GLYPH_BOTTOM: u32 = 15;
+        const DARK_TEXT: [u8; RGB_CHANNEL_COUNT] = [30, 30, 30];
+        const BRIGHT_BLUE_FILL: [u8; RGB_CHANNEL_COUNT] = [210, 220, 240];
+        let mut rgb_data = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let is_glyph_stroke = (x < GLYPH_STROKE_WIDTH && (GLYPH_TOP..=GLYPH_BOTTOM).contains(&y))
+                    || (x < GLYPH_BAR_WIDTH && (y == GLYPH_TOP || y == GLYPH_BOTTOM));
+                let pixel = if is_glyph_stroke {
+                    DARK_TEXT
+                } else if x < BRIGHT_FILL_WIDTH {
+                    BRIGHT_BLUE_FILL
+                } else {
+                    [u8::MAX; RGB_CHANNEL_COUNT]
+                };
+                rgb_data.extend_from_slice(&pixel);
+            }
+        }
+
+        assert!(
+            should_apply_default_preprocessing(&rgb_data),
+            "a distinct dark text population must not be hidden by a larger bright fill"
+        );
+    }
+
+    #[test]
+    fn should_ignore_isolated_dark_noise_over_bright_color_fill() {
+        const WIDTH: u32 = 100;
+        const HEIGHT: u32 = 20;
+        const BRIGHT_FILL_WIDTH: u32 = 20;
+        const DARK_NOISE: [u8; RGB_CHANNEL_COUNT] = [30, 30, 30];
+        const BRIGHT_BLUE_FILL: [u8; RGB_CHANNEL_COUNT] = [210, 220, 240];
+        let mut rgb_data = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let pixel = if x == 0 && y == 0 {
+                    DARK_NOISE
+                } else if x < BRIGHT_FILL_WIDTH {
+                    BRIGHT_BLUE_FILL
+                } else {
+                    [u8::MAX; RGB_CHANNEL_COUNT]
+                };
+                rgb_data.extend_from_slice(&pixel);
+            }
+        }
+
+        assert!(
+            !should_apply_default_preprocessing(&rgb_data),
+            "one dark sample must not turn a bright low-contrast raster into a document page"
+        );
+    }
+
+    #[test]
+    fn should_ignore_four_scattered_dark_speckles_over_bright_color_fill() {
+        const WIDTH: u32 = 400;
+        const HEIGHT: u32 = 16;
+        const BRIGHT_FILL_WIDTH: u32 = 64;
+        const DARK_NOISE: [u8; RGB_CHANNEL_COUNT] = [30, 30, 30];
+        const BRIGHT_BLUE_FILL: [u8; RGB_CHANNEL_COUNT] = [210, 220, 240];
+        const DARK_SPECKLES: [(u32, u32); 4] = [(0, 0), (100, 4), (200, 8), (300, 12)];
+        let mut rgb_data = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let pixel = if DARK_SPECKLES.contains(&(x, y)) {
+                    DARK_NOISE
+                } else if x < BRIGHT_FILL_WIDTH {
+                    BRIGHT_BLUE_FILL
+                } else {
+                    [u8::MAX; RGB_CHANNEL_COUNT]
+                };
+                rgb_data.extend_from_slice(&pixel);
+            }
+        }
+
+        assert!(
+            !should_apply_default_preprocessing(&rgb_data),
+            "four isolated dark samples must not be treated as a coherent text population"
         );
     }
 

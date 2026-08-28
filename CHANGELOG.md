@@ -142,9 +142,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed Tesseract preprocessing so deskew, denoise, contrast enhancement, and Otsu, adaptive, and
   Sauvola binarization settings transform the OCR raster on native and WebAssembly backends;
   `none` (with `off` as an alias) preserves unthresholded grayscale when deskew is disabled,
-  sparse receipt-image fallback and low-contrast colored text no longer lose faint content to
-  global thresholding, and WebAssembly Tesseract now rejects images exceeding 4096 × 4096
-  pixels before decoding.
+  sparse receipt-image fallback and faint colored text no longer lose content to global
+  thresholding, dark labels over bright map fills still receive Otsu preprocessing, and
+  WebAssembly Tesseract now rejects images exceeding 4096 × 4096 pixels before decoding.
 - Fixed OCR measurement tooling so line-filter comparisons score the intended ground-truth lines
   and report filtering regressions accurately.
 - Fixed the OpenAPI document's dangling Djot attribute reference so schema validators and client generators can
