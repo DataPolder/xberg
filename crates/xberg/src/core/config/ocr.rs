@@ -1223,7 +1223,7 @@ fn validate_tesseract_tuning(tesseract_config: Option<&crate::types::TesseractCo
     crate::core::config_validation::validate_tesseract_psm(tesseract_config.psm)?;
     crate::core::config_validation::validate_tesseract_oem(tesseract_config.oem)?;
     if let Some(ref preprocessing) = tesseract_config.preprocessing {
-        crate::core::config_validation::validate_binarization_method(&preprocessing.binarization_method)?;
+        crate::core::config_validation::validate_image_preprocessing_config(preprocessing)?;
     }
     Ok(())
 }
@@ -1322,6 +1322,30 @@ mod tests {
         assert!(
             message.contains("binarization"),
             "error should name the binarization method; got: {message}"
+        );
+    }
+
+    #[test]
+    fn should_reject_ocr_config_when_deskew_has_no_binarization() {
+        let mut tesseract_config = tesseract_config_with(6, 1);
+        tesseract_config.preprocessing = Some(crate::types::ImagePreprocessingConfig {
+            deskew: true,
+            binarization_method: "none".to_string(),
+            ..Default::default()
+        });
+        let config = OcrConfig {
+            tesseract_config: Some(tesseract_config),
+            ..Default::default()
+        };
+
+        let message = config
+            .validate()
+            .expect_err("grayscale-preserving deskew is unavailable")
+            .to_string();
+
+        assert_eq!(
+            message,
+            "Validation error: deskew must be false when binarization_method is none or off"
         );
     }
 

@@ -248,16 +248,14 @@ impl TesseractConfig {
                 self.output_format
             ));
         }
-        if let Some(preprocessing) = &self.preprocessing
-            && !matches!(
-                preprocessing.binarization_method.to_ascii_lowercase().as_str(),
-                "otsu" | "adaptive" | "sauvola"
-            )
-        {
-            return Err(format!(
-                "Invalid binarization method '{}'. Must be one of: otsu, adaptive, sauvola",
-                preprocessing.binarization_method
-            ));
+        if let Some(preprocessing) = &self.preprocessing {
+            crate::core::config_validation::validate_image_preprocessing_config(preprocessing).map_err(|error| {
+                if let crate::XbergError::Validation { message, .. } = error {
+                    message
+                } else {
+                    error.to_string()
+                }
+            })?;
         }
         Ok(())
     }
@@ -431,6 +429,36 @@ mod tests {
             };
             assert!(config.validate().is_ok());
         }
+
+        for method in ["none", "off"] {
+            let config = TesseractConfig {
+                preprocessing: Some(ImagePreprocessingConfig {
+                    deskew: false,
+                    binarization_method: method.to_string(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            assert!(config.validate().is_ok(), "{method} must disable binarization");
+        }
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_reject_tesseract_config_when_deskew_has_no_binarization() {
+        let config = TesseractConfig {
+            preprocessing: Some(ImagePreprocessingConfig {
+                deskew: true,
+                binarization_method: "off".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            config.validate().unwrap_err(),
+            "deskew must be false when binarization_method is none or off"
+        );
     }
 
     #[cfg(feature = "ocr")]

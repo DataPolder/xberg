@@ -1302,7 +1302,13 @@ fn sparse_image_ocr_fallback_config(
     let mut fallback_config = whole_image_config.clone();
     let tesseract_config = fallback_config.tesseract_config.get_or_insert_default();
     tesseract_config.psm = SPARSE_IMAGE_OCR_FALLBACK_PSM;
-    tesseract_config.preprocessing = Some(crate::types::ImagePreprocessingConfig::default());
+    let preprocessing = crate::types::ImagePreprocessingConfig {
+        deskew: false,
+        contrast_enhance: true,
+        binarization_method: "none".to_string(),
+        ..Default::default()
+    };
+    tesseract_config.preprocessing = Some(preprocessing);
     fallback_config
 }
 
@@ -2641,7 +2647,7 @@ mod tests {
         }
 
         #[test]
-        fn should_build_psm3_fallback_with_explicit_default_preprocessing() {
+        fn should_build_psm3_fallback_with_explicit_grayscale_enhancement() {
             let mut whole_image_config = crate::core::config::OcrConfig::default();
             apply_default_whole_image_tesseract_psm(&mut whole_image_config);
 
@@ -2651,7 +2657,17 @@ mod tests {
                 .expect("fallback must materialize Tesseract configuration");
 
             assert_eq!(tesseract_config.psm, SPARSE_IMAGE_OCR_FALLBACK_PSM);
-            assert!(tesseract_config.preprocessing.is_some());
+            assert_eq!(
+                tesseract_config
+                    .preprocessing
+                    .as_ref()
+                    .expect("fallback must materialize preprocessing")
+                    .binarization_method,
+                "none"
+            );
+            let preprocessing = tesseract_config.preprocessing.unwrap();
+            assert!(!preprocessing.deskew);
+            assert!(preprocessing.contrast_enhance);
         }
 
         /// Regression test for the standalone-image-OCR variant of the `TesseractConfig`
@@ -2724,6 +2740,33 @@ mod tests {
 
         assert!(!result.metadata.ocr_used);
         assert_eq!(result.extraction_method, None);
+    }
+
+    #[cfg(feature = "ocr")]
+    #[tokio::test]
+    async fn should_recover_receipt_header_with_implicit_sparse_image_fallback() {
+        let Some(receipt) = crate::utils::read_test_fixture("images/cord_receipt_02.jpg") else {
+            return;
+        };
+        let config = ExtractionConfig {
+            use_cache: false,
+            force_ocr: true,
+            ocr: Some(crate::core::config::OcrConfig::default()),
+            ..Default::default()
+        };
+
+        let doc = ImageExtractor::new()
+            .extract_content(&receipt, "image/jpeg", &config)
+            .await
+            .expect("receipt OCR must succeed");
+        let result =
+            crate::extraction::derive::derive_extraction_result(doc, false, crate::core::config::OutputFormat::Plain);
+        let normalized = result.content.to_ascii_lowercase();
+
+        assert!(
+            normalized.contains("j.stb promo"),
+            "implicit sparse-image fallback must recover the grounded receipt header; got {normalized:?}"
+        );
     }
 
     #[test]

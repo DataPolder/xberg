@@ -7,7 +7,7 @@
 use crate::{Result, XbergError};
 
 /// Valid binarization methods for image preprocessing.
-const VALID_BINARIZATION_METHODS: &[&str] = &["otsu", "adaptive", "sauvola"];
+const VALID_BINARIZATION_METHODS: &[&str] = &["none", "off", "otsu", "adaptive", "sauvola"];
 
 /// Valid token reduction levels.
 const VALID_TOKEN_REDUCTION_LEVELS: &[&str] = &["off", "light", "moderate", "aggressive", "maximum"];
@@ -226,7 +226,7 @@ const VALID_OUTPUT_FORMATS: &[&str] = &["plain", "text", "markdown", "md", "djot
 ///
 /// # Arguments
 ///
-/// * `method` - The binarization method to validate (e.g., "otsu", "adaptive", "sauvola")
+/// * `method` - The binarization method to validate (e.g., "none", "otsu", "adaptive", "sauvola")
 ///
 /// # Returns
 ///
@@ -239,6 +239,7 @@ const VALID_OUTPUT_FORMATS: &[&str] = &["plain", "text", "markdown", "md", "djot
 /// ```ignore
 /// use xberg::core::config_validation::validate_binarization_method;
 ///
+/// assert!(validate_binarization_method("none").is_ok());
 /// assert!(validate_binarization_method("otsu").is_ok());
 /// assert!(validate_binarization_method("adaptive").is_ok());
 /// assert!(validate_binarization_method("invalid").is_err());
@@ -257,6 +258,18 @@ pub(crate) fn validate_binarization_method(method: &str) -> Result<()> {
             source: None,
         })
     }
+}
+
+pub(crate) fn validate_image_preprocessing_config(config: &crate::types::ImagePreprocessingConfig) -> Result<()> {
+    validate_binarization_method(&config.binarization_method)?;
+    let method = config.binarization_method.to_ascii_lowercase();
+    if matches!(method.as_str(), "none" | "off") && config.deskew {
+        return Err(XbergError::Validation {
+            message: "deskew must be false when binarization_method is none or off".to_string(),
+            source: None,
+        });
+    }
+    Ok(())
 }
 
 /// Validate a token reduction level string.

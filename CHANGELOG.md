@@ -130,7 +130,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inputs, and TOON now uses the documented batch envelope.
 - Fixed Tesseract preprocessing so deskew, denoise, contrast enhancement, and Otsu, adaptive, and
   Sauvola binarization settings transform the OCR raster on native and WebAssembly backends;
-  WebAssembly Tesseract now rejects images exceeding 4096 × 4096 pixels before decoding.
+  `none` (with `off` as an alias) preserves unthresholded grayscale when deskew is disabled,
+  sparse receipt-image fallback no longer loses faint text to global thresholding, and WebAssembly
+  Tesseract now rejects images exceeding 4096 × 4096 pixels before decoding.
 - Fixed the OpenAPI document's dangling Djot attribute reference so schema validators and client generators can
   resolve every advertised component (#1505).
 - XML and JSON content with unsupported specialized extensions now routes through the supported generic extractor

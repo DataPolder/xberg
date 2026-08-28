@@ -391,16 +391,18 @@ pub struct ImagePreprocessingConfig {
     /// Auto-detect and correct image rotation.
     pub auto_rotate: bool,
 
-    /// Correct skew (tilted images).
+    /// Correct skew (tilted images). Must be `false` with `none` or `off` binarization.
     pub deskew: bool,
 
     /// Remove noise from the image.
     pub denoise: bool,
 
-    /// Enhance contrast for better text visibility.
+    /// Enhance contrast for better text visibility. With `none` or `off` binarization, this
+    /// applies background normalization and sharpening while preserving grayscale pixels.
     pub contrast_enhance: bool,
 
-    /// Binarization method: "otsu", "sauvola", "adaptive".
+    /// Binarization method: "none" (alias "off"), "otsu", "sauvola", or "adaptive".
+    /// `deskew` must be `false` when this is `none` or `off`.
     pub binarization_method: String,
 
     /// Invert colors (white text on black → black on white).
