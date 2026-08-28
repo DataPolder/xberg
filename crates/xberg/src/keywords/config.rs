@@ -102,6 +102,7 @@ impl Default for NgramRange {
 /// YAKE-specific parameters.
 #[cfg(feature = "keywords-yake")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(all(feature = "api", feature = "keywords-yake"), derive(utoipa::ToSchema))]
 pub struct YakeParams {
     /// Window size for co-occurrence analysis (default: 2).
@@ -120,6 +121,7 @@ impl Default for YakeParams {
 /// RAKE-specific parameters.
 #[cfg(feature = "keywords-rake")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(all(feature = "api", feature = "keywords-rake"), derive(utoipa::ToSchema))]
 pub struct RakeParams {
     /// Minimum word length to consider (default: 1).
@@ -141,6 +143,7 @@ impl Default for RakeParams {
 
 /// Keyword extraction configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
 pub struct KeywordConfig {
     /// Algorithm to use for extraction.

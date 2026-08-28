@@ -84,6 +84,7 @@ where
 /// All fields default to the values that match the previous hardcoded behavior,
 /// so `OcrQualityThresholds::default()` preserves existing semantics exactly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OcrQualityThresholds {
     /// Minimum total non-whitespace characters to consider text substantive.
     #[serde(default = "default_min_total_non_whitespace")]
@@ -416,6 +417,7 @@ fn default_min_provenance_fallback_ratio() -> f64 {
 
 /// A single backend stage in the OCR pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OcrPipelineStage {
     /// Backend name: "tesseract", "paddleocr", "paddle-ocr", "sceptre", "vlm", or a custom registered name.
     /// Sceptre uses ONNX Runtime on desktop/server and tract on Android/iOS; browser WebAssembly has a separate
@@ -530,6 +532,7 @@ pub(crate) enum OcrPipelineSelection {
 /// stage's result is returned as the best effort (`vlm_fallback` pipelines prefer their
 /// last non-empty stage; explicit and classical pipelines stay score-based).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OcrPipelineConfig {
     /// Ordered list of backends to try. Sorted by priority (descending) at runtime.
     pub stages: Vec<OcrPipelineStage>,
@@ -581,7 +584,7 @@ pub struct OcrPipelineConfig {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum VlmFallbackPolicy {
     /// No VLM fallback (default). Behaves identically to the pre-policy single-backend mode.
@@ -604,6 +607,27 @@ pub enum VlmFallbackPolicy {
     Always,
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+enum VlmFallbackPolicyWire {
+    Disabled {},
+    OnLowQuality { quality_threshold: f64 },
+    Always {},
+}
+
+impl<'de> Deserialize<'de> for VlmFallbackPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(match VlmFallbackPolicyWire::deserialize(deserializer)? {
+            VlmFallbackPolicyWire::Disabled {} => Self::Disabled,
+            VlmFallbackPolicyWire::OnLowQuality { quality_threshold } => Self::OnLowQuality { quality_threshold },
+            VlmFallbackPolicyWire::Always {} => Self::Always,
+        })
+    }
+}
+
 /// Default confidence a page must reach before [`OcrStrategy::ScannedPages`] OCRs it.
 ///
 /// A slide with a full-bleed background image scores `0.50`, so a threshold of
@@ -624,7 +648,7 @@ pub const DEFAULT_SCANNED_MIN_CONFIDENCE: f64 = 0.70;
 /// };
 /// assert!(matches!(config.ocr_strategy, OcrStrategy::ScannedPages { .. }));
 /// ```
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum OcrStrategy {
     /// OCR only when the native text layer fails a quality check (default).
@@ -652,6 +676,25 @@ pub enum OcrStrategy {
     },
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+enum OcrStrategyWire {
+    Auto {},
+    ScannedPages { min_confidence: f64 },
+}
+
+impl<'de> Deserialize<'de> for OcrStrategy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(match OcrStrategyWire::deserialize(deserializer)? {
+            OcrStrategyWire::Auto {} => Self::Auto,
+            OcrStrategyWire::ScannedPages { min_confidence } => Self::ScannedPages { min_confidence },
+        })
+    }
+}
+
 impl OcrStrategy {
     pub(crate) fn validate(&self) -> Result<(), XbergError> {
         if let Self::ScannedPages { min_confidence } = self {
@@ -677,6 +720,7 @@ impl OcrStrategy {
 
 /// OCR configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OcrConfig {
     /// Whether OCR is enabled.
     ///
@@ -2276,4 +2320,12 @@ mod tests {
         assert_eq!(returned_opts["device"], "gpu");
         assert_eq!(returned_opts["batch"], 8);
     }
+}
+#[test]
+fn tagged_ocr_policies_reject_fields_for_unit_variants() {
+    let strategy = r#"{"mode":"auto","min_confidence":0.95}"#;
+    assert!(serde_json::from_str::<OcrStrategy>(strategy).is_err());
+
+    let fallback = r#"{"mode":"disabled","quality_threshold":0.8}"#;
+    assert!(serde_json::from_str::<VlmFallbackPolicy>(fallback).is_err());
 }

@@ -434,6 +434,7 @@ impl OcrElement {
 /// Controls how OCR elements are extracted and filtered.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
 pub struct OcrElementConfig {
     /// Whether to include OCR elements in the extraction result.
     ///

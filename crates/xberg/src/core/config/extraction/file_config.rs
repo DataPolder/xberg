@@ -44,7 +44,7 @@ use super::types::{
 /// };
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct FileExtractionConfig {
     /// ~keep: Override MIME inference policy for this file.
     #[serde(skip_serializing_if = "Option::is_none")]

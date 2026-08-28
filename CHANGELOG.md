@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** configuration deserialization now rejects unknown fields in nested Xberg
+  configuration tables instead of silently ignoring misspelled settings.
 - **Breaking:** PDF backend configuration now uses `"native"` and `PdfBackend::Native` instead of
   `"pdf_oxide"` and `PdfBackend::PdfOxide`. Update explicit configuration values; the default is
   unchanged.

@@ -383,7 +383,7 @@ pub struct OcrTableBoundingBox {
 /// for different document types.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ImagePreprocessingConfig {
     /// Target DPI for the image (300 is standard, 600 for small text).
     pub target_dpi: i32,
@@ -442,7 +442,7 @@ impl Default for ImagePreprocessingConfig {
 /// `ocr::types::TesseractConfig::default`, and vice versa.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct TesseractConfig {
     /// Language code(s) for OCR recognition. For Tesseract, languages are joined with "+".
     ///
