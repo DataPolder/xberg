@@ -179,7 +179,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed PDF reading order for dense two-column layouts, hanging clause numbers, split list markers,
   and modest font-size changes on one baseline.
 - Fixed PDF heading recovery for repeated bold section titles set at body font size while retaining
-  short bold labels as body text (#1513).
+  short bold labels, presenter attributions, and calendar legends as body text (#1513).
 - Fixed PDF table extraction so multi-word cells, rule-less prose regions, OCR-derived tables, and
   page-local table failures are handled correctly (#688, #1358).
 - Fixed PDF Markdown and Djot output so native text is retained when structured conversion is
