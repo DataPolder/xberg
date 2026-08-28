@@ -936,7 +936,13 @@ impl PdfDocument {
                         (reconstructed_xref, reconstructed_trailer)
                     }
                     Err(recon_err) => {
-                        tracing::error!("XRef reconstruction also failed: {}", recon_err);
+                        tracing::warn!(
+                            target: crate::LOG_TARGET_ROOT,
+                            operation = "reconstruct_xref",
+                            primary_error = %e,
+                            reconstruction_error = %recon_err,
+                            "xref reconstruction failed; propagating original parse error"
+                        );
                         return Err(e);
                     }
                 }
@@ -15562,9 +15568,11 @@ impl PdfDocument {
                         }
                         Err(e) => {
                             tracing::warn!(
-                                "Failed to decode content stream element on page {}: {}, skipping",
+                                target: crate::LOG_TARGET_ROOT,
+                                operation = "decode_optional_page_content",
                                 page_index,
-                                e
+                                error = %e,
+                                "skipping corrupt optional page content stream"
                             );
                         }
                     }
@@ -15595,9 +15603,11 @@ impl PdfDocument {
                     }
                     Err(e) => {
                         tracing::warn!(
-                            "Failed to decode content stream element on page {}: {}, skipping",
+                            target: crate::LOG_TARGET_ROOT,
+                            operation = "decode_optional_page_content",
                             page_index,
-                            e
+                            error = %e,
+                            "skipping corrupt optional page content stream"
                         );
                     }
                 }
@@ -20039,7 +20049,62 @@ fn find_substring(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::io::Cursor;
+    use std::sync::{Arc, Mutex};
+    use tracing::Level;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    #[derive(Clone, Debug)]
+    struct CapturedEvent {
+        level: Level,
+        target: String,
+        fields: BTreeMap<String, String>,
+    }
+
+    #[derive(Clone, Default)]
+    struct EventCapture(Arc<Mutex<Vec<CapturedEvent>>>);
+
+    impl<S> Layer<S> for EventCapture
+    where
+        S: tracing::Subscriber,
+    {
+        fn on_event(&self, event: &tracing::Event<'_>, _context: tracing_subscriber::layer::Context<'_, S>) {
+            let mut visitor = FieldCapture::default();
+            event.record(&mut visitor);
+            self.0.lock().unwrap().push(CapturedEvent {
+                level: *event.metadata().level(),
+                target: event.metadata().target().to_string(),
+                fields: visitor.0,
+            });
+        }
+    }
+
+    #[derive(Default)]
+    struct FieldCapture(BTreeMap<String, String>);
+
+    impl tracing::field::Visit for FieldCapture {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            self.0.insert(field.name().to_string(), format!("{value:?}"));
+        }
+
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            self.0.insert(field.name().to_string(), value.to_string());
+        }
+
+        fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+            self.0.insert(field.name().to_string(), value.to_string());
+        }
+    }
+
+    fn capture_events<T>(operation: impl FnOnce() -> T) -> (T, Vec<CapturedEvent>) {
+        let capture = EventCapture::default();
+        let subscriber = tracing_subscriber::registry().with(capture.clone());
+        let result = tracing::subscriber::with_default(subscriber, operation);
+        let events = capture.0.lock().unwrap().clone();
+        (result, events)
+    }
 
     #[test]
     fn test_run_is_signed_number() {
@@ -25152,6 +25217,105 @@ mod tests {
         let text = String::from_utf8_lossy(&data);
         assert!(text.contains("q"));
         assert!(text.contains("Q"));
+    }
+
+    #[test]
+    fn corrupt_optional_content_stream_warns_with_operation_identity() {
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let off1 = pdf.len();
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+        let off2 = pdf.len();
+        pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+        let off3 = pdf.len();
+        pdf.extend_from_slice(
+            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << >> >>\nendobj\n",
+        );
+        let off4 = pdf.len();
+        pdf.extend_from_slice(b"4 0 obj\n[5 0 R 6 0 R]\nendobj\n");
+        let corrupt = b"This is not zlib compressed data";
+        let off5 = pdf.len();
+        pdf.extend_from_slice(
+            format!(
+                "5 0 obj\n<< /Length {} /Filter /FlateDecode >>\nstream\n",
+                corrupt.len()
+            )
+            .as_bytes(),
+        );
+        pdf.extend_from_slice(corrupt);
+        pdf.extend_from_slice(b"\nendstream\nendobj\n");
+        let valid = b"Q";
+        let off6 = pdf.len();
+        pdf.extend_from_slice(format!("6 0 obj\n<< /Length {} >>\nstream\n", valid.len()).as_bytes());
+        pdf.extend_from_slice(valid);
+        pdf.extend_from_slice(b"\nendstream\nendobj\n");
+        let xref_off = pdf.len();
+        pdf.extend_from_slice(b"xref\n0 7\n0000000000 65535 f \n");
+        for offset in [off1, off2, off3, off4, off5, off6] {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref_off}\n%%EOF\n").as_bytes());
+
+        let doc = PdfDocument::from_bytes(pdf).unwrap();
+        let (result, events) = capture_events(|| doc.get_page_content_data(0));
+
+        assert_eq!(result.unwrap().as_slice(), b"Q\n");
+        let warning = events.iter().find(|event| {
+            event.level == Level::WARN
+                && event.target == crate::LOG_TARGET_ROOT
+                && event.fields.get("operation").map(String::as_str) == Some("decode_optional_page_content")
+        });
+        let warning = warning.unwrap_or_else(|| panic!("missing optional-content warning: {events:#?}"));
+        assert_eq!(warning.fields.get("page_index").map(String::as_str), Some("0"));
+        assert!(warning.fields.contains_key("error"));
+        assert!(events.iter().all(|event| event.level != Level::ERROR));
+    }
+
+    #[test]
+    fn corrupt_mandatory_xref_stream_errors_at_open_boundary() {
+        let corrupt = b"This is not zlib compressed data";
+        let mut pdf = b"%PDF-1.5\n".to_vec();
+        let xref_offset = pdf.len();
+        pdf.extend_from_slice(
+            format!(
+                "1 0 obj\n<< /Type /XRef /Size 2 /W [1 2 1] /Length {} /Filter /FlateDecode >>\nstream\n",
+                corrupt.len()
+            )
+            .as_bytes(),
+        );
+        pdf.extend_from_slice(corrupt);
+        pdf.extend_from_slice(b"\nendstream\nendobj\n");
+        pdf.extend_from_slice(format!("startxref\n{xref_offset}\n%%EOF\n").as_bytes());
+
+        let (result, events) = capture_events(|| PdfDocument::from_bytes(pdf));
+
+        assert!(result.is_err(), "a corrupt mandatory xref stream must fail open");
+        let failures: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event.level == Level::ERROR
+                    && event.target == format!("{}::document", crate::LOG_TARGET_ROOT)
+                    && event.fields.contains_key("error")
+            })
+            .collect();
+        assert_eq!(failures.len(), 1, "expected one boundary error: {events:#?}");
+        assert_eq!(
+            events.iter().filter(|event| event.level == Level::ERROR).count(),
+            1,
+            "fatal xref failure must emit exactly one ERROR: {events:#?}"
+        );
+        let error = failures[0].fields.get("error").unwrap();
+        assert!(
+            error.contains("Trailer keyword not found"),
+            "wrong propagated error: {error}"
+        );
+        let reconstruction = events.iter().find(|event| {
+            event.level == Level::WARN
+                && event.target == crate::LOG_TARGET_ROOT
+                && event.fields.get("operation").map(String::as_str) == Some("reconstruct_xref")
+        });
+        let reconstruction = reconstruction.unwrap_or_else(|| panic!("missing reconstruction context: {events:#?}"));
+        assert!(reconstruction.fields.contains_key("primary_error"));
+        assert!(reconstruction.fields.contains_key("reconstruction_error"));
     }
 
     #[test]

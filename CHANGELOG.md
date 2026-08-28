@@ -154,6 +154,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed PDF OCR and rendering for highly compressed scans, CCITT images, CFF fonts, maximum-size font
   tables, malformed embedded fonts, rotated content, missing glyph warnings, and concurrent Pdfium
   extraction.
+- Fixed native PDF tracing so corrupt optional content is reported as a recoverable warning, while
+  mandatory cross-reference failures emit a single operation-boundary error without changing the returned error type.
 - Fixed scanned PDF extraction so CCITT parameters align with their filter in multi-filter streams,
   referenced JBIG2 image masks are available to OCR, and stencil-mask polarity renders text as opaque.
 - Fixed PDF reading order for dense two-column layouts, hanging clause numbers, split list markers,
