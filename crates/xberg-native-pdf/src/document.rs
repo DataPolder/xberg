@@ -262,6 +262,8 @@ impl BoundedObjectCache {
 // false "circular reference" errors when two threads resolve the same object
 // concurrently (Race C). ~keep
 thread_local! {
+    // HashSet::new is not const on the supported Rust toolchain. ~keep
+    #[allow(clippy::missing_const_for_thread_local)]
     static RESOLVING_STACK: RefCell<HashSet<ObjectRef>> = RefCell::new(HashSet::new());
     static RECURSION_DEPTH: RefCell<u32> = const { RefCell::new(0) };
 }

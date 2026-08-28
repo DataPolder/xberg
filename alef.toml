@@ -1194,6 +1194,8 @@ exclude_functions = [
   # here per that error's own remedy -- `xberg doctor` inspects host backends and model caches,
   # neither of which exists in a browser. ~keep
   "doctor",
+  # Chunk classification requires liter-llm and tokio; neither is WASM-safe. ~keep
+  "classify_chunks_owned",
 ]
 
 [crates.wasm.extra_dependencies]
