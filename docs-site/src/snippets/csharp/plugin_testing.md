@@ -4,6 +4,8 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
+CustomExtractorTests.VerifyExtractsJsonContent();
+
 public static class CustomExtractorTests
 {
     public static void VerifyExtractsJsonContent()
