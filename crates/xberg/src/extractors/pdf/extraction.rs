@@ -18,12 +18,29 @@ pub(crate) type PdfExtractionPhaseResult = (
     Option<Vec<PageBoundary>>,
     Option<crate::types::internal::InternalDocument>,
     bool,
+    Option<AnnotationTextFallback>,
     Option<Vec<PdfAnnotation>>,
     Option<Vec<crate::types::ExtractedImage>>,
     Vec<crate::types::PdfFormField>,
     Vec<crate::types::ProcessingWarning>,
     Option<Vec<String>>,
 );
+
+#[cfg(feature = "pdf")]
+#[derive(Clone)]
+pub(crate) struct AnnotationTextFallback {
+    native_pages: Vec<String>,
+    annotation_pages: Vec<Vec<String>>,
+}
+
+#[cfg(feature = "pdf")]
+pub(crate) struct AnnotationFallbackTarget<'a> {
+    pub(crate) text: &'a mut String,
+    pub(crate) page_contents: &'a mut Option<Vec<PageContent>>,
+    pub(crate) boundaries: &'a mut Option<Vec<PageBoundary>>,
+    pub(crate) pdf_metadata: &'a mut crate::pdf::metadata::PdfExtractionMetadata,
+    pub(crate) page_config: Option<&'a crate::core::config::PageConfig>,
+}
 
 #[cfg(feature = "layout-detection")]
 fn effective_layout_acceleration<'a>(
@@ -95,32 +112,41 @@ fn table_stage_failure_warning(stage: &str, error: &impl std::fmt::Display) -> c
 fn extract_annotations_with_empty_body_fallback(
     doc: &mut crate::pdf::native::NativeDocument,
     requested: bool,
-    native_text: &mut String,
-    page_contents: &mut Option<Vec<PageContent>>,
-    boundaries: &mut Option<Vec<PageBoundary>>,
-    pdf_metadata: &mut crate::pdf::metadata::PdfExtractionMetadata,
-    page_config: Option<&crate::core::config::PageConfig>,
-) -> (Option<Vec<PdfAnnotation>>, Vec<crate::types::ProcessingWarning>) {
+    native_text: &str,
+    page_contents: Option<&[PageContent]>,
+    boundaries: Option<&[PageBoundary]>,
+) -> (
+    Option<Vec<PdfAnnotation>>,
+    Option<AnnotationTextFallback>,
+    Vec<crate::types::ProcessingWarning>,
+) {
     if requested {
         let (annotations, warnings) = crate::pdf::native::annotations::extract_annotations(doc);
-        return ((!annotations.is_empty()).then_some(annotations), warnings);
-    }
-    if !native_pages_are_blank(native_text, boundaries.as_deref()) {
-        return (None, Vec::new());
+        return ((!annotations.is_empty()).then_some(annotations), None, warnings);
     }
 
-    let (annotations, mut warnings, page_count) =
-        crate::pdf::native::annotations::extract_visible_free_text_annotations(doc);
-    let (recovered_pages, recovered_count) = annotation_text_by_page(&annotations, page_count);
+    let page_count = match doc.doc.page_count() {
+        Ok(page_count) => page_count,
+        Err(error) => {
+            return (
+                None,
+                None,
+                vec![crate::pdf::native::annotations::page_count_failure_warning(&error)],
+            );
+        }
+    };
+    let native_pages = native_page_texts(native_text, page_contents, boundaries, page_count);
+    if native_pages.len() != page_count {
+        return (None, None, Vec::new());
+    }
+    let eligible_pages: Vec<bool> = native_pages.iter().map(|page| page.trim().is_empty()).collect();
+    if !eligible_pages.iter().any(|eligible| *eligible) {
+        return (None, None, Vec::new());
+    }
+    let (annotations, mut warnings) =
+        crate::pdf::native::annotations::extract_visible_free_text_annotations(doc, &eligible_pages);
+    let (annotation_pages, recovered_count) = annotation_text_by_page(&annotations, page_count);
     if recovered_count > 0 {
-        apply_recovered_page_texts(
-            recovered_pages,
-            native_text,
-            page_contents,
-            boundaries,
-            pdf_metadata,
-            page_config,
-        );
         warnings.push(crate::types::ProcessingWarning {
             source: std::borrow::Cow::Borrowed("pdf_annotations"),
             message: std::borrow::Cow::Owned(format!(
@@ -130,23 +156,42 @@ fn extract_annotations_with_empty_body_fallback(
         });
     }
 
-    (None, warnings)
+    let fallback = (recovered_count > 0).then_some(AnnotationTextFallback {
+        native_pages,
+        annotation_pages,
+    });
+    (None, fallback, warnings)
 }
 
 #[cfg(feature = "pdf")]
-fn native_pages_are_blank(native_text: &str, boundaries: Option<&[PageBoundary]>) -> bool {
-    let Some(boundaries) = boundaries.filter(|boundaries| !boundaries.is_empty()) else {
-        return native_text.trim().is_empty();
-    };
-    boundaries.iter().all(|boundary| {
-        native_text
-            .get(boundary.byte_start..boundary.byte_end)
-            .is_some_and(|page_text| page_text.trim().is_empty())
-    })
+fn native_page_texts(
+    native_text: &str,
+    page_contents: Option<&[PageContent]>,
+    boundaries: Option<&[PageBoundary]>,
+    page_count: usize,
+) -> Vec<String> {
+    if let Some(pages) = page_contents.filter(|pages| pages.len() == page_count) {
+        return pages.iter().map(|page| page.content.clone()).collect();
+    }
+    if let Some(boundaries) = boundaries.filter(|boundaries| boundaries.len() == page_count) {
+        return boundaries
+            .iter()
+            .map(|boundary| {
+                native_text
+                    .get(boundary.byte_start..boundary.byte_end)
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect();
+    }
+    if native_text.trim().is_empty() {
+        return vec![String::new(); page_count];
+    }
+    vec![native_text.to_string()]
 }
 
 #[cfg(feature = "pdf")]
-fn annotation_text_by_page(annotations: &[PdfAnnotation], page_count: usize) -> (Vec<String>, usize) {
+fn annotation_text_by_page(annotations: &[PdfAnnotation], page_count: usize) -> (Vec<Vec<String>>, usize) {
     let mut pages = vec![Vec::new(); page_count];
     let mut recovered_count = 0;
     for annotation in annotations {
@@ -165,47 +210,121 @@ fn annotation_text_by_page(annotations: &[PdfAnnotation], page_count: usize) -> 
         else {
             continue;
         };
-        page.push(content);
+        page.push(content.to_string());
         recovered_count += 1;
     }
-    (
-        pages.into_iter().map(|content| content.join("\n")).collect(),
-        recovered_count,
-    )
+    (pages, recovered_count)
 }
 
 #[cfg(feature = "pdf")]
-fn apply_recovered_page_texts(
-    recovered_pages: Vec<String>,
-    native_text: &mut String,
-    page_contents: &mut Option<Vec<PageContent>>,
-    boundaries: &mut Option<Vec<PageBoundary>>,
-    pdf_metadata: &mut crate::pdf::metadata::PdfExtractionMetadata,
-    page_config: Option<&crate::core::config::PageConfig>,
+pub(crate) fn apply_annotation_text_fallback(
+    fallback: &AnnotationTextFallback,
+    ocr_page_texts: Option<&[String]>,
+    ocr_results: Option<&ahash::AHashMap<u32, String>>,
+    full_ocr: bool,
+    target: AnnotationFallbackTarget<'_>,
 ) {
-    if let Some(pages) = page_contents {
+    let mut native_pages = fallback.native_pages.clone();
+    let single_string_ocr = native_pages.len() > 1 && ocr_page_texts.is_some_and(|pages| pages.len() == 1);
+    if full_ocr && single_string_ocr {
+        let authoritative_text = ocr_page_texts
+            .and_then(|pages| pages.first())
+            .cloned()
+            .unwrap_or_else(|| target.text.clone());
+        native_pages.fill(String::new());
+        if let Some(first_page) = native_pages.first_mut() {
+            *first_page = authoritative_text;
+        }
+    } else if full_ocr {
+        if let Some(ocr_pages) = ocr_page_texts.filter(|pages| pages.len() == native_pages.len()) {
+            native_pages.clone_from_slice(ocr_pages);
+        } else {
+            let authoritative_text = target.text.clone();
+            native_pages.fill(String::new());
+            if let Some(first_page) = native_pages.first_mut() {
+                *first_page = authoritative_text;
+            }
+        }
+    } else if let Some(ocr_results) = ocr_results {
+        for (page_number, content) in ocr_results {
+            if let Some(page) = page_number
+                .checked_sub(1)
+                .and_then(|page| native_pages.get_mut(page as usize))
+            {
+                page.clone_from(content);
+            }
+        }
+    }
+    for (page, annotations) in native_pages.iter_mut().zip(&fallback.annotation_pages) {
+        for annotation in annotations {
+            if page_has_exact_text_block(page, annotation) {
+                continue;
+            }
+            if !page.is_empty() {
+                page.push('\n');
+            }
+            page.push_str(annotation);
+        }
+    }
+
+    if let Some(pages) = target.page_contents.as_mut() {
         for page in pages.iter_mut() {
-            let recovered = recovered_pages.get(page.page_number.saturating_sub(1) as usize);
-            if let Some(recovered) = recovered.filter(|text| !text.is_empty()) {
-                page.content.clone_from(recovered);
-                page.is_blank = Some(false);
+            if let Some(content) = native_pages.get(page.page_number.saturating_sub(1) as usize) {
+                page.content.clone_from(content);
+                page.is_blank = Some(crate::extraction::blank_detection::is_page_text_blank(content));
             }
         }
     }
 
-    let (rebuilt_text, rebuilt_boundaries) = join_pages_with_boundaries(&recovered_pages, page_config);
-    *native_text = rebuilt_text;
-    if boundaries.is_some() || page_contents.is_some() || pdf_metadata.page_structure.is_some() {
-        *boundaries = Some(rebuilt_boundaries.clone());
+    let (rebuilt_text, rebuilt_boundaries) = join_pages_with_boundaries(&native_pages, target.page_config);
+    *target.text = rebuilt_text;
+    if target.boundaries.is_some() || target.page_contents.is_some() || target.pdf_metadata.page_structure.is_some() {
+        *target.boundaries = Some(rebuilt_boundaries.clone());
     }
-    if let Some(page_structure) = pdf_metadata.page_structure.as_mut() {
+    if let Some(page_structure) = target.pdf_metadata.page_structure.as_mut() {
         page_structure.boundaries = Some(rebuilt_boundaries);
         if let Some(pages) = page_structure.pages.as_mut() {
             for page in pages {
-                page.is_blank = recovered_pages
+                page.is_blank = native_pages
                     .get(page.number.saturating_sub(1) as usize)
                     .map(|content| crate::extraction::blank_detection::is_page_text_blank(content));
             }
+        }
+    }
+}
+
+fn page_has_exact_text_block(page: &str, annotation: &str) -> bool {
+    let annotation_lines: Vec<_> = annotation.trim().lines().map(str::trim).collect();
+    if annotation_lines.is_empty() {
+        return false;
+    }
+
+    let page_lines: Vec<_> = page.lines().map(str::trim).collect();
+    page_lines
+        .windows(annotation_lines.len())
+        .any(|lines| lines == annotation_lines)
+}
+
+#[cfg(feature = "pdf")]
+pub(crate) fn append_annotation_fallback_elements(
+    fallback: &AnnotationTextFallback,
+    document: &mut crate::types::internal::InternalDocument,
+) {
+    for (page_index, annotations) in fallback.annotation_pages.iter().enumerate() {
+        for annotation in annotations {
+            if document.elements.iter().any(|element| {
+                element.page == Some(page_index as u32 + 1) && page_has_exact_text_block(&element.text, annotation)
+            }) {
+                continue;
+            }
+            document.push_element(
+                crate::types::internal::InternalElement::text(
+                    crate::types::internal::ElementKind::Paragraph,
+                    annotation,
+                    0,
+                )
+                .with_page(page_index as u32 + 1),
+            );
         }
     }
 }
@@ -252,10 +371,26 @@ pub(crate) fn extract_all_from_native_document(
 ) -> Result<PdfExtractionPhaseResult> {
     let _span = tracing::debug_span!("extract_xberg_native_pdf").entered();
     let margins = crate::pdf::native::text::PageMarginFractions::from_extraction_config(Some(config));
+    let annotation_fallback_requested = !config
+        .pdf_options
+        .as_ref()
+        .is_some_and(|options| options.extract_annotations);
+    let force_annotation_page_tracking = annotation_fallback_requested && config.pages.is_none();
+    let mut tracked_config;
+    let text_config = if force_annotation_page_tracking {
+        tracked_config = config.clone();
+        tracked_config.pages = Some(crate::core::config::PageConfig::default());
+        &tracked_config
+    } else {
+        config
+    };
+    let page_structure_was_implicitly_tracked = force_annotation_page_tracking
+        && config.ocr.is_none()
+        && config.force_ocr_pages.as_ref().is_none_or(Vec::is_empty);
 
     #[cfg_attr(not(feature = "layout-detection"), allow(unused_mut))]
     let (mut native_text, mut boundaries, mut page_contents, mut pdf_metadata) =
-        crate::pdf::native::text::extract_text_and_metadata(&mut doc, Some(config)).map_err(|e| {
+        crate::pdf::native::text::extract_text_and_metadata(&mut doc, Some(text_config)).map_err(|e| {
             crate::error::XbergError::Parsing {
                 message: format!("xberg_native_pdf text extraction failed: {e}"),
                 source: None,
@@ -378,19 +513,20 @@ pub(crate) fn extract_all_from_native_document(
     };
     extraction_warnings.extend(table_warnings);
 
-    let (annotations, annotation_warnings) = extract_annotations_with_empty_body_fallback(
+    let (annotations, annotation_text_fallback, annotation_warnings) = extract_annotations_with_empty_body_fallback(
         &mut doc,
         config
             .pdf_options
             .as_ref()
             .is_some_and(|options| options.extract_annotations),
-        &mut native_text,
-        &mut page_contents,
-        &mut boundaries,
-        &mut pdf_metadata,
-        config.pages.as_ref(),
+        &native_text,
+        page_contents.as_deref(),
+        boundaries.as_deref(),
     );
     extraction_warnings.extend(annotation_warnings);
+    if page_structure_was_implicitly_tracked {
+        pdf_metadata.page_structure = None;
+    }
 
     let images_extraction_enabled =
         config.needs_image_data() || config.pdf_options.as_ref().map(|p| p.extract_images).unwrap_or(false);
@@ -577,6 +713,7 @@ pub(crate) fn extract_all_from_native_document(
         boundaries,
         pre_rendered_doc,
         has_font_encoding_issues,
+        annotation_text_fallback,
         annotations,
         images,
         form_fields,
@@ -721,10 +858,22 @@ fn join_pages_with_boundaries(
 #[cfg(test)]
 mod tests {
     use super::{
-        hierarchy_cluster_count, needs_structured_extraction, retain_segments_inside_page_margins,
-        table_stage_failure_warning,
+        hierarchy_cluster_count, needs_structured_extraction, page_has_exact_text_block,
+        retain_segments_inside_page_margins, table_stage_failure_warning,
     };
     use crate::core::config::OutputFormat;
+
+    #[test]
+    fn should_match_multiline_annotation_as_contiguous_lines_inside_page_text() {
+        assert!(page_has_exact_text_block(
+            "HEADER\nLINE 1\nLINE 2\nFOOTER",
+            "LINE 1\nLINE 2"
+        ));
+        assert!(!page_has_exact_text_block(
+            "HEADER\nLINE 1\nUNRELATED\nLINE 2\nFOOTER",
+            "LINE 1\nLINE 2"
+        ));
+    }
 
     #[test]
     fn should_use_public_hierarchy_default_for_implicit_structure() {

@@ -8664,7 +8664,23 @@ impl PdfDocument {
     /// AP streams are content streams with their own /Resources. This creates
     /// a temporary TextExtractor, loads fonts from the AP stream resources,
     /// and extracts text spans from the decoded stream data.
+    pub fn extract_annotation_appearance_text(
+        &self,
+        annotation: &crate::annotations::Annotation,
+        excluded_layers: &std::collections::HashSet<String>,
+    ) -> Option<String> {
+        self.extract_text_from_ap_stream_filtered(annotation.raw_dict.as_ref()?, excluded_layers)
+    }
+
     fn extract_text_from_ap_stream(&self, annot_dict: &std::collections::HashMap<String, Object>) -> Option<String> {
+        self.extract_text_from_ap_stream_filtered(annot_dict, &std::collections::HashSet::new())
+    }
+
+    fn extract_text_from_ap_stream_filtered(
+        &self,
+        annot_dict: &std::collections::HashMap<String, Object>,
+        excluded_layers: &std::collections::HashSet<String>,
+    ) -> Option<String> {
         use crate::extractors::TextExtractor;
 
         let ap_obj = annot_dict.get("AP")?;
@@ -8693,6 +8709,9 @@ impl PdfDocument {
         }
 
         let mut extractor = TextExtractor::new();
+        if !excluded_layers.is_empty() {
+            extractor.set_excluded_layers(excluded_layers.clone());
+        }
 
         // Load fonts from the AP/N stream's own /Resources. No resources on
         // the AP stream — try the annotation's /DR or parent page resources

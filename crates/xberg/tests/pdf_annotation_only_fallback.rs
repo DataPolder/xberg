@@ -3,8 +3,33 @@
 use xberg::core::config::{ExtractInput, OcrConfig, PdfConfig};
 use xberg::{ExtractionConfig, ResultFormat, extract};
 
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+use async_trait::async_trait;
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+use std::borrow::Cow;
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+use std::{
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+use xberg::plugins::{OcrBackend, OcrBackendType, Plugin, register_ocr_backend, unregister_ocr_backend};
+
 const EXPECTED_TEXT: &str = "VISIBLE ANNOTATION TEXT";
 const SECOND_PAGE_TEXT: &str = "PAGE TWO ANNOTATION";
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const TOTAL_TEXT: &str = "TOTAL";
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const LONG_ANNOTATION_TEXT: &str = concat!(
+    "This annotation contains enough ordinary words to look substantive to the native text quality gate ",
+    "even though the PDF page itself is only a scanned image and still requires optical character recognition ",
+    "to recover its underlying document content."
+);
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const OCR_TEXT: &str = "OCR RECOVERED SCANNED PAGE";
 const BODY_TEXT: &str = "BODY TEXT";
 const PDF_MIME: &str = "application/pdf";
 const FALLBACK_WARNING_SOURCE: &str = "pdf_annotations";
@@ -15,6 +40,10 @@ const HIDDEN_ANNOTATION_FLAG: u32 = 2;
 const NO_VIEW_ANNOTATION_FLAG: u32 = 32;
 
 struct AnnotationOptions<'a> {
+    content: &'a str,
+    include_appearance: bool,
+    appearance_content: Option<&'a str>,
+    appearance_hidden_optional_content: bool,
     subtype: &'a str,
     flags: u32,
     opacity: Option<f64>,
@@ -25,6 +54,10 @@ struct AnnotationOptions<'a> {
 impl Default for AnnotationOptions<'_> {
     fn default() -> Self {
         Self {
+            content: EXPECTED_TEXT,
+            include_appearance: true,
+            appearance_content: None,
+            appearance_hidden_optional_content: false,
             subtype: "FreeText",
             flags: 0,
             opacity: None,
@@ -35,7 +68,13 @@ impl Default for AnnotationOptions<'_> {
 }
 
 fn rotated_pdf(body_text: Option<&str>, annotation: AnnotationOptions<'_>) -> Vec<u8> {
-    let appearance = format!("BT\n/Helv 14 Tf\n10 20 Td\n({EXPECTED_TEXT}) Tj\nET\n");
+    let appearance_text = annotation.appearance_content.unwrap_or(annotation.content);
+    let appearance_body = format!("BT\n/Helv 14 Tf\n10 20 Td\n({appearance_text}) Tj\nET\n");
+    let appearance = if annotation.appearance_hidden_optional_content {
+        format!("/OC /Hidden BDC\n{appearance_body}EMC\n")
+    } else {
+        appearance_body
+    };
     let page_content = body_text
         .map(|text| format!("BT\n/Helv 14 Tf\n72 700 Td\n({text}) Tj\nET\n"))
         .unwrap_or_default();
@@ -48,11 +87,17 @@ fn rotated_pdf(body_text: Option<&str>, annotation: AnnotationOptions<'_>) -> Ve
     } else {
         ""
     };
-    let catalog_optional_content = if annotation.hidden_optional_content {
-        " /OCProperties << /OCGs [8 0 R] /D << /OFF [8 0 R] >> >>"
+    let appearance_entry = if annotation.include_appearance {
+        " /AP << /N 6 0 R >>"
     } else {
         ""
     };
+    let catalog_optional_content =
+        if annotation.hidden_optional_content || annotation.appearance_hidden_optional_content {
+            " /OCProperties << /OCGs [8 0 R] /D << /OFF [8 0 R] >> >>"
+        } else {
+            ""
+        };
     let [x0, y0, x1, y1] = annotation.rect;
     let objects = [
         format!("<< /Type /Catalog /Pages 2 0 R{catalog_optional_content} >>"),
@@ -63,13 +108,14 @@ fn rotated_pdf(body_text: Option<&str>, annotation: AnnotationOptions<'_>) -> Ve
         format!("<< /Length {} >>\nstream\n{page_content}endstream", page_content.len()),
         format!(
             "<< /Type /Annot /Subtype /{} /Rect [{x0} {y0} {x1} {y1}] \
-             /Contents ({EXPECTED_TEXT}) /DA (0 0 0 rg /Helv 14 Tf) /Rotate 90 \
-             /F {}{opacity}{optional_content} /AP << /N 6 0 R >> >>",
-            annotation.subtype, annotation.flags
+             /Contents ({}) /DA (0 0 0 rg /Helv 14 Tf) /Rotate 90 \
+             /F {}{opacity}{optional_content}{appearance_entry} >>",
+            annotation.subtype, annotation.content, annotation.flags
         ),
         format!(
             "<< /Type /XObject /Subtype /Form /BBox [0 0 220 40] \
-             /Resources << /Font << /Helv 7 0 R >> >> /Length {} >>\nstream\n{appearance}endstream",
+             /Resources << /Font << /Helv 7 0 R >> \
+             /Properties << /Hidden 8 0 R >> >> /Length {} >>\nstream\n{appearance}endstream",
             appearance.len()
         ),
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
@@ -83,8 +129,11 @@ fn rotated_pdf(body_text: Option<&str>, annotation: AnnotationOptions<'_>) -> Ve
     assemble_pdf(&objects)
 }
 
-fn two_page_pdf_with_second_page_annotation(rect: [f64; 4]) -> Vec<u8> {
+fn two_page_pdf_with_second_page_annotation(rect: [f64; 4], page_one_text: Option<&str>) -> Vec<u8> {
     let appearance = format!("BT\n/Helv 14 Tf\n10 20 Td\n({SECOND_PAGE_TEXT}) Tj\nET\n");
+    let first_page_content = page_one_text
+        .map(|text| format!("BT\n/Helv 14 Tf\n72 700 Td\n({text}) Tj\nET\n"))
+        .unwrap_or_default();
     let [x0, y0, x1, y1] = rect;
     let objects = [
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
@@ -95,7 +144,10 @@ fn two_page_pdf_with_second_page_annotation(rect: [f64; 4]) -> Vec<u8> {
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /CropBox [0 0 300 300] \
          /Resources << /Font << /Helv 9 0 R >> >> /Contents 6 0 R /Annots [7 0 R] >>"
             .to_string(),
-        "<< /Length 0 >>\nstream\nendstream".to_string(),
+        format!(
+            "<< /Length {} >>\nstream\n{first_page_content}endstream",
+            first_page_content.len()
+        ),
         "<< /Length 0 >>\nstream\nendstream".to_string(),
         format!(
             "<< /Type /Annot /Subtype /FreeText /Rect [{x0} {y0} {x1} {y1}] \
@@ -109,6 +161,33 @@ fn two_page_pdf_with_second_page_annotation(rect: [f64; 4]) -> Vec<u8> {
         "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
     ];
 
+    assemble_pdf(&objects)
+}
+
+fn two_page_pdf_with_identical_annotations() -> Vec<u8> {
+    let appearance = format!("BT\n/Helv 14 Tf\n10 20 Td\n({EXPECTED_TEXT}) Tj\nET\n");
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Annots [7 0 R] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Annots [8 0 R] >>".to_string(),
+        "<< /Length 0 >>\nstream\nendstream".to_string(),
+        "<< /Length 0 >>\nstream\nendstream".to_string(),
+        format!(
+            "<< /Type /Annot /Subtype /FreeText /Rect [100 100 320 140] \
+             /Contents ({EXPECTED_TEXT}) /AP << /N 9 0 R >> >>"
+        ),
+        format!(
+            "<< /Type /Annot /Subtype /FreeText /Rect [100 100 320 140] \
+             /Contents ({EXPECTED_TEXT}) /AP << /N 9 0 R >> >>"
+        ),
+        format!(
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 220 40] \
+             /Resources << /Font << /Helv 10 0 R >> >> /Length {} >>\nstream\n{appearance}endstream",
+            appearance.len()
+        ),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+    ];
     assemble_pdf(&objects)
 }
 
@@ -264,11 +343,62 @@ async fn should_not_recover_free_text_annotation_on_hidden_optional_content_laye
 }
 
 #[tokio::test]
+async fn should_not_recover_contents_when_normal_appearance_is_blank() {
+    assert_annotation_is_excluded(AnnotationOptions {
+        appearance_content: Some(""),
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn should_not_recover_contents_when_normal_appearance_text_differs() {
+    assert_annotation_is_excluded(AnnotationOptions {
+        appearance_content: Some("DIFFERENT APPEARANCE"),
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn should_not_recover_contents_hidden_inside_normal_appearance() {
+    assert_annotation_is_excluded(AnnotationOptions {
+        appearance_hidden_optional_content: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn should_recover_visible_contents_when_normal_appearance_is_absent() {
+    let config = extraction_config();
+    let result = extract(
+        ExtractInput::from_bytes(
+            rotated_pdf(
+                None,
+                AnnotationOptions {
+                    include_appearance: false,
+                    ..Default::default()
+                },
+            ),
+            PDF_MIME,
+            None,
+        ),
+        &config,
+    )
+    .await
+    .expect("FreeText without an appearance stream must succeed");
+
+    assert_eq!(result.results[0].content, EXPECTED_TEXT);
+    assert!(result.results[0].annotations.is_none());
+}
+
+#[tokio::test]
 async fn should_recover_annotation_into_its_exact_page_and_element() {
     let config = extraction_config();
     let result = extract(
         ExtractInput::from_bytes(
-            two_page_pdf_with_second_page_annotation([100.0, 100.0, 250.0, 140.0]),
+            two_page_pdf_with_second_page_annotation([100.0, 100.0, 250.0, 140.0], None),
             PDF_MIME,
             None,
         ),
@@ -328,7 +458,7 @@ async fn should_not_recover_annotation_outside_crop_box() {
     let config = extraction_config();
     let result = extract(
         ExtractInput::from_bytes(
-            two_page_pdf_with_second_page_annotation([400.0, 100.0, 500.0, 140.0]),
+            two_page_pdf_with_second_page_annotation([400.0, 100.0, 500.0, 140.0], None),
             PDF_MIME,
             None,
         ),
@@ -345,6 +475,461 @@ async fn should_not_recover_annotation_outside_crop_box() {
             .processing_warnings
             .iter()
             .all(|warning| warning.source != FALLBACK_WARNING_SOURCE)
+    );
+}
+
+#[tokio::test]
+async fn should_recover_reversed_free_text_rectangle() {
+    let config = extraction_config();
+    let result = extract(
+        ExtractInput::from_bytes(
+            rotated_pdf(
+                None,
+                AnnotationOptions {
+                    rect: [320.0, 140.0, 100.0, 100.0],
+                    ..Default::default()
+                },
+            ),
+            PDF_MIME,
+            None,
+        ),
+        &config,
+    )
+    .await
+    .expect("reversed annotation rectangle must be normalized");
+
+    assert_eq!(result.results[0].content, EXPECTED_TEXT);
+}
+
+#[tokio::test]
+async fn should_recover_blank_page_annotation_in_mixed_native_document() {
+    let mut config = extraction_config();
+    config.result_format = ResultFormat::Unified;
+    config.ocr = None;
+    let result = extract(
+        ExtractInput::from_bytes(
+            two_page_pdf_with_second_page_annotation([100.0, 100.0, 250.0, 140.0], Some(BODY_TEXT)),
+            PDF_MIME,
+            None,
+        ),
+        &config,
+    )
+    .await
+    .expect("mixed native and annotation-only pages must succeed");
+    let document = &result.results[0];
+
+    assert!(document.content.contains(BODY_TEXT));
+    assert!(document.content.contains(SECOND_PAGE_TEXT));
+    assert!(document.elements.is_none());
+}
+
+#[tokio::test]
+async fn should_preserve_explicit_annotation_extraction_on_blank_body() {
+    let mut config = extraction_config();
+    config
+        .pdf_options
+        .as_mut()
+        .expect("PDF options must exist")
+        .extract_annotations = true;
+    let result = extract(
+        ExtractInput::from_bytes(rotated_pdf(None, AnnotationOptions::default()), PDF_MIME, None),
+        &config,
+    )
+    .await
+    .expect("explicit annotation extraction must succeed");
+    let document = &result.results[0];
+    let annotations = document
+        .annotations
+        .as_deref()
+        .expect("annotation output must be present");
+
+    assert_eq!(annotations.len(), 1);
+    assert_eq!(annotations[0].content.as_deref(), Some(EXPECTED_TEXT));
+    assert!(
+        document.processing_warnings.iter().all(|warning| {
+            warning.source != FALLBACK_WARNING_SOURCE || warning.message != FALLBACK_WARNING_MESSAGE
+        })
+    );
+}
+
+#[tokio::test]
+async fn should_emit_identical_annotation_text_once_on_each_page() {
+    let config = extraction_config();
+    let result = extract(
+        ExtractInput::from_bytes(two_page_pdf_with_identical_annotations(), PDF_MIME, None),
+        &config,
+    )
+    .await
+    .expect("identical annotations on separate pages must succeed");
+    let elements = result.results[0].elements.as_deref().expect("elements must be present");
+    let matching: Vec<_> = elements
+        .iter()
+        .filter(|element| element.text == EXPECTED_TEXT)
+        .collect();
+
+    assert_eq!(matching.len(), 2);
+    assert_eq!(matching[0].metadata.page_number, Some(1));
+    assert_eq!(matching[1].metadata.page_number, Some(2));
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+struct AnnotationScanOcrBackend {
+    text: &'static str,
+    document_level: bool,
+    document_called: Option<Arc<AtomicBool>>,
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+impl Plugin for AnnotationScanOcrBackend {
+    fn name(&self) -> &str {
+        "tesseract"
+    }
+
+    fn version(&self) -> String {
+        "1.0.0".to_string()
+    }
+
+    fn initialize(&self) -> xberg::Result<()> {
+        Ok(())
+    }
+
+    fn shutdown(&self) -> xberg::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[async_trait]
+impl OcrBackend for AnnotationScanOcrBackend {
+    async fn process_image(&self, _image_bytes: &[u8], _config: &OcrConfig) -> xberg::Result<xberg::ExtractedDocument> {
+        let mut document = xberg::ExtractedDocument::default();
+        document.content = self.text.to_string();
+        document.mime_type = Cow::Borrowed("text/plain");
+        Ok(document)
+    }
+
+    fn supports_language(&self, _language: &str) -> bool {
+        true
+    }
+
+    fn backend_type(&self) -> OcrBackendType {
+        OcrBackendType::Custom
+    }
+
+    fn supports_document_processing(&self) -> bool {
+        self.document_level
+    }
+
+    async fn process_document(&self, _path: &Path, _config: &OcrConfig) -> xberg::Result<xberg::ExtractedDocument> {
+        if let Some(document_called) = &self.document_called {
+            document_called.store(true, Ordering::SeqCst);
+        }
+        let mut document = xberg::ExtractedDocument::default();
+        document.content = self.text.to_string();
+        document.mime_type = Cow::Borrowed("text/plain");
+        Ok(document)
+    }
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[tokio::test]
+#[serial_test::serial]
+async fn should_route_scanned_page_to_ocr_despite_long_free_text_annotation() {
+    let _ = unregister_ocr_backend("tesseract");
+    register_ocr_backend(Arc::new(AnnotationScanOcrBackend {
+        text: OCR_TEXT,
+        document_level: false,
+        document_called: None,
+    }))
+    .expect("test OCR backend must register");
+    let mut config = extraction_config();
+    config.ocr = Some(OcrConfig {
+        enabled: true,
+        backend: "tesseract".to_string(),
+        ..Default::default()
+    });
+    let result = extract(
+        ExtractInput::from_bytes(
+            rotated_pdf(
+                None,
+                AnnotationOptions {
+                    content: LONG_ANNOTATION_TEXT,
+                    ..Default::default()
+                },
+            ),
+            PDF_MIME,
+            None,
+        ),
+        &config,
+    )
+    .await;
+    unregister_ocr_backend("tesseract").expect("test OCR backend must unregister");
+    let document = &result.expect("OCR-enabled annotation scan must succeed").results[0];
+
+    assert!(
+        document.content.contains(OCR_TEXT),
+        "OCR output proves the OCR route ran"
+    );
+    assert!(document.content.contains(LONG_ANNOTATION_TEXT));
+    assert_eq!(document.content.matches(LONG_ANNOTATION_TEXT).count(), 1);
+    assert!(document.annotations.is_none());
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[tokio::test]
+#[serial_test::serial]
+async fn should_retain_each_page_from_document_capable_backend_on_byte_input() {
+    let _ = unregister_ocr_backend("tesseract");
+    register_ocr_backend(Arc::new(AnnotationScanOcrBackend {
+        text: OCR_TEXT,
+        document_level: true,
+        document_called: None,
+    }))
+    .expect("document OCR backend must register");
+    let mut config = extraction_config();
+    config.force_ocr = true;
+    config.ocr = Some(OcrConfig {
+        enabled: true,
+        backend: "tesseract".to_string(),
+        ..Default::default()
+    });
+    let result = extract(
+        ExtractInput::from_bytes(
+            two_page_pdf_with_second_page_annotation([100.0, 100.0, 250.0, 140.0], Some(BODY_TEXT)),
+            PDF_MIME,
+            None,
+        ),
+        &config,
+    )
+    .await;
+    unregister_ocr_backend("tesseract").expect("document OCR backend must unregister");
+    let document = &result.expect("per-page OCR for byte input must succeed").results[0];
+    let pages = document.pages.as_deref().expect("pages must remain coherent");
+    let boundaries = document
+        .metadata
+        .pages
+        .as_ref()
+        .and_then(|pages| pages.boundaries.as_deref())
+        .expect("boundaries must remain coherent");
+
+    assert_eq!(document.content.matches(OCR_TEXT).count(), 2);
+    assert!(!document.content.contains(BODY_TEXT));
+    assert_eq!(document.content.matches(SECOND_PAGE_TEXT).count(), 1);
+    assert_eq!(pages[0].content, OCR_TEXT);
+    assert!(pages[1].content.contains(OCR_TEXT));
+    assert!(pages[1].content.contains(SECOND_PAGE_TEXT));
+    let joined_page_content = pages
+        .iter()
+        .map(|page| page.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    assert_eq!((boundaries[0].byte_start, boundaries[0].byte_end), (0, OCR_TEXT.len()));
+    assert_eq!(boundaries[1].byte_start, OCR_TEXT.len() + 2);
+    assert_eq!(
+        &joined_page_content[boundaries[1].byte_start..boundaries[1].byte_end],
+        pages[1].content
+    );
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[tokio::test]
+#[serial_test::serial]
+async fn should_replace_stale_native_pages_after_actual_document_ocr() {
+    let _ = unregister_ocr_backend("tesseract");
+    let document_called = Arc::new(AtomicBool::new(false));
+    register_ocr_backend(Arc::new(AnnotationScanOcrBackend {
+        text: OCR_TEXT,
+        document_level: true,
+        document_called: Some(Arc::clone(&document_called)),
+    }))
+    .expect("document OCR backend must register");
+    let directory = tempfile::tempdir().expect("temporary directory must be created");
+    let path = directory.path().join("annotation-document.pdf");
+    std::fs::write(
+        &path,
+        two_page_pdf_with_second_page_annotation([100.0, 100.0, 250.0, 140.0], Some(BODY_TEXT)),
+    )
+    .expect("temporary PDF must be written");
+    let mut config = extraction_config();
+    config.force_ocr = true;
+    config.ocr = Some(OcrConfig {
+        enabled: true,
+        backend: "tesseract".to_string(),
+        ..Default::default()
+    });
+    config.content_filter = Some(xberg::core::config::ContentFilterConfig {
+        include_headers: true,
+        include_footers: true,
+        ..Default::default()
+    });
+    let result = extract(ExtractInput::from_uri(path.to_string_lossy()), &config).await;
+    unregister_ocr_backend("tesseract").expect("document OCR backend must unregister");
+    let document = &result.expect("whole-document OCR must succeed").results[0];
+    let pages = document.pages.as_deref().expect("pages must remain coherent");
+
+    assert!(document_called.load(Ordering::SeqCst), "process_document must run");
+    assert!(document.content.contains(OCR_TEXT));
+    assert!(!document.content.contains(BODY_TEXT));
+    assert_eq!(document.content.matches(SECOND_PAGE_TEXT).count(), 1);
+    assert_eq!(pages[0].content, OCR_TEXT);
+    assert_eq!(pages[1].content, SECOND_PAGE_TEXT);
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[tokio::test]
+#[serial_test::serial]
+async fn should_not_treat_annotation_as_substring_duplicate_of_ocr_text() {
+    let _ = unregister_ocr_backend("tesseract");
+    register_ocr_backend(Arc::new(AnnotationScanOcrBackend {
+        text: "SUBTOTAL",
+        document_level: false,
+        document_called: None,
+    }))
+    .expect("substring OCR backend must register");
+    let mut config = extraction_config();
+    config.force_ocr = true;
+    config.ocr = Some(OcrConfig {
+        enabled: true,
+        backend: "tesseract".to_string(),
+        ..Default::default()
+    });
+    let result = extract(
+        ExtractInput::from_bytes(
+            rotated_pdf(
+                None,
+                AnnotationOptions {
+                    content: TOTAL_TEXT,
+                    ..Default::default()
+                },
+            ),
+            PDF_MIME,
+            None,
+        ),
+        &config,
+    )
+    .await;
+    unregister_ocr_backend("tesseract").expect("substring OCR backend must unregister");
+    let document = &result.expect("substring OCR case must succeed").results[0];
+
+    assert!(document.content.contains("SUBTOTAL"));
+    assert_eq!(
+        document
+            .content
+            .lines()
+            .filter(|line| line.trim() == TOTAL_TEXT)
+            .count(),
+        1
+    );
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[tokio::test]
+#[serial_test::serial]
+async fn should_not_duplicate_exact_annotation_already_present_in_ocr_text() {
+    let _ = unregister_ocr_backend("tesseract");
+    register_ocr_backend(Arc::new(AnnotationScanOcrBackend {
+        text: TOTAL_TEXT,
+        document_level: false,
+        document_called: None,
+    }))
+    .expect("exact-match OCR backend must register");
+    let mut config = extraction_config();
+    config.force_ocr = true;
+    config.ocr = Some(OcrConfig {
+        enabled: true,
+        backend: "tesseract".to_string(),
+        ..Default::default()
+    });
+    let result = extract(
+        ExtractInput::from_bytes(
+            rotated_pdf(
+                None,
+                AnnotationOptions {
+                    content: TOTAL_TEXT,
+                    ..Default::default()
+                },
+            ),
+            PDF_MIME,
+            None,
+        ),
+        &config,
+    )
+    .await;
+    unregister_ocr_backend("tesseract").expect("exact-match OCR backend must unregister");
+    let document = &result.expect("exact-match OCR case must succeed").results[0];
+
+    assert_eq!(
+        document
+            .content
+            .lines()
+            .filter(|line| line.trim() == TOTAL_TEXT)
+            .count(),
+        1
+    );
+    assert_eq!(
+        document
+            .elements
+            .as_deref()
+            .into_iter()
+            .flatten()
+            .filter(|element| element.metadata.page_number == Some(1) && element.text.trim() == TOTAL_TEXT)
+            .count(),
+        1
+    );
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[tokio::test]
+#[serial_test::serial]
+async fn should_not_duplicate_annotation_line_inside_structured_ocr_element() {
+    let _ = unregister_ocr_backend("tesseract");
+    register_ocr_backend(Arc::new(AnnotationScanOcrBackend {
+        text: "HEADER\nTOTAL",
+        document_level: false,
+        document_called: None,
+    }))
+    .expect("embedded-line OCR backend must register");
+    let mut config = extraction_config();
+    config.force_ocr = true;
+    config.ocr = Some(OcrConfig {
+        enabled: true,
+        backend: "tesseract".to_string(),
+        ..Default::default()
+    });
+    let result = extract(
+        ExtractInput::from_bytes(
+            rotated_pdf(
+                None,
+                AnnotationOptions {
+                    content: TOTAL_TEXT,
+                    ..Default::default()
+                },
+            ),
+            PDF_MIME,
+            None,
+        ),
+        &config,
+    )
+    .await;
+    unregister_ocr_backend("tesseract").expect("embedded-line OCR backend must unregister");
+    let document = &result.expect("embedded-line OCR case must succeed").results[0];
+
+    assert_eq!(
+        document.content.lines().filter(|line| line.trim() == TOTAL_TEXT).count(),
+        1
+    );
+    assert_eq!(
+        document
+            .elements
+            .as_deref()
+            .into_iter()
+            .flatten()
+            .filter(|element| {
+                element.metadata.page_number == Some(1)
+                    && element.text.lines().any(|line| line.trim() == TOTAL_TEXT)
+            })
+            .count(),
+        1
     );
 }
 

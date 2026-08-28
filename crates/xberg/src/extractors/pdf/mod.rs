@@ -1646,10 +1646,11 @@ impl PdfExtractor {
             mut pdf_metadata,
             native_text,
             mut tables,
-            page_contents,
-            boundaries,
+            mut page_contents,
+            mut boundaries,
             pre_rendered_doc,
             _has_font_encoding_issues,
+            annotation_text_fallback,
             pdf_annotations,
             mut extracted_images,
             pdf_form_fields,
@@ -1759,7 +1760,7 @@ impl PdfExtractor {
         }
 
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-        let (text, extraction_method) = if config.effective_disable_ocr() {
+        let (mut text, extraction_method) = if config.effective_disable_ocr() {
             (native_text, ExtractionMethod::Native)
         } else if config.force_ocr {
             let (
@@ -2094,7 +2095,7 @@ impl PdfExtractor {
         };
 
         #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
-        let (text, extraction_method) = (native_text, ExtractionMethod::Native);
+        let (mut text, extraction_method) = (native_text, ExtractionMethod::Native);
 
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
         // Full-document OCR is authoritative for tables when it produced
@@ -2109,8 +2110,6 @@ impl PdfExtractor {
         ) = (extracted_images, None);
 
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-        let mut page_contents = page_contents;
-
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
         {
             if let Some(pts) = ocr_page_texts.as_ref() {
@@ -2183,6 +2182,33 @@ impl PdfExtractor {
         #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
         let image_preprocessing = None;
 
+        #[cfg_attr(not(any(feature = "ocr", feature = "ocr-pipeline")), allow(unused_variables))]
+        let annotation_fallback_applied = annotation_text_fallback.is_some();
+        if let Some(annotation_text_fallback) = annotation_text_fallback.as_ref() {
+            extraction::apply_annotation_text_fallback(
+                annotation_text_fallback,
+                #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+                ocr_page_texts.as_deref(),
+                #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
+                None,
+                #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+                ocr_results_map.as_ref(),
+                #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
+                None,
+                #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+                (extraction_method == ExtractionMethod::Ocr),
+                #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
+                false,
+                extraction::AnnotationFallbackTarget {
+                    text: &mut text,
+                    page_contents: &mut page_contents,
+                    boundaries: &mut boundaries,
+                    pdf_metadata: &mut pdf_metadata,
+                    page_config: config.pages.as_ref(),
+                },
+            );
+        }
+
         let mut final_pages =
             assign_tables_and_images_to_pages(page_contents, &tables, images.as_deref().unwrap_or(&[]));
 
@@ -2194,13 +2220,17 @@ impl PdfExtractor {
         // already shifted every later offset, so re-map before handing them to the document
         // selector or page tagging would attribute content to the wrong page. ~keep
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-        let selector_boundaries = boundaries_for_ocr_output(
-            extraction_method,
-            &text,
-            boundaries.as_deref(),
-            ocr_results_map.as_ref(),
-            ocr_page_texts.as_deref(),
-        );
+        let selector_boundaries = if annotation_fallback_applied {
+            boundaries.clone()
+        } else {
+            boundaries_for_ocr_output(
+                extraction_method,
+                &text,
+                boundaries.as_deref(),
+                ocr_results_map.as_ref(),
+                ocr_page_texts.as_deref(),
+            )
+        };
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
         if let Some(ref mut page_structure) = pdf_metadata.page_structure {
             page_structure.boundaries = selector_boundaries.clone();
@@ -2227,6 +2257,9 @@ impl PdfExtractor {
         #[cfg(not(any(feature = "ocr", feature = "ocr-pipeline")))]
         let (mut doc, document_is_structured) =
             select_native_pdf_document(&text, mime_type, pre_rendered_doc, boundaries.as_deref());
+        if let Some(annotation_text_fallback) = annotation_text_fallback.as_ref() {
+            extraction::append_annotation_fallback_elements(annotation_text_fallback, &mut doc);
+        }
         #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
         tracing::debug!(?document_origin, document_is_structured, "selected PDF document origin");
 
