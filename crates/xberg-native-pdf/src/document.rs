@@ -270,6 +270,8 @@ thread_local! {
 
 const FONT_IDENTITY_MAX_REFERENCE_DEPTH: usize = 32;
 const FONT_IDENTITY_MAX_RESOLVED_REFERENCES: usize = 4096;
+const FONT_IDENTITY_MAX_HASHED_BYTES: usize = 32 * 1024 * 1024;
+const FONT_HASH_BYTE_LIMIT_MARKER: u8 = 247;
 const FONT_HASH_REFERENCE_LIMIT_MARKER: u8 = 248;
 const FONT_HASH_RESOLVED_REFERENCE_MARKER: u8 = 249;
 const FONT_HASH_DEPTH_LIMIT_MARKER: u8 = 250;
@@ -436,6 +438,13 @@ pub struct PdfDocument {
     /// indirect semantic objects on every page. `None` means the identity was not
     /// safe for cross-object or cross-document reuse.
     font_id_hash_cache: Mutex<HashMap<ObjectRef, Option<u64>>>,
+    /// Resolved identities that were proven safe for reuse by another font
+    /// root in this document. Bounded by the traversal reference cap. ~keep
+    font_reference_hash_cache: Mutex<BoundedEntryCache<ObjectRef, FontIdentityHash>>,
+    /// Total stream bytes hashed while establishing semantic font identities.
+    font_identity_hashed_bytes: AtomicUsize,
+    /// Fail-closed gate for cross-object and cross-document font identity reuse.
+    font_identity_shared_cache_enabled: AtomicBool,
     /// Cached structure tree (None = not yet checked, Some(None) = untagged, Some(Some) = tagged).
     /// Uses Arc to avoid expensive deep clones on every page extraction.
     /// Mutex provides interior mutability for `&self` read-path methods.
@@ -1148,6 +1157,9 @@ impl PdfDocument {
             font_name_set_cache: Mutex::new(BoundedEntryCache::new(256)),
             font_identity_cache: Mutex::new(BoundedEntryCache::new(512)),
             font_id_hash_cache: Mutex::new(HashMap::new()),
+            font_reference_hash_cache: Mutex::new(BoundedEntryCache::new(FONT_IDENTITY_MAX_RESOLVED_REFERENCES)),
+            font_identity_hashed_bytes: AtomicUsize::new(0),
+            font_identity_shared_cache_enabled: AtomicBool::new(true),
             structure_tree_cache: Mutex::new(None),
             structure_content_cache: Mutex::new(None),
             actualtext_index_cache: Mutex::new(None),
@@ -16966,6 +16978,9 @@ impl PdfDocument {
     /// `font_identity_hash_cheap` of `font_ref`'s object, memoized (an object's
     /// content is fixed within a document).
     fn cached_font_identity_hash(&self, font_ref: ObjectRef) -> Option<u64> {
+        if !self.font_identity_shared_cache_enabled.load(Ordering::Acquire) {
+            return None;
+        }
         if let Some(cached) = self.font_id_hash_cache.lock_or_recover().get(&font_ref) {
             return *cached;
         }
@@ -16999,13 +17014,17 @@ impl PdfDocument {
     fn font_identity_hash_details(&self, font_obj: &Object) -> FontIdentityHash {
         use std::hash::{Hash, Hasher};
         let base = Self::font_identity_hash_cheap(font_obj);
+        // Encrypted stream bytes are document-key-dependent ciphertext, so
+        // neither hashing nor cross-document identity reuse is safe. ~keep
+        if self.is_encrypted() || !self.font_identity_shared_cache_enabled.load(Ordering::Acquire) {
+            return FontIdentityHash {
+                value: base,
+                cacheable: false,
+            };
+        }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         base.hash(&mut hasher);
-        // Encrypted stream bytes are document-key-dependent ciphertext. Hashing
-        // them raw cannot establish semantic equality across documents, while
-        // decoding them solely for a cache key would duplicate expensive font
-        // decompression. Keep encrypted fonts on the object-reference cache. ~keep
-        let mut cacheable = !self.is_encrypted();
+        let mut cacheable = true;
 
         if let Some(font_dict) = font_obj.as_dict() {
             let mut traversal = FontHashTraversal::default();
@@ -17019,8 +17038,36 @@ impl PdfDocument {
 
         FontIdentityHash {
             value: hasher.finish(),
-            cacheable,
+            cacheable: cacheable && self.font_identity_shared_cache_enabled.load(Ordering::Acquire),
         }
+    }
+
+    fn reserve_font_identity_hash_bytes(&self, bytes: usize) -> bool {
+        if !self.font_identity_shared_cache_enabled.load(Ordering::Acquire) {
+            return false;
+        }
+        let reserved = self
+            .font_identity_hashed_bytes
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                current
+                    .checked_add(bytes)
+                    .filter(|next| *next <= FONT_IDENTITY_MAX_HASHED_BYTES)
+            });
+        if reserved.is_err() {
+            self.font_identity_shared_cache_enabled.store(false, Ordering::Release);
+            return false;
+        }
+        self.font_identity_shared_cache_enabled.load(Ordering::Acquire)
+    }
+
+    #[cfg(test)]
+    fn font_identity_hashed_bytes(&self) -> usize {
+        self.font_identity_hashed_bytes.load(Ordering::Acquire)
+    }
+
+    #[cfg(test)]
+    fn font_identity_shared_cache_enabled(&self) -> bool {
+        self.font_identity_shared_cache_enabled.load(Ordering::Acquire)
     }
 
     /// Hash an object by resolved content, not by its document-local object id.
@@ -17057,8 +17104,12 @@ impl PdfDocument {
                 8u8.hash(hasher);
                 let cacheable = self.hash_pdf_dictionary_resolved(dict, hasher, traversal, depth + 1);
                 data.len().hash(hasher);
+                if !cacheable || !self.reserve_font_identity_hash_bytes(data.len()) {
+                    FONT_HASH_BYTE_LIMIT_MARKER.hash(hasher);
+                    return false;
+                }
                 data.as_ref().hash(hasher);
-                cacheable
+                self.font_identity_shared_cache_enabled.load(Ordering::Acquire)
             }
         }
     }
@@ -17076,20 +17127,37 @@ impl PdfDocument {
             identity.value.hash(hasher);
             return identity.cacheable;
         }
+        if traversal.resolving.contains(&reference) {
+            FONT_HASH_REFERENCE_CYCLE_MARKER.hash(hasher);
+            return false;
+        }
         if traversal.resolved_references >= FONT_IDENTITY_MAX_RESOLVED_REFERENCES {
             FONT_HASH_REFERENCE_LIMIT_MARKER.hash(hasher);
             return false;
         }
-        if !traversal.resolving.insert(reference) {
-            FONT_HASH_REFERENCE_CYCLE_MARKER.hash(hasher);
-            return false;
-        }
-
         traversal.resolved_references += 1;
+        if self.font_identity_shared_cache_enabled.load(Ordering::Acquire)
+            && let Some(identity) = self
+                .font_reference_hash_cache
+                .lock_or_recover()
+                .get(&reference)
+                .copied()
+        {
+            identity.value.hash(hasher);
+            traversal.resolved_hashes.insert(reference, identity);
+            return true;
+        }
+        traversal.resolving.insert(reference);
+
         let identity = self.resolve_font_reference_identity(reference, traversal, depth + 1);
         traversal.resolving.remove(&reference);
         identity.value.hash(hasher);
         traversal.resolved_hashes.insert(reference, identity);
+        if identity.cacheable && self.font_identity_shared_cache_enabled.load(Ordering::Acquire) {
+            self.font_reference_hash_cache
+                .lock_or_recover()
+                .insert(reference, identity);
+        }
         identity.cacheable
     }
 
@@ -24969,6 +25037,85 @@ mod tests {
             ("BaseFont".to_string(), Object::Name("Helvetica".to_string())),
             ("Subtype".to_string(), Object::Name("Type1".to_string())),
         ]));
+
+        assert!(!document.font_identity_hash_details(&font).cacheable);
+    }
+
+    #[test]
+    fn shared_font_stream_is_hashed_once_per_document() {
+        let document = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+        let stream_data = bytes::Bytes::from(vec![b'F'; 4096]);
+        document.object_cache.lock_or_recover().insert(
+            ObjectRef::new(100, 0),
+            Object::Stream {
+                dict: std::collections::HashMap::new(),
+                data: stream_data.clone(),
+            },
+        );
+        let font = |base_font: &str| {
+            Object::Dictionary(std::collections::HashMap::from([
+                ("BaseFont".to_string(), Object::Name(base_font.to_string())),
+                ("Subtype".to_string(), Object::Name("Type0".to_string())),
+                ("ToUnicode".to_string(), Object::Reference(ObjectRef::new(100, 0))),
+            ]))
+        };
+
+        assert!(document.font_identity_hash_details(&font("FontA")).cacheable);
+        assert!(document.font_identity_hash_details(&font("FontB")).cacheable);
+        assert_eq!(document.font_identity_hashed_bytes(), stream_data.len());
+    }
+
+    #[test]
+    fn font_hash_byte_budget_disables_shared_identity_caches() {
+        let document = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+        document.object_cache.lock_or_recover().insert(
+            ObjectRef::new(100, 0),
+            Object::Stream {
+                dict: std::collections::HashMap::new(),
+                data: bytes::Bytes::from(vec![b'F'; FONT_IDENTITY_MAX_HASHED_BYTES + 1]),
+            },
+        );
+        let font = Object::Dictionary(std::collections::HashMap::from([
+            ("BaseFont".to_string(), Object::Name("FontA".to_string())),
+            ("Subtype".to_string(), Object::Name("Type0".to_string())),
+            ("ToUnicode".to_string(), Object::Reference(ObjectRef::new(100, 0))),
+        ]));
+
+        assert!(!document.font_identity_hash_details(&font).cacheable);
+        assert!(!document.font_identity_shared_cache_enabled());
+        let cheap_font = Object::Dictionary(std::collections::HashMap::from([(
+            "BaseFont".to_string(),
+            Object::Name("Helvetica".to_string()),
+        )]));
+        assert!(!document.font_identity_hash_details(&cheap_font).cacheable);
+    }
+
+    #[test]
+    fn memoized_font_references_still_obey_per_root_reference_limit() {
+        let document = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+        let mut references = Vec::with_capacity(FONT_IDENTITY_MAX_RESOLVED_REFERENCES + 1);
+        for offset in 0..=FONT_IDENTITY_MAX_RESOLVED_REFERENCES {
+            let object_id = 1000 + u32::try_from(offset).expect("reference cap fits u32");
+            let reference = ObjectRef::new(object_id, 0);
+            document
+                .object_cache
+                .lock_or_recover()
+                .insert(reference, Object::Integer(400));
+            let font = Object::Dictionary(std::collections::HashMap::from([(
+                "Widths".to_string(),
+                Object::Reference(reference),
+            )]));
+            assert!(document.font_identity_hash_details(&font).cacheable);
+            references.push(Object::Reference(reference));
+        }
+        document
+            .object_cache
+            .lock_or_recover()
+            .insert(ObjectRef::new(999, 0), Object::Array(references));
+        let font = Object::Dictionary(std::collections::HashMap::from([(
+            "Widths".to_string(),
+            Object::Reference(ObjectRef::new(999, 0)),
+        )]));
 
         assert!(!document.font_identity_hash_details(&font).cacheable);
     }
