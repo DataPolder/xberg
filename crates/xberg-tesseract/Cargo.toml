@@ -46,8 +46,8 @@ thiserror = { workspace = true }
 [build-dependencies]
 cc = { version = "^1.4.4", optional = true }
 cmake = { version = "0.1.58", optional = true }
-pkg-config = { version = "0.3.34", optional = true }
 libc = { workspace = true }
+pkg-config = { version = "0.3.34", optional = true }
 sha2 = { workspace = true }
 tempfile = { workspace = true }
 vcpkg = { version = "0.2.15", optional = true }
