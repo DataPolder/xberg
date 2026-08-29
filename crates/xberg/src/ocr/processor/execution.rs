@@ -420,6 +420,8 @@ const CLEAN_PAGE_MIN_FOREGROUND_CONTRAST: f64 = 0.20;
 const CLEAN_PAGE_DARK_PIXEL_FRACTION_THRESHOLD: f64 = 0.005;
 /// Minimum population required for the lower foreground mode on small rasters. ~keep
 const CLEAN_PAGE_DARK_PIXEL_COUNT_THRESHOLD: usize = 8;
+const CLEAN_PAGE_TEXT_COMPONENT_MAX_FILL_NUMERATOR: usize = 3;
+const CLEAN_PAGE_TEXT_COMPONENT_MAX_FILL_DENOMINATOR: usize = 4;
 /// Maximum value of an 8-bit RGB channel.
 const RGB_CHANNEL_MAX: f64 = u8::MAX as f64;
 /// Number of channels in an RGB pixel.
@@ -679,7 +681,27 @@ fn structured_component_size(
         }
     }
 
-    if min_x < max_x && min_y < max_y { size } else { 0 }
+    if component_has_text_density(size, min_x, max_x, min_y, max_y) {
+        size
+    } else {
+        0
+    }
+}
+
+fn component_has_text_density(size: usize, min_x: usize, max_x: usize, min_y: usize, max_y: usize) -> bool {
+    if min_x >= max_x || min_y >= max_y {
+        return false;
+    }
+    let Some(area) = (max_x - min_x + 1).checked_mul(max_y - min_y + 1) else {
+        return false;
+    };
+    let Some(scaled_size) = size.checked_mul(CLEAN_PAGE_TEXT_COMPONENT_MAX_FILL_DENOMINATOR) else {
+        return false;
+    };
+    let Some(maximum_fill) = area.checked_mul(CLEAN_PAGE_TEXT_COMPONENT_MAX_FILL_NUMERATOR) else {
+        return false;
+    };
+    scaled_size <= maximum_fill
 }
 
 fn prepare_preprocessed_ocr_image(
@@ -2809,6 +2831,33 @@ mod tests {
             !prepared.apply_pix_preprocessing,
             "isolated speckles are not text structure"
         );
+        assert_eq!(prepared.data, rgb_data);
+    }
+
+    #[test]
+    fn should_reject_a_contiguous_blob_with_the_same_dark_pixel_count_as_glyphs() {
+        const BLOB_WIDTH: u32 = 16;
+        const BLOB_HEIGHT: u32 = 24;
+        let (mut rgb_data, glyph_pixels) = contrast_fixture(BRIGHT_BLUE_FILL, true, 0);
+        assert_eq!(BLOB_WIDTH as usize * BLOB_HEIGHT as usize, glyph_pixels);
+
+        for y in 48..48 + BLOB_HEIGHT {
+            for x in 4..4 + BLOB_WIDTH {
+                let pixel_index = (y as usize * CONTRAST_FIXTURE_WIDTH as usize + x as usize) * RGB_CHANNEL_COUNT;
+                rgb_data[pixel_index..pixel_index + RGB_CHANNEL_COUNT].copy_from_slice(&DARK_TEXT);
+            }
+        }
+
+        let prepared = prepare_ocr_image(
+            rgb_data.clone(),
+            CONTRAST_FIXTURE_WIDTH,
+            CONTRAST_FIXTURE_HEIGHT,
+            None,
+            None,
+            false,
+            Some(300.0),
+        );
+        assert!(!prepared.apply_pix_preprocessing, "a solid blob is not text structure");
         assert_eq!(prepared.data, rgb_data);
     }
 
