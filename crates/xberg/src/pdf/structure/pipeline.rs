@@ -30,6 +30,7 @@ const MIN_BODY_SIZE_BOLD_SIGNALS: usize = 3;
 const MAX_OTHER_HEADING_RATIO: usize = 2;
 const BODY_SIZE_BOLD_ALIGNMENT_TOLERANCE_EM: f32 = 1.5;
 const MIN_OPENED_BODY_WORDS: usize = 4;
+const SAME_ROW_MIN_VERTICAL_OVERLAP_RATIO: f32 = 0.5;
 /// Font-size "same tier" tolerance (absolute, in the unit `font_size` happens to carry —
 /// points for native PDFs, a render-DPI-dependent pixel measurement for OCR segments).
 ///
@@ -259,6 +260,31 @@ fn build_heading_map(
     Ok((heading_map, struct_tree_needs_classify))
 }
 
+fn bbox_coordinates_are_finite(bbox: (f32, f32, f32, f32)) -> bool {
+    let (left, bottom, right, top) = bbox;
+    left.is_finite() && bottom.is_finite() && right.is_finite() && top.is_finite()
+}
+
+fn shares_same_text_row(candidate: &PdfParagraph, following: &PdfParagraph, is_same_page: bool) -> bool {
+    if !is_same_page {
+        return false;
+    }
+    let (Some(candidate_bbox), Some(following_bbox)) = (candidate.block_bbox, following.block_bbox) else {
+        return false;
+    };
+    if !bbox_coordinates_are_finite(candidate_bbox) || !bbox_coordinates_are_finite(following_bbox) {
+        return false;
+    }
+
+    let candidate_bottom = candidate_bbox.1.min(candidate_bbox.3);
+    let candidate_top = candidate_bbox.1.max(candidate_bbox.3);
+    let following_bottom = following_bbox.1.min(following_bbox.3);
+    let following_top = following_bbox.1.max(following_bbox.3);
+    let minimum_height = (candidate_top - candidate_bottom).min(following_top - following_bottom);
+    let overlap = candidate_top.min(following_top) - candidate_bottom.max(following_bottom);
+    minimum_height > 0.0 && overlap.max(0.0) / minimum_height >= SAME_ROW_MIN_VERTICAL_OVERLAP_RATIO
+}
+
 fn opens_aligned_body_block(
     candidate: &PdfParagraph,
     following: &PdfParagraph,
@@ -272,12 +298,12 @@ fn opens_aligned_body_block(
         return false;
     }
 
-    let coordinates_are_finite = |bbox: (f32, f32, f32, f32)| {
-        let (left, bottom, right, top) = bbox;
-        left.is_finite() && bottom.is_finite() && right.is_finite() && top.is_finite()
-    };
-    if candidate.block_bbox.is_some_and(|bbox| !coordinates_are_finite(bbox))
-        || following.block_bbox.is_some_and(|bbox| !coordinates_are_finite(bbox))
+    if candidate
+        .block_bbox
+        .is_some_and(|bbox| !bbox_coordinates_are_finite(bbox))
+        || following
+            .block_bbox
+            .is_some_and(|bbox| !bbox_coordinates_are_finite(bbox))
     {
         return false;
     }
@@ -285,9 +311,11 @@ fn opens_aligned_body_block(
         return true;
     };
 
-    let is_horizontally_aligned =
-        candidate_bbox.0 <= following_bbox.0 + body_font_size * BODY_SIZE_BOLD_ALIGNMENT_TOLERANCE_EM;
-    is_horizontally_aligned && (!is_same_page || candidate_bbox.1 >= following_bbox.3)
+    if shares_same_text_row(candidate, following, is_same_page) {
+        return false;
+    }
+
+    candidate_bbox.0 <= following_bbox.0 + body_font_size * BODY_SIZE_BOLD_ALIGNMENT_TOLERANCE_EM
 }
 
 fn is_explicit_numbered_body_size_section(text: &str) -> bool {
@@ -320,17 +348,23 @@ fn body_size_heading_eligibility(all_pages: &[Vec<PdfParagraph>], body_font_size
         let mut page_eligibility = Vec::with_capacity(page.len());
         for paragraph in page.iter().rev() {
             let is_candidate = is_body_size_bold_heading_candidate(paragraph, body_font_size);
+            let is_explicit_section = is_explicit_numbered_body_size_section(paragraph_text_raw(paragraph).trim());
             page_eligibility.push(
                 is_candidate
-                    && (is_explicit_numbered_body_size_section(paragraph_text_raw(paragraph).trim())
-                        || next_content.is_some_and(|(following_page_index, following)| {
+                    && if is_explicit_section {
+                        !next_content.is_some_and(|(following_page_index, following)| {
+                            shares_same_text_row(paragraph, following, page_index == following_page_index)
+                        })
+                    } else {
+                        next_content.is_some_and(|(following_page_index, following)| {
                             opens_aligned_body_block(
                                 paragraph,
                                 following,
                                 body_font_size,
                                 page_index == following_page_index,
                             )
-                        })),
+                        })
+                    },
             );
             if paragraph.word_count > 0 && !paragraph.is_page_furniture {
                 next_content = Some((page_index, paragraph));
@@ -9869,12 +9903,17 @@ where new shares are issued;";
         )]];
         numbered_section_pages.extend(["I.", "II.", "III."].into_iter().enumerate().map(|(index, marker)| {
             vec![
-                body_size_paragraph_at(&format!("{marker} CENTERED MEETING AGENDA SECTION"), true, None, 220.0),
-                body_size_paragraph_at(
+                body_size_paragraph_with_bbox(
+                    &format!("{marker} CENTERED MEETING AGENDA SECTION"),
+                    true,
+                    None,
+                    (220.0, 700.0, 430.0, 714.0),
+                ),
+                body_size_paragraph_with_bbox(
                     &format!("Agenda section {} contains ordinary list or body content.", index + 1),
                     false,
                     None,
-                    74.0,
+                    (74.0, 660.0, 430.0, 690.0),
                 ),
             ]
         }));
@@ -10015,6 +10054,57 @@ where new shares are issued;";
                 .count(),
             3,
             "vertically ordered headings must retain repeated body-size promotion"
+        );
+    }
+
+    #[test]
+    fn should_preserve_structural_headings_and_reject_same_row_table_cells() {
+        let mut pages = vec![vec![body_size_paragraph_with_bbox(
+            "Existing document title",
+            true,
+            Some(1),
+            (74.0, 740.0, 274.0, 752.0),
+        )]];
+        for heading in [
+            "3. NUMBERED SECTION HEADING",
+            "IV. ROMAN SECTION HEADING",
+            "ARTICLE I GENERAL PROVISIONS",
+            "PART IV ADMINISTRATIVE RULES",
+            "Policy Administration and Review",
+        ] {
+            pages.push(vec![
+                body_size_paragraph_with_bbox(heading, true, None, (74.0, 700.0, 300.0, 714.0)),
+                body_size_paragraph_with_bbox(
+                    "The outdented heading opens this substantive ordinary body paragraph.",
+                    false,
+                    None,
+                    (110.0, 680.0, 430.0, 702.0),
+                ),
+            ]);
+        }
+        pages.push(vec![
+            body_size_paragraph_with_bbox("1. TABLE CELL LABEL", true, None, (74.0, 600.0, 190.0, 612.0)),
+            body_size_paragraph_with_bbox(
+                "Adjacent table value with enough words",
+                false,
+                None,
+                (210.0, 600.0, 430.0, 612.0),
+            ),
+        ]);
+
+        promote_repeated_body_size_bold_headings(&mut pages, Some(12.0));
+
+        for page in pages.iter().skip(1).take(5) {
+            assert_eq!(
+                page[0].heading_level,
+                Some(3),
+                "a vertically ordered, outdented structural heading must survive slight bbox overlap: {:?}",
+                paragraph_text_raw(&page[0])
+            );
+        }
+        assert_eq!(
+            pages[6][0].heading_level, None,
+            "an explicitly numbered table cell must not bypass the same-row guard"
         );
     }
 
