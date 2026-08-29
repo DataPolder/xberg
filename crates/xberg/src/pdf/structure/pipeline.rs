@@ -10136,12 +10136,7 @@ where new shares are issued;";
         );
         invalid_following.block_bbox = Some((210.0, 520.0, f32::INFINITY, 532.0));
         pages.push(vec![
-            body_size_paragraph_with_bbox(
-                "3. INVALID FOLLOWING GEOMETRY",
-                true,
-                None,
-                (74.0, 520.0, 190.0, 532.0),
-            ),
+            body_size_paragraph_with_bbox("3. INVALID FOLLOWING GEOMETRY", true, None, (74.0, 520.0, 190.0, 532.0)),
             invalid_following,
         ]);
 

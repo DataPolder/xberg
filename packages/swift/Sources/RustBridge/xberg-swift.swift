@@ -805,6 +805,9 @@ public func formattedBlockFromJson<GenericIntoRustString: IntoRustString>(_ json
 public func formulaFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> Formula {
     try { let val = __swift_bridge__$formula_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return Formula(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
 }
+public func geoJsonExtractionConfigFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> GeoJsonExtractionConfig {
+    try { let val = __swift_bridge__$geo_json_extraction_config_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return GeoJsonExtractionConfig(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
+}
 public func gridCellFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> GridCell {
     try { let val = __swift_bridge__$grid_cell_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return GridCell(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
 }
@@ -1459,6 +1462,9 @@ public func linkTypeFromJson<GenericIntoRustString: IntoRustString>(_ json: Gene
 public func mergeModeFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> MergeMode {
     try { let val = __swift_bridge__$merge_mode_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return MergeMode(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
 }
+public func mimeDetectionPolicyFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> MimeDetectionPolicy {
+    try { let val = __swift_bridge__$mime_detection_policy_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return MimeDetectionPolicy(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
+}
 public func nerBackendKindFromJson<GenericIntoRustString: IntoRustString>(_ json: GenericIntoRustString) throws -> NerBackendKind {
     try { let val = __swift_bridge__$ner_backend_kind_from_json({ let rustString = json.intoRustString(); rustString.isOwned = false; return rustString.ptr }()); if val.is_ok { return NerBackendKind(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
 }
@@ -1782,6 +1788,9 @@ public func __alef_phantom_vec_formatted_block() -> RustVec<FormattedBlock> {
 }
 public func __alef_phantom_vec_formula() -> RustVec<Formula> {
     RustVec(ptr: __swift_bridge__$__alef_phantom_vec_formula())
+}
+public func __alef_phantom_vec_geo_json_extraction_config() -> RustVec<GeoJsonExtractionConfig> {
+    RustVec(ptr: __swift_bridge__$__alef_phantom_vec_geo_json_extraction_config())
 }
 public func __alef_phantom_vec_grid_cell() -> RustVec<GridCell> {
     RustVec(ptr: __swift_bridge__$__alef_phantom_vec_grid_cell())
@@ -2217,6 +2226,9 @@ public func __alef_phantom_vec_list_type() -> RustVec<ListType> {
 }
 public func __alef_phantom_vec_merge_mode() -> RustVec<MergeMode> {
     RustVec(ptr: __swift_bridge__$__alef_phantom_vec_merge_mode())
+}
+public func __alef_phantom_vec_mime_detection_policy() -> RustVec<MimeDetectionPolicy> {
+    RustVec(ptr: __swift_bridge__$__alef_phantom_vec_mime_detection_policy())
 }
 public func __alef_phantom_vec_ner_backend_kind() -> RustVec<NerBackendKind> {
     RustVec(ptr: __swift_bridge__$__alef_phantom_vec_ner_backend_kind())
@@ -10910,6 +10922,10 @@ public class ExtractionConfigRef {
     }
 }
 extension ExtractionConfigRef {
+    public func mimeDetectionPolicy() -> RustString {
+        RustString(ptr: __swift_bridge__$ExtractionConfig$mime_detection_policy(ptr))
+    }
+
     public func useCache() -> Bool {
         __swift_bridge__$ExtractionConfig$use_cache(ptr)
     }
@@ -11052,6 +11068,10 @@ extension ExtractionConfigRef {
 
     public func csv() -> Optional<CsvConfig> {
         { let val = __swift_bridge__$ExtractionConfig$csv(ptr); if val != nil { return CsvConfig(ptr: val!) } else { return nil } }()
+    }
+
+    public func geojson() -> Optional<GeoJsonExtractionConfig> {
+        { let val = __swift_bridge__$ExtractionConfig$geojson(ptr); if val != nil { return GeoJsonExtractionConfig(ptr: val!) } else { return nil } }()
     }
 
     public func concurrency() -> Optional<ConcurrencyConfig> {
@@ -11686,6 +11706,10 @@ public class FileExtractionConfigRef {
     }
 }
 extension FileExtractionConfigRef {
+    public func mimeDetectionPolicy() -> Optional<RustString> {
+        { let val = __swift_bridge__$FileExtractionConfig$mime_detection_policy(ptr); if val != nil { return RustString(ptr: val!) } else { return nil } }()
+    }
+
     public func enableQualityProcessing() -> Optional<Bool> {
         __swift_bridge__$FileExtractionConfig$enable_quality_processing(ptr).intoSwiftRepr()
     }
@@ -12401,6 +12425,91 @@ extension Formula: Vectorizable {
 
     public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
         __swift_bridge__$Vec_Formula$len(vecPtr)
+    }
+}
+
+
+public class GeoJsonExtractionConfig: GeoJsonExtractionConfigRefMut {
+    public var isOwned: Bool = true
+
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+
+    deinit {
+        if isOwned {
+            __swift_bridge__$GeoJsonExtractionConfig$_free(ptr)
+        }
+    }
+}
+extension GeoJsonExtractionConfig {
+    public convenience init(_ include_full_coordinates: Bool) {
+        self.init(ptr: __swift_bridge__$GeoJsonExtractionConfig$new(include_full_coordinates))
+    }
+}
+public class GeoJsonExtractionConfigRefMut: GeoJsonExtractionConfigRef {
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+}
+public class GeoJsonExtractionConfigRef {
+    public var ptr: UnsafeMutableRawPointer
+
+    public init(ptr: UnsafeMutableRawPointer) {
+        self.ptr = ptr
+    }
+}
+extension GeoJsonExtractionConfigRef {
+    public func includeFullCoordinates() -> Bool {
+        __swift_bridge__$GeoJsonExtractionConfig$include_full_coordinates(ptr)
+    }
+}
+extension GeoJsonExtractionConfig: Vectorizable {
+    public static func vecOfSelfNew() -> UnsafeMutableRawPointer {
+        __swift_bridge__$Vec_GeoJsonExtractionConfig$new()
+    }
+
+    public static func vecOfSelfFree(vecPtr: UnsafeMutableRawPointer) {
+        __swift_bridge__$Vec_GeoJsonExtractionConfig$drop(vecPtr)
+    }
+
+    public static func vecOfSelfPush(vecPtr: UnsafeMutableRawPointer, value: GeoJsonExtractionConfig) {
+        __swift_bridge__$Vec_GeoJsonExtractionConfig$push(vecPtr, {value.isOwned = false; return value.ptr;}())
+    }
+
+    public static func vecOfSelfPop(vecPtr: UnsafeMutableRawPointer) -> Optional<Self> {
+        let pointer = __swift_bridge__$Vec_GeoJsonExtractionConfig$pop(vecPtr)
+        if pointer == nil {
+            return nil
+        } else {
+            return (GeoJsonExtractionConfig(ptr: pointer!) as! Self)
+        }
+    }
+
+    public static func vecOfSelfGet(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<GeoJsonExtractionConfigRef> {
+        let pointer = __swift_bridge__$Vec_GeoJsonExtractionConfig$get(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return GeoJsonExtractionConfigRef(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfGetMut(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<GeoJsonExtractionConfigRefMut> {
+        let pointer = __swift_bridge__$Vec_GeoJsonExtractionConfig$get_mut(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return GeoJsonExtractionConfigRefMut(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfAsPtr(vecPtr: UnsafeMutableRawPointer) -> UnsafePointer<GeoJsonExtractionConfigRef> {
+        UnsafePointer<GeoJsonExtractionConfigRef>(OpaquePointer(__swift_bridge__$Vec_GeoJsonExtractionConfig$as_ptr(vecPtr)))
+    }
+
+    public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
+        __swift_bridge__$Vec_GeoJsonExtractionConfig$len(vecPtr)
     }
 }
 
@@ -18271,8 +18380,8 @@ public class OcrQualityThresholds: OcrQualityThresholdsRefMut {
     }
 }
 extension OcrQualityThresholds {
-    public convenience init(_ min_total_non_whitespace: UInt, _ min_non_whitespace_per_page: Double, _ min_meaningful_word_len: UInt, _ min_meaningful_words: UInt, _ min_alnum_ratio: Double, _ min_garbage_chars: UInt, _ max_fragmented_word_ratio: Double, _ critical_fragmented_word_ratio: Double, _ max_ocr_output_fragmented_word_ratio: Double, _ min_ocr_mean_confidence: Double, _ min_words_for_ocr_output_check: UInt, _ max_ocr_output_dict_invalid_word_ratio: Double, _ min_avg_word_length: Double, _ min_words_for_avg_length_check: UInt, _ min_consecutive_repeat_ratio: Double, _ min_words_for_repeat_check: UInt, _ substantive_min_chars: UInt, _ non_text_min_chars: UInt, _ alnum_ws_ratio_threshold: Double, _ pipeline_min_quality: Double, _ min_undecodable_ratio: Double, _ enable_provenance_ocr_routing: Bool, _ min_provenance_fallback_ratio: Double) {
-        self.init(ptr: __swift_bridge__$OcrQualityThresholds$new(min_total_non_whitespace, min_non_whitespace_per_page, min_meaningful_word_len, min_meaningful_words, min_alnum_ratio, min_garbage_chars, max_fragmented_word_ratio, critical_fragmented_word_ratio, max_ocr_output_fragmented_word_ratio, min_ocr_mean_confidence, min_words_for_ocr_output_check, max_ocr_output_dict_invalid_word_ratio, min_avg_word_length, min_words_for_avg_length_check, min_consecutive_repeat_ratio, min_words_for_repeat_check, substantive_min_chars, non_text_min_chars, alnum_ws_ratio_threshold, pipeline_min_quality, min_undecodable_ratio, enable_provenance_ocr_routing, min_provenance_fallback_ratio))
+    public convenience init(_ min_total_non_whitespace: UInt, _ min_non_whitespace_per_page: Double, _ min_meaningful_word_len: UInt, _ min_meaningful_words: UInt, _ min_alnum_ratio: Double, _ min_garbage_chars: UInt, _ max_fragmented_word_ratio: Double, _ critical_fragmented_word_ratio: Double, _ max_ocr_output_fragmented_word_ratio: Double, _ min_ocr_mean_confidence: Double, _ min_words_for_ocr_output_check: UInt, _ max_ocr_output_dict_invalid_word_ratio: Double, _ discard_suspected_ocr_noise: Bool, _ min_avg_word_length: Double, _ min_words_for_avg_length_check: UInt, _ min_consecutive_repeat_ratio: Double, _ min_words_for_repeat_check: UInt, _ substantive_min_chars: UInt, _ non_text_min_chars: UInt, _ alnum_ws_ratio_threshold: Double, _ pipeline_min_quality: Double, _ min_undecodable_ratio: Double, _ enable_provenance_ocr_routing: Bool, _ min_provenance_fallback_ratio: Double) {
+        self.init(ptr: __swift_bridge__$OcrQualityThresholds$new(min_total_non_whitespace, min_non_whitespace_per_page, min_meaningful_word_len, min_meaningful_words, min_alnum_ratio, min_garbage_chars, max_fragmented_word_ratio, critical_fragmented_word_ratio, max_ocr_output_fragmented_word_ratio, min_ocr_mean_confidence, min_words_for_ocr_output_check, max_ocr_output_dict_invalid_word_ratio, discard_suspected_ocr_noise, min_avg_word_length, min_words_for_avg_length_check, min_consecutive_repeat_ratio, min_words_for_repeat_check, substantive_min_chars, non_text_min_chars, alnum_ws_ratio_threshold, pipeline_min_quality, min_undecodable_ratio, enable_provenance_ocr_routing, min_provenance_fallback_ratio))
     }
 }
 public class OcrQualityThresholdsRefMut: OcrQualityThresholdsRef {
@@ -18334,6 +18443,10 @@ extension OcrQualityThresholdsRef {
 
     public func maxOcrOutputDictInvalidWordRatio() -> Double {
         __swift_bridge__$OcrQualityThresholds$max_ocr_output_dict_invalid_word_ratio(ptr)
+    }
+
+    public func discardSuspectedOcrNoise() -> Bool {
+        __swift_bridge__$OcrQualityThresholds$discard_suspected_ocr_noise(ptr)
     }
 
     public func minAvgWordLength() -> Double {
@@ -24072,8 +24185,8 @@ public class SsrfPolicy: SsrfPolicyRefMut {
     }
 }
 extension SsrfPolicy {
-    public convenience init(_ deny_private: Bool, _ allowlist: RustVec<HostMatcher>, _ max_redirects: UInt8) {
-        self.init(ptr: __swift_bridge__$SsrfPolicy$new(deny_private, { let val = allowlist; val.isOwned = false; return val.ptr }(), max_redirects))
+    public convenience init<GenericIntoRustString: IntoRustString>(_ deny_private: Bool, _ allowlist: RustVec<HostMatcher>, _ max_redirects: UInt8, _ scheme_allowlist: RustVec<GenericIntoRustString>) {
+        self.init(ptr: __swift_bridge__$SsrfPolicy$new(deny_private, { let val = allowlist; val.isOwned = false; return val.ptr }(), max_redirects, { let val = scheme_allowlist; val.isOwned = false; return val.ptr }()))
     }
 }
 public class SsrfPolicyRefMut: SsrfPolicyRef {
@@ -24099,6 +24212,10 @@ extension SsrfPolicyRef {
 
     public func maxRedirects() -> UInt8 {
         __swift_bridge__$SsrfPolicy$max_redirects(ptr)
+    }
+
+    public func schemeAllowlist() -> RustVec<RustString> {
+        RustVec(ptr: __swift_bridge__$SsrfPolicy$scheme_allowlist(ptr))
     }
 }
 extension SsrfPolicy: Vectorizable {
@@ -31520,6 +31637,86 @@ extension MergeMode: Vectorizable {
 }
 
 
+public class MimeDetectionPolicy: MimeDetectionPolicyRefMut {
+    public var isOwned: Bool = true
+
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+
+    deinit {
+        if isOwned {
+            __swift_bridge__$MimeDetectionPolicy$_free(ptr)
+        }
+    }
+}
+public class MimeDetectionPolicyRefMut: MimeDetectionPolicyRef {
+    public override init(ptr: UnsafeMutableRawPointer) {
+        super.init(ptr: ptr)
+    }
+}
+public class MimeDetectionPolicyRef {
+    public var ptr: UnsafeMutableRawPointer
+
+    public init(ptr: UnsafeMutableRawPointer) {
+        self.ptr = ptr
+    }
+}
+extension MimeDetectionPolicyRef {
+    public func to_string() -> RustString {
+        RustString(ptr: __swift_bridge__$MimeDetectionPolicy$to_string(ptr))
+    }
+}
+extension MimeDetectionPolicy: Vectorizable {
+    public static func vecOfSelfNew() -> UnsafeMutableRawPointer {
+        __swift_bridge__$Vec_MimeDetectionPolicy$new()
+    }
+
+    public static func vecOfSelfFree(vecPtr: UnsafeMutableRawPointer) {
+        __swift_bridge__$Vec_MimeDetectionPolicy$drop(vecPtr)
+    }
+
+    public static func vecOfSelfPush(vecPtr: UnsafeMutableRawPointer, value: MimeDetectionPolicy) {
+        __swift_bridge__$Vec_MimeDetectionPolicy$push(vecPtr, {value.isOwned = false; return value.ptr;}())
+    }
+
+    public static func vecOfSelfPop(vecPtr: UnsafeMutableRawPointer) -> Optional<Self> {
+        let pointer = __swift_bridge__$Vec_MimeDetectionPolicy$pop(vecPtr)
+        if pointer == nil {
+            return nil
+        } else {
+            return (MimeDetectionPolicy(ptr: pointer!) as! Self)
+        }
+    }
+
+    public static func vecOfSelfGet(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<MimeDetectionPolicyRef> {
+        let pointer = __swift_bridge__$Vec_MimeDetectionPolicy$get(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return MimeDetectionPolicyRef(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfGetMut(vecPtr: UnsafeMutableRawPointer, index: UInt) -> Optional<MimeDetectionPolicyRefMut> {
+        let pointer = __swift_bridge__$Vec_MimeDetectionPolicy$get_mut(vecPtr, index)
+        if pointer == nil {
+            return nil
+        } else {
+            return MimeDetectionPolicyRefMut(ptr: pointer!)
+        }
+    }
+
+    public static func vecOfSelfAsPtr(vecPtr: UnsafeMutableRawPointer) -> UnsafePointer<MimeDetectionPolicyRef> {
+        UnsafePointer<MimeDetectionPolicyRef>(OpaquePointer(__swift_bridge__$Vec_MimeDetectionPolicy$as_ptr(vecPtr)))
+    }
+
+    public static func vecOfSelfLen(vecPtr: UnsafeMutableRawPointer) -> UInt {
+        __swift_bridge__$Vec_MimeDetectionPolicy$len(vecPtr)
+    }
+}
+
+
 public class NerBackendKind: NerBackendKindRefMut {
     public var isOwned: Bool = true
 
@@ -35921,6 +36118,3 @@ func __swift_bridge__SwiftRerankerBackendBox__free (ptr: UnsafeMutableRawPointer
 func __swift_bridge__SwiftTokenizerBackendBox__free (ptr: UnsafeMutableRawPointer) {
     let _ = Unmanaged<SwiftTokenizerBackendBox>.fromOpaque(ptr).takeRetainedValue()
 }
-
-
-

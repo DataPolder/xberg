@@ -770,6 +770,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FormulaModel dco_decode_box_autoadd_formula_model(dynamic raw);
 
   @protected
+  GeoJsonExtractionConfig dco_decode_box_autoadd_geo_json_extraction_config(
+    dynamic raw,
+  );
+
+  @protected
   GlmOcrLayoutMode dco_decode_box_autoadd_glm_ocr_layout_mode(dynamic raw);
 
   @protected
@@ -850,6 +855,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LlmRateLimitConfig dco_decode_box_autoadd_llm_rate_limit_config(dynamic raw);
+
+  @protected
+  MimeDetectionPolicy dco_decode_box_autoadd_mime_detection_policy(dynamic raw);
 
   @protected
   MultiVectorEmbedding dco_decode_box_autoadd_multi_vector_embedding(
@@ -1373,6 +1381,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FormulaModel dco_decode_formula_model(dynamic raw);
 
   @protected
+  GeoJsonExtractionConfig dco_decode_geo_json_extraction_config(dynamic raw);
+
+  @protected
   GlmOcrBackendOptions dco_decode_glm_ocr_backend_options(dynamic raw);
 
   @protected
@@ -1874,6 +1885,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Metadata dco_decode_metadata(dynamic raw);
 
   @protected
+  MimeDetectionPolicy dco_decode_mime_detection_policy(dynamic raw);
+
+  @protected
   ModelPaths dco_decode_model_paths(dynamic raw);
 
   @protected
@@ -2099,6 +2113,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FormulaModel? dco_decode_opt_box_autoadd_formula_model(dynamic raw);
 
   @protected
+  GeoJsonExtractionConfig?
+  dco_decode_opt_box_autoadd_geo_json_extraction_config(dynamic raw);
+
+  @protected
   GlmOcrLayoutMode? dco_decode_opt_box_autoadd_glm_ocr_layout_mode(dynamic raw);
 
   @protected
@@ -2169,6 +2187,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LlmRateLimitConfig? dco_decode_opt_box_autoadd_llm_rate_limit_config(
+    dynamic raw,
+  );
+
+  @protected
+  MimeDetectionPolicy? dco_decode_opt_box_autoadd_mime_detection_policy(
     dynamic raw,
   );
 
@@ -3464,6 +3487,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  GeoJsonExtractionConfig sse_decode_box_autoadd_geo_json_extraction_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   GlmOcrLayoutMode sse_decode_box_autoadd_glm_ocr_layout_mode(
     SseDeserializer deserializer,
   );
@@ -3570,6 +3598,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LlmRateLimitConfig sse_decode_box_autoadd_llm_rate_limit_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  MimeDetectionPolicy sse_decode_box_autoadd_mime_detection_policy(
     SseDeserializer deserializer,
   );
 
@@ -4191,6 +4224,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FormulaModel sse_decode_formula_model(SseDeserializer deserializer);
+
+  @protected
+  GeoJsonExtractionConfig sse_decode_geo_json_extraction_config(
+    SseDeserializer deserializer,
+  );
 
   @protected
   GlmOcrBackendOptions sse_decode_glm_ocr_backend_options(
@@ -4834,6 +4872,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Metadata sse_decode_metadata(SseDeserializer deserializer);
 
   @protected
+  MimeDetectionPolicy sse_decode_mime_detection_policy(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ModelPaths sse_decode_model_paths(SseDeserializer deserializer);
 
   @protected
@@ -5125,6 +5168,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  GeoJsonExtractionConfig?
+  sse_decode_opt_box_autoadd_geo_json_extraction_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   GlmOcrLayoutMode? sse_decode_opt_box_autoadd_glm_ocr_layout_mode(
     SseDeserializer deserializer,
   );
@@ -5221,6 +5270,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LlmRateLimitConfig? sse_decode_opt_box_autoadd_llm_rate_limit_config(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  MimeDetectionPolicy? sse_decode_opt_box_autoadd_mime_detection_policy(
     SseDeserializer deserializer,
   );
 
@@ -6943,6 +6997,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_geo_json_extraction_config(
+    GeoJsonExtractionConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_glm_ocr_layout_mode(
     GlmOcrLayoutMode self,
     SseSerializer serializer,
@@ -7077,6 +7137,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_llm_rate_limit_config(
     LlmRateLimitConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_mime_detection_policy(
+    MimeDetectionPolicy self,
     SseSerializer serializer,
   );
 
@@ -7918,6 +7984,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_formula_model(FormulaModel self, SseSerializer serializer);
 
   @protected
+  void sse_encode_geo_json_extraction_config(
+    GeoJsonExtractionConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_glm_ocr_backend_options(
     GlmOcrBackendOptions self,
     SseSerializer serializer,
@@ -8740,6 +8812,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_metadata(Metadata self, SseSerializer serializer);
 
   @protected
+  void sse_encode_mime_detection_policy(
+    MimeDetectionPolicy self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_model_paths(ModelPaths self, SseSerializer serializer);
 
   @protected
@@ -9091,6 +9169,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_geo_json_extraction_config(
+    GeoJsonExtractionConfig? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_glm_ocr_layout_mode(
     GlmOcrLayoutMode? self,
     SseSerializer serializer,
@@ -9207,6 +9291,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_llm_rate_limit_config(
     LlmRateLimitConfig? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_mime_detection_policy(
+    MimeDetectionPolicy? self,
     SseSerializer serializer,
   );
 

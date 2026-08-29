@@ -65,6 +65,7 @@ exclude = [
   "**/vendor/**",
   "/docs-site/src/snippets-generated/**",
   "/.ai-rulez-generated.json",
+  "/schemas/**",
 ]
 
 [lint.markdown.rumdl]
@@ -222,6 +223,31 @@ utiliza = "utiliza"
 webui = "webui"
 wel = "wel"
 yor = "yor"
+Leafs = "Leafs"
+addresss = "addresss"
+ative = "ative"
+certi = "certi"
+cient = "cient"
+compre = "compre"
+controler = "controler"
+diffcult = "diffcult"
+ect = "ect"
+ede = "ede"
+equivalen = "equivalen"
+evn = "evn"
+fied = "fied"
+garanties = "garanties"
+hel = "hel"
+implemen = "implemen"
+multipl = "multipl"
+normale = "normale"
+paeth = "paeth"
+parms = "parms"
+proce = "proce"
+rturned = "rturned"
+teh = "teh"
+thic = "thic"
+versoin = "versoin"
 
 [lint.typos.extend_identifiers]
 MarkItDown = "MarkItDown"
@@ -579,6 +605,7 @@ lint = { exclude = [
   "**/target/**",
   "**/vendor/**",
   "docs-site/src/snippets-generated/**",
+  "schemas/**",
 ] }
 fmt = { exclude = [
   "**/*.freezed.dart",
@@ -640,6 +667,7 @@ fmt = { exclude = [
   "**/target/**",
   "**/vendor/**",
   "docs-site/src/snippets-generated/**",
+  "schemas/**",
 ] }
 file_safety = { exclude = [
   # Generated Rust/FFI sources lead with inner attributes (`#![deny(...)]`,
@@ -720,6 +748,7 @@ file_safety = { exclude = [
   "**/target/**",
   "**/vendor/**",
   "docs-site/src/snippets-generated/**",
+  "schemas/**",
 ] }
 cargo = true
 commit = { stages = ["commit-msg"] }

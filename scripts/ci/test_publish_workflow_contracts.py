@@ -8,21 +8,15 @@ import textwrap
 from pathlib import Path
 
 WORKFLOW = Path(__file__).parents[2] / ".github" / "workflows" / "publish.yaml"
-DOCKER_WORKFLOW = (
-    Path(__file__).parents[2] / ".github" / "workflows" / "publish-docker.yaml"
-)
-PUBDEV_WORKFLOW = (
-    Path(__file__).parents[2] / ".github" / "workflows" / "publish-pubdev.yaml"
-)
+DOCKER_WORKFLOW = Path(__file__).parents[2] / ".github" / "workflows" / "publish-docker.yaml"
+PUBDEV_WORKFLOW = Path(__file__).parents[2] / ".github" / "workflows" / "publish-pubdev.yaml"
 CI_WORKFLOW = Path(__file__).parents[2] / ".github" / "workflows" / "ci-lint.yaml"
 PUBLISHER_BOT = "xberg-dev-publisher[bot]"
 PUBLISH_PUB_SHA = "a25ae95253ee755ac5f691f7e1053dcb104cdee7"
 
 
 def job_block(workflow: str, job: str) -> str:
-    match = re.search(
-        rf"(?ms)^  {re.escape(job)}:\n(.*?)(?=^  [a-zA-Z0-9_-]+:\n|\Z)", workflow
-    )
+    match = re.search(rf"(?ms)^  {re.escape(job)}:\n(.*?)(?=^  [a-zA-Z0-9_-]+:\n|\Z)", workflow)
     if match is None:
         raise AssertionError(f"publish workflow has no {job!r} job")
     return match.group(1)
@@ -61,11 +55,7 @@ def attribute_value(node: ast.Attribute, context: dict[str, object]) -> object:
 
 
 def evaluate_condition(expression: str, context: dict[str, object]) -> bool:
-    translated = (
-        expression.replace("||", "or")
-        .replace("&&", "and")
-        .replace("startsWith", "starts_with")
-    )
+    translated = expression.replace("||", "or").replace("&&", "and").replace("startsWith", "starts_with")
 
     def evaluate(node: ast.expr) -> object:
         if isinstance(node, ast.BoolOp):
@@ -74,19 +64,12 @@ def evaluate_condition(expression: str, context: dict[str, object]) -> bool:
                 return any(values)
             if isinstance(node.op, ast.And):
                 return all(values)
-        elif (
-            isinstance(node, ast.Compare)
-            and len(node.ops) == len(node.comparators) == 1
-        ):
+        elif isinstance(node, ast.Compare) and len(node.ops) == len(node.comparators) == 1:
             left = evaluate(node.left)
             right = evaluate(node.comparators[0])
             if isinstance(node.ops[0], ast.NotEq):
                 return left != right
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "starts_with"
-        ):
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "starts_with":
             assert len(node.args) == 2 and not node.keywords
             return str(evaluate(node.args[0])).startswith(str(evaluate(node.args[1])))
         elif isinstance(node, ast.Attribute):
@@ -99,9 +82,7 @@ def evaluate_condition(expression: str, context: dict[str, object]) -> bool:
     return bool(evaluate(parsed.body))
 
 
-def github_context(
-    event_name: str, tag: str, actor: str, triggering_actor: str
-) -> dict[str, object]:
+def github_context(event_name: str, tag: str, actor: str, triggering_actor: str) -> dict[str, object]:
     return {
         "github": {
             "event_name": event_name,
@@ -129,12 +110,8 @@ def step_script(block: str, step: str) -> str:
     return re.sub(r"(?m)^(\s*)sleep \$\(\(attempt \* 3\)\)$", r"\1:", script)
 
 
-def run(
-    command: list[str], cwd: Path, env: dict[str, str] | None = None
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command, cwd=cwd, env=env, text=True, capture_output=True, check=False
-    )
+def run(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, cwd=cwd, env=env, text=True, capture_output=True, check=False)
 
 
 def git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -176,11 +153,7 @@ def run_homebrew_push_script(
     runner: Path,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    step = (
-        "Commit and push to tap"
-        if job == "publish-homebrew-formula"
-        else "Commit and push bottle DSL"
-    )
+    step = "Commit and push to tap" if job == "publish-homebrew-formula" else "Commit and push bottle DSL"
     script = step_script(job_block(WORKFLOW.read_text(), job), step)
     script = script.replace("${{ needs.prepare.outputs.version }}", "1.1.0")
     return run(["bash", "-euo", "pipefail", "-c", script], runner, env)
@@ -209,9 +182,7 @@ def test_release_event_guards_cover_initial_actor_and_tag_policy() -> None:
 
     docker_prepare = job_block(DOCKER_WORKFLOW.read_text(), "prepare")
     docker_expression = job_if_expression(docker_prepare)
-    assert docker_expression == (
-        "github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')"
-    )
+    assert docker_expression == ("github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')")
     docker_cases = (
         ("workflow_dispatch", "", True),
         ("repository_dispatch", "", True),
@@ -257,12 +228,8 @@ def test_homebrew_push_rebases_after_concurrent_non_conflicting_push() -> None:
             assert result.returncode == 0, result.stderr
             verification = root / "verification"
             git(root, "clone", str(origin), str(verification))
-            assert (
-                verification / "Formula" / "xberg.rb"
-            ).read_text() == "version 1.1.0\n"
-            assert (
-                verification / "Formula" / "other.rb"
-            ).read_text() == "other 2.0.0\n"
+            assert (verification / "Formula" / "xberg.rb").read_text() == "version 1.1.0\n"
+            assert (verification / "Formula" / "other.rb").read_text() == "other 2.0.0\n"
 
 
 def test_homebrew_push_stops_after_five_rejections() -> None:
@@ -322,9 +289,7 @@ def test_homebrew_push_aborts_rebase_conflict_without_force() -> None:
         assert not (runner / ".git" / "rebase-apply").exists()
         verification = root / "verification"
         git(root, "clone", str(origin), str(verification))
-        assert (
-            verification / "Formula" / "xberg.rb"
-        ).read_text() == "competitor version\n"
+        assert (verification / "Formula" / "xberg.rb").read_text() == "competitor version\n"
 
 
 def test_swift_dry_run_checks_run_artifact_without_release_mutation() -> None:
@@ -373,10 +338,7 @@ def test_glibc_native_closures_are_strictly_verified() -> None:
 
 
 def test_publish_contracts_run_in_ci() -> None:
-    assert (
-        "python3 scripts/ci/test_publish_workflow_contracts.py"
-        in CI_WORKFLOW.read_text()
-    )
+    assert "python3 scripts/ci/test_publish_workflow_contracts.py" in CI_WORKFLOW.read_text()
 
 
 if __name__ == "__main__":

@@ -1506,9 +1506,9 @@ dependencies = [
 
 [[package]]
 name = "crawlberg"
-version = "1.4.0"
+version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd756a90c129c58039e58485ecd1a054940305a5f7a374d5a522421cf597c878"
+checksum = "723dbd626a68331c8b235e0c1878d38630fc827b9df6e86bf176250e87a54520"
 dependencies = [
  "ahash 0.8.12",
  "aho-corasick",
@@ -3574,9 +3574,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.14.0"
+version = "2.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
+checksum = "07aa2048142242915a31d35844fb311e0e53fcca590c3a0a40dcf1b841fa09eb"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
@@ -4034,9 +4034,9 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "liter-llm"
-version = "1.18.1"
+version = "1.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5692559794e5e8aa53f43d97aa3c1c22582050c01011cc3eae72c6bd6c0e3429"
+checksum = "b01b44e82f70d3953b7fdf286a421fc670ce7909a29a7e9b1ad357d3510927be"
 dependencies = [
  "ahash 0.8.12",
  "arc-swap",
@@ -4158,11 +4158,11 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.16.4"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
+checksum = "0d317b4b9eb398e6acce275758ec6125535505e7a146fb1a9b8bda2451b0ff4c"
 dependencies = [
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -6239,14 +6239,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "rqrr"
+name = "rqrr-zeroize"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffbe87d9e8db95652c25ded2418150e00b08c2fde09e23ec15896d2c470c6631"
+checksum = "15469072ec2f788a9bfa1f7ea4edca49e45c14d754ce38ae3df5396ccc9f041c"
 dependencies = [
  "g2p",
  "image 0.25.10",
  "lru",
+ "zeroize",
 ]
 
 [[package]]
@@ -7472,7 +7473,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -8183,9 +8184,9 @@ checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
 
 [[package]]
 name = "tree-sitter-language-pack"
-version = "1.15.8"
+version = "1.15.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f18a84db3f2bfe8436cdeb67d01fe8af292077527560752ae688eb7bf9269741"
+checksum = "cb3b27d583142cc8a361b3d16d8185f79040ee0a17dd2aef0c3e963608d11a0f"
 dependencies = [
  "ahash 0.8.12",
  "cc",
@@ -9295,7 +9296,7 @@ dependencies = [
  "rmcp",
  "rmp-serde",
  "roxmltree 0.21.1",
- "rqrr",
+ "rqrr-zeroize",
  "rusqlite",
  "sceptre",
  "scrypt",

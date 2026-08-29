@@ -9,7 +9,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'lib.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ChunkClassificationEnrichmentConfig`, `DocumentExtractorDartCallbacks`, `EmbeddingBackendDartCallbacks`, `OcrBackendDartCallbacks`, `PostProcessorDartCallbacks`, `RendererDartCallbacks`, `RerankerBackendDartCallbacks`, `TokenizerBackendDartCallbacks`, `ValidatorDartCallbacks`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `confidence_semantics`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `page_orientation_handling`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `confidence_semantics`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `page_orientation_handling`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
 
 /// Extract content from a single bytes or URI input.
 Future<ExtractionResult> extract({
@@ -292,6 +292,11 @@ Future<LanguageDetectionConfig> createLanguageDetectionConfigFromJson({
   required String json,
 }) =>
     RustLib.instance.api.crateCreateLanguageDetectionConfigFromJson(json: json);
+
+Future<GeoJsonExtractionConfig> createGeoJsonExtractionConfigFromJson({
+  required String json,
+}) =>
+    RustLib.instance.api.crateCreateGeoJsonExtractionConfigFromJson(json: json);
 
 Future<HtmlOutputConfig> createHtmlOutputConfigFromJson({
   required String json,
@@ -3822,7 +3827,6 @@ class ConversionOptions {
   ///
   /// - [`TierStrategy::Auto`] (default) — automatically choose the best path.
   /// - [`TierStrategy::Tier2`] — always use the Tier-2 DOM-walk path.
-  /// - `TierStrategy::Tier1` — always attempt Tier-1 (testkit only).
   final TierStrategy tierStrategy;
 
   const ConversionOptions({
@@ -4263,8 +4267,7 @@ class CrawlConfig {
   /// SSRF policy for outbound network requests. Default: deny private networks,
   /// allow http/https only, max 5 redirects.
   ///
-  /// `deny_private`, `allowlist` and `max_redirects` are exposed to all language
-  /// bindings. `scheme_allowlist` stays Rust-only — see `SsrfPolicy`.
+  /// All policy fields are exposed to language bindings.
   ///
   /// **wasm32 (including Node.js): `deny_private` does not stop hostname-based
   /// requests.** There is no DNS resolution on this target, so only a literal IP host is
@@ -6768,9 +6771,12 @@ class ExtractedDocument {
   /// Previously stored in `metadata.additional["keywords"]`.
   final List<Keyword>? extractedKeywords;
 
-  /// Document quality score from quality analysis.
+  /// Text cleanliness/readability score from quality analysis.
   ///
-  /// A value between 0.0 and 1.0 indicating the overall text quality.
+  /// A value between 0.0 and 1.0 describing the quality of the text that was
+  /// retained. This is not a completeness or recall score: clean text can score
+  /// highly even when an extractor omitted or rejected other content. Inspect
+  /// `processing_warnings` separately for known degraded or partial extraction.
   /// Previously stored in `metadata.additional["quality_score"]`.
   final double? qualityScore;
 
@@ -6778,7 +6784,8 @@ class ExtractedDocument {
   ///
   /// Captures errors from optional pipeline features (embedding, chunking,
   /// language detection, output formatting) that don't prevent extraction
-  /// but may indicate degraded results.
+  /// but may indicate degraded or incomplete results. These warnings are
+  /// independent of `quality_score`, which assesses only retained text.
   /// Previously stored as individual keys in `metadata.additional`.
   final List<ProcessingWarning> processingWarnings;
 
@@ -7259,6 +7266,9 @@ class ExtractionConfidence {
 /// // let config = ExtractionConfig::from_toml_file("xberg.toml")?;
 /// ```
 class ExtractionConfig {
+  /// Controls whether MIME inference prefers content, a supported extension, or content alone.
+  final MimeDetectionPolicy mimeDetectionPolicy;
+
   /// Enable caching of extraction results
   final bool useCache;
 
@@ -7378,9 +7388,9 @@ class ExtractionConfig {
   ///
   /// Controls maximum archive size, compression ratio, file count, and other
   /// security thresholds to prevent decompression bomb attacks. Also caps
-  /// nesting depth, iteration count, entity / token length, total
-  /// content size, and table cell count for every extraction path that
-  /// ingests user-controlled bytes.
+  /// nesting depth, iteration count, entity / token length, total content size,
+  /// decoded image allocation, and table cell count for every extraction path
+  /// that ingests user-controlled bytes.
   /// When `None`, default limits are used.
   final SecurityLimits? securityLimits;
 
@@ -7528,6 +7538,14 @@ class ExtractionConfig {
   /// auto-detection. See `CsvConfig` for details.
   final CsvConfig? csv;
 
+  /// GeoJSON extraction configuration (None = bounded summary).
+  ///
+  /// By default, GeoJSON coordinates are replaced by aggregate counts and bounds
+  /// so large geometry arrays do not become unbounded rendered output. Set
+  /// `include_full_coordinates`
+  /// explicitly to retain the legacy full-coordinate output.
+  final GeoJsonExtractionConfig? geojson;
+
   /// Concurrency limits for constrained environments (None = use defaults).
   ///
   /// Controls Rayon thread pool size, ONNX Runtime intra-op threads, and the
@@ -7591,6 +7609,7 @@ class ExtractionConfig {
   final bool? qrCodes;
 
   const ExtractionConfig({
+    required this.mimeDetectionPolicy,
     required this.useCache,
     required this.enableQualityProcessing,
     this.ocr,
@@ -7627,6 +7646,7 @@ class ExtractionConfig {
     this.cacheTtlSecs,
     this.email,
     this.csv,
+    this.geojson,
     this.concurrency,
     required this.url,
     required this.maxArchiveDepth,
@@ -7644,6 +7664,7 @@ class ExtractionConfig {
 
   @override
   int get hashCode =>
+      mimeDetectionPolicy.hashCode ^
       useCache.hashCode ^
       enableQualityProcessing.hashCode ^
       ocr.hashCode ^
@@ -7680,6 +7701,7 @@ class ExtractionConfig {
       cacheTtlSecs.hashCode ^
       email.hashCode ^
       csv.hashCode ^
+      geojson.hashCode ^
       concurrency.hashCode ^
       url.hashCode ^
       maxArchiveDepth.hashCode ^
@@ -7699,6 +7721,7 @@ class ExtractionConfig {
       identical(this, other) ||
       other is ExtractionConfig &&
           runtimeType == other.runtimeType &&
+          mimeDetectionPolicy == other.mimeDetectionPolicy &&
           useCache == other.useCache &&
           enableQualityProcessing == other.enableQualityProcessing &&
           ocr == other.ocr &&
@@ -7735,6 +7758,7 @@ class ExtractionConfig {
           cacheTtlSecs == other.cacheTtlSecs &&
           email == other.email &&
           csv == other.csv &&
+          geojson == other.geojson &&
           concurrency == other.concurrency &&
           url == other.url &&
           maxArchiveDepth == other.maxArchiveDepth &&
@@ -8028,6 +8052,9 @@ class FictionBookMetadata {
 /// };
 /// ```
 class FileExtractionConfig {
+  /// Override MIME inference policy for this file.
+  final MimeDetectionPolicy? mimeDetectionPolicy;
+
   /// Override quality post-processing for this file.
   final bool? enableQualityProcessing;
 
@@ -8139,6 +8166,7 @@ class FileExtractionConfig {
   final bool? qrCodes;
 
   const FileExtractionConfig({
+    this.mimeDetectionPolicy,
     this.enableQualityProcessing,
     this.ocr,
     this.forceOcr,
@@ -8177,6 +8205,7 @@ class FileExtractionConfig {
 
   @override
   int get hashCode =>
+      mimeDetectionPolicy.hashCode ^
       enableQualityProcessing.hashCode ^
       ocr.hashCode ^
       forceOcr.hashCode ^
@@ -8217,6 +8246,7 @@ class FileExtractionConfig {
       identical(this, other) ||
       other is FileExtractionConfig &&
           runtimeType == other.runtimeType &&
+          mimeDetectionPolicy == other.mimeDetectionPolicy &&
           enableQualityProcessing == other.enableQualityProcessing &&
           ocr == other.ocr &&
           forceOcr == other.forceOcr &&
@@ -8588,6 +8618,33 @@ enum FormulaModel {
   /// RapidLaTeXOCR (MIT, pix2tex-derived): resizer + encoder + decoder ONNX,
   /// ~180 MB total, downloaded on demand.
   latexOcr,
+}
+
+/// Configuration for GeoJSON extraction.
+///
+/// GeoJSON coordinates can dominate extraction output and duplicate large geometry
+/// payloads in rendered content and metadata. The default therefore emits a bounded
+/// aggregate summary. Set [`Self::include_full_coordinates`] only when callers need
+/// every coordinate in the extracted text and accept output proportional to the input.
+class GeoJsonExtractionConfig {
+  /// Include every coordinate in rendered content and `flattened_fields` metadata.
+  ///
+  /// Defaults to `false`. When false, extraction reports feature, property, geometry,
+  /// position-count, bounds, truncation, and discarded-category metadata and emits a
+  /// `ProcessingWarning` for every GeoJSON input.
+  final bool includeFullCoordinates;
+
+  const GeoJsonExtractionConfig({required this.includeFullCoordinates});
+
+  @override
+  int get hashCode => includeFullCoordinates.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GeoJsonExtractionConfig &&
+          runtimeType == other.runtimeType &&
+          includeFullCoordinates == other.includeFullCoordinates;
 }
 
 /// Runtime options accepted by the `candle-glm-ocr` backend.
@@ -9702,16 +9759,18 @@ class ImagePreprocessingConfig {
   /// Auto-detect and correct image rotation.
   final bool autoRotate;
 
-  /// Correct skew (tilted images).
+  /// Correct skew (tilted images). Must be `false` with `none` or `off` binarization.
   final bool deskew;
 
   /// Remove noise from the image.
   final bool denoise;
 
-  /// Enhance contrast for better text visibility.
+  /// Enhance contrast for better text visibility. With `none` or `off` binarization, this
+  /// applies background normalization and sharpening while preserving grayscale pixels.
   final bool contrastEnhance;
 
-  /// Binarization method: "otsu", "sauvola", "adaptive".
+  /// Binarization method: "none" (alias "off"), "otsu", "sauvola", or "adaptive".
+  /// `deskew` must be `false` when this is `none` or `off`.
   final String binarizationMethod;
 
   /// Invert colors (white text on black → black on white).
@@ -11606,6 +11665,23 @@ class Metadata {
           additional == other.additional;
 }
 
+/// Selects which evidence is authoritative when Xberg infers a MIME type.
+enum MimeDetectionPolicy {
+  /// Prefer a supported content signature, falling back to the filename extension.
+  preferContent,
+
+  /// Trust a supported filename extension without reading content for detection.
+  ///
+  /// # Security
+  ///
+  /// Filenames are attacker-controlled input in uploads and downloads. Use this only for trusted sources;
+  /// otherwise a misleading extension can route arbitrary content to the wrong extractor.
+  trustExtension,
+
+  /// Ignore the filename extension and require content-based detection.
+  contentOnly,
+}
+
 /// Combined paths to all models needed for OCR (backward compatibility).
 class ModelPaths {
   /// Exact path to the detection ONNX model in the Hugging Face snapshot.
@@ -12703,8 +12779,8 @@ class OcrPoint {
 
 /// Quality thresholds for OCR fallback decisions and pipeline quality gating.
 ///
-/// All fields default to the values that match the previous hardcoded behavior,
-/// so `OcrQualityThresholds::default()` preserves existing semantics exactly.
+/// Fields default to conservative extraction behavior. Suspected OCR recognition noise is
+/// reported but retained unless destructive filtering is explicitly enabled.
 class OcrQualityThresholds {
   /// Minimum total non-whitespace characters to consider text substantive.
   final PlatformInt64 minTotalNonWhitespace;
@@ -12732,7 +12808,7 @@ class OcrQualityThresholds {
   final double criticalFragmentedWordRatio;
 
   /// Maximum fraction of short (1-2 char) words an *OCR result* may carry before the page
-  /// is rejected as recognition noise rather than accepted as content.
+  /// is reported as suspected recognition noise.
   ///
   /// This is a different decision, and a different operating point, from
   /// [`Self::max_fragmented_word_ratio`] / [`Self::critical_fragmented_word_ratio`]: those
@@ -12744,12 +12820,12 @@ class OcrQualityThresholds {
   ///
   /// Measured over the 16 pages of a recorded municipal ordinance (13 prose pages, 3 scanned
   /// survey drawings): prose ran 0.04-0.28, the drawings 0.42-0.47. The default sits in that
-  /// gap with margin on both sides. Raise it to keep more marginal text, lower it to be
-  /// stricter — but note the cost is asymmetric, since a false positive deletes real content
-  /// while a false negative only leaves noise in place.
+  /// gap with margin on both sides. By default, crossing the threshold emits a processing
+  /// warning but retains the recognized text. Set [`Self::discard_suspected_ocr_noise`] to
+  /// `true` to restore destructive filtering.
   final double maxOcrOutputFragmentedWordRatio;
 
-  /// Minimum mean OCR confidence (0-100) a page must reach for its text to be accepted.
+  /// Minimum mean OCR confidence (0-100) below which a page is reported as suspected noise.
   ///
   /// This is the engine's own uncertainty about what it read, and it is a far sharper
   /// instrument than any statistic derived from the output text. Measured per page over a
@@ -12764,12 +12840,13 @@ class OcrQualityThresholds {
   ///
   /// A backend that reports no confidence (no `mean_text_conf` in its result metadata)
   /// skips this check entirely and falls back to
-  /// [`Self::max_ocr_output_fragmented_word_ratio`]. Set to 0.0 to disable.
+  /// [`Self::max_ocr_output_fragmented_word_ratio`]. By default, the signal emits a warning
+  /// without discarding content. Set to 0.0 to disable the signal.
   final double minOcrMeanConfidence;
 
-  /// Minimum word count before [`Self::max_ocr_output_fragmented_word_ratio`] may reject a
+  /// Minimum word count before [`Self::max_ocr_output_fragmented_word_ratio`] may report a
   /// page. Short pages (a signature block, an exhibit title) are legitimately dominated by
-  /// short words, so the ratio is not meaningful on them and the veto stays disabled.
+  /// short words, so the ratio is not meaningful on them and the signal stays disabled.
   final PlatformInt64 minWordsForOcrOutputCheck;
 
   /// Maximum fraction of a Tesseract page's dictionary-checkable words that
@@ -12785,10 +12862,14 @@ class OcrQualityThresholds {
   /// ordinance's prose vs. drawing pages), this ratio has not yet had a page-level
   /// measurement run over a labeled corpus. The default therefore disables the check
   /// entirely (`1.01`, above the `[0.0, 1.0]` range a ratio can reach) rather than guess an
-  /// operating point. Do not lower this without running that measurement first — the cost
-  /// of a wrong threshold here is the same as for the fragmented-word-ratio veto: a false
-  /// positive deletes real content, a false negative only leaves noise in place.
+  /// operating point. Do not lower this without running that measurement first.
   final double maxOcrOutputDictInvalidWordRatio;
+
+  /// Discard non-empty OCR text when any configured recognition-noise signal fires.
+  ///
+  /// Defaults to `false`: suspected noise is retained and surfaced through
+  /// `processing_warnings`. Set to `true` to preserve the legacy destructive behavior.
+  final bool discardSuspectedOcrNoise;
 
   /// Minimum average word length. Below this with enough words indicates garbled extraction.
   final double minAvgWordLength;
@@ -12852,6 +12933,7 @@ class OcrQualityThresholds {
     required this.minOcrMeanConfidence,
     required this.minWordsForOcrOutputCheck,
     required this.maxOcrOutputDictInvalidWordRatio,
+    required this.discardSuspectedOcrNoise,
     required this.minAvgWordLength,
     required this.minWordsForAvgLengthCheck,
     required this.minConsecutiveRepeatRatio,
@@ -12879,6 +12961,7 @@ class OcrQualityThresholds {
       minOcrMeanConfidence.hashCode ^
       minWordsForOcrOutputCheck.hashCode ^
       maxOcrOutputDictInvalidWordRatio.hashCode ^
+      discardSuspectedOcrNoise.hashCode ^
       minAvgWordLength.hashCode ^
       minWordsForAvgLengthCheck.hashCode ^
       minConsecutiveRepeatRatio.hashCode ^
@@ -12910,6 +12993,7 @@ class OcrQualityThresholds {
           minWordsForOcrOutputCheck == other.minWordsForOcrOutputCheck &&
           maxOcrOutputDictInvalidWordRatio ==
               other.maxOcrOutputDictInvalidWordRatio &&
+          discardSuspectedOcrNoise == other.discardSuspectedOcrNoise &&
           minAvgWordLength == other.minAvgWordLength &&
           minWordsForAvgLengthCheck == other.minWordsForAvgLengthCheck &&
           minConsecutiveRepeatRatio == other.minConsecutiveRepeatRatio &&
@@ -15234,7 +15318,8 @@ enum ProcessingStage {
 /// A non-fatal warning from a processing pipeline stage.
 ///
 /// Captures errors from optional features that don't prevent extraction
-/// but may indicate degraded results.
+/// but may indicate degraded or incomplete results. Inspect these independently
+/// from `ExtractedDocument::quality_score`, which assesses retained text only.
 class ProcessingWarning {
   /// The pipeline stage or feature that produced this warning
   /// (e.g., "embedding", "chunking", "language_detection", "output_format").
@@ -16208,7 +16293,7 @@ class SecurityLimits {
   /// caught by `max_content_size` instead.
   final PlatformInt64 maxEntityLength;
 
-  /// Maximum string growth per document (100 MB)
+  /// Maximum string growth and decoded image allocation per document (100 MB)
   final PlatformInt64 maxContentSize;
 
   /// Maximum iterations per operation
@@ -16217,7 +16302,10 @@ class SecurityLimits {
   /// Maximum XML depth (1024 levels)
   final PlatformInt64 maxXmlDepth;
 
-  /// Maximum cells per table (100,000)
+  /// Maximum aggregate table cells per document (100,000).
+  ///
+  /// Raise this for trusted large tabular inputs. Higher values permit
+  /// proportionally more parsing work and output allocation.
   final PlatformInt64 maxTableCells;
 
   /// Maximum number of pages (or slides, or frames) in a single document.
@@ -16592,15 +16680,24 @@ class SsrfPolicy {
   /// Maximum number of HTTP redirects to follow during validation.
   final PlatformInt64 maxRedirects;
 
+  /// Allowed URI schemes. Default: `["http", "https"]`.
+  ///
+  /// Only `http` and `https` are supported. An empty list denies every URL.
+  final List<String> schemeAllowlist;
+
   const SsrfPolicy({
     required this.denyPrivate,
     required this.allowlist,
     required this.maxRedirects,
+    required this.schemeAllowlist,
   });
 
   @override
   int get hashCode =>
-      denyPrivate.hashCode ^ allowlist.hashCode ^ maxRedirects.hashCode;
+      denyPrivate.hashCode ^
+      allowlist.hashCode ^
+      maxRedirects.hashCode ^
+      schemeAllowlist.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -16609,7 +16706,8 @@ class SsrfPolicy {
           runtimeType == other.runtimeType &&
           denyPrivate == other.denyPrivate &&
           allowlist == other.allowlist &&
-          maxRedirects == other.maxRedirects;
+          maxRedirects == other.maxRedirects &&
+          schemeAllowlist == other.schemeAllowlist;
 }
 
 /// Structured data (Schema.org, microdata, RDFa) block.
@@ -17507,10 +17605,6 @@ enum TierStrategy {
 
   /// Always use the Tier-2 (`tl::parse` + walk) path, skipping Tier-1.
   tier2,
-
-  /// Force the Tier-1 byte scanner; if it bails, fall back to Tier-2.
-  /// Testkit-only; not stable API.
-  tier1,
 }
 
 /// Configuration for the token-reduction pipeline.
