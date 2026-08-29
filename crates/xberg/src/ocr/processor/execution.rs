@@ -400,21 +400,23 @@ const _: () = assert!(MIN_ORIENTATION_CONFIDENCE == crate::doc_orientation::MIN_
 const RAW_IMAGE_SOURCE_DPI: i32 = 72;
 /// Source resolution retained when explicit DPI normalization fails.
 const PREPROCESSING_FALLBACK_SOURCE_DPI: i32 = 300;
-/// Pixel stride used to classify whether an image resembles a clean document page.
+/// Pixel stride used by phase-sensitive classifier regression fixtures.
+#[cfg(test)]
 const DEFAULT_PREPROCESSING_SAMPLE_STRIDE: usize = 4;
 /// Minimum normalized mean luminance for automatic document-page preprocessing.
 const CLEAN_PAGE_MEAN_LUMINANCE_THRESHOLD: f64 = 0.90;
 /// Normalized luminance at which a sampled pixel counts as near-white.
 const CLEAN_PAGE_LIGHT_PIXEL_THRESHOLD: f64 = 0.90;
+/// Minimum summed RGB channel value equivalent to the light-pixel threshold.
+const CLEAN_PAGE_LIGHT_CHANNEL_SUM_THRESHOLD: u16 =
+    (CLEAN_PAGE_LIGHT_PIXEL_THRESHOLD * RGB_CHANNEL_MAX * RGB_CHANNEL_COUNT as f64).ceil() as u16;
 /// Minimum near-white sample fraction for automatic document-page preprocessing.
 const CLEAN_PAGE_LIGHT_PIXEL_FRACTION_THRESHOLD: f64 = 0.80;
-/// Minimum separation between sampled background and foreground modes. ~keep
+/// Minimum separation between background and foreground luminance modes. ~keep
 const CLEAN_PAGE_MIN_FOREGROUND_CONTRAST: f64 = 0.20;
-/// Upper luminance bound for a dark text mode that remains distinct from bright fills. ~keep
-const CLEAN_PAGE_DARK_PIXEL_THRESHOLD: f64 = 0.50;
-/// Minimum sampled fraction required before dark pixels count as significant rather than noise. ~keep
+/// Minimum image fraction required before a lower foreground mode counts as significant. ~keep
 const CLEAN_PAGE_DARK_PIXEL_FRACTION_THRESHOLD: f64 = 0.005;
-/// Minimum sampled population required for the dark-pixel override on small rasters. ~keep
+/// Minimum population required for the lower foreground mode on small rasters. ~keep
 const CLEAN_PAGE_DARK_PIXEL_COUNT_THRESHOLD: usize = 8;
 /// Maximum value of an 8-bit RGB channel.
 const RGB_CHANNEL_MAX: f64 = u8::MAX as f64;
@@ -448,7 +450,7 @@ fn prepare_ocr_image(
     known_source_dpi: Option<f64>,
 ) -> PreparedOcrImage {
     let Some(preprocessing) = preprocessing else {
-        if should_apply_default_preprocessing(&rgb_data) {
+        if should_apply_default_preprocessing(&rgb_data, width, height) {
             return prepare_preprocessed_ocr_image(
                 rgb_data,
                 width,
@@ -484,39 +486,40 @@ fn prepare_ocr_image(
 }
 
 /// Classify bright, page-like RGB images that benefit from the default OCR preprocessing path.
-fn should_apply_default_preprocessing(rgb_data: &[u8]) -> bool {
-    let mut luminance_sum = 0.0;
-    let mut light_luminance_sum = 0.0;
-    let mut foreground_luminance_sum = 0.0;
-    let mut light_pixels = 0usize;
-    let mut foreground_pixels = 0usize;
-    let mut dark_pixels = 0usize;
-    let mut sample_count = 0usize;
-
-    for pixel in rgb_data
-        .chunks_exact(RGB_CHANNEL_COUNT)
-        .step_by(DEFAULT_PREPROCESSING_SAMPLE_STRIDE)
-    {
-        let luminance =
-            pixel.iter().map(|channel| f64::from(*channel)).sum::<f64>() / (RGB_CHANNEL_MAX * RGB_CHANNEL_COUNT as f64);
-        luminance_sum += luminance;
-        if luminance >= CLEAN_PAGE_LIGHT_PIXEL_THRESHOLD {
-            light_luminance_sum += luminance;
-            light_pixels += 1;
-        } else {
-            foreground_luminance_sum += luminance;
-            foreground_pixels += 1;
-        }
-        dark_pixels += usize::from(luminance <= CLEAN_PAGE_DARK_PIXEL_THRESHOLD);
-        sample_count += 1;
-    }
-
-    if sample_count == 0 {
+fn should_apply_default_preprocessing(rgb_data: &[u8], width: u32, height: u32) -> bool {
+    let Some(pixel_count) = (width as usize).checked_mul(height as usize) else {
+        return false;
+    };
+    let Some(expected_len) = pixel_count.checked_mul(RGB_CHANNEL_COUNT) else {
+        return false;
+    };
+    if pixel_count == 0 || rgb_data.len() != expected_len {
         return false;
     }
-    let sample_count = sample_count as f64;
-    if luminance_sum / sample_count < CLEAN_PAGE_MEAN_LUMINANCE_THRESHOLD
-        || light_pixels as f64 / sample_count < CLEAN_PAGE_LIGHT_PIXEL_FRACTION_THRESHOLD
+
+    let mut channel_sum = 0u128;
+    let mut light_channel_sum = 0u128;
+    let mut foreground_channel_sum = 0u128;
+    let mut light_pixels = 0usize;
+    let mut foreground_pixels = 0usize;
+    let mut foreground_histogram = [0usize; 256];
+
+    for pixel in rgb_data.chunks_exact(RGB_CHANNEL_COUNT) {
+        let pixel_channel_sum = u16::from(pixel[0]) + u16::from(pixel[1]) + u16::from(pixel[2]);
+        channel_sum += u128::from(pixel_channel_sum);
+        if pixel_channel_sum >= CLEAN_PAGE_LIGHT_CHANNEL_SUM_THRESHOLD {
+            light_channel_sum += u128::from(pixel_channel_sum);
+            light_pixels += 1;
+        } else {
+            foreground_channel_sum += u128::from(pixel_channel_sum);
+            foreground_pixels += 1;
+            foreground_histogram[((pixel_channel_sum + 1) / RGB_CHANNEL_COUNT as u16) as usize] += 1;
+        }
+    }
+    let pixel_count_f64 = pixel_count as f64;
+    let max_pixel_channel_sum = RGB_CHANNEL_MAX * RGB_CHANNEL_COUNT as f64;
+    if channel_sum as f64 / (pixel_count_f64 * max_pixel_channel_sum) < CLEAN_PAGE_MEAN_LUMINANCE_THRESHOLD
+        || light_pixels as f64 / pixel_count_f64 < CLEAN_PAGE_LIGHT_PIXEL_FRACTION_THRESHOLD
     {
         return false;
     }
@@ -524,11 +527,157 @@ fn should_apply_default_preprocessing(rgb_data: &[u8]) -> bool {
         return true;
     }
 
-    let background_luminance = light_luminance_sum / light_pixels as f64;
-    let foreground_luminance = foreground_luminance_sum / foreground_pixels as f64;
-    let has_significant_dark_population = dark_pixels >= CLEAN_PAGE_DARK_PIXEL_COUNT_THRESHOLD
-        && dark_pixels as f64 / sample_count >= CLEAN_PAGE_DARK_PIXEL_FRACTION_THRESHOLD;
-    background_luminance - foreground_luminance >= CLEAN_PAGE_MIN_FOREGROUND_CONTRAST || has_significant_dark_population
+    let background_luminance = light_channel_sum as f64 / (light_pixels as f64 * max_pixel_channel_sum);
+    let foreground_luminance = foreground_channel_sum as f64 / (foreground_pixels as f64 * max_pixel_channel_sum);
+    if background_luminance - foreground_luminance >= CLEAN_PAGE_MIN_FOREGROUND_CONTRAST {
+        return true;
+    }
+
+    let Some((lower_mode_max, lower_mode_pixels)) = foreground_lower_mode(&foreground_histogram) else {
+        return false;
+    };
+    lower_mode_pixels >= CLEAN_PAGE_DARK_PIXEL_COUNT_THRESHOLD
+        && lower_mode_pixels as f64 / pixel_count_f64 >= CLEAN_PAGE_DARK_PIXEL_FRACTION_THRESHOLD
+        && lower_mode_has_text_structure(
+            rgb_data,
+            width as usize,
+            height as usize,
+            lower_mode_max,
+            lower_mode_pixels,
+        )
+}
+
+fn foreground_lower_mode(histogram: &[usize; 256]) -> Option<(u8, usize)> {
+    let total_count: usize = histogram.iter().sum();
+    let total_weight: u128 = histogram
+        .iter()
+        .enumerate()
+        .map(|(value, count)| value as u128 * *count as u128)
+        .sum();
+    let mut lower_count = 0usize;
+    let mut lower_weight = 0u128;
+    let mut best: Option<(f64, u8, usize, f64, f64)> = None;
+
+    for (threshold, &count) in histogram.iter().enumerate().take(u8::MAX as usize) {
+        lower_count += count;
+        lower_weight += threshold as u128 * count as u128;
+        let upper_count = total_count - lower_count;
+        if lower_count == 0 || upper_count == 0 {
+            continue;
+        }
+        let lower_mean = lower_weight as f64 / lower_count as f64;
+        let upper_mean = (total_weight - lower_weight) as f64 / upper_count as f64;
+        let separation = upper_mean - lower_mean;
+        let between_class_variance = lower_count as f64 * upper_count as f64 * separation * separation;
+        if best
+            .as_ref()
+            .is_none_or(|(variance, ..)| between_class_variance > *variance)
+        {
+            best = Some((
+                between_class_variance,
+                threshold as u8,
+                lower_count,
+                lower_mean,
+                upper_mean,
+            ));
+        }
+    }
+
+    let (_, threshold, lower_count, lower_mean, upper_mean) = best?;
+    ((upper_mean - lower_mean) / RGB_CHANNEL_MAX >= CLEAN_PAGE_MIN_FOREGROUND_CONTRAST)
+        .then_some((threshold, lower_count))
+}
+
+fn lower_mode_has_text_structure(
+    rgb_data: &[u8],
+    width: usize,
+    height: usize,
+    lower_mode_max: u8,
+    lower_mode_pixels: usize,
+) -> bool {
+    let Some(pixel_count) = width.checked_mul(height) else {
+        return false;
+    };
+    let lower_mode_mask: Vec<bool> = rgb_data
+        .chunks_exact(RGB_CHANNEL_COUNT)
+        .map(|pixel| {
+            let channel_sum = u16::from(pixel[0]) + u16::from(pixel[1]) + u16::from(pixel[2]);
+            (channel_sum + 1) / RGB_CHANNEL_COUNT as u16 <= u16::from(lower_mode_max)
+        })
+        .collect();
+    if lower_mode_mask.len() != pixel_count {
+        return false;
+    }
+
+    let mut visited = vec![false; pixel_count];
+    let mut component_stack = Vec::new();
+    let mut structured_pixels = 0usize;
+    for start in 0..pixel_count {
+        if !lower_mode_mask[start] || visited[start] {
+            continue;
+        }
+        let component_pixels = structured_component_size(
+            &lower_mode_mask,
+            &mut visited,
+            &mut component_stack,
+            start,
+            width,
+            height,
+        );
+        let Some(total) = structured_pixels.checked_add(component_pixels) else {
+            return false;
+        };
+        structured_pixels = total;
+    }
+    structured_pixels >= lower_mode_pixels.div_ceil(2)
+}
+
+fn structured_component_size(
+    mask: &[bool],
+    visited: &mut [bool],
+    stack: &mut Vec<usize>,
+    start: usize,
+    width: usize,
+    height: usize,
+) -> usize {
+    stack.clear();
+    stack.push(start);
+    visited[start] = true;
+    let (mut min_x, mut max_x) = (start % width, start % width);
+    let (mut min_y, mut max_y) = (start / width, start / width);
+    let mut size = 0usize;
+
+    while let Some(index) = stack.pop() {
+        let Some(next_size) = size.checked_add(1) else {
+            return 0;
+        };
+        size = next_size;
+        let x = index % width;
+        let y = index / width;
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+        let left = x.checked_sub(1).and_then(|_| index.checked_sub(1));
+        let right = x
+            .checked_add(1)
+            .filter(|next_x| *next_x < width)
+            .and_then(|_| index.checked_add(1));
+        let above = y.checked_sub(1).and_then(|_| index.checked_sub(width));
+        let below = y
+            .checked_add(1)
+            .filter(|next_y| *next_y < height)
+            .and_then(|_| index.checked_add(width));
+        let neighbors = [left, right, above, below];
+        for neighbor in neighbors.into_iter().flatten() {
+            if mask[neighbor] && !visited[neighbor] {
+                visited[neighbor] = true;
+                stack.push(neighbor);
+            }
+        }
+    }
+
+    if min_x < max_x && min_y < max_y { size } else { 0 }
 }
 
 fn prepare_preprocessed_ocr_image(
@@ -2392,136 +2541,222 @@ mod tests {
         const SAMPLE_PIXEL_COUNT: usize = 16;
         let rgb_data = vec![u8::MAX; SAMPLE_PIXEL_COUNT * RGB_CHANNEL_COUNT];
 
-        assert!(should_apply_default_preprocessing(&rgb_data));
+        assert!(should_apply_default_preprocessing(
+            &rgb_data,
+            SAMPLE_PIXEL_COUNT as u32,
+            1
+        ));
     }
 
-    #[test]
-    fn should_skip_default_otsu_for_bright_low_contrast_blue_text() {
-        const WIDTH: u32 = 80;
-        const HEIGHT: u32 = 20;
-        const FOREGROUND_WIDTH: u32 = 4;
-        const LOW_CONTRAST_BLUE: [u8; RGB_CHANNEL_COUNT] = [200, 220, 245];
-        let mut rgb_data = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT);
-        for _y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                let pixel = if x < FOREGROUND_WIDTH {
-                    LOW_CONTRAST_BLUE
+    const CONTRAST_FIXTURE_WIDTH: u32 = 512;
+    const CONTRAST_FIXTURE_HEIGHT: u32 = 128;
+    const CONTRAST_FIXTURE_FILL_WIDTH: u32 = 80;
+    const PALE_TEXT: [u8; RGB_CHANNEL_COUNT] = [200, 220, 245];
+    const DARK_TEXT: [u8; RGB_CHANNEL_COUNT] = [30, 30, 30];
+    const BRIGHT_BLUE_FILL: [u8; RGB_CHANNEL_COUNT] = [210, 220, 240];
+
+    fn glyph_mask(x: u32, y: u32, offset: u32) -> bool {
+        const TOP: u32 = 48;
+        const HEIGHT: u32 = 24;
+        const WIDTH: u32 = 20;
+        const STROKE: u32 = 2;
+        for left in [4 + offset, 30 + offset, 56 + offset] {
+            let local_x = x.checked_sub(left);
+            let local_y = y.checked_sub(TOP);
+            if let (Some(local_x), Some(local_y)) = (local_x, local_y)
+                && local_x < WIDTH
+                && local_y < HEIGHT
+                && (local_x < STROKE
+                    || local_x >= WIDTH - STROKE
+                    || (HEIGHT / 2..HEIGHT / 2 + STROKE).contains(&local_y))
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn contrast_fixture(text: [u8; RGB_CHANNEL_COUNT], fill: bool, offset: u32) -> (Vec<u8>, usize) {
+        let mut rgb_data =
+            Vec::with_capacity(CONTRAST_FIXTURE_WIDTH as usize * CONTRAST_FIXTURE_HEIGHT as usize * RGB_CHANNEL_COUNT);
+        let mut glyph_pixels = 0usize;
+        for y in 0..CONTRAST_FIXTURE_HEIGHT {
+            for x in 0..CONTRAST_FIXTURE_WIDTH {
+                let pixel = if glyph_mask(x, y, offset) {
+                    glyph_pixels += 1;
+                    text
+                } else if fill && x < CONTRAST_FIXTURE_FILL_WIDTH {
+                    BRIGHT_BLUE_FILL
                 } else {
                     [u8::MAX; RGB_CHANNEL_COUNT]
                 };
                 rgb_data.extend_from_slice(&pixel);
             }
         }
+        (rgb_data, glyph_pixels)
+    }
 
-        let prepared = prepare_ocr_image(rgb_data.clone(), WIDTH, HEIGHT, None, None, false, None);
+    fn aggregate_foreground_contrast(rgb_data: &[u8]) -> f64 {
+        let mut background_sum = 0.0;
+        let mut background_count = 0usize;
+        let mut foreground_sum = 0.0;
+        let mut foreground_count = 0usize;
+        for pixel in rgb_data.chunks_exact(RGB_CHANNEL_COUNT) {
+            let luminance = pixel.iter().map(|channel| f64::from(*channel)).sum::<f64>()
+                / (RGB_CHANNEL_MAX * RGB_CHANNEL_COUNT as f64);
+            if luminance >= CLEAN_PAGE_LIGHT_PIXEL_THRESHOLD {
+                background_sum += luminance;
+                background_count += 1;
+            } else {
+                foreground_sum += luminance;
+                foreground_count += 1;
+            }
+        }
+        background_sum / background_count as f64 - foreground_sum / foreground_count as f64
+    }
 
-        assert!(!prepared.apply_pix_preprocessing);
+    #[test]
+    fn should_preserve_pale_glyphs_without_implicit_otsu() {
+        let (rgb_data, glyph_pixels) = contrast_fixture(PALE_TEXT, false, 0);
         assert_eq!(
-            prepared.data, rgb_data,
-            "implicit preprocessing must preserve low-contrast RGB pixels"
+            glyph_pixels, 384,
+            "fixture must contain the intended nonempty glyph mask"
         );
 
-        let explicit = prepare_ocr_image(
-            rgb_data,
-            WIDTH,
-            HEIGHT,
-            Some(&crate::types::ImagePreprocessingConfig::default()),
+        let prepared = prepare_ocr_image(
+            rgb_data.clone(),
+            CONTRAST_FIXTURE_WIDTH,
+            CONTRAST_FIXTURE_HEIGHT,
+            None,
             None,
             false,
+            Some(300.0),
+        );
+
+        assert!(!prepared.apply_pix_preprocessing);
+        assert!(prepared.preprocessing.is_none());
+        assert!(prepared.image_preprocessing.is_none());
+        assert_eq!(
+            prepared.data, rgb_data,
+            "implicit preprocessing must preserve pale glyph pixels"
+        );
+    }
+
+    #[test]
+    fn should_apply_implicit_otsu_to_dark_glyphs_over_bright_fill_at_every_sample_phase() {
+        for offset in 0..DEFAULT_PREPROCESSING_SAMPLE_STRIDE as u32 {
+            let (rgb_data, glyph_pixels) = contrast_fixture(DARK_TEXT, true, offset);
+            assert_eq!(glyph_pixels, 384, "offset {offset} changed the glyph population");
+            assert!(
+                aggregate_foreground_contrast(&rgb_data) < CLEAN_PAGE_MIN_FOREGROUND_CONTRAST,
+                "fixture must fail the legacy aggregate-contrast gate at offset {offset}"
+            );
+
+            let prepared = prepare_ocr_image(
+                rgb_data,
+                CONTRAST_FIXTURE_WIDTH,
+                CONTRAST_FIXTURE_HEIGHT,
+                None,
+                None,
+                false,
+                Some(300.0),
+            );
+
+            assert!(
+                prepared.apply_pix_preprocessing,
+                "dark glyphs were missed at offset {offset}"
+            );
+            assert_eq!(prepared.width, CONTRAST_FIXTURE_WIDTH);
+            assert_eq!(prepared.height, CONTRAST_FIXTURE_HEIGHT);
+            assert_eq!(
+                prepared
+                    .preprocessing
+                    .as_ref()
+                    .map(|config| config.binarization_method.as_str()),
+                Some("otsu")
+            );
+        }
+    }
+
+    #[test]
+    fn should_reject_scattered_speckles_with_the_same_dark_pixel_count_as_glyphs() {
+        let (mut rgb_data, glyph_pixels) = contrast_fixture(BRIGHT_BLUE_FILL, true, 0);
+        let mut speckles = 0usize;
+        'rows: for y in (0..CONTRAST_FIXTURE_HEIGHT).step_by(2) {
+            for x in (0..CONTRAST_FIXTURE_WIDTH).step_by(DEFAULT_PREPROCESSING_SAMPLE_STRIDE) {
+                let pixel_index = (y as usize * CONTRAST_FIXTURE_WIDTH as usize + x as usize) * RGB_CHANNEL_COUNT;
+                rgb_data[pixel_index..pixel_index + RGB_CHANNEL_COUNT].copy_from_slice(&DARK_TEXT);
+                speckles += 1;
+                if speckles == glyph_pixels {
+                    break 'rows;
+                }
+            }
+        }
+        assert_eq!(
+            speckles, glyph_pixels,
+            "control must have the same dark-pixel population"
+        );
+
+        let prepared = prepare_ocr_image(
+            rgb_data.clone(),
+            CONTRAST_FIXTURE_WIDTH,
+            CONTRAST_FIXTURE_HEIGHT,
             None,
+            None,
+            false,
+            Some(300.0),
         );
         assert!(
-            explicit.apply_pix_preprocessing,
-            "explicit Otsu preprocessing must remain enabled"
+            !prepared.apply_pix_preprocessing,
+            "isolated speckles are not text structure"
         );
+        assert_eq!(prepared.data, rgb_data);
     }
 
     #[test]
-    fn should_select_default_otsu_for_dark_text_over_bright_color_fill() {
-        const WIDTH: u32 = 400;
-        const HEIGHT: u32 = 20;
-        const BRIGHT_FILL_WIDTH: u32 = 64;
-        const GLYPH_STROKE_WIDTH: u32 = 4;
-        const GLYPH_BAR_WIDTH: u32 = 40;
-        const GLYPH_TOP: u32 = 4;
-        const GLYPH_BOTTOM: u32 = 15;
-        const DARK_TEXT: [u8; RGB_CHANNEL_COUNT] = [30, 30, 30];
-        const BRIGHT_BLUE_FILL: [u8; RGB_CHANNEL_COUNT] = [210, 220, 240];
-        let mut rgb_data = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT);
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                let is_glyph_stroke = (x < GLYPH_STROKE_WIDTH && (GLYPH_TOP..=GLYPH_BOTTOM).contains(&y))
-                    || (x < GLYPH_BAR_WIDTH && (y == GLYPH_TOP || y == GLYPH_BOTTOM));
-                let pixel = if is_glyph_stroke {
-                    DARK_TEXT
-                } else if x < BRIGHT_FILL_WIDTH {
-                    BRIGHT_BLUE_FILL
-                } else {
-                    [u8::MAX; RGB_CHANNEL_COUNT]
-                };
-                rgb_data.extend_from_slice(&pixel);
+    fn should_reject_a_small_defect_among_equal_count_scattered_speckles() {
+        const DEFECT_PIXELS: usize = 4;
+        let (mut rgb_data, glyph_pixels) = contrast_fixture(BRIGHT_BLUE_FILL, true, 0);
+        for y in 0..2 {
+            for x in 0..2 {
+                let pixel_index = (y * CONTRAST_FIXTURE_WIDTH as usize + x) * RGB_CHANNEL_COUNT;
+                rgb_data[pixel_index..pixel_index + RGB_CHANNEL_COUNT].copy_from_slice(&DARK_TEXT);
             }
         }
 
-        assert!(
-            should_apply_default_preprocessing(&rgb_data),
-            "a distinct dark text population must not be hidden by a larger bright fill"
+        let mut speckles = 0usize;
+        'rows: for y in (4..CONTRAST_FIXTURE_HEIGHT).step_by(2) {
+            for x in (4..CONTRAST_FIXTURE_WIDTH).step_by(DEFAULT_PREPROCESSING_SAMPLE_STRIDE) {
+                let pixel_index = (y as usize * CONTRAST_FIXTURE_WIDTH as usize + x as usize) * RGB_CHANNEL_COUNT;
+                rgb_data[pixel_index..pixel_index + RGB_CHANNEL_COUNT].copy_from_slice(&DARK_TEXT);
+                speckles += 1;
+                if speckles + DEFECT_PIXELS == glyph_pixels {
+                    break 'rows;
+                }
+            }
+        }
+        assert_eq!(speckles + DEFECT_PIXELS, glyph_pixels);
+
+        let prepared = prepare_ocr_image(
+            rgb_data.clone(),
+            CONTRAST_FIXTURE_WIDTH,
+            CONTRAST_FIXTURE_HEIGHT,
+            None,
+            None,
+            false,
+            Some(300.0),
         );
+        assert!(
+            !prepared.apply_pix_preprocessing,
+            "a small connected defect does not make scattered noise text-like"
+        );
+        assert_eq!(prepared.data, rgb_data);
     }
 
     #[test]
-    fn should_ignore_isolated_dark_noise_over_bright_color_fill() {
-        const WIDTH: u32 = 100;
-        const HEIGHT: u32 = 20;
-        const BRIGHT_FILL_WIDTH: u32 = 20;
-        const DARK_NOISE: [u8; RGB_CHANNEL_COUNT] = [30, 30, 30];
-        const BRIGHT_BLUE_FILL: [u8; RGB_CHANNEL_COUNT] = [210, 220, 240];
-        let mut rgb_data = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT);
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                let pixel = if x == 0 && y == 0 {
-                    DARK_NOISE
-                } else if x < BRIGHT_FILL_WIDTH {
-                    BRIGHT_BLUE_FILL
-                } else {
-                    [u8::MAX; RGB_CHANNEL_COUNT]
-                };
-                rgb_data.extend_from_slice(&pixel);
-            }
-        }
-
-        assert!(
-            !should_apply_default_preprocessing(&rgb_data),
-            "one dark sample must not turn a bright low-contrast raster into a document page"
-        );
-    }
-
-    #[test]
-    fn should_ignore_four_scattered_dark_speckles_over_bright_color_fill() {
-        const WIDTH: u32 = 400;
-        const HEIGHT: u32 = 16;
-        const BRIGHT_FILL_WIDTH: u32 = 64;
-        const DARK_NOISE: [u8; RGB_CHANNEL_COUNT] = [30, 30, 30];
-        const BRIGHT_BLUE_FILL: [u8; RGB_CHANNEL_COUNT] = [210, 220, 240];
-        const DARK_SPECKLES: [(u32, u32); 4] = [(0, 0), (100, 4), (200, 8), (300, 12)];
-        let mut rgb_data = Vec::with_capacity(WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT);
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                let pixel = if DARK_SPECKLES.contains(&(x, y)) {
-                    DARK_NOISE
-                } else if x < BRIGHT_FILL_WIDTH {
-                    BRIGHT_BLUE_FILL
-                } else {
-                    [u8::MAX; RGB_CHANNEL_COUNT]
-                };
-                rgb_data.extend_from_slice(&pixel);
-            }
-        }
-
-        assert!(
-            !should_apply_default_preprocessing(&rgb_data),
-            "four isolated dark samples must not be treated as a coherent text population"
-        );
+    fn should_reject_malformed_or_overflowing_rgb_dimensions() {
+        assert!(!should_apply_default_preprocessing(&[u8::MAX; 3], 2, 2));
+        assert!(!should_apply_default_preprocessing(&[], u32::MAX, u32::MAX));
     }
 
     #[test]
@@ -2541,7 +2776,7 @@ mod tests {
             }
         }
 
-        assert!(should_apply_default_preprocessing(&rgb_data));
+        assert!(should_apply_default_preprocessing(&rgb_data, WIDTH, HEIGHT));
     }
 
     #[test]
@@ -2566,7 +2801,11 @@ mod tests {
         const SHADOWED_CHANNEL_VALUE: u8 = 128;
         let rgb_data = vec![SHADOWED_CHANNEL_VALUE; SAMPLE_PIXEL_COUNT * RGB_CHANNEL_COUNT];
 
-        assert!(!should_apply_default_preprocessing(&rgb_data));
+        assert!(!should_apply_default_preprocessing(
+            &rgb_data,
+            SAMPLE_PIXEL_COUNT as u32,
+            1
+        ));
     }
 
     #[test]

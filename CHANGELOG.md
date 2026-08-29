@@ -151,7 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Sauvola binarization settings transform the OCR raster on native and WebAssembly backends;
   `none` (with `off` as an alias) preserves unthresholded grayscale when deskew is disabled,
   sparse receipt-image fallback and faint colored text no longer lose content to global
-  thresholding, dark labels over bright map fills still receive Otsu preprocessing, and
+  thresholding, dark labels over bright map fills still receive Otsu preprocessing without
+  isolated or clustered dark artifacts triggering it, and
   WebAssembly Tesseract now rejects images exceeding 4096 × 4096 pixels before decoding.
 - Fixed OCR measurement tooling so line-filter comparisons score the intended ground-truth lines
   and report filtering regressions accurately.
