@@ -68,9 +68,13 @@ impl<D: FnMut(*mut c_char)> Drop for TessTextGuard<D> {
 ///
 /// # Safety
 ///
-/// `pointer` must reference a valid NUL-terminated allocation that remains readable until
-/// `deleter` releases it. `deleter` must accept that allocation exactly once. ~keep
+/// A non-null `pointer` must reference a valid NUL-terminated allocation that remains readable
+/// until `deleter` releases it. A null pointer represents no allocation and is rejected without
+/// calling `deleter`. `deleter` must accept a non-null allocation exactly once. ~keep
 unsafe fn copy_and_delete_tess_text(pointer: *mut c_char, deleter: impl FnMut(*mut c_char)) -> Result<String> {
+    if pointer.is_null() {
+        return Err(TesseractError::NullPointerError);
+    }
     let text = TessTextGuard { pointer, deleter };
     // SAFETY: the caller guarantees that the guarded pointer is readable and NUL-terminated. ~keep
     let c_str = unsafe { CStr::from_ptr(text.pointer) };
@@ -564,13 +568,45 @@ mod tests {
     #[test]
     fn should_delete_iterator_text_when_utf8_conversion_fails() {
         let mut invalid_text = vec![0xff_u8, 0];
-        let deleted = Cell::new(false);
+        let delete_count = Cell::new(0usize);
 
         // SAFETY: the vector is NUL-terminated and remains alive for the call; the test deleter does not free it. ~keep
-        let result = unsafe { copy_and_delete_tess_text(invalid_text.as_mut_ptr().cast(), |_| deleted.set(true)) };
+        let result = unsafe {
+            copy_and_delete_tess_text(invalid_text.as_mut_ptr().cast(), |_| {
+                delete_count.set(delete_count.get() + 1)
+            })
+        };
 
         assert!(matches!(result, Err(TesseractError::Utf8Error(_))));
-        assert!(deleted.get(), "the native text deleter must run on conversion errors");
+        assert_eq!(delete_count.get(), 1, "the native text deleter must run exactly once");
+    }
+
+    #[test]
+    fn should_delete_iterator_text_once_after_a_successful_copy() {
+        let mut valid_text = b"retained\0".to_vec();
+        let delete_count = Cell::new(0usize);
+
+        // SAFETY: the vector is NUL-terminated and remains alive for the call; the test deleter does not free it. ~keep
+        let result = unsafe {
+            copy_and_delete_tess_text(valid_text.as_mut_ptr().cast(), |_| {
+                delete_count.set(delete_count.get() + 1)
+            })
+        };
+
+        assert_eq!(result.unwrap(), "retained");
+        assert_eq!(delete_count.get(), 1, "the native text deleter must run exactly once");
+    }
+
+    #[test]
+    fn should_not_delete_text_when_tesseract_returns_null() {
+        let delete_count = Cell::new(0usize);
+
+        // SAFETY: null represents Tesseract returning no allocation; the helper rejects it before dereferencing. ~keep
+        let result =
+            unsafe { copy_and_delete_tess_text(std::ptr::null_mut(), |_| delete_count.set(delete_count.get() + 1)) };
+
+        assert!(matches!(result, Err(TesseractError::NullPointerError)));
+        assert_eq!(delete_count.get(), 0, "no native allocation exists to delete");
     }
 
     /// Drives [`record_word_extraction_result`] over a fixed, known sequence of
