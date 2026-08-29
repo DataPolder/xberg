@@ -624,11 +624,13 @@ impl PageRenderer {
                                 );
                                 self.fonts.insert(name.clone(), info);
                             }
-                            Err(e) => {
+                            Err(error) => {
                                 tracing::warn!(
-                                    "Failed to parse font '{}': {}. Text using this font may render incorrectly.",
-                                    name,
-                                    e
+                                    target: crate::LOG_TARGET_ROOT,
+                                    operation = "load_render_font",
+                                    error_code = error.telemetry_code(),
+                                    error_offset = ?error.telemetry_offset(),
+                                    "rendering text with fallback font data"
                                 );
                             }
                         }

@@ -2884,7 +2884,7 @@ fn apply_decode_to_plane(plane: &mut [u8], dmin: f32, dmax: f32) {
 #[allow(clippy::too_many_arguments)]
 fn paint_image_mask_to_plates(
     pixmaps: &mut [Pixmap],
-    name: &str,
+    _name: &str,
     xobject: &Object,
     obj_ref: Option<crate::object::ObjectRef>,
     base_transform: Transform,
@@ -2908,9 +2908,12 @@ fn paint_image_mask_to_plates(
     // and resolves /Width and /Height the same way an indirect reference is
     // resolved for the non-mask image path (ISO 32000-1 §7.3.10). ~keep
     let layout = crate::rendering::page_renderer::PageRenderer::image_mask_layout(dict, ctx.doc);
-    let Ok((w32, h32, _row_bytes, packed_len, _rgba_len)) = layout else {
-        tracing::warn!("Skipping image mask '{name}': {}", layout.unwrap_err());
-        return Ok(());
+    let (w32, h32, _row_bytes, packed_len, _rgba_len) = match layout {
+        Ok(layout) => layout,
+        Err(error) => {
+            crate::error::trace_recovery("resolve_separation_image_mask_layout", &error);
+            return Ok(());
+        }
     };
     let (w, h) = (w32 as usize, h32 as usize);
     let pixel_count = w * h;
@@ -2925,8 +2928,11 @@ fn paint_image_mask_to_plates(
     let bpc = dict.get("BitsPerComponent").and_then(resolve_int).unwrap_or(1) as u8;
     if bpc != 1 {
         tracing::warn!(
-            "Skipping image mask '{name}': BitsPerComponent={bpc} out of spec \
-             (§8.9.6.2 mandates 1-bpc)"
+            target: crate::LOG_TARGET_ROOT,
+            operation = "decode_separation_image_mask",
+            error_code = "invalid_bits_per_component",
+            bits_per_component = bpc,
+            "skipping invalid separation image mask"
         );
         return Ok(());
     }
@@ -2941,9 +2947,14 @@ fn paint_image_mask_to_plates(
     // 2147483648` is representable and asks for 2^62 bytes. ~keep
     if packed.len() < packed_len {
         tracing::warn!(
-            "Skipping image mask '{name}': {w}x{h} needs {packed_len} bytes, the stream \
-             carries {}",
-            packed.len()
+            target: crate::LOG_TARGET_ROOT,
+            operation = "decode_separation_image_mask",
+            error_code = "truncated_stream",
+            width = w,
+            height = h,
+            expected_byte_count = packed_len,
+            actual_byte_count = packed.len(),
+            "skipping truncated separation image mask"
         );
         return Ok(());
     }

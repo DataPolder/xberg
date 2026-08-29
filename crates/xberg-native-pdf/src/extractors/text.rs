@@ -6196,11 +6196,13 @@ impl<'doc> TextExtractor<'doc> {
                         xobj_resources.clone()
                     };
 
-                    if let Err(e) = doc.load_fonts(&xobj_res, self) {
+                    if let Err(error) = doc.load_fonts(&xobj_res, self) {
                         tracing::warn!(
-                            "Failed to load fonts for Form XObject '{}': {}, using page fonts",
-                            name,
-                            e
+                            target: crate::LOG_TARGET_ROOT,
+                            operation = "load_form_fonts",
+                            error_code = error.telemetry_code(),
+                            error_offset = ?error.telemetry_offset(),
+                            "using page fonts for form"
                         );
                     }
 
@@ -6245,11 +6247,13 @@ impl<'doc> TextExtractor<'doc> {
                 // success so the parent stream's scope is correctly
                 // restored even on errors. ~keep
                 self.mcid_scope_stack.pop();
-                if let Err(e) = parse_result {
+                if let Err(error) = parse_result {
                     tracing::warn!(
-                        "Error parsing Form XObject '{}' content stream: {}, partial text may be extracted",
-                        name,
-                        e
+                        target: crate::LOG_TARGET_ROOT,
+                        operation = "parse_form_content",
+                        error_code = error.telemetry_code(),
+                        error_offset = ?error.telemetry_offset(),
+                        "returning partial form text after parse failure"
                     );
                 }
 

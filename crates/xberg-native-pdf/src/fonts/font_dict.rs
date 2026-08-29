@@ -371,8 +371,13 @@ impl FontInfo {
                         Some(cmap)
                     }
                     Ok(_) => None,
-                    Err(e) => {
-                        tracing::warn!("Font '{}': TrueType cmap extraction failed: {}", self.base_font, e);
+                    Err(_) => {
+                        tracing::warn!(
+                            target: crate::LOG_TARGET_ROOT,
+                            operation = "extract_truetype_cmap",
+                            error_code = "invalid_font_data",
+                            "using fallback font encoding"
+                        );
                         None
                     }
                 }
@@ -707,26 +712,16 @@ impl FontInfo {
                                 .as_reference()
                                 .and_then(|ff2_ref| {
                                     doc.load_object(ff2_ref)
-                                        .inspect_err(|e| {
-                                            tracing::warn!(
-                                                "Font '{}': failed to load FontFile2 object {}: {}",
-                                                base_font,
-                                                ff2_ref,
-                                                e
-                                            )
+                                        .inspect_err(|error| {
+                                            crate::error::trace_recovery("load_truetype_font_program", error);
                                         })
                                         .ok()
                                         .map(|obj| (obj, ff2_ref))
                                 })
                                 .and_then(|(ff2_stream, ff2_ref)| {
                                     doc.decode_stream_with_encryption(&ff2_stream, ff2_ref)
-                                        .inspect_err(|e| {
-                                            tracing::warn!(
-                                                "Font '{}': failed to decode FontFile2 stream {}: {}",
-                                                base_font,
-                                                ff2_ref,
-                                                e
-                                            )
+                                        .inspect_err(|error| {
+                                            crate::error::trace_recovery("decode_truetype_font_program", error);
                                         })
                                         .ok()
                                 })
@@ -748,26 +743,16 @@ impl FontInfo {
                                 .as_reference()
                                 .and_then(|ff3_ref| {
                                     doc.load_object(ff3_ref)
-                                        .inspect_err(|e| {
-                                            tracing::warn!(
-                                                "Font '{}': failed to load FontFile3 object {}: {}",
-                                                base_font,
-                                                ff3_ref,
-                                                e
-                                            )
+                                        .inspect_err(|error| {
+                                            crate::error::trace_recovery("load_cff_font_program", error);
                                         })
                                         .ok()
                                         .map(|obj| (obj, ff3_ref))
                                 })
                                 .and_then(|(ff3_stream, ff3_ref)| {
                                     doc.decode_stream_with_encryption(&ff3_stream, ff3_ref)
-                                        .inspect_err(|e| {
-                                            tracing::warn!(
-                                                "Font '{}': failed to decode FontFile3 stream {}: {}",
-                                                base_font,
-                                                ff3_ref,
-                                                e
-                                            )
+                                        .inspect_err(|error| {
+                                            crate::error::trace_recovery("decode_cff_font_program", error);
                                         })
                                         .ok()
                                 })
@@ -796,26 +781,16 @@ impl FontInfo {
                                 .as_reference()
                                 .and_then(|ff_ref| {
                                     doc.load_object(ff_ref)
-                                        .inspect_err(|e| {
-                                            tracing::warn!(
-                                                "Font '{}': failed to load FontFile object {}: {}",
-                                                base_font,
-                                                ff_ref,
-                                                e
-                                            )
+                                        .inspect_err(|error| {
+                                            crate::error::trace_recovery("load_type1_font_program", error);
                                         })
                                         .ok()
                                         .map(|obj| (obj, ff_ref))
                                 })
                                 .and_then(|(ff_stream, ff_ref)| {
                                     doc.decode_stream_with_encryption(&ff_stream, ff_ref)
-                                        .inspect_err(|e| {
-                                            tracing::warn!(
-                                                "Font '{}': failed to decode FontFile stream {}: {}",
-                                                base_font,
-                                                ff_ref,
-                                                e
-                                            )
+                                        .inspect_err(|error| {
+                                            crate::error::trace_recovery("decode_type1_font_program", error);
                                         })
                                         .ok()
                                 })
@@ -1019,23 +994,13 @@ impl FontInfo {
             let stream_opt = match doc.load_object(cmap_ref) {
                 Ok(cmap_obj) => match doc.decode_stream_with_encryption(&cmap_obj, cmap_ref) {
                     Ok(data) => Some(data),
-                    Err(e) => {
-                        tracing::warn!(
-                            "Font '{}': Failed to decrypt/decode ToUnicode CMap stream {:?}: {}",
-                            base_font,
-                            cmap_ref,
-                            e
-                        );
+                    Err(error) => {
+                        crate::error::trace_recovery("decode_tounicode_cmap", &error);
                         None
                     }
                 },
-                Err(e) => {
-                    tracing::warn!(
-                        "Font '{}': Failed to load ToUnicode CMap object {:?}: {}",
-                        base_font,
-                        cmap_ref,
-                        e
-                    );
+                Err(error) => {
+                    crate::error::trace_recovery("load_tounicode_cmap", &error);
                     None
                 }
             };
@@ -1205,12 +1170,8 @@ impl FontInfo {
                         dvmetrics,
                     )
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        "Font '{}': Failed to parse DescendantFonts: {}. Using Identity fallback.",
-                        base_font,
-                        e
-                    );
+                Err(error) => {
+                    crate::error::trace_recovery("parse_descendant_fonts", &error);
                     (
                         Some(CIDToGIDMap::Identity),
                         None,
@@ -1625,12 +1586,8 @@ impl FontInfo {
 
         let cid_system_info = match Self::parse_cidsysteminfo(cidfont_dict, doc) {
             Ok(info) => Some(info),
-            Err(e) => {
-                tracing::warn!(
-                    "Font '{}': Failed to parse CIDSystemInfo: {}. Continuing with None.",
-                    base_font,
-                    e
-                );
+            Err(error) => {
+                crate::error::trace_recovery("parse_cid_system_info", &error);
                 None
             }
         };
@@ -1651,9 +1608,10 @@ impl FontInfo {
                             Some(CIDToGIDMap::Identity)
                         } else {
                             tracing::warn!(
-                                "Font '{}': Invalid CIDToGIDMap name '{}' (only 'Identity' is valid as name)",
-                                base_font,
-                                name
+                                target: crate::LOG_TARGET_ROOT,
+                                operation = "parse_cid_to_gid_map",
+                                error_code = "invalid_map_name",
+                                "using identity CID-to-GID map"
                             );
                             Some(CIDToGIDMap::Identity)
                         }
@@ -1663,15 +1621,20 @@ impl FontInfo {
                                 Ok(stream_data) => {
                                     if stream_data.len() % 2 != 0 {
                                         tracing::warn!(
-                                            "Font '{}': CIDToGIDMap stream has odd length {} (must be even). Using Identity fallback.",
-                                            base_font,
-                                            stream_data.len()
+                                            target: crate::LOG_TARGET_ROOT,
+                                            operation = "parse_cid_to_gid_map",
+                                            error_code = "odd_stream_length",
+                                            byte_count = stream_data.len(),
+                                            "using identity CID-to-GID map"
                                         );
                                         Some(CIDToGIDMap::Identity)
                                     } else if stream_data.is_empty() {
                                         tracing::warn!(
-                                            "Font '{}': CIDToGIDMap stream is empty. Using Identity fallback.",
-                                            base_font
+                                            target: crate::LOG_TARGET_ROOT,
+                                            operation = "parse_cid_to_gid_map",
+                                            error_code = "empty_stream",
+                                            byte_count = 0usize,
+                                            "using identity CID-to-GID map"
                                         );
                                         Some(CIDToGIDMap::Identity)
                                     } else {
@@ -1689,21 +1652,13 @@ impl FontInfo {
                                         Some(CIDToGIDMap::Explicit(map))
                                     }
                                 }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "Font '{}': CIDToGIDMap stream decode failed: {}. Using Identity fallback.",
-                                        base_font,
-                                        e
-                                    );
+                                Err(error) => {
+                                    crate::error::trace_recovery("decode_cid_to_gid_map", &error);
                                     Some(CIDToGIDMap::Identity)
                                 }
                             },
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Font '{}': CIDToGIDMap stream object load failed: {}. Using Identity fallback.",
-                                    base_font,
-                                    e
-                                );
+                            Err(error) => {
+                                crate::error::trace_recovery("load_cid_to_gid_map", &error);
                                 Some(CIDToGIDMap::Identity)
                             }
                         }
@@ -1747,8 +1702,8 @@ impl FontInfo {
                         dict_clone.insert("W".to_string(), resolved);
                         std::borrow::Cow::Owned(dict_clone)
                     }
-                    Err(e) => {
-                        tracing::warn!("Font '{}': Failed to resolve /W reference: {}", base_font, e);
+                    Err(error) => {
+                        crate::error::trace_recovery("resolve_cid_widths", &error);
                         std::borrow::Cow::Borrowed(cidfont_dict)
                     }
                 }
@@ -1777,8 +1732,8 @@ impl FontInfo {
                         dict_clone.insert("W2".to_string(), resolved);
                         std::borrow::Cow::Owned(dict_clone)
                     }
-                    Err(e) => {
-                        tracing::warn!("Font '{}': Failed to resolve /W2 reference: {}", base_font, e);
+                    Err(error) => {
+                        crate::error::trace_recovery("resolve_cid_vertical_metrics", &error);
                         resolved_cidfont_dict.clone()
                     }
                 }
@@ -1844,25 +1799,15 @@ impl FontInfo {
         let ff2_ref = ff2_obj.as_reference()?;
         let ff2_stream = match doc.load_object(ff2_ref) {
             Ok(obj) => obj,
-            Err(e) => {
-                tracing::warn!(
-                    "Font '{}': Failed to load FontFile2 object {:?}: {}",
-                    base_font,
-                    ff2_ref,
-                    e
-                );
+            Err(error) => {
+                crate::error::trace_recovery("load_truetype_font_program", &error);
                 return None;
             }
         };
         let font_data = match doc.decode_stream_with_encryption(&ff2_stream, ff2_ref) {
             Ok(data) => data,
-            Err(e) => {
-                tracing::warn!(
-                    "Font '{}': Failed to decrypt/decode FontFile2 stream {:?}: {}",
-                    base_font,
-                    ff2_ref,
-                    e
-                );
+            Err(error) => {
+                crate::error::trace_recovery("decode_truetype_font_program", &error);
                 return None;
             }
         };
@@ -1950,15 +1895,15 @@ impl FontInfo {
                 };
                 let ff_stream = match doc.load_object(ff_ref) {
                     Ok(obj) => obj,
-                    Err(e) => {
-                        tracing::warn!("Font '{}': Failed to load {} {:?}: {}", base_font, key, ff_ref, e);
+                    Err(error) => {
+                        crate::error::trace_recovery("load_embedded_font_program", &error);
                         continue;
                     }
                 };
                 let font_data = match doc.decode_stream_with_encryption(&ff_stream, ff_ref) {
                     Ok(data) => data,
-                    Err(e) => {
-                        tracing::warn!("Font '{}': Failed to decode {} stream: {}", base_font, key, e);
+                    Err(error) => {
+                        crate::error::trace_recovery("decode_embedded_font_program", &error);
                         continue;
                     }
                 };
@@ -6342,14 +6287,12 @@ mod tests {
 
         let failure_warnings = logs
             .iter()
-            .filter(|message| {
-                message.contains("Failed to parse the ToUnicode CMap") && message.contains("BrokenCMapFont")
-            })
+            .filter(|message| message.contains("PDF operation degraded"))
             .count();
         assert_eq!(
             failure_warnings, 1,
-            "a broken ToUnicode must WARN once per font, naming it, not once per \
-             character code and not twice for one failure; got: {logs:?}"
+            "a broken ToUnicode must WARN once per font, not once per character \
+             code and not twice for one failure; got: {logs:?}"
         );
     }
 

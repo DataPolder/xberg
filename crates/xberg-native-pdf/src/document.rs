@@ -116,6 +116,9 @@ const DEFAULT_OBJECT_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
 /// Default maximum number of entries for the XObject span/image caches.
 const DEFAULT_XOBJECT_CACHE_MAX_ENTRIES: usize = 1024;
 
+/// Default maximum number of parsed object streams retained per document.
+const DEFAULT_OBJECT_STREAM_CACHE_MAX_ENTRIES: usize = 1024;
+
 /// Heuristic multiplier for the forward-gap guard in the main
 /// assembly loop's compound newline predicate
 /// (`y_diff > 2.0 && gap > K * max(fs)`). Visual gap-sweep over
@@ -424,6 +427,10 @@ pub struct PdfDocument {
     /// Bounded at [`DEFAULT_OBJECT_CACHE_MAX_BYTES`] with FIFO eviction to
     /// prevent unbounded heap growth during multi-page extraction.
     object_cache: Mutex<BoundedObjectCache>,
+    /// Parsed object streams keyed by the stream reference. A stream can contain
+    /// malformed entries or omit objects named by a corrupt xref; retaining the
+    /// parsed result prevents repeated decoding, parsing, and recovery events. ~keep
+    object_stream_cache: Mutex<BoundedEntryCache<ObjectRef, Arc<HashMap<u32, Object>>>>,
     /// Encryption handler (if PDF is encrypted).
     /// Wrapped in RefCell for interior mutability (lazy initialization from &self).
     encryption_handler: Mutex<Option<EncryptionHandler>>,
@@ -1208,6 +1215,7 @@ impl PdfDocument {
             xref,
             trailer,
             object_cache: Mutex::new(BoundedObjectCache::new(DEFAULT_OBJECT_CACHE_MAX_BYTES)),
+            object_stream_cache: Mutex::new(BoundedEntryCache::new(DEFAULT_OBJECT_STREAM_CACHE_MAX_ENTRIES)),
             encryption_handler: Mutex::new(None),
             encrypt_dict_ref: Mutex::new(None),
             options: ParserOptions::default(),
@@ -2250,11 +2258,14 @@ impl PdfDocument {
             // — mirrors the default branch in `load_compressed_object`. ~keep
             let objects_map = match parse_object_stream_with_decryption(&stream_obj, None, 0, 0) {
                 Ok(m) => m,
-                Err(e) => {
+                Err(error) => {
                     tracing::warn!(
-                        "Skipping ObjStm {} during recovery sweep (parse failed: {})",
-                        stream_obj_num,
-                        e
+                        target: crate::LOG_TARGET_ROOT,
+                        operation = "recover_object_stream",
+                        stream_object_id = stream_obj_num,
+                        error_code = error.telemetry_code(),
+                        error_offset = ?error.telemetry_offset(),
+                        "skipping malformed object stream during recovery"
                     );
                     continue;
                 }
@@ -3446,8 +3457,6 @@ impl PdfDocument {
     /// * `stream_obj_num` - The object number of the object stream
     /// * `index_in_stream` - The index within the stream (unused but provided for completeness)
     fn load_compressed_object(&self, obj_ref: ObjectRef, stream_obj_num: u32, _index_in_stream: u16) -> Result<Object> {
-        use crate::objstm::parse_object_stream_with_decryption;
-
         tracing::trace!(
             object_id = obj_ref.id,
             stream_object_id = stream_obj_num,
@@ -3458,37 +3467,61 @@ impl PdfDocument {
             trace_recoverable_pdf_error("initialize_object_stream_encryption", &error);
         }
 
-        let stream_ref = ObjectRef::new(stream_obj_num, 0);
-        let stream_obj = self.load_uncompressed_object(stream_ref, {
-            let stream_entry = match self.xref.get(stream_obj_num) {
-                Some(entry) => entry,
-                None => {
-                    tracing::warn!(
-                        "Object stream {} not in xref, treating compressed object {} as Null",
-                        stream_obj_num,
-                        obj_ref.id
-                    );
-                    self.object_cache.lock_or_recover().insert(obj_ref, Object::Null);
-                    return Ok(Object::Null);
-                }
-            };
+        let Some((objects_map, newly_parsed)) = self.load_object_stream_objects(stream_obj_num)? else {
+            self.object_cache.lock_or_recover().insert(obj_ref, Object::Null);
+            return Ok(Object::Null);
+        };
 
-            if stream_entry.entry_type != crate::xref::XRefEntryType::Uncompressed {
-                return Err(Error::InvalidPdf(format!(
-                    "object stream {} is not an uncompressed object",
-                    stream_obj_num
-                )));
+        let obj = match objects_map.get(&obj_ref.id) {
+            Some(o) => o.clone(),
+            None => {
+                tracing::warn!(
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "load_compressed_object",
+                    error_code = "missing_stream_object",
+                    object_id = obj_ref.id,
+                    stream_object_id = stream_obj_num,
+                    "treating missing compressed object as null"
+                );
+                Object::Null
             }
+        };
 
-            stream_entry.offset
-        })?;
+        if newly_parsed {
+            self.cache_object_stream_entries(stream_obj_num, &objects_map);
+        }
+        Ok(obj)
+    }
 
+    fn load_object_stream_objects(&self, stream_obj_num: u32) -> Result<Option<(Arc<HashMap<u32, Object>>, bool)>> {
+        use crate::objstm::parse_object_stream_with_decryption;
+
+        let stream_ref = ObjectRef::new(stream_obj_num, 0);
+        if let Some(cached) = self.object_stream_cache.lock_or_recover().get(&stream_ref).cloned() {
+            return Ok(Some((cached, false)));
+        }
+        let Some(stream_entry) = self.xref.get(stream_obj_num) else {
+            tracing::warn!(
+                target: crate::LOG_TARGET_ROOT,
+                operation = "load_object_stream",
+                error_code = "missing_xref_entry",
+                stream_object_id = stream_obj_num,
+                "treating compressed object as null"
+            );
+            return Ok(None);
+        };
+        if stream_entry.entry_type != crate::xref::XRefEntryType::Uncompressed {
+            return Err(Error::InvalidPdf(format!(
+                "object stream {} is not an uncompressed object",
+                stream_obj_num
+            )));
+        }
+        let stream_obj = self.load_uncompressed_object(stream_ref, stream_entry.offset)?;
         let handler_ref = self.encryption_handler.lock_or_recover();
-        let objects_map = if handler_ref.is_some() {
+        let parsed = if let Some(handler) = handler_ref.as_ref() {
             match parse_object_stream_with_decryption(&stream_obj, None, 0, 0) {
                 Ok(map) => map,
-                Err(_no_decrypt_err) => {
-                    let handler = handler_ref.as_ref().unwrap();
+                Err(_) => {
                     let decrypt_fn =
                         |data: &[u8]| -> Result<Vec<u8>> { handler.decrypt_stream(data, stream_obj_num, 0) };
                     parse_object_stream_with_decryption(&stream_obj, Some(&decrypt_fn), stream_obj_num, 0)?
@@ -3498,28 +3531,23 @@ impl PdfDocument {
             parse_object_stream_with_decryption(&stream_obj, None, 0, 0)?
         };
         drop(handler_ref);
+        let parsed = Arc::new(parsed);
+        self.object_stream_cache
+            .lock_or_recover()
+            .insert(stream_ref, Arc::clone(&parsed));
+        Ok(Some((parsed, true)))
+    }
 
-        let obj = match objects_map.get(&obj_ref.id) {
-            Some(o) => o.clone(),
-            None => {
-                tracing::warn!(
-                    "Object {} not found in object stream {}, treating as Null",
-                    obj_ref.id,
-                    stream_obj_num
-                );
-                Object::Null
-            }
-        };
-
+    fn cache_object_stream_entries(&self, stream_obj_num: u32, objects_map: &HashMap<u32, Object>) {
         for (obj_num, object) in objects_map {
-            let cache_ref = ObjectRef::new(obj_num, 0);
-            let should_cache = if let Some(entry) = self.xref.get(obj_num) {
+            let cache_ref = ObjectRef::new(*obj_num, 0);
+            let should_cache = if let Some(entry) = self.xref.get(*obj_num) {
                 entry.entry_type == crate::xref::XRefEntryType::Compressed && entry.offset == stream_obj_num as u64
             } else {
                 true
             };
             if should_cache {
-                self.object_cache.lock_or_recover().insert(cache_ref, object);
+                self.object_cache.lock_or_recover().insert(cache_ref, object.clone());
             } else {
                 tracing::trace!(
                     object_id = obj_num,
@@ -3528,8 +3556,6 @@ impl PdfDocument {
                 );
             }
         }
-
-        Ok(obj)
     }
 
     /// Find object header by searching backwards from a given offset.
@@ -13964,11 +13990,14 @@ impl PdfDocument {
 
         let content_data = match self.get_page_content_data(page_index) {
             Ok(data) => data,
-            Err(e) => {
+            Err(error) => {
                 tracing::warn!(
-                    "Failed to decode content stream for page {}: {}, returning empty",
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "decode_page_content",
                     page_index,
-                    e
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "returning empty page content after decode failure"
                 );
                 return Ok(Vec::new());
             }
@@ -13992,11 +14021,14 @@ impl PdfDocument {
         if let Some(resources) = page_dict.get("Resources") {
             extractor.set_resources(resources.clone());
             extractor.set_document(self);
-            if let Err(e) = self.load_fonts(resources, &mut extractor) {
+            if let Err(error) = self.load_fonts(resources, &mut extractor) {
                 tracing::warn!(
-                    "Failed to load fonts for page {}: {}, continuing with defaults",
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "load_page_fonts",
                     page_index,
-                    e
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "using fallback font encoding"
                 );
             }
         }
@@ -14522,11 +14554,14 @@ impl PdfDocument {
         // Get content stream data — skip page on decode failure (Annex I) ~keep
         let content_data = match self.get_page_content_data(page_index) {
             Ok(data) => data,
-            Err(e) => {
+            Err(error) => {
                 tracing::warn!(
-                    "Failed to decode content stream for page {}: {}, returning empty",
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "decode_page_content",
                     page_index,
-                    e
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "returning empty page content after decode failure"
                 );
                 return Ok(Vec::new());
             }
@@ -14543,11 +14578,14 @@ impl PdfDocument {
             extractor.set_resources(resources.clone());
             extractor.set_document(self);
 
-            if let Err(e) = self.load_fonts(resources, &mut extractor) {
+            if let Err(error) = self.load_fonts(resources, &mut extractor) {
                 tracing::warn!(
-                    "Failed to load fonts for page {}: {}, continuing with defaults",
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "load_page_fonts",
                     page_index,
-                    e
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "using fallback font encoding"
                 );
             }
         }
@@ -14972,11 +15010,14 @@ impl PdfDocument {
 
         let content_data = match self.get_page_content_data(page_index) {
             Ok(data) => data,
-            Err(e) => {
+            Err(error) => {
                 tracing::warn!(
-                    "Failed to decode content stream for page {}: {}, returning empty",
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "decode_page_content",
                     page_index,
-                    e
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "returning empty page content after decode failure"
                 );
                 return Ok(Vec::new());
             }
@@ -14997,11 +15038,14 @@ impl PdfDocument {
         if let Some(resources) = page_dict.get("Resources") {
             extractor.set_resources(resources.clone());
             extractor.set_document(self);
-            if let Err(e) = self.load_fonts(resources, &mut extractor) {
+            if let Err(error) = self.load_fonts(resources, &mut extractor) {
                 tracing::warn!(
-                    "Failed to load fonts for page {}: {}, continuing with defaults",
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "load_page_fonts",
                     page_index,
-                    e
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "using fallback font encoding"
                 );
             }
         }
@@ -15928,11 +15972,14 @@ impl PdfDocument {
         // Get content stream data — skip page on decode failure (Annex I) ~keep
         let content_data = match self.get_page_content_data(page_index) {
             Ok(data) => data,
-            Err(e) => {
+            Err(error) => {
                 tracing::warn!(
-                    "Failed to decode content stream for page {}: {}, returning empty paths",
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "decode_page_path_content",
                     page_index,
-                    e
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "returning empty paths after decode failure"
                 );
                 return Ok(Vec::new());
             }
@@ -15940,11 +15987,14 @@ impl PdfDocument {
 
         let operators = match parse_content_stream_paths_only(&content_data) {
             Ok(ops) => ops,
-            Err(e) => {
+            Err(error) => {
                 tracing::warn!(
-                    "Failed to parse content stream for page {}: {}, returning empty paths",
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "parse_page_paths",
                     page_index,
-                    e
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "returning empty paths after parse failure"
                 );
                 return Ok(Vec::new());
             }
@@ -17704,11 +17754,13 @@ impl PdfDocument {
                                 self.font_cache.lock_or_recover().insert(font_ref, Arc::clone(&arc));
                                 extractor.add_font_shared((*name).clone(), arc);
                             }
-                            Err(e) => {
+                            Err(error) => {
                                 tracing::warn!(
-                                    "Failed to load font '{}': {}. Text using this font will use fallback encoding.",
-                                    name,
-                                    e
+                                    target: crate::LOG_TARGET_ROOT,
+                                    operation = "load_font_resource",
+                                    error_code = error.telemetry_code(),
+                                    error_offset = ?error.telemetry_offset(),
+                                    "using fallback font encoding"
                                 );
                                 continue;
                             }
@@ -17721,11 +17773,13 @@ impl PdfDocument {
                             Ok(font_info) => {
                                 extractor.add_font((*name).clone(), font_info);
                             }
-                            Err(e) => {
+                            Err(error) => {
                                 tracing::warn!(
-                                    "Failed to load font '{}': {}. Text using this font will use fallback encoding.",
-                                    name,
-                                    e
+                                    target: crate::LOG_TARGET_ROOT,
+                                    operation = "load_font_resource",
+                                    error_code = error.telemetry_code(),
+                                    error_offset = ?error.telemetry_offset(),
+                                    "using fallback font encoding"
                                 );
                                 continue;
                             }
@@ -26081,6 +26135,69 @@ mod tests {
         assert_eq!(warnings[0].fields.get("skipped_count").map(String::as_str), Some("2"));
         assert!(!warnings[0].fields.contains_key("error"));
         assert!(!format!("{events:?}").contains("CONFIDENTIAL_ENCRYPT_REFERENCE"));
+    }
+
+    #[test]
+    fn malformed_object_stream_is_parsed_once_for_multiple_missing_references() {
+        use crate::xref::XRefEntry;
+
+        let mut pdf = b"%PDF-1.5\n".to_vec();
+        let catalog_offset = pdf.len();
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+        let pages_offset = pdf.len();
+        pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+        let object_stream_offset = pdf.len();
+        pdf.extend_from_slice(
+            b"10 0 obj\n<< /Type /ObjStm /N 1 /First 5 /Length 6 >>\nstream\n10 0 $\nendstream\nendobj\n",
+        );
+        let xref_offset = pdf.len();
+        pdf.extend_from_slice(b"xref\n0 11\n0000000000 65535 f \n");
+        for object_id in 1..=10 {
+            let offset = match object_id {
+                1 => catalog_offset,
+                2 => pages_offset,
+                10 => object_stream_offset,
+                _ => 0,
+            };
+            let state = if offset == 0 { 'f' } else { 'n' };
+            pdf.extend_from_slice(format!("{offset:010} 00000 {state} \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!("trailer\n<< /Size 22 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").as_bytes(),
+        );
+
+        let mut document = PdfDocument::from_bytes(pdf).unwrap();
+        document.xref.add_entry(20, XRefEntry::compressed(10, 0));
+        document.xref.add_entry(21, XRefEntry::compressed(10, 1));
+
+        let ((first, second), events) = capture_events(|| {
+            (
+                document.load_compressed_object(ObjectRef::new(20, 0), 10, 0),
+                document.load_compressed_object(ObjectRef::new(21, 0), 10, 1),
+            )
+        });
+        assert_eq!(first.unwrap(), Object::Null);
+        assert_eq!(second.unwrap(), Object::Null);
+        let warnings: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event.level == Level::WARN
+                    && event.target == crate::LOG_TARGET_ROOT
+                    && event.fields.get("operation").map(String::as_str) == Some("parse_object_stream")
+            })
+            .collect();
+        assert_eq!(warnings.len(), 1, "object stream must be parsed once: {events:#?}");
+        assert_eq!(
+            warnings[0].fields,
+            BTreeMap::from([
+                ("error_code".to_string(), "invalid_embedded_object".to_string()),
+                ("invalid_offset_count".to_string(), "0".to_string()),
+                ("message".to_string(), "object stream entries were skipped".to_string()),
+                ("operation".to_string(), "parse_object_stream".to_string()),
+                ("parse_failure_count".to_string(), "1".to_string()),
+                ("skipped_count".to_string(), "1".to_string()),
+            ])
+        );
     }
 
     #[test]
