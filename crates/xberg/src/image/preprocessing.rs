@@ -5,6 +5,7 @@ use super::dpi::calculate_smart_dpi;
 use super::resize::resize_rgb;
 
 const PDF_POINTS_PER_INCH: f64 = 72.0;
+const MAX_NORMALIZE_MEMORY_MB: f64 = 2048.0;
 
 /// Build the internal DPI/dimension config this module consumes from the public,
 /// user-facing `ImageExtractionConfig` (issue #209: `target_dpi`, `max_image_dimension`,
@@ -101,10 +102,13 @@ pub(crate) fn normalize_image_dpi_owned(
 
     let current_dpi = current_dpi.unwrap_or(PDF_POINTS_PER_INCH);
     let original_dpi = (current_dpi, current_dpi);
-    let max_memory_mb = 2048.0;
-
-    let (target_dpi, auto_adjusted, calculated_dpi) =
-        calculate_target_dpi(width as u32, height as u32, current_dpi, config, max_memory_mb);
+    let (target_dpi, auto_adjusted, calculated_dpi) = calculate_target_dpi(
+        width as u32,
+        height as u32,
+        current_dpi,
+        config,
+        MAX_NORMALIZE_MEMORY_MB,
+    );
 
     let scale_factor = f64::from(target_dpi) / current_dpi;
 
@@ -142,6 +146,22 @@ pub(crate) fn normalize_image_dpi_owned(
         Ok(result) => Ok(result),
         Err(error) => Err((error, rgb_data)),
     }
+}
+
+pub(crate) fn normalized_image_dimensions(
+    width: u32,
+    height: u32,
+    config: &ExtractionConfig,
+    current_dpi: Option<f64>,
+) -> (u32, u32) {
+    let current_dpi = current_dpi.unwrap_or(PDF_POINTS_PER_INCH);
+    let (target_dpi, _, _) = calculate_target_dpi(width, height, current_dpi, config, MAX_NORMALIZE_MEMORY_MB);
+    let scale_factor = f64::from(target_dpi) / current_dpi;
+    if !needs_resize(width, height, scale_factor, config) {
+        return (width, height);
+    }
+    let (new_width, new_height, _, _) = calculate_new_dimensions(width, height, scale_factor, config);
+    (new_width, new_height)
 }
 
 /// Calculate target DPI based on configuration

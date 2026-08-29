@@ -1496,7 +1496,7 @@ mod output_format_pass_tests {
     use crate::core::config::extraction::{ImageExtractionConfig, ImageOutputFormat};
     use crate::types::{ExtractedDocument, ExtractedImage};
 
-    use super::apply_output_format_pass;
+    use super::{apply_output_format_pass, apply_output_format_pass_with_security_limits};
 
     fn make_jpeg_bytes() -> Bytes {
         use image::codecs::jpeg::JpegEncoder;
@@ -1641,6 +1641,38 @@ mod output_format_pass_tests {
         assert_eq!(images[0].data, original, "bytes must be untouched for Native");
         assert_eq!(images[0].format.as_ref(), "jpeg", "format must be untouched");
         assert!(result.processing_warnings.is_empty());
+    }
+
+    #[test]
+    fn request_security_limit_reaches_output_encoder() {
+        let original = make_png_bytes();
+        let mut result = ExtractedDocument {
+            images: Some(vec![make_image(original.clone(), "png")]),
+            ..Default::default()
+        };
+        let config = ImageExtractionConfig {
+            output_format: ImageOutputFormat::Jpeg { quality: 85 },
+            ..Default::default()
+        };
+        let limits = crate::extractors::security::SecurityLimits {
+            max_content_size: 100,
+            ..Default::default()
+        };
+
+        apply_output_format_pass_with_security_limits(&mut result, &config, Some(&limits));
+
+        let image = &result.images.as_ref().expect("image result")[0];
+        assert_eq!(
+            image.data, original,
+            "rejected output conversion must preserve source data"
+        );
+        assert_eq!(image.format.as_ref(), "png");
+        assert_eq!(result.processing_warnings.len(), 1);
+        assert!(
+            result.processing_warnings[0]
+                .message
+                .contains("security_limits.max_content_size")
+        );
     }
 }
 

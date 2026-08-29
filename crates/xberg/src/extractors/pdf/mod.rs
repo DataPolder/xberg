@@ -814,7 +814,11 @@ async fn run_ocr_with_layout(
     let owned_layout = if precomputed_layout_detections.is_none() || precomputed_layout_images.is_none() {
         if let Some(layout_config) = config.resolved_layout_config() {
             let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
-            match layout_runner::run_layout_for_ocr(content, layout_config.as_ref(), thread_budget).await {
+            let default_security_limits = crate::extractors::security::SecurityLimits::default();
+            let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+            match layout_runner::run_layout_for_ocr(content, layout_config.as_ref(), thread_budget, security_limits)
+                .await
+            {
                 Ok((
                     layout_runner::LayoutAttempt {
                         output:

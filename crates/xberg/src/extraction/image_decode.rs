@@ -33,10 +33,10 @@ impl ImageDecodeBudget {
     }
 }
 
-pub(crate) fn image_dimension_error(width: u32, height: u32, decoded_bytes: u64, max_decoded_bytes: u64) -> XbergError {
+pub(crate) fn image_dimension_error(width: u32, height: u32, live_bytes: u64, max_decoded_bytes: u64) -> XbergError {
     XbergError::Validation {
         message: format!(
-            "Image dimensions {width}x{height} require {decoded_bytes} decoded bytes, exceeding or invalid under \
+            "Image dimensions {width}x{height} require {live_bytes} live image-processing bytes, exceeding or invalid under \
              security_limits.max_content_size ({max_decoded_bytes} bytes)"
         ),
         source: None,
@@ -151,16 +151,13 @@ pub(crate) fn probe_standard_image_with_default_security_limits(
     probe_standard_image_with_security_limits(bytes, &SecurityLimits::default())
 }
 
-pub(crate) fn decode_standard_image_with_default_security_limits(bytes: &[u8]) -> Result<image::DynamicImage> {
-    decode_standard_image_with_security_limits(bytes, &SecurityLimits::default())
-}
-
 #[cfg(feature = "image-encode")]
-pub(crate) fn decode_standard_image_with_format_and_default_security_limits(
+pub(crate) fn decode_standard_image_with_format_and_security_limits(
     bytes: &[u8],
     format: ImageFormat,
+    limits: &SecurityLimits,
 ) -> Result<image::DynamicImage> {
-    decode_standard_image(bytes, &SecurityLimits::default(), Some(format))
+    decode_standard_image(bytes, limits, Some(format))
 }
 
 pub(crate) fn decode_standard_image_with_security_limits(
@@ -183,10 +180,28 @@ pub(crate) fn validate_dynamic_image_additional_live_bytes(
     let additional_bytes = decoded_byte_count(width, height, additional_bytes_per_pixel)?
         .checked_add(fixed_additional_bytes)
         .ok_or_else(|| image_dimension_error(width, height, u64::MAX, u64::MAX))?;
-    let peak_bytes = live_bytes
-        .checked_add(additional_bytes)
+    validate_image_live_bytes(width, height, live_bytes, additional_bytes, limits)
+}
+
+pub(crate) fn validate_image_live_bytes(
+    width: u32,
+    height: u32,
+    current_live_bytes: u64,
+    additional_live_bytes: u64,
+    limits: &SecurityLimits,
+) -> Result<()> {
+    let peak_bytes = current_live_bytes
+        .checked_add(additional_live_bytes)
         .ok_or_else(|| image_dimension_error(width, height, u64::MAX, u64::MAX))?;
     ImageDecodeBudget::from_security_limits(limits).validate(width, height, peak_bytes)
+}
+
+pub(crate) fn clone_dynamic_image_to_rgb8_with_security_limits(
+    image: &image::DynamicImage,
+    limits: &SecurityLimits,
+) -> Result<image::RgbImage> {
+    validate_dynamic_image_additional_live_bytes(image, limits, u64::from(ColorType::Rgb8.bytes_per_pixel()), 0)?;
+    Ok(image.to_rgb8())
 }
 
 fn decode_standard_image(
@@ -196,12 +211,24 @@ fn decode_standard_image(
 ) -> Result<image::DynamicImage> {
     let budget = ImageDecodeBudget::from_security_limits(limits);
     let probe = probe_standard_image(bytes, budget, format)?;
+    let encoded_bytes =
+        u64::try_from(bytes.len()).map_err(|_| image_dimension_error(probe.width, probe.height, u64::MAX, u64::MAX))?;
+    let peak_bytes = probe
+        .decoded_bytes
+        .checked_add(encoded_bytes)
+        .ok_or_else(|| image_dimension_error(probe.width, probe.height, u64::MAX, u64::MAX))?;
+    budget.validate(probe.width, probe.height, peak_bytes)?;
     let mut reader = ImageReader::with_format(Cursor::new(bytes), probe.format);
     reader.limits(image_decode_limits(budget));
     reader.decode().map_err(map_image_decode_error)
 }
 
-fn conversion_peak_bytes(probe: StandardImageProbe, target: ColorType, additional_live_bytes: u64) -> Result<u64> {
+fn conversion_peak_bytes(
+    probe: StandardImageProbe,
+    target: ColorType,
+    encoded_live_bytes: u64,
+    additional_live_bytes: u64,
+) -> Result<u64> {
     let target_bytes = decoded_byte_count(probe.width, probe.height, u64::from(target.bytes_per_pixel()))?;
     let conversion_peak = if probe.color_type == target {
         target_bytes
@@ -214,13 +241,18 @@ fn conversion_peak_bytes(probe: StandardImageProbe, target: ColorType, additiona
     let post_conversion_peak = target_bytes
         .checked_add(additional_live_bytes)
         .ok_or_else(|| image_dimension_error(probe.width, probe.height, u64::MAX, u64::MAX))?;
-    Ok(conversion_peak.max(post_conversion_peak))
+    conversion_peak
+        .max(post_conversion_peak)
+        .checked_add(encoded_live_bytes)
+        .ok_or_else(|| image_dimension_error(probe.width, probe.height, u64::MAX, u64::MAX))
 }
 
 fn decode_standard_rgb8(bytes: &[u8], limits: &SecurityLimits, additional_live_bytes: u64) -> Result<image::RgbImage> {
     let budget = ImageDecodeBudget::from_security_limits(limits);
     let probe = probe_standard_image(bytes, budget, None)?;
-    let peak_bytes = conversion_peak_bytes(probe, ColorType::Rgb8, additional_live_bytes)?;
+    let encoded_live_bytes =
+        u64::try_from(bytes.len()).map_err(|_| image_dimension_error(probe.width, probe.height, u64::MAX, u64::MAX))?;
+    let peak_bytes = conversion_peak_bytes(probe, ColorType::Rgb8, encoded_live_bytes, additional_live_bytes)?;
     budget.validate(probe.width, probe.height, peak_bytes)?;
     let mut reader = ImageReader::with_format(Cursor::new(bytes), probe.format);
     reader.limits(image_decode_limits(budget));
@@ -241,27 +273,34 @@ pub(crate) fn decode_standard_rgb8_with_default_security_limits(bytes: &[u8]) ->
     decode_standard_rgb8_with_security_limits(bytes, &SecurityLimits::default())
 }
 
+pub(crate) fn decode_standard_rgb8_with_additional_live_bytes_and_security_limits(
+    bytes: &[u8],
+    limits: &SecurityLimits,
+    additional_live_bytes: u64,
+) -> Result<image::RgbImage> {
+    decode_standard_rgb8(bytes, limits, additional_live_bytes)
+}
+
 pub(crate) fn decode_standard_rgb8_with_additional_live_bytes_and_default_security_limits(
     bytes: &[u8],
     additional_live_bytes: u64,
 ) -> Result<image::RgbImage> {
-    decode_standard_rgb8(bytes, &SecurityLimits::default(), additional_live_bytes)
+    decode_standard_rgb8_with_additional_live_bytes_and_security_limits(
+        bytes,
+        &SecurityLimits::default(),
+        additional_live_bytes,
+    )
 }
 
-pub(crate) fn decode_standard_rgb8_with_same_sized_output_and_default_security_limits(
+pub(crate) fn decode_standard_luma8_with_security_limits(
     bytes: &[u8],
-) -> Result<image::RgbImage> {
-    let limits = SecurityLimits::default();
-    let budget = ImageDecodeBudget::from_security_limits(&limits);
-    let probe = probe_standard_image(bytes, budget, None)?;
-    let rgb_bytes = decoded_byte_count(probe.width, probe.height, u64::from(ColorType::Rgb8.bytes_per_pixel()))?;
-    decode_standard_rgb8(bytes, &limits, rgb_bytes)
-}
-
-fn decode_standard_luma8_with_security_limits(bytes: &[u8], limits: &SecurityLimits) -> Result<image::GrayImage> {
+    limits: &SecurityLimits,
+) -> Result<image::GrayImage> {
     let budget = ImageDecodeBudget::from_security_limits(limits);
     let probe = probe_standard_image(bytes, budget, None)?;
-    let peak_bytes = conversion_peak_bytes(probe, ColorType::L8, 0)?;
+    let encoded_live_bytes =
+        u64::try_from(bytes.len()).map_err(|_| image_dimension_error(probe.width, probe.height, u64::MAX, u64::MAX))?;
+    let peak_bytes = conversion_peak_bytes(probe, ColorType::L8, encoded_live_bytes, 0)?;
     budget.validate(probe.width, probe.height, peak_bytes)?;
     let mut reader = ImageReader::with_format(Cursor::new(bytes), probe.format);
     reader.limits(image_decode_limits(budget));
@@ -367,14 +406,15 @@ mod tests {
             .expect_err("100-byte luma plus 300-byte RGB conversion must exceed 399 bytes");
 
         assert!(matches!(error, XbergError::Validation { .. }));
-        assert!(error.to_string().contains("400 decoded bytes"));
+        assert!(error.to_string().contains("live image-processing bytes"));
     }
 
     #[test]
     fn rgb_decode_accepts_peak_at_exact_budget() {
         let bytes = grayscale_png(10, 10);
+        let exact_peak = bytes.len() + 400;
         let limits = SecurityLimits {
-            max_content_size: 400,
+            max_content_size: exact_peak,
             ..Default::default()
         };
 
@@ -383,6 +423,20 @@ mod tests {
 
         assert_eq!(rgb.dimensions(), (10, 10));
         assert_eq!(rgb.as_raw().len(), 300);
+    }
+
+    #[test]
+    fn rgb_decode_counts_still_live_encoded_input() {
+        let bytes = grayscale_png(10, 10);
+        let limits = SecurityLimits {
+            max_content_size: bytes.len() + 399,
+            ..Default::default()
+        };
+
+        let error = decode_standard_rgb8_with_security_limits(&bytes, &limits)
+            .expect_err("encoded input must remain in the live peak during pixel conversion");
+
+        assert!(matches!(error, XbergError::Validation { .. }));
     }
 
     #[test]
@@ -400,7 +454,7 @@ mod tests {
             .expect_err("400-byte RGBA plus 100-byte luma conversion must exceed 499 bytes");
 
         assert!(matches!(error, XbergError::Validation { .. }));
-        assert!(error.to_string().contains("500 decoded bytes"));
+        assert!(error.to_string().contains("live image-processing bytes"));
     }
 
     #[test]
@@ -412,15 +466,17 @@ mod tests {
                     load_from_memory(bytes);
                 let _ = decode_pixels(bytes);
                 let _ = image::codecs::png::PngDecoder::new(cursor);
+                let _ = image::codecs::bmp::BmpDecoder::new_without_file_header(cursor);
                 let _ = tiff::decoder::Decoder::new(cursor);
                 let _ = sceptre::Image::from_bytes(bytes);
-                let _ = lib.decode(&handle, color_space, None);
+                let renamed_primary = context.primary_image_handle().unwrap();
+                let _ = lib.decode(&renamed_primary, color_space, None);
             }
         "#;
 
         let calls = direct_decoder_calls(source);
 
-        assert_eq!(calls.len(), 6, "every direct decoder family must be denied");
+        assert_eq!(calls.len(), 7, "every direct decoder family must be denied");
     }
 
     #[test]
@@ -433,6 +489,47 @@ mod tests {
         "#;
 
         assert!(direct_decoder_calls(source).is_empty());
+    }
+
+    #[test]
+    fn source_audit_requires_guard_in_same_approved_function() {
+        let source = r#"
+            fn guarded_elsewhere(budget: Budget) {
+                budget.validate(10, 10, 300).unwrap();
+            }
+            fn decode_standard_image(bytes: &[u8]) {
+                let _ = image::ImageReader::new(std::io::Cursor::new(bytes));
+            }
+        "#;
+        let calls = direct_decoder_calls(source);
+
+        assert_eq!(calls.len(), 1);
+        assert!(!calls[0].guards.contains("method::validate"));
+    }
+
+    #[test]
+    fn production_audit_fires_when_guard_is_removed_or_moved() {
+        let removed = r#"
+            fn decode_standard_image(bytes: &[u8]) {
+                let _ = image::ImageReader::new(std::io::Cursor::new(bytes));
+            }
+        "#;
+        let moved = r#"
+            fn sibling(bytes: &[u8], limits: Limits) { let _ = probe_standard_image(bytes, limits, None); }
+            fn decode_standard_image(bytes: &[u8]) {
+                let _ = image::ImageReader::new(std::io::Cursor::new(bytes));
+            }
+        "#;
+        let guarded = r#"
+            fn decode_standard_image(bytes: &[u8], limits: Limits) {
+                let _ = probe_standard_image(bytes, limits, None);
+                let _ = image::ImageReader::new(std::io::Cursor::new(bytes));
+            }
+        "#;
+
+        assert_eq!(decoder_audit_violations("extraction/image_decode.rs", removed).len(), 1);
+        assert_eq!(decoder_audit_violations("extraction/image_decode.rs", moved).len(), 1);
+        assert!(decoder_audit_violations("extraction/image_decode.rs", guarded).is_empty());
     }
 
     fn rust_sources(root: &Path, files: &mut Vec<std::path::PathBuf>) {
@@ -513,7 +610,8 @@ mod tests {
                 | "tiff::decoder::Decoder::new"
                 | "sceptre::Image::from_bytes"
                 | "xberg_libheif::HeifContext::read_from_bytes"
-        ) || (path.starts_with("image::codecs::") && path.ends_with("Decoder::new"))
+        ) || (path.starts_with("image::codecs::")
+            && (path.ends_with("Decoder::new") || path.ends_with("Decoder::new_without_file_header")))
     }
 
     struct UseAliasVisitor {
@@ -532,9 +630,19 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct DecoderCall {
+        function: String,
+        path: String,
+        guards: std::collections::BTreeSet<String>,
+    }
+
     struct DecoderCallVisitor<'a> {
         aliases: &'a UseAliases,
-        calls: usize,
+        current_function: Option<String>,
+        calls: Vec<DecoderCall>,
+        current_guards: std::collections::BTreeSet<String>,
+        heif_handles: std::collections::BTreeSet<String>,
     }
 
     impl<'ast> syn::visit::Visit<'ast> for DecoderCallVisitor<'_> {
@@ -545,27 +653,108 @@ mod tests {
         }
 
         fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
-            if let syn::Expr::Path(function) = call.func.as_ref()
-                && resolved_paths(&function.path, self.aliases)
-                    .iter()
-                    .any(|path| is_direct_decoder_path(path))
-            {
-                self.calls += 1;
+            if let syn::Expr::Path(function) = call.func.as_ref() {
+                for path in resolved_paths(&function.path, self.aliases) {
+                    if let Some(current) = &self.current_function {
+                        self.current_guards.insert(path.clone());
+                        if is_direct_decoder_path(&path) {
+                            self.calls.push(DecoderCall {
+                                function: current.clone(),
+                                path,
+                                guards: self.current_guards.clone(),
+                            });
+                        }
+                    }
+                }
             }
             syn::visit::visit_expr_call(self, call);
         }
 
         fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+            if self.current_function.is_some() {
+                self.current_guards.insert(format!("method::{}", call.method));
+            }
             let decodes_heif_handle = call.method == "decode"
                 && call.args.first().is_some_and(|argument| {
-                    matches!(argument, syn::Expr::Reference(reference) if matches!(reference.expr.as_ref(), syn::Expr::Path(path) if path.path.is_ident("handle")))
+                    matches!(argument, syn::Expr::Reference(reference) if matches!(reference.expr.as_ref(), syn::Expr::Path(path) if path.path.get_ident().is_some_and(|ident| self.heif_handles.contains(&ident.to_string()))))
                 });
-            self.calls += usize::from(decodes_heif_handle);
+            if decodes_heif_handle && let Some(current) = &self.current_function {
+                self.calls.push(DecoderCall {
+                    function: current.clone(),
+                    path: "xberg_libheif::LibHeif::decode".to_string(),
+                    guards: self.current_guards.clone(),
+                });
+            }
             syn::visit::visit_expr_method_call(self, call);
+        }
+
+        fn visit_local(&mut self, local: &'ast syn::Local) {
+            if let syn::Pat::Ident(binding) = &local.pat
+                && local
+                    .init
+                    .as_ref()
+                    .is_some_and(|init| expression_calls_method(&init.expr, "primary_image_handle"))
+            {
+                self.heif_handles.insert(binding.ident.to_string());
+            }
+            syn::visit::visit_local(self, local);
+        }
+
+        fn visit_item_fn(&mut self, function: &'ast syn::ItemFn) {
+            let function_name = function.sig.ident.to_string();
+            let previous = self.current_function.replace(function_name.clone());
+            let previous_guards = std::mem::take(&mut self.current_guards);
+            let previous_handles = std::mem::take(&mut self.heif_handles);
+            let call_start = self.calls.len();
+            syn::visit::visit_block(self, &function.block);
+            self.finish_function_calls(call_start, &function_name);
+            self.current_guards = previous_guards;
+            self.heif_handles = previous_handles;
+            self.current_function = previous;
+        }
+
+        fn visit_impl_item_fn(&mut self, function: &'ast syn::ImplItemFn) {
+            let function_name = function.sig.ident.to_string();
+            let previous = self.current_function.replace(function_name.clone());
+            let previous_guards = std::mem::take(&mut self.current_guards);
+            let previous_handles = std::mem::take(&mut self.heif_handles);
+            let call_start = self.calls.len();
+            syn::visit::visit_block(self, &function.block);
+            self.finish_function_calls(call_start, &function_name);
+            self.current_guards = previous_guards;
+            self.heif_handles = previous_handles;
+            self.current_function = previous;
         }
     }
 
-    fn direct_decoder_calls(source: &str) -> Vec<usize> {
+    impl DecoderCallVisitor<'_> {
+        fn finish_function_calls(&mut self, call_start: usize, function_name: &str) {
+            for call in &mut self.calls[call_start..] {
+                if call.function == function_name && call.path != "xberg_libheif::LibHeif::decode" {
+                    call.guards = self.current_guards.clone();
+                }
+            }
+        }
+    }
+
+    fn expression_calls_method(expression: &syn::Expr, method: &str) -> bool {
+        struct MethodFinder<'a> {
+            method: &'a str,
+            found: bool,
+        }
+        impl<'ast> syn::visit::Visit<'ast> for MethodFinder<'_> {
+            fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+                self.found |= call.method == self.method;
+                syn::visit::visit_expr_method_call(self, call);
+            }
+        }
+        use syn::visit::Visit;
+        let mut finder = MethodFinder { method, found: false };
+        finder.visit_expr(expression);
+        finder.found
+    }
+
+    fn direct_decoder_calls(source: &str) -> Vec<DecoderCall> {
         use syn::visit::Visit;
 
         let syntax = syn::parse_file(source).expect("Rust source must parse");
@@ -575,21 +764,17 @@ mod tests {
         alias_visitor.visit_file(&syntax);
         let mut visitor = DecoderCallVisitor {
             aliases: &alias_visitor.aliases,
-            calls: 0,
+            current_function: None,
+            calls: Vec::new(),
+            current_guards: std::collections::BTreeSet::new(),
+            heif_handles: std::collections::BTreeSet::new(),
         };
         visitor.visit_file(&syntax);
-        (0..visitor.calls).collect()
+        visitor.calls
     }
 
     #[test]
     fn direct_image_decode_api_calls_are_audited() {
-        let wrapper_allowlist = [
-            "core/image_encode.rs",
-            "extraction/heif.rs",
-            "extraction/image.rs",
-            "extraction/image_decode.rs",
-            "ocr/tesseract_wasm_backend.rs",
-        ];
         let test_only_sources = ["paddle_ocr/tract_parity.rs"];
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = Vec::new();
@@ -601,13 +786,13 @@ mod tests {
                 .expect("source path under root")
                 .to_string_lossy()
                 .replace('\\', "/");
-            if wrapper_allowlist.contains(&relative.as_str()) || test_only_sources.contains(&relative.as_str()) {
+            if test_only_sources.contains(&relative.as_str()) {
                 continue;
             }
             let source = std::fs::read_to_string(&path).expect("read Rust source");
-            let count = direct_decoder_calls(&source).len();
-            if count > 0 {
-                violations.insert(relative, count);
+            let file_violations = decoder_audit_violations(&relative, &source);
+            if !file_violations.is_empty() {
+                violations.insert(relative, file_violations);
             }
         }
         assert_eq!(
@@ -615,5 +800,36 @@ mod tests {
             BTreeMap::new(),
             "direct image decoder calls must live in an audited wrapper"
         );
+    }
+
+    fn decoder_audit_violations(relative: &str, source: &str) -> Vec<String> {
+        direct_decoder_calls(source)
+            .into_iter()
+            .filter_map(|call| {
+                let approved = approved_decoder_guard(relative, &call.function, &call.path)
+                    .is_some_and(|guard| guard == "header-only" || call.guards.contains(guard));
+                (!approved).then(|| format!("{}: {} (guards: {:?})", call.function, call.path, call.guards))
+            })
+            .collect()
+    }
+
+    fn approved_decoder_guard(relative: &str, function: &str, path: &str) -> Option<&'static str> {
+        match (relative, function, path) {
+            ("extraction/image_decode.rs", "probe_standard_image", _) => Some("method::limits"),
+            ("extraction/image_decode.rs", "decode_standard_image", _)
+            | ("extraction/image_decode.rs", "decode_standard_rgb8", _)
+            | ("extraction/image_decode.rs", "decode_standard_luma8_with_security_limits", _) => {
+                Some("probe_standard_image")
+            }
+            ("extraction/image_decode.rs", "standard_image_is_single_frame", _) => Some("header-only"),
+            ("extraction/image.rs", "decode_jp2_to_rgb_with_security_limits", _) => Some("method::validate"),
+            ("extraction/image.rs", "decode_jbig2_to_gray_with_security_limits", _) => Some("method::validate"),
+            ("extraction/image.rs", "extract_image_metadata_with_security_limits", _) => Some("method::validate"),
+            ("extraction/image.rs", "detect_tiff_frame_count", _) => Some("header-only"),
+            ("extraction/heif.rs", "decode_heic_to_png", _) => Some("validate_heif_decode_budget"),
+            ("core/image_encode.rs", "decode_heic", _) => Some("validate_heic_decode_budget"),
+            ("ocr/tesseract_wasm_backend.rs", "decode_wasm_ocr_image", _) => Some("method::limits"),
+            _ => None,
+        }
     }
 }

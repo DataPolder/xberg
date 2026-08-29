@@ -74,6 +74,11 @@ const MIN_LAYOUT_CROP_DIMENSION: u32 = 4;
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 const MIN_LAYOUT_OCR_ELEMENT_INTERSECTION_OVER_WORD_AREA: f32 = 0.2;
 
+#[cfg(feature = "ocr-pipeline")]
+const NORMALIZED_PNG_ENCODE_BYTES_PER_PIXEL: u64 = 4;
+#[cfg(feature = "ocr-pipeline")]
+const NORMALIZED_PNG_ENCODE_FIXED_BYTES: u64 = 256 * 1024;
+
 #[cfg(all(feature = "layout-detection", feature = "ocr"))]
 const MAX_OCR_COORDINATE_SCALE_RELATIVE_DIFFERENCE: f64 = 0.01;
 
@@ -889,7 +894,7 @@ async fn detect_image_layout(
         drop(layout_content);
         let mut engine = crate::layout::take_or_create_engine(&layout_config, thread_budget)
             .map_err(|error| crate::XbergError::Other(format!("Layout engine init failed: {error}")))?;
-        let detection = engine.detect(&rgb);
+        let detection = engine.detect_with_security_limits(&rgb, &security_limits);
         crate::layout::return_engine(engine);
         let detection =
             detection.map_err(|error| crate::XbergError::Other(format!("Layout detection failed: {error}")))?;
@@ -1350,6 +1355,24 @@ fn normalize_image_bytes_for_ocr(
     };
     let (width, height) = rgb.dimensions();
     let dpi_config = crate::types::ImageDpiConfig::from(images_config);
+    let (planned_width, planned_height) =
+        crate::image::preprocessing::normalized_image_dimensions(width, height, &dpi_config, None);
+    let encoded_source_bytes = u64::try_from(content.len())
+        .map_err(|_| crate::extraction::image_decode::image_dimension_error(width, height, u64::MAX, u64::MAX))?;
+    let current_bytes = u64::try_from(rgb.as_raw().len())
+        .ok()
+        .and_then(|bytes| bytes.checked_add(encoded_source_bytes))
+        .ok_or_else(|| crate::extraction::image_decode::image_dimension_error(width, height, u64::MAX, u64::MAX))?;
+    let planned_bytes = crate::extraction::image_decode::decoded_byte_count(planned_width, planned_height, 3)?;
+    if (planned_width, planned_height) != (width, height) {
+        crate::extraction::image_decode::validate_image_live_bytes(
+            width,
+            height,
+            current_bytes,
+            planned_bytes,
+            security_limits,
+        )?;
+    }
     let result = match crate::image::preprocessing::normalize_image_dpi_owned(
         rgb.into_raw(),
         width as usize,
@@ -1364,7 +1387,31 @@ fn normalize_image_bytes_for_ocr(
         }
     };
     let (new_width, new_height) = result.dimensions;
-    let bytes = match encode_rgb_as_png(&result.rgb_data, new_width as u32, new_height as u32) {
+    let new_width = u32::try_from(new_width)
+        .map_err(|_| crate::extraction::image_decode::image_dimension_error(u32::MAX, u32::MAX, u64::MAX, u64::MAX))?;
+    let new_height = u32::try_from(new_height)
+        .map_err(|_| crate::extraction::image_decode::image_dimension_error(new_width, u32::MAX, u64::MAX, u64::MAX))?;
+    let normalized_bytes = u64::try_from(result.rgb_data.len())
+        .ok()
+        .and_then(|bytes| bytes.checked_add(encoded_source_bytes))
+        .ok_or_else(|| {
+            crate::extraction::image_decode::image_dimension_error(new_width, new_height, u64::MAX, u64::MAX)
+        })?;
+    let encode_live_bytes = crate::extraction::image_decode::decoded_byte_count(
+        new_width,
+        new_height,
+        NORMALIZED_PNG_ENCODE_BYTES_PER_PIXEL,
+    )?
+    .checked_add(NORMALIZED_PNG_ENCODE_FIXED_BYTES)
+    .ok_or_else(|| crate::extraction::image_decode::image_dimension_error(new_width, new_height, u64::MAX, u64::MAX))?;
+    crate::extraction::image_decode::validate_image_live_bytes(
+        new_width,
+        new_height,
+        normalized_bytes,
+        encode_live_bytes,
+        security_limits,
+    )?;
+    let bytes = match encode_rgb_as_png(&result.rgb_data, new_width, new_height) {
         Ok(bytes) => bytes,
         Err(error) => {
             tracing::warn!(%error, "failed to encode normalized OCR image; using original image");
@@ -1755,6 +1802,16 @@ impl ImageExtractor {
         let default_security_limits = crate::extractors::security::SecurityLimits::default();
         let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
         let image = crate::extraction::image::decode_image_to_rgb8_with_security_limits(content, security_limits)?;
+        let rgb_bytes = u64::try_from(image.as_raw().len()).map_err(|_| {
+            crate::extraction::image_decode::image_dimension_error(image.width(), image.height(), u64::MAX, u64::MAX)
+        })?;
+        crate::extraction::image_decode::validate_image_live_bytes(
+            image.width(),
+            image.height(),
+            rgb_bytes,
+            rgb_bytes,
+            security_limits,
+        )?;
         let image = image::DynamicImage::ImageRgb8(image);
         let images = [image];
 

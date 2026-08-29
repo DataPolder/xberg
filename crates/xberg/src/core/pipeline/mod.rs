@@ -451,7 +451,7 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
 
     #[cfg(feature = "image-encode")]
     if let Some(ref image_cfg) = config.images {
-        apply_output_format_pass(&mut result, image_cfg);
+        apply_output_format_pass_with_security_limits(&mut result, image_cfg, config.security_limits.as_ref());
     }
 
     if let Some(ref image_cfg) = config.images {
@@ -699,7 +699,7 @@ pub fn run_pipeline_sync(mut doc: InternalDocument, config: &ExtractionConfig) -
 
     #[cfg(feature = "image-encode")]
     if let Some(ref image_cfg) = config.images {
-        apply_output_format_pass(&mut result, image_cfg);
+        apply_output_format_pass_with_security_limits(&mut result, image_cfg, config.security_limits.as_ref());
     }
 
     if let Some(ref image_cfg) = config.images {
@@ -793,10 +793,19 @@ fn measure_text_coverage(result: &ExtractedDocument) -> f32 {
 ///
 /// When the `svg` feature is active and `config.output_format` is `Native`, a
 /// sanitization pass is still applied to SVG images if `config.svg.sanitize` is set.
-#[cfg(feature = "image-encode")]
+#[cfg(all(feature = "image-encode", test))]
 fn apply_output_format_pass(
     result: &mut ExtractedDocument,
     config: &crate::core::config::extraction::ImageExtractionConfig,
+) {
+    apply_output_format_pass_with_security_limits(result, config, None);
+}
+
+#[cfg(feature = "image-encode")]
+fn apply_output_format_pass_with_security_limits(
+    result: &mut ExtractedDocument,
+    config: &crate::core::config::extraction::ImageExtractionConfig,
+    security_limits: Option<&crate::extractors::security::SecurityLimits>,
 ) {
     use crate::core::config::extraction::ImageOutputFormat;
     use crate::core::image_encode::re_encode;
@@ -811,10 +820,13 @@ fn apply_output_format_pass(
     }
 
     let target = config.output_format;
+    let default_security_limits = crate::extractors::security::SecurityLimits::default();
+    let security_limits = security_limits.unwrap_or(&default_security_limits);
     for image in result.images.iter_mut().flatten() {
         match re_encode(
             image,
             target,
+            security_limits,
             #[cfg(feature = "svg")]
             &config.svg,
         ) {

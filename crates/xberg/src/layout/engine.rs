@@ -8,6 +8,10 @@ use std::time::Instant;
 
 use image::RgbImage;
 
+const LAYOUT_MODEL_MAX_INPUT_SIDE: u32 = 1_280;
+const LAYOUT_MODEL_FLOAT_RGB_BYTES_PER_PIXEL: u64 = 12;
+const LAYOUT_MODEL_RESIZED_RGB_BYTES_PER_PIXEL: u64 = 3;
+
 use crate::layout::error::LayoutError;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::layout::model_manager::LayoutModelManager;
@@ -287,6 +291,16 @@ impl LayoutEngine {
     /// Returns a [`DetectionResult`] with bounding boxes, classes, and confidence scores.
     /// If `apply_heuristics` is enabled in config, postprocessing is applied automatically.
     pub fn detect(&mut self, img: &RgbImage) -> Result<DetectionResult, LayoutError> {
+        self.detect_with_security_limits(img, &crate::extractors::security::SecurityLimits::default())
+    }
+
+    pub(crate) fn detect_with_security_limits(
+        &mut self,
+        img: &RgbImage,
+        security_limits: &crate::extractors::security::SecurityLimits,
+    ) -> Result<DetectionResult, LayoutError> {
+        validate_layout_peak(img, security_limits)
+            .map_err(|error| LayoutError::Image(image::ImageError::IoError(std::io::Error::other(error))))?;
         let (result, _timings) = self.detect_timed(img)?;
         for detection in &result.detections {
             tracing::trace!(class = ?detection.class_name, confidence = detection.confidence, "Layout detection result");
@@ -421,6 +435,36 @@ impl LayoutEngine {
     ) -> Result<Vec<(DetectionResult, DetectTimings)>, LayoutError> {
         self.detect_batch(images)
     }
+}
+
+fn validate_layout_peak(
+    image: &RgbImage,
+    security_limits: &crate::extractors::security::SecurityLimits,
+) -> crate::Result<()> {
+    validate_layout_batch_peak(&[image], security_limits)
+}
+
+pub(crate) fn validate_layout_batch_peak(
+    images: &[&RgbImage],
+    security_limits: &crate::extractors::security::SecurityLimits,
+) -> crate::Result<()> {
+    let (width, height) = images.first().map_or((1, 1), |image| image.dimensions());
+    let current = images.iter().try_fold(0_u64, |total, image| {
+        let bytes = u64::try_from(image.as_raw().len())
+            .map_err(|_| crate::extraction::image_decode::image_dimension_error(width, height, u64::MAX, u64::MAX))?;
+        total
+            .checked_add(bytes)
+            .ok_or_else(|| crate::extraction::image_decode::image_dimension_error(width, height, u64::MAX, u64::MAX))
+    })?;
+    let per_image_workspace = crate::extraction::image_decode::decoded_byte_count(
+        LAYOUT_MODEL_MAX_INPUT_SIDE,
+        LAYOUT_MODEL_MAX_INPUT_SIDE,
+        LAYOUT_MODEL_FLOAT_RGB_BYTES_PER_PIXEL + LAYOUT_MODEL_RESIZED_RGB_BYTES_PER_PIXEL,
+    )?;
+    let workspace = per_image_workspace
+        .checked_mul(u64::try_from(images.len()).unwrap_or(u64::MAX))
+        .ok_or_else(|| crate::extraction::image_decode::image_dimension_error(width, height, u64::MAX, u64::MAX))?;
+    crate::extraction::image_decode::validate_image_live_bytes(width, height, current, workspace, security_limits)
 }
 
 #[cfg(test)]

@@ -172,7 +172,7 @@ fn compute_entropy_on_thumbnail(bytes: &[u8], _width: u32, _height: u32) -> Resu
 
     let thumb = img.resize_exact(64, 64, FilterType::Lanczos3);
 
-    let rgb = thumb.to_rgb8();
+    let rgb = thumb.into_rgb8();
     let pixels = rgb.as_raw();
 
     let mut histogram = vec![0u32; 256];

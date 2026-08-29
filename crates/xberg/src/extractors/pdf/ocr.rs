@@ -1023,7 +1023,12 @@ pub(crate) fn render_selected_pages_for_ocr(
 ) -> crate::Result<Vec<(usize, image::DynamicImage)>> {
     let (doc, page_count, page_rotations) = open_pdf_for_page_ocr(content)?;
     let valid_indices = valid_page_indices(page_indices, page_count);
-    render_selected_pages_from_document(&doc, &page_rotations, &valid_indices)
+    render_selected_pages_from_document(
+        &doc,
+        &page_rotations,
+        &valid_indices,
+        &crate::extractors::security::SecurityLimits::default(),
+    )
 }
 
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
@@ -1103,6 +1108,98 @@ const INK_BLANK_MAX_DARK_RATIO: f64 = 0.0001;
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 const MAX_INK_PROBE_TEXT_CHARS: usize = 200;
 
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+const OCR_PNG_ENCODE_BYTES_PER_PIXEL: u64 = 4;
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+const OCR_PNG_ENCODE_FIXED_BYTES: u64 = 256 * 1024;
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn validate_png_encode_batch_peak<'a>(
+    images: impl IntoIterator<Item = &'a image::DynamicImage>,
+    parallel: bool,
+    security_limits: &crate::extractors::security::SecurityLimits,
+) -> crate::Result<()> {
+    let mut dimensions = (1, 1);
+    let mut source_bytes = 0_u64;
+    let mut output_bytes = 0_u64;
+    let mut conversion_bytes = 0_u64;
+    for image in images {
+        dimensions = (image.width(), image.height());
+        source_bytes = source_bytes
+            .checked_add(u64::try_from(image.as_bytes().len()).unwrap_or(u64::MAX))
+            .ok_or_else(|| {
+                crate::extraction::image_decode::image_dimension_error(dimensions.0, dimensions.1, u64::MAX, u64::MAX)
+            })?;
+        let conversion = crate::extraction::image_decode::decoded_byte_count(dimensions.0, dimensions.1, 3)?;
+        conversion_bytes = if parallel {
+            conversion_bytes.checked_add(conversion)
+        } else {
+            Some(conversion_bytes.max(conversion))
+        }
+        .ok_or_else(|| {
+            crate::extraction::image_decode::image_dimension_error(dimensions.0, dimensions.1, u64::MAX, u64::MAX)
+        })?;
+        let output = crate::extraction::image_decode::decoded_byte_count(
+            dimensions.0,
+            dimensions.1,
+            OCR_PNG_ENCODE_BYTES_PER_PIXEL,
+        )?
+        .checked_add(OCR_PNG_ENCODE_FIXED_BYTES)
+        .ok_or_else(|| {
+            crate::extraction::image_decode::image_dimension_error(dimensions.0, dimensions.1, u64::MAX, u64::MAX)
+        })?;
+        output_bytes = output_bytes.checked_add(output).ok_or_else(|| {
+            crate::extraction::image_decode::image_dimension_error(dimensions.0, dimensions.1, u64::MAX, u64::MAX)
+        })?;
+    }
+    let additional_bytes = conversion_bytes.checked_add(output_bytes).ok_or_else(|| {
+        crate::extraction::image_decode::image_dimension_error(dimensions.0, dimensions.1, u64::MAX, u64::MAX)
+    })?;
+    crate::extraction::image_decode::validate_image_live_bytes(
+        dimensions.0,
+        dimensions.1,
+        source_bytes,
+        additional_bytes,
+        security_limits,
+    )
+}
+
+#[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+mod png_encode_peak_tests {
+    use super::*;
+
+    #[test]
+    fn parallel_batch_peak_counts_every_live_page_conversion() {
+        let images = [
+            image::DynamicImage::ImageRgb8(image::RgbImage::new(10, 10)),
+            image::DynamicImage::ImageRgb8(image::RgbImage::new(10, 10)),
+        ];
+        let limits = crate::extractors::security::SecurityLimits {
+            max_content_size: 525_500,
+            ..Default::default()
+        };
+
+        let error = validate_png_encode_batch_peak(images.iter(), true, &limits)
+            .expect_err("parallel page conversions must be budgeted together");
+
+        assert!(matches!(error, crate::XbergError::Validation { .. }));
+    }
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn clone_rgb_for_png_encode(
+    image: &image::DynamicImage,
+    security_limits: &crate::extractors::security::SecurityLimits,
+) -> crate::Result<image::RgbImage> {
+    crate::extraction::image_decode::validate_dynamic_image_additional_live_bytes(
+        image,
+        security_limits,
+        3 + OCR_PNG_ENCODE_BYTES_PER_PIXEL,
+        OCR_PNG_ENCODE_FIXED_BYTES,
+    )?;
+    Ok(image.to_rgb8())
+}
+
 /// Whether the rendered page raster carries essentially no ink.
 ///
 /// Issue #1444: when xberg_native_pdf cannot draw a page's image XObjects it substitutes a
@@ -1116,8 +1213,9 @@ const MAX_INK_PROBE_TEXT_CHARS: usize = 200;
 ///
 /// [`is_page_text_blank`]: crate::extraction::blank_detection::is_page_text_blank
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
-fn page_raster_is_blank(png_bytes: &[u8]) -> bool {
-    let Ok(luma) = crate::extraction::image_decode::decode_standard_luma8_with_default_security_limits(png_bytes)
+fn page_raster_is_blank(png_bytes: &[u8], security_limits: &crate::extractors::security::SecurityLimits) -> bool {
+    let Ok(luma) =
+        crate::extraction::image_decode::decode_standard_luma8_with_security_limits(png_bytes, security_limits)
     else {
         tracing::debug!("ink probe: page raster could not be decoded; not treating it as blank");
         return false;
@@ -1152,12 +1250,16 @@ fn page_raster_is_blank(png_bytes: &[u8]) -> bool {
 ///
 /// [`is_page_text_blank`]: crate::extraction::blank_detection::is_page_text_blank
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
-fn page_needs_xobject_fallback(ocr_text: &str, page_png: &[u8]) -> bool {
+fn page_needs_xobject_fallback(
+    ocr_text: &str,
+    page_png: &[u8],
+    security_limits: &crate::extractors::security::SecurityLimits,
+) -> bool {
     if crate::extraction::blank_detection::is_page_text_blank(ocr_text) {
         return true;
     }
     let non_whitespace = ocr_text.chars().filter(|c| !c.is_whitespace()).count();
-    non_whitespace <= MAX_INK_PROBE_TEXT_CHARS && page_raster_is_blank(page_png)
+    non_whitespace <= MAX_INK_PROBE_TEXT_CHARS && page_raster_is_blank(page_png, security_limits)
 }
 
 /// What one page's image-XObject OCR recovery attempt produced.
@@ -1282,6 +1384,7 @@ fn render_full_pdf_ocr_batch(
     doc: &xberg_native_pdf::PdfDocument,
     page_rotations: &[u32],
     page_range: std::ops::Range<usize>,
+    security_limits: &crate::extractors::security::SecurityLimits,
 ) -> crate::Result<Vec<EncodedPage>> {
     let mut encoded = Vec::with_capacity(page_range.len());
     for page_idx in page_range {
@@ -1292,11 +1395,12 @@ fn render_full_pdf_ocr_batch(
             }
         })?;
         let rotation = page_rotations.get(page_idx).copied().unwrap_or(0);
-        let (data, width, height) = crate::pdf::render::normalize_rendered_page_for_ocr(
+        let (data, width, height) = crate::pdf::render::normalize_rendered_page_for_ocr_with_security_limits(
             rendered.data,
             rendered.width,
             rendered.height,
             rotation,
+            security_limits,
         )?;
         encoded.push((page_idx, std::sync::Arc::new(data), width, height));
     }
@@ -1330,6 +1434,7 @@ fn render_selected_pages_from_document(
     doc: &xberg_native_pdf::PdfDocument,
     page_rotations: &[u32],
     page_indices: &[usize],
+    security_limits: &crate::extractors::security::SecurityLimits,
 ) -> crate::Result<Vec<(usize, image::DynamicImage)>> {
     let mut images = Vec::with_capacity(page_indices.len());
     for &idx in page_indices {
@@ -1339,18 +1444,18 @@ fn render_selected_pages_from_document(
                 source: None,
             })?;
         let rotation = page_rotations.get(idx).copied().unwrap_or(0);
-        let (data, _, _) = crate::pdf::render::normalize_rendered_page_for_ocr(
+        let (data, _, _) = crate::pdf::render::normalize_rendered_page_for_ocr_with_security_limits(
             rendered.data,
             rendered.width,
             rendered.height,
             rotation,
+            security_limits,
         )?;
-        let img = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(&data).map_err(
-            |e| crate::XbergError::Parsing {
-                message: format!("Failed to decode rendered page {}: {}", idx + 1, e),
-                source: None,
-            },
-        )?;
+        let img = crate::extraction::image_decode::decode_standard_image_with_security_limits(&data, security_limits)
+            .map_err(|e| crate::XbergError::Parsing {
+            message: format!("Failed to decode rendered page {}: {}", idx + 1, e),
+            source: None,
+        })?;
         images.push((idx, img));
     }
 
@@ -2025,7 +2130,16 @@ pub(crate) async fn extract_mixed_ocr_native(
         Vec<crate::types::ProcessingWarning>,
     ) = if let Some(layout_config) = config.resolved_layout_config() {
         let layout_thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
-        match super::layout_runner::run_layout_for_ocr(content, layout_config.as_ref(), layout_thread_budget).await {
+        let default_security_limits = crate::extractors::security::SecurityLimits::default();
+        let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+        match super::layout_runner::run_layout_for_ocr(
+            content,
+            layout_config.as_ref(),
+            layout_thread_budget,
+            security_limits,
+        )
+        .await
+        {
             Ok((
                 super::layout_runner::LayoutAttempt {
                     output:
@@ -2171,8 +2285,14 @@ pub(crate) async fn extract_mixed_ocr_native(
 
     for batch_start in (0..total).step_by(batch_size) {
         let batch_end = (batch_start + batch_size).min(total);
-        let page_images =
-            render_selected_pages_from_document(&render_doc, &page_rotations, &page_indices[batch_start..batch_end])?;
+        let default_security_limits = crate::extractors::security::SecurityLimits::default();
+        let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+        let page_images = render_selected_pages_from_document(
+            &render_doc,
+            &page_rotations,
+            &page_indices[batch_start..batch_end],
+            security_limits,
+        )?;
 
         // Multi-stage pipeline route (#1341): drive each page through `run_ocr_pipeline`
         // so `vlm_fallback` / explicit-pipeline stages apply here, mirroring the image
@@ -2397,8 +2517,15 @@ pub(crate) async fn extract_mixed_ocr_native(
                 }
             }
             if capture_rasters {
+                let default_security_limits = crate::extractors::security::SecurityLimits::default();
+                let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+                validate_png_encode_batch_peak(
+                    page_images.iter().map(|(_, image)| image.as_ref()),
+                    false,
+                    security_limits,
+                )?;
                 for (page_idx, image) in &page_images {
-                    let rgb = image.to_rgb8();
+                    let rgb = clone_rgb_for_png_encode(image, security_limits)?;
                     let (w, h) = rgb.dimensions();
                     let mut buf = Cursor::new(Vec::new());
                     PngEncoder::new(&mut buf)
@@ -2424,12 +2551,20 @@ pub(crate) async fn extract_mixed_ocr_native(
             .expect("backend is resolved above whenever effective_pipeline is None");
         let orientation_handling = backend.page_orientation_handling();
         let batch_slice = &page_images;
+        let default_security_limits = crate::extractors::security::SecurityLimits::default();
+        let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+        #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
+        validate_png_encode_batch_peak(batch_slice.iter().map(|(_, image)| image), true, security_limits)?;
+        #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
+        validate_png_encode_batch_peak(batch_slice.iter().map(|(_, image)| image), false, security_limits)?;
 
         #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
         let encoded: crate::Result<Vec<EncodedPage>> = batch_slice
             .par_iter()
             .map(|(page_idx, image)| {
-                let rgb = image.to_rgb8();
+                let default_security_limits = crate::extractors::security::SecurityLimits::default();
+                let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+                let rgb = clone_rgb_for_png_encode(image, security_limits)?;
                 let (w, h) = rgb.dimensions();
                 let mut buf = Cursor::new(Vec::new());
                 PngEncoder::new(&mut buf)
@@ -2445,7 +2580,9 @@ pub(crate) async fn extract_mixed_ocr_native(
         let encoded: crate::Result<Vec<EncodedPage>> = batch_slice
             .iter()
             .map(|(page_idx, image)| {
-                let rgb = image.to_rgb8();
+                let default_security_limits = crate::extractors::security::SecurityLimits::default();
+                let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+                let rgb = clone_rgb_for_png_encode(image, security_limits)?;
                 let (w, h) = rgb.dimensions();
                 let mut buf = Cursor::new(Vec::new());
                 PngEncoder::new(&mut buf)
@@ -2477,8 +2614,14 @@ pub(crate) async fn extract_mixed_ocr_native(
                 let config_clone =
                     ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees, source_dpi)
                         .into_owned();
-                let (upright_data, upright_width, upright_height, correction_degrees) =
-                    upright_raster_for_backend(data, *width, *height, page_rotation_degrees, orientation_handling)?;
+                let (upright_data, upright_width, upright_height, correction_degrees) = upright_raster_for_backend(
+                    data,
+                    *width,
+                    *height,
+                    page_rotation_degrees,
+                    orientation_handling,
+                    config.security_limits.as_ref(),
+                )?;
                 let idx = *page_idx;
                 join_set.spawn(async move {
                     let result = backend_clone.process_image_owned(upright_data, &config_clone).await;
@@ -2572,8 +2715,14 @@ pub(crate) async fn extract_mixed_ocr_native(
                 let source_dpi = rendered_page_source_dpi(&render_doc, *page_idx, *width);
                 let config_for_page =
                     ocr_config_with_page_rotation_hint(&ocr_config_owned, page_rotation_degrees, source_dpi);
-                let (upright_data, upright_width, upright_height, correction_degrees) =
-                    upright_raster_for_backend(data, *width, *height, page_rotation_degrees, orientation_handling)?;
+                let (upright_data, upright_width, upright_height, correction_degrees) = upright_raster_for_backend(
+                    data,
+                    *width,
+                    *height,
+                    page_rotation_degrees,
+                    orientation_handling,
+                    config.security_limits.as_ref(),
+                )?;
                 let mut extraction_result = backend
                     .process_image(upright_data.as_slice(), config_for_page.as_ref())
                     .await?;
@@ -4676,6 +4825,12 @@ async fn extract_with_ocr_for_page(
         #[allow(unused_variables)]
         let (batch_slice, encoded_batch) = if let Some(imgs) = images {
             let slice: Cow<'_, [image::DynamicImage]> = Cow::Borrowed(&imgs[batch_start..batch_end]);
+            let default_security_limits = crate::extractors::security::SecurityLimits::default();
+            let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+            #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
+            validate_png_encode_batch_peak(slice.iter(), true, security_limits)?;
+            #[cfg(any(not(feature = "tokio-runtime"), target_arch = "wasm32"))]
+            validate_png_encode_batch_peak(slice.iter(), false, security_limits)?;
             #[allow(clippy::type_complexity)]
             #[cfg(all(feature = "tokio-runtime", not(target_arch = "wasm32")))]
             let encoded: crate::Result<Vec<(usize, Arc<Vec<u8>>, u32, u32)>> = slice
@@ -4683,7 +4838,9 @@ async fn extract_with_ocr_for_page(
                 .enumerate()
                 .map(|(offset, image)| {
                     let page_idx = batch_start + offset;
-                    let rgb_image = image.to_rgb8();
+                    let default_security_limits = crate::extractors::security::SecurityLimits::default();
+                    let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+                    let rgb_image = clone_rgb_for_png_encode(image, security_limits)?;
                     let (width, height) = rgb_image.dimensions();
                     let mut image_bytes = Cursor::new(Vec::new());
                     let encoder = PngEncoder::new(&mut image_bytes);
@@ -4703,7 +4860,9 @@ async fn extract_with_ocr_for_page(
                 .enumerate()
                 .map(|(offset, image)| {
                     let page_idx = batch_start + offset;
-                    let rgb_image = image.to_rgb8();
+                    let default_security_limits = crate::extractors::security::SecurityLimits::default();
+                    let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+                    let rgb_image = clone_rgb_for_png_encode(image, security_limits)?;
                     let (width, height) = rgb_image.dimensions();
                     let mut image_bytes = Cursor::new(Vec::new());
                     let encoder = PngEncoder::new(&mut image_bytes);
@@ -4727,7 +4886,9 @@ async fn extract_with_ocr_for_page(
                             message: "PDF content is required for OCR rendering but was not provided".to_string(),
                             source: None,
                         })?;
-                render_full_pdf_ocr_batch(doc, page_rotations, batch_start..batch_end)?
+                let default_security_limits = crate::extractors::security::SecurityLimits::default();
+                let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+                render_full_pdf_ocr_batch(doc, page_rotations, batch_start..batch_end, security_limits)?
             };
             #[cfg(not(feature = "pdf"))]
             let encoded: Vec<(usize, Arc<Vec<u8>>, u32, u32)> = Vec::new();
@@ -4788,6 +4949,7 @@ async fn extract_with_ocr_for_page(
                     *height,
                     page_rotation_degrees,
                     orientation_handling,
+                    config.security_limits.as_ref(),
                 )?;
                 #[cfg(not(feature = "pdf"))]
                 let (upright_data, upright_width, upright_height, correction_degrees) =
@@ -4851,6 +5013,7 @@ async fn extract_with_ocr_for_page(
                     *height,
                     page_rotation_degrees,
                     orientation_handling,
+                    config.security_limits.as_ref(),
                 )?;
                 #[cfg(not(feature = "pdf"))]
                 let (upright_data, upright_width, upright_height, correction_degrees) =
@@ -4960,7 +5123,9 @@ async fn extract_with_ocr_for_page(
             // *described* as blank is caught by the ink probe in
             // `page_needs_xobject_fallback` -- both used to sail past this block.
             #[cfg(feature = "pdf")]
-            if page_needs_xobject_fallback(&ocr_result.content, encoded_batch[offset].1.as_slice()) {
+            let default_security_limits = crate::extractors::security::SecurityLimits::default();
+            let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+            if page_needs_xobject_fallback(&ocr_result.content, encoded_batch[offset].1.as_slice(), security_limits) {
                 // The layout-detection route hands in pre-rendered `images`, which leaves
                 // `lazy_pdf_render_state` unopened; that used to disable this fallback
                 // entirely for exactly the scanned documents most likely to need it. The
@@ -5056,14 +5221,24 @@ async fn extract_with_ocr_for_page(
                 let recognized_tables = match (render_scaled_detection.as_ref(), tatr_model.as_mut()) {
                     (Some(scaled_det), Some(model)) => {
                         let rgb = if let Some(ref slice) = batch_slice {
-                            slice[offset].to_rgb8()
+                            let default_security_limits = crate::extractors::security::SecurityLimits::default();
+                            let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+                            crate::extraction::image_decode::clone_dynamic_image_to_rgb8_with_security_limits(
+                                &slice[offset],
+                                security_limits,
+                            )?
                         } else {
                             let png_data = &encoded_batch[offset].1;
-                            crate::extraction::image_decode::decode_standard_rgb8_with_default_security_limits(png_data)
-                                .map_err(|e| crate::XbergError::Parsing {
-                                    message: format!("Failed to decode PNG for TATR: {}", e),
-                                    source: None,
-                                })?
+                            let default_security_limits = crate::extractors::security::SecurityLimits::default();
+                            let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+                            crate::extraction::image_decode::decode_standard_rgb8_with_security_limits(
+                                png_data,
+                                security_limits,
+                            )
+                            .map_err(|e| crate::XbergError::Parsing {
+                                message: format!("Failed to decode PNG for TATR: {}", e),
+                                source: None,
+                            })?
                         };
                         crate::ocr::layout_assembly::recognize_page_tables(
                             &rgb,
@@ -6352,13 +6527,21 @@ fn upright_raster_for_backend(
     height: u32,
     page_rotation_degrees: u32,
     orientation_handling: crate::plugins::PageOrientationHandling,
+    security_limits: Option<&crate::extractors::security::SecurityLimits>,
 ) -> crate::Result<(std::sync::Arc<Vec<u8>>, u32, u32, u32)> {
     if page_rotation_degrees == 0 || orientation_handling != crate::plugins::PageOrientationHandling::RequiresUpright {
         return Ok((std::sync::Arc::clone(data), width, height, 0));
     }
     let correction_degrees = page_rotation_degrees % 360;
-    let (rotated, new_width, new_height) =
-        crate::pdf::render::rotate_png_page_if_needed((**data).clone(), width, height, correction_degrees)?;
+    let default_security_limits = crate::extractors::security::SecurityLimits::default();
+    let security_limits = security_limits.unwrap_or(&default_security_limits);
+    let (rotated, new_width, new_height) = crate::pdf::render::rotate_png_page_if_needed_with_security_limits(
+        (**data).clone(),
+        width,
+        height,
+        correction_degrees,
+        security_limits,
+    )?;
     Ok((std::sync::Arc::new(rotated), new_width, new_height, correction_degrees))
 }
 
@@ -9479,12 +9662,24 @@ Buffers:           50000 kB
         let (doc, page_count, page_rotations) = open_pdf_for_full_ocr(&pdf).unwrap();
 
         assert_eq!(page_count, 1);
-        let first_batch = render_full_pdf_ocr_batch(&doc, &page_rotations, 0..1).unwrap();
+        let first_batch = render_full_pdf_ocr_batch(
+            &doc,
+            &page_rotations,
+            0..1,
+            &crate::extractors::security::SecurityLimits::default(),
+        )
+        .unwrap();
         assert_eq!(first_batch.len(), 1);
         assert_eq!(first_batch[0].0, 0);
         drop(first_batch);
 
-        let second_batch = render_full_pdf_ocr_batch(&doc, &page_rotations, 0..1).unwrap();
+        let second_batch = render_full_pdf_ocr_batch(
+            &doc,
+            &page_rotations,
+            0..1,
+            &crate::extractors::security::SecurityLimits::default(),
+        )
+        .unwrap();
         assert_eq!(second_batch.len(), 1);
         assert_eq!(second_batch[0].0, 0);
     }
@@ -12337,8 +12532,13 @@ Name: ___
         // byte-for-byte against production behaviour rather than a re-derived approximation.
         let (expected_doc, _page_count, expected_rotations) =
             open_pdf_for_full_ocr(&content).expect("fixture PDF must open for OCR rendering");
-        let expected_encoded =
-            render_full_pdf_ocr_batch(&expected_doc, &expected_rotations, 0..1).expect("fixture page must render");
+        let expected_encoded = render_full_pdf_ocr_batch(
+            &expected_doc,
+            &expected_rotations,
+            0..1,
+            &crate::extractors::security::SecurityLimits::default(),
+        )
+        .expect("fixture page must render");
         let (_, expected_bytes, _, _) = expected_encoded.into_iter().next().expect("page 0 must render");
 
         let config = ExtractionConfig {
@@ -13535,7 +13735,8 @@ Name: ___
         }
 
         let white = image::RgbImage::from_pixel(400, 500, image::Rgb([255; 3]));
-        assert!(page_raster_is_blank(&encode_png(&white)));
+        let limits = crate::extractors::security::SecurityLimits::default();
+        assert!(page_raster_is_blank(&encode_png(&white), &limits));
 
         let mut inked = white.clone();
         for y in 100..140 {
@@ -13543,14 +13744,19 @@ Name: ___
                 inked.put_pixel(x, y, image::Rgb([0; 3]));
             }
         }
-        assert!(!page_raster_is_blank(&encode_png(&inked)));
+        assert!(!page_raster_is_blank(&encode_png(&inked), &limits));
 
         // A short answer over an inked raster is a real (if terse) transcription and must
         // not be escalated; over a blank one it is a description of blankness.
-        assert!(!page_needs_xobject_fallback("Invoice 4471", &encode_png(&inked)));
+        assert!(!page_needs_xobject_fallback(
+            "Invoice 4471",
+            &encode_png(&inked),
+            &limits
+        ));
         assert!(page_needs_xobject_fallback(
             "The image is entirely blank.",
-            &encode_png(&white)
+            &encode_png(&white),
+            &limits,
         ));
     }
 }

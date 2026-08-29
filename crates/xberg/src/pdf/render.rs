@@ -14,6 +14,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// gap is upstream vs. xberg-side.
 const PDF_RENDER_WARNING_SOURCE: &str = "pdf-render";
 
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+const ROTATED_PNG_ENCODE_BYTES_PER_PIXEL: u64 = 4;
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+const ROTATED_PNG_ENCODE_FIXED_BYTES: u64 = 256 * 1024;
+
 thread_local! {
     /// Buffer for `xberg_native_pdf`'s `tracing::warn!` records emitted while a render
     /// call made by this thread is in flight. `None` when no render call is
@@ -637,21 +642,51 @@ pub(crate) fn ocr_page_correction_degrees(rotation_degrees: u32) -> u32 {
 /// actually carry /Rotate. Returns the (possibly new) PNG bytes with the
 /// post-rotation width and height.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+#[cfg(test)]
 pub(crate) fn rotate_png_page_if_needed(
     png_data: Vec<u8>,
     width: u32,
     height: u32,
     rotation_degrees: u32,
 ) -> Result<(Vec<u8>, u32, u32)> {
+    rotate_png_page_if_needed_with_security_limits(
+        png_data,
+        width,
+        height,
+        rotation_degrees,
+        &crate::extractors::security::SecurityLimits::default(),
+    )
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+pub(crate) fn rotate_png_page_if_needed_with_security_limits(
+    png_data: Vec<u8>,
+    width: u32,
+    height: u32,
+    rotation_degrees: u32,
+    security_limits: &crate::extractors::security::SecurityLimits,
+) -> Result<(Vec<u8>, u32, u32)> {
     if rotation_degrees.is_multiple_of(360) {
         return Ok((png_data, width, height));
     }
-    let rgb = crate::extraction::image_decode::decode_standard_rgb8_with_same_sized_output_and_default_security_limits(
+    let pixel_count = u64::from(width)
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| crate::extraction::image_decode::image_dimension_error(width, height, u64::MAX, u64::MAX))?;
+    let additional_live_bytes = pixel_count
+        .checked_mul(3 + ROTATED_PNG_ENCODE_BYTES_PER_PIXEL)
+        .and_then(|bytes| bytes.checked_add(ROTATED_PNG_ENCODE_FIXED_BYTES))
+        .ok_or_else(|| crate::extraction::image_decode::image_dimension_error(width, height, u64::MAX, u64::MAX))?;
+    let rgb = crate::extraction::image_decode::decode_standard_rgb8_with_additional_live_bytes_and_security_limits(
         &png_data,
+        security_limits,
+        additional_live_bytes,
     )
-    .map_err(|e| XbergError::Parsing {
-        message: format!("failed to decode rendered page for rotation correction: {e}"),
-        source: None,
+    .map_err(|error| match error {
+        error @ XbergError::Validation { .. } => error,
+        error => XbergError::Parsing {
+            message: format!("failed to decode rendered page for rotation correction: {error}"),
+            source: Some(Box::new(error)),
+        },
     })?;
     let img = image::DynamicImage::ImageRgb8(rgb);
     let rotated = rotate_dynamic_image(img, rotation_degrees);
@@ -672,6 +707,7 @@ pub(crate) fn rotate_png_page_if_needed(
 /// inverse transform exactly once so text is upright before layout and OCR
 /// inference consume the shared raster. ~keep
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+#[cfg(test)]
 pub(crate) fn normalize_rendered_page_for_ocr(
     png_data: Vec<u8>,
     width: u32,
@@ -679,6 +715,23 @@ pub(crate) fn normalize_rendered_page_for_ocr(
     rotation_degrees: u32,
 ) -> Result<(Vec<u8>, u32, u32)> {
     rotate_png_page_if_needed(png_data, width, height, ocr_page_correction_degrees(rotation_degrees))
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+pub(crate) fn normalize_rendered_page_for_ocr_with_security_limits(
+    png_data: Vec<u8>,
+    width: u32,
+    height: u32,
+    rotation_degrees: u32,
+    security_limits: &crate::extractors::security::SecurityLimits,
+) -> Result<(Vec<u8>, u32, u32)> {
+    rotate_png_page_if_needed_with_security_limits(
+        png_data,
+        width,
+        height,
+        ocr_page_correction_degrees(rotation_degrees),
+        security_limits,
+    )
 }
 
 /// Contain a panic raised while rasterizing one page, turning it into an
@@ -1176,6 +1229,24 @@ mod tests {
         let img = image::DynamicImage::new_rgb8(100, 150);
         let rotated = rotate_dynamic_image(img, 270);
         assert_eq!((rotated.width(), rotated.height()), (150, 100));
+    }
+
+    #[test]
+    fn rotated_png_rejects_request_limit_before_peak_allocation() {
+        let image = image::RgbImage::from_pixel(2, 2, image::Rgb([255, 255, 255]));
+        let mut encoded = Vec::new();
+        image::DynamicImage::ImageRgb8(image)
+            .write_to(&mut std::io::Cursor::new(&mut encoded), image::ImageFormat::Png)
+            .expect("encode rotation fixture");
+        let limits = crate::extractors::security::SecurityLimits {
+            max_content_size: 1_000,
+            ..Default::default()
+        };
+
+        let error = rotate_png_page_if_needed_with_security_limits(encoded, 2, 2, 90, &limits)
+            .expect_err("rotation, PNG encoder workspace, and output must honor request limits");
+
+        assert!(matches!(error, XbergError::Validation { .. }));
     }
 
     /// Count pixels darker than mid-gray inside one glyph cell of the
