@@ -5272,8 +5272,13 @@ async fn extract_with_ocr_for_page(
             all_page_paragraphs[page_idx] = None;
         }
     }
-    discard_ocr_elements_from_rejected_pages(&mut all_ocr_elements, &rejected_pages);
-    discard_rejected_ocr_page_payloads(&mut collected_tables, &mut accumulated_formulas, &rejected_pages);
+    discard_ocr_elements_from_rejected_pages(&mut all_ocr_elements, &rejected_pages, page_index_offset);
+    discard_rejected_ocr_page_payloads(
+        &mut collected_tables,
+        &mut accumulated_formulas,
+        &rejected_pages,
+        page_index_offset,
+    );
 
     fill_unstructured_ocr_pages(&mut all_page_paragraphs, &page_texts);
 
@@ -6167,21 +6172,21 @@ fn filter_public_ocr_elements(
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-fn discard_ocr_elements_from_rejected_pages(elements: &mut Vec<crate::types::OcrElement>, rejected_pages: &[bool]) {
-    elements.retain(|element| {
-        element
-            .page_number
-            .checked_sub(1)
-            .and_then(|index| rejected_pages.get(index as usize))
-            .is_none_or(|rejected| !rejected)
-    });
+fn discard_ocr_elements_from_rejected_pages(
+    elements: &mut Vec<crate::types::OcrElement>,
+    rejected_pages: &[bool],
+    page_index_offset: usize,
+) {
+    elements.retain(|element| !ocr_page_is_rejected(element.page_number, rejected_pages, page_index_offset));
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-fn ocr_page_is_rejected(page_number: u32, rejected_pages: &[bool]) -> bool {
+fn ocr_page_is_rejected(page_number: u32, rejected_pages: &[bool], page_index_offset: usize) -> bool {
     page_number
         .checked_sub(1)
-        .and_then(|index| rejected_pages.get(index as usize))
+        .and_then(|index| usize::try_from(index).ok())
+        .and_then(|index| index.checked_sub(page_index_offset))
+        .and_then(|local_index| rejected_pages.get(local_index))
         .copied()
         .unwrap_or(false)
 }
@@ -6191,12 +6196,13 @@ fn discard_rejected_ocr_page_payloads(
     tables: &mut Vec<crate::types::Table>,
     formulas: &mut Vec<crate::types::Formula>,
     rejected_pages: &[bool],
+    page_index_offset: usize,
 ) {
-    tables.retain(|table| !ocr_page_is_rejected(table.page_number, rejected_pages));
+    tables.retain(|table| !ocr_page_is_rejected(table.page_number, rejected_pages, page_index_offset));
     formulas.retain(|formula| {
         formula
             .page
-            .is_none_or(|page_number| !ocr_page_is_rejected(page_number, rejected_pages))
+            .is_none_or(|page_number| !ocr_page_is_rejected(page_number, rejected_pages, page_index_offset))
     });
 }
 
@@ -13615,7 +13621,7 @@ approval of the rezoning request; and";
         };
         let mut elements = vec![element(1), element(2), element(3)];
 
-        discard_ocr_elements_from_rejected_pages(&mut elements, &[false, true, false]);
+        discard_ocr_elements_from_rejected_pages(&mut elements, &[false, true, false], 0);
 
         assert_eq!(
             elements.iter().map(|element| element.page_number).collect::<Vec<_>>(),
@@ -13641,13 +13647,38 @@ approval of the rezoning request; and";
             })
             .collect();
 
-        discard_rejected_ocr_page_payloads(&mut tables, &mut formulas, &[false, true, false]);
+        discard_rejected_ocr_page_payloads(&mut tables, &mut formulas, &[false, true, false], 0);
 
         assert_eq!(tables.iter().map(|table| table.page_number).collect::<Vec<_>>(), [1, 3]);
         assert_eq!(
             formulas.iter().filter_map(|formula| formula.page).collect::<Vec<_>>(),
             [1, 3]
         );
+    }
+
+    #[test]
+    fn should_discard_global_page_two_payloads_for_detached_local_rejection() {
+        let mut elements = vec![crate::types::OcrElement {
+            text: "rejected page two word".to_string(),
+            page_number: 2,
+            ..Default::default()
+        }];
+        let mut tables = vec![crate::types::Table {
+            page_number: 2,
+            ..Default::default()
+        }];
+        let mut formulas = vec![crate::types::Formula {
+            latex: "rejected page two formula".to_string(),
+            bbox: None,
+            page: Some(2),
+        }];
+
+        discard_ocr_elements_from_rejected_pages(&mut elements, &[true], 1);
+        discard_rejected_ocr_page_payloads(&mut tables, &mut formulas, &[true], 1);
+
+        assert!(elements.is_empty(), "rejected detached-page elements must be removed");
+        assert!(tables.is_empty(), "rejected detached-page tables must be removed");
+        assert!(formulas.is_empty(), "rejected detached-page formulas must be removed");
     }
 
     #[test]
