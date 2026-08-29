@@ -330,6 +330,7 @@ const FONT_IDENTITY_CONSUMED_DICTIONARY_FIELDS: &[&str] = &[
 struct FontIdentityHash {
     value: u64,
     cacheable: bool,
+    subtree_depth: usize,
 }
 
 #[derive(Default)]
@@ -337,6 +338,34 @@ struct FontHashTraversal {
     resolving: HashSet<ObjectRef>,
     resolved_hashes: HashMap<ObjectRef, FontIdentityHash>,
     resolved_references: usize,
+    depth_frames: Vec<FontHashDepthFrame>,
+}
+
+struct FontHashDepthFrame {
+    entry_depth: usize,
+    max_depth: usize,
+}
+
+impl FontHashTraversal {
+    fn begin_reference(&mut self, entry_depth: usize) {
+        self.depth_frames.push(FontHashDepthFrame {
+            entry_depth,
+            max_depth: entry_depth,
+        });
+    }
+
+    fn observe_depth(&mut self, depth: usize) {
+        for frame in &mut self.depth_frames {
+            frame.max_depth = frame.max_depth.max(depth);
+        }
+    }
+
+    fn end_reference(&mut self) -> usize {
+        let Some(frame) = self.depth_frames.pop() else {
+            return FONT_IDENTITY_MAX_REFERENCE_DEPTH;
+        };
+        frame.max_depth.saturating_sub(frame.entry_depth)
+    }
 }
 
 /// PDF document.
@@ -17052,6 +17081,7 @@ impl PdfDocument {
             return FontIdentityHash {
                 value: base,
                 cacheable: false,
+                subtree_depth: 0,
             };
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -17071,6 +17101,7 @@ impl PdfDocument {
         FontIdentityHash {
             value: hasher.finish(),
             cacheable: cacheable && self.font_identity_shared_cache_enabled.load(Ordering::Acquire),
+            subtree_depth: 0,
         }
     }
 
@@ -17113,6 +17144,7 @@ impl PdfDocument {
         depth: usize,
     ) -> bool {
         use std::hash::Hash;
+        traversal.observe_depth(depth);
         if depth >= FONT_IDENTITY_MAX_REFERENCE_DEPTH {
             FONT_HASH_DEPTH_LIMIT_MARKER.hash(hasher);
             obj.type_name().hash(hasher);
@@ -17156,8 +17188,7 @@ impl PdfDocument {
         use std::hash::Hash;
         FONT_HASH_RESOLVED_REFERENCE_MARKER.hash(hasher);
         if let Some(identity) = traversal.resolved_hashes.get(&reference) {
-            identity.value.hash(hasher);
-            return identity.cacheable;
+            return Self::hash_memoized_font_identity(*identity, hasher, traversal, depth);
         }
         if traversal.resolving.contains(&reference) {
             FONT_HASH_REFERENCE_CYCLE_MARKER.hash(hasher);
@@ -17175,7 +17206,9 @@ impl PdfDocument {
                 .get(&reference)
                 .copied()
         {
-            identity.value.hash(hasher);
+            if !Self::hash_memoized_font_identity(identity, hasher, traversal, depth) {
+                return false;
+            }
             traversal.resolved_hashes.insert(reference, identity);
             return true;
         }
@@ -17193,6 +17226,29 @@ impl PdfDocument {
         identity.cacheable
     }
 
+    fn hash_memoized_font_identity<H: std::hash::Hasher>(
+        identity: FontIdentityHash,
+        hasher: &mut H,
+        traversal: &mut FontHashTraversal,
+        depth: usize,
+    ) -> bool {
+        use std::hash::Hash;
+        let Some(max_depth) = depth
+            .checked_add(1)
+            .and_then(|entry_depth| entry_depth.checked_add(identity.subtree_depth))
+        else {
+            FONT_HASH_DEPTH_LIMIT_MARKER.hash(hasher);
+            return false;
+        };
+        if max_depth >= FONT_IDENTITY_MAX_REFERENCE_DEPTH {
+            FONT_HASH_DEPTH_LIMIT_MARKER.hash(hasher);
+            return false;
+        }
+        traversal.observe_depth(max_depth);
+        identity.value.hash(hasher);
+        identity.cacheable
+    }
+
     fn resolve_font_reference_identity(
         &self,
         reference: ObjectRef,
@@ -17201,6 +17257,7 @@ impl PdfDocument {
     ) -> FontIdentityHash {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        traversal.begin_reference(depth);
         let cacheable = match self.load_object(reference) {
             Ok(resolved) => self.hash_pdf_object_resolved(&resolved, &mut hasher, traversal, depth),
             Err(_) => {
@@ -17208,9 +17265,11 @@ impl PdfDocument {
                 false
             }
         };
+        let subtree_depth = traversal.end_reference();
         FontIdentityHash {
             value: hasher.finish(),
             cacheable,
+            subtree_depth,
         }
     }
 
@@ -25180,6 +25239,50 @@ mod tests {
         )]));
 
         assert!(!document.font_identity_hash_details(&font).cacheable);
+    }
+
+    #[test]
+    fn memoized_font_reference_still_obeys_remaining_depth_budget() {
+        let document = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+        let shared_reference = ObjectRef::new(100, 0);
+        let mut shared_object = Object::Integer(400);
+        for _ in 0..12 {
+            shared_object = Object::Dictionary(std::collections::HashMap::from([(
+                "FontDescriptor".to_string(),
+                shared_object,
+            )]));
+        }
+        document
+            .object_cache
+            .lock_or_recover()
+            .insert(shared_reference, shared_object);
+        let shallow_font = Object::Dictionary(std::collections::HashMap::from([(
+            "Widths".to_string(),
+            Object::Reference(shared_reference),
+        )]));
+        assert!(document.font_identity_hash_details(&shallow_font).cacheable);
+
+        let first_outer_reference = ObjectRef::new(200, 0);
+        for object_id in 200..210 {
+            let next_reference = if object_id == 209 {
+                shared_reference
+            } else {
+                ObjectRef::new(object_id + 1, 0)
+            };
+            document.object_cache.lock_or_recover().insert(
+                ObjectRef::new(object_id, 0),
+                Object::Dictionary(std::collections::HashMap::from([(
+                    "FontDescriptor".to_string(),
+                    Object::Reference(next_reference),
+                )])),
+            );
+        }
+        let deep_font = Object::Dictionary(std::collections::HashMap::from([(
+            "Widths".to_string(),
+            Object::Reference(first_outer_reference),
+        )]));
+
+        assert!(!document.font_identity_hash_details(&deep_font).cacheable);
     }
 
     fn build_pdf_with_annotations(annot_objects: Vec<(usize, Vec<u8>)>) -> Vec<u8> {
