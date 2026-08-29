@@ -45,6 +45,10 @@ struct ObjectStreamRecovery {
 }
 
 impl ObjectStreamParseOutcome {
+    pub(crate) fn has_recovery(&self) -> bool {
+        self.recovery.is_some()
+    }
+
     pub(crate) fn trace_recovery(&self) {
         let Some(recovery) = &self.recovery else {
             return;

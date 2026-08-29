@@ -1528,9 +1528,11 @@ impl FontInfo {
         // Use first element (PDF spec: "Usually contains a single element") ~keep
         if array.len() > 1 {
             tracing::warn!(
-                "Font '{}': DescendantFonts array has {} elements, using first",
-                base_font,
-                array.len()
+                target: crate::LOG_TARGET_ROOT,
+                operation = "parse_descendant_fonts",
+                error_code = "extra_descendants",
+                descendant_count = array.len(),
+                "using first descendant font"
             );
         }
 
@@ -1559,9 +1561,10 @@ impl FontInfo {
                 // Inline-dict path — accept it per §9.7.6 lenient
                 // reader posture. ~keep
                 tracing::warn!(
-                    "Type0 font '{}': DescendantFonts[0] is a direct dictionary \
-                     (non-conformant per §9.7.6 but recoverable); parsing inline",
-                    base_font,
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "parse_descendant_fonts",
+                    error_code = "inline_descendant",
+                    "parsing inline descendant font"
                 );
                 array[0].as_dict().ok_or_else(|| Error::ParseError {
                     offset: 0,
@@ -1673,8 +1676,10 @@ impl FontInfo {
                         }
                     } else {
                         tracing::warn!(
-                            "Font '{}': CIDToGIDMap is neither Name nor Stream reference. Using Identity fallback.",
-                            base_font
+                            target: crate::LOG_TARGET_ROOT,
+                            operation = "parse_cid_to_gid_map",
+                            error_code = "invalid_map_type",
+                            "using identity CID-to-GID map"
                         );
                         Some(CIDToGIDMap::Identity)
                     }
@@ -2148,7 +2153,7 @@ impl FontInfo {
     /// the HashMap allocation entirely on horizontal fonts.
     fn parse_cid_vertical_metrics(
         cidfont_dict: &HashMap<String, Object>,
-        base_font: &str,
+        _base_font: &str,
     ) -> Option<HashMap<u16, VerticalMetrics>> {
         let w2_obj = cidfont_dict.get("W2")?;
         let w2_array = w2_obj.as_array()?;
@@ -2165,9 +2170,11 @@ impl FontInfo {
                 Object::Integer(c) => *c as u16,
                 _ => {
                     tracing::warn!(
-                        "Font '{}': /W2 array element {} is not an integer, skipping",
-                        base_font,
-                        i
+                        target: crate::LOG_TARGET_ROOT,
+                        operation = "parse_cid_vertical_metrics",
+                        error_code = "invalid_start_cid",
+                        entry_index = i,
+                        "skipping invalid vertical metrics entry"
                     );
                     i += 1;
                     continue;
@@ -2209,21 +2216,23 @@ impl FontInfo {
                         // overflowing slot onto u16::MAX; instead we stop. ~keep
                         let Some(cid) = (cid_start as u32).checked_add(emitted) else {
                             tracing::warn!(
-                                "Font '{}': /W2 Form A starting at CID {} overflowed u32 \
-                                 at emitted offset {}; stopping",
-                                base_font,
-                                cid_start,
-                                emitted
+                                target: crate::LOG_TARGET_ROOT,
+                                operation = "parse_cid_vertical_metrics",
+                                error_code = "cid_overflow",
+                                start_cid = cid_start,
+                                emitted_count = emitted,
+                                "stopping vertical metrics parsing"
                             );
                             break;
                         };
                         if cid > u16::MAX as u32 {
                             tracing::warn!(
-                                "Font '{}': /W2 Form A starting at CID {} would assign \
-                                 beyond u16::MAX at emitted offset {}; stopping",
-                                base_font,
-                                cid_start,
-                                emitted
+                                target: crate::LOG_TARGET_ROOT,
+                                operation = "parse_cid_vertical_metrics",
+                                error_code = "cid_out_of_range",
+                                start_cid = cid_start,
+                                emitted_count = emitted,
+                                "stopping vertical metrics parsing"
                             );
                             break;
                         }
@@ -2233,11 +2242,12 @@ impl FontInfo {
                             }
                             _ => {
                                 tracing::warn!(
-                                    "Font '{}': /W2 Form A triple starting at CID {} (offset \
-                                     {}) is malformed; dropping it (keeping CID alignment)",
-                                    base_font,
-                                    cid_start,
-                                    emitted
+                                    target: crate::LOG_TARGET_ROOT,
+                                    operation = "parse_cid_vertical_metrics",
+                                    error_code = "invalid_metric_triple",
+                                    start_cid = cid_start,
+                                    emitted_count = emitted,
+                                    "skipping invalid vertical metric"
                                 );
                             }
                         }
@@ -2251,9 +2261,11 @@ impl FontInfo {
                     i += 1;
                     if i + 2 >= w2_array.len() {
                         tracing::warn!(
-                            "Font '{}': /W2 range starting at CID {} truncated",
-                            base_font,
-                            cid_start
+                            target: crate::LOG_TARGET_ROOT,
+                            operation = "parse_cid_vertical_metrics",
+                            error_code = "truncated_range",
+                            start_cid = cid_start,
+                            "stopping truncated vertical metrics range"
                         );
                         break;
                     }
@@ -2284,9 +2296,11 @@ impl FontInfo {
                 }
                 _ => {
                     tracing::warn!(
-                        "Font '{}': /W2 array has unexpected element type after CID {}",
-                        base_font,
-                        cid_start
+                        target: crate::LOG_TARGET_ROOT,
+                        operation = "parse_cid_vertical_metrics",
+                        error_code = "invalid_range_type",
+                        start_cid = cid_start,
+                        "skipping invalid vertical metrics range"
                     );
                     i += 1;
                 }
@@ -2296,7 +2310,7 @@ impl FontInfo {
         if metrics.is_empty() { None } else { Some(metrics) }
     }
 
-    fn parse_cid_widths(cidfont_dict: &HashMap<String, Object>, base_font: &str) -> Option<HashMap<u16, f32>> {
+    fn parse_cid_widths(cidfont_dict: &HashMap<String, Object>, _base_font: &str) -> Option<HashMap<u16, f32>> {
         let w_obj = cidfont_dict.get("W")?;
         let w_array = w_obj.as_array()?;
 
@@ -2312,9 +2326,11 @@ impl FontInfo {
                 Object::Integer(c) => *c as u16,
                 _ => {
                     tracing::warn!(
-                        "Font '{}': /W array element {} is not an integer, skipping",
-                        base_font,
-                        i
+                        target: crate::LOG_TARGET_ROOT,
+                        operation = "parse_cid_widths",
+                        error_code = "invalid_start_cid",
+                        entry_index = i,
+                        "skipping invalid width entry"
                     );
                     i += 1;
                     continue;
@@ -2348,10 +2364,12 @@ impl FontInfo {
 
                     if i >= w_array.len() {
                         tracing::warn!(
-                            "Font '{}': /W array missing width for CID range {}-{}",
-                            base_font,
-                            cid_start,
-                            cid_end
+                            target: crate::LOG_TARGET_ROOT,
+                            operation = "parse_cid_widths",
+                            error_code = "missing_range_width",
+                            start_cid = cid_start,
+                            end_cid = cid_end,
+                            "stopping truncated width range"
                         );
                         break;
                     }
@@ -2361,10 +2379,12 @@ impl FontInfo {
                         Object::Real(w) => *w as f32,
                         _ => {
                             tracing::warn!(
-                                "Font '{}': /W array has invalid width for CID range {}-{}",
-                                base_font,
-                                cid_start,
-                                cid_end
+                                target: crate::LOG_TARGET_ROOT,
+                                operation = "parse_cid_widths",
+                                error_code = "invalid_range_width",
+                                start_cid = cid_start,
+                                end_cid = cid_end,
+                                "skipping invalid width range"
                             );
                             i += 1;
                             continue;
@@ -2378,9 +2398,11 @@ impl FontInfo {
                 }
                 _ => {
                     tracing::warn!(
-                        "Font '{}': /W array has unexpected element type after CID {}",
-                        base_font,
-                        cid_start
+                        target: crate::LOG_TARGET_ROOT,
+                        operation = "parse_cid_widths",
+                        error_code = "invalid_range_type",
+                        start_cid = cid_start,
+                        "skipping invalid width range"
                     );
                     i += 1;
                 }
@@ -6288,6 +6310,105 @@ mod tests {
                 .count(),
             1
         );
+        let rendered = format!("{logs:?}");
+        assert!(!rendered.contains(SECRET_FONT));
+        assert!(!rendered.contains(SECRET_OBJECT));
+    }
+
+    #[test]
+    fn cid_font_recovery_warnings_cover_all_malformed_branches_without_names() {
+        const SECRET_FONT: &str = "CONFIDENTIAL_CID_FONT_01c8";
+        const SECRET_OBJECT: &str = "CONFIDENTIAL_CID_OBJECT_79e3";
+        let doc = minimal_pdf_doc();
+        let system_info = Object::Dictionary(HashMap::from([
+            ("Registry".to_string(), Object::String(b"Adobe".to_vec())),
+            ("Ordering".to_string(), Object::String(b"Identity".to_vec())),
+            ("Supplement".to_string(), Object::Integer(0)),
+        ]));
+        let cid_font = Object::Dictionary(HashMap::from([
+            ("Subtype".to_string(), Object::Name("CIDFontType2".to_string())),
+            ("CIDSystemInfo".to_string(), system_info),
+            (
+                "CIDToGIDMap".to_string(),
+                Object::String(SECRET_OBJECT.as_bytes().to_vec()),
+            ),
+        ]));
+        let descendants = HashMap::from([(
+            "DescendantFonts".to_string(),
+            Object::Array(vec![cid_font, Object::Null]),
+        )]);
+
+        let logs = capture_warnings(|| {
+            FontInfo::parse_descendant_fonts(&descendants, SECRET_FONT, &doc).unwrap();
+            for w2 in [
+                vec![Object::Name(SECRET_OBJECT.to_string())],
+                vec![
+                    Object::Integer(65_535),
+                    Object::Array(vec![
+                        Object::Integer(1),
+                        Object::Integer(2),
+                        Object::Integer(3),
+                        Object::Integer(4),
+                        Object::Integer(5),
+                        Object::Integer(6),
+                    ]),
+                ],
+                vec![
+                    Object::Integer(1),
+                    Object::Array(vec![
+                        Object::Name(SECRET_OBJECT.to_string()),
+                        Object::Integer(2),
+                        Object::Integer(3),
+                    ]),
+                ],
+                vec![Object::Integer(1), Object::Integer(2), Object::Integer(3)],
+                vec![Object::Integer(1), Object::Name(SECRET_OBJECT.to_string())],
+            ] {
+                FontInfo::parse_cid_vertical_metrics(
+                    &HashMap::from([("W2".to_string(), Object::Array(w2))]),
+                    SECRET_FONT,
+                );
+            }
+            for widths in [
+                vec![Object::Name(SECRET_OBJECT.to_string())],
+                vec![Object::Integer(1), Object::Integer(2)],
+                vec![
+                    Object::Integer(1),
+                    Object::Integer(2),
+                    Object::Name(SECRET_OBJECT.to_string()),
+                ],
+                vec![Object::Integer(1), Object::Name(SECRET_OBJECT.to_string())],
+            ] {
+                FontInfo::parse_cid_widths(&HashMap::from([("W".to_string(), Object::Array(widths))]), SECRET_FONT);
+            }
+        });
+
+        assert_eq!(logs.len(), 12, "expected every malformed CID branch once: {logs:#?}");
+        for (operation, error_code) in [
+            ("parse_descendant_fonts", "extra_descendants"),
+            ("parse_descendant_fonts", "inline_descendant"),
+            ("parse_cid_to_gid_map", "invalid_map_type"),
+            ("parse_cid_vertical_metrics", "invalid_start_cid"),
+            ("parse_cid_vertical_metrics", "cid_out_of_range"),
+            ("parse_cid_vertical_metrics", "invalid_metric_triple"),
+            ("parse_cid_vertical_metrics", "truncated_range"),
+            ("parse_cid_vertical_metrics", "invalid_range_type"),
+            ("parse_cid_widths", "invalid_start_cid"),
+            ("parse_cid_widths", "missing_range_width"),
+            ("parse_cid_widths", "invalid_range_width"),
+            ("parse_cid_widths", "invalid_range_type"),
+        ] {
+            assert_eq!(
+                logs.iter()
+                    .filter(|event| {
+                        event.contains(&format!("operation=\"{operation}\""))
+                            && event.contains(&format!("error_code=\"{error_code}\""))
+                    })
+                    .count(),
+                1,
+                "missing exact {operation}/{error_code} event: {logs:#?}"
+            );
+        }
         let rendered = format!("{logs:?}");
         assert!(!rendered.contains(SECRET_FONT));
         assert!(!rendered.contains(SECRET_OBJECT));

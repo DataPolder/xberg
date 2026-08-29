@@ -118,6 +118,7 @@ const DEFAULT_XOBJECT_CACHE_MAX_ENTRIES: usize = 1024;
 
 /// Maximum accounted bytes retained as parsed object-stream maps.
 const DEFAULT_OBJECT_STREAM_CACHE_MAX_BYTES: usize = DEFAULT_OBJECT_CACHE_MAX_BYTES / 4;
+const DEFAULT_OBJECT_STREAM_RECOVERY_MARKERS: usize = 4096;
 
 /// Heuristic multiplier for the forward-gap guard in the main
 /// assembly loop's compound newline predicate
@@ -161,6 +162,34 @@ struct BoundedObjectStreamCache {
     max_bytes: usize,
 }
 
+struct BoundedRecoveryTelemetry {
+    seen: HashSet<u32>,
+    max_entries: usize,
+    saturated: bool,
+}
+
+impl BoundedRecoveryTelemetry {
+    fn new(max_entries: usize) -> Self {
+        Self {
+            seen: HashSet::new(),
+            max_entries,
+            saturated: false,
+        }
+    }
+
+    fn should_emit(&mut self, stream_object_id: u32) -> bool {
+        if self.saturated || self.seen.contains(&stream_object_id) {
+            return false;
+        }
+        if self.seen.len() >= self.max_entries {
+            self.seen.clear();
+            self.saturated = true;
+            return false;
+        }
+        self.seen.insert(stream_object_id)
+    }
+}
+
 impl BoundedObjectStreamCache {
     fn new(max_bytes: usize) -> Self {
         Self {
@@ -176,7 +205,9 @@ impl BoundedObjectStreamCache {
     }
 
     fn insert(&mut self, key: ObjectRef, value: Arc<HashMap<u32, Object>>) -> bool {
-        let entry_size = Self::estimate_size(&value);
+        let Some(entry_size) = Self::estimate_size(&value) else {
+            return false;
+        };
         if entry_size > self.max_bytes {
             return false;
         }
@@ -195,22 +226,52 @@ impl BoundedObjectStreamCache {
 
     fn remove(&mut self, key: &ObjectRef) {
         if let Some(old_value) = self.map.remove(key) {
-            self.current_bytes = self.current_bytes.saturating_sub(Self::estimate_size(&old_value));
+            let old_size = Self::estimate_size(&old_value).unwrap_or(self.max_bytes);
+            self.current_bytes = self.current_bytes.saturating_sub(old_size);
         }
         if let Some(position) = self.insertion_order.iter().position(|candidate| candidate == key) {
             self.insertion_order.remove(position);
         }
     }
 
-    fn estimate_size(objects: &HashMap<u32, Object>) -> usize {
-        let headers = std::mem::size_of::<HashMap<u32, Object>>()
-            .saturating_add(std::mem::size_of::<Arc<HashMap<u32, Object>>>());
+    fn estimate_size(objects: &HashMap<u32, Object>) -> Option<usize> {
+        let headers =
+            std::mem::size_of::<HashMap<u32, Object>>().checked_add(std::mem::size_of::<Arc<HashMap<u32, Object>>>())?;
         let buckets = objects
             .capacity()
-            .saturating_mul(std::mem::size_of::<u32>() + std::mem::size_of::<Object>() + std::mem::size_of::<usize>());
-        objects.values().fold(headers.saturating_add(buckets), |total, object| {
-            total.saturating_add(BoundedObjectCache::estimate_size(object))
-        })
+            .checked_mul(std::mem::size_of::<u32>() + std::mem::size_of::<Object>() + std::mem::size_of::<usize>())?;
+        let mut total = headers.checked_add(buckets)?;
+        let mut stack: Vec<&Object> = objects.values().collect();
+        while let Some(object) = stack.pop() {
+            total = total.checked_add(Self::estimate_dynamic_size(object, &mut stack)?)?;
+        }
+        Some(total)
+    }
+
+    fn estimate_dynamic_size<'a>(object: &'a Object, stack: &mut Vec<&'a Object>) -> Option<usize> {
+        match object {
+            Object::String(value) => Some(value.capacity()),
+            Object::Name(value) => Some(value.capacity()),
+            Object::Array(values) => {
+                stack.extend(values);
+                values.capacity().checked_mul(std::mem::size_of::<Object>())
+            }
+            Object::Dictionary(values) => Self::estimate_dictionary(values, stack),
+            Object::Stream { dict, data } => Self::estimate_dictionary(dict, stack)?.checked_add(data.len()),
+            _ => Some(0),
+        }
+    }
+
+    fn estimate_dictionary<'a>(values: &'a HashMap<String, Object>, stack: &mut Vec<&'a Object>) -> Option<usize> {
+        let buckets = values.capacity().checked_mul(
+            std::mem::size_of::<String>() + std::mem::size_of::<Object>() + std::mem::size_of::<usize>(),
+        )?;
+        let mut total = std::mem::size_of::<HashMap<String, Object>>().checked_add(buckets)?;
+        for (key, value) in values {
+            total = total.checked_add(key.capacity())?;
+            stack.push(value);
+        }
+        Some(total)
     }
 }
 
@@ -490,9 +551,9 @@ pub struct PdfDocument {
     object_cache: Mutex<BoundedObjectCache>,
     /// Parsed object streams keyed by the stream reference and bounded by accounted bytes.
     object_stream_cache: Mutex<BoundedObjectStreamCache>,
-    /// Stream references whose aggregated recovery telemetry has already fired.
-    /// The marker is compact and independent from decoded-map eviction. ~keep
-    object_stream_telemetry_seen: Mutex<HashSet<u32>>,
+    /// Bounded markers for streams whose aggregated recovery telemetry fired.
+    /// Saturation fails closed by suppressing further recovery events. ~keep
+    object_stream_telemetry_seen: Mutex<BoundedRecoveryTelemetry>,
     /// Encryption handler (if PDF is encrypted).
     /// Wrapped in RefCell for interior mutability (lazy initialization from &self).
     encryption_handler: Mutex<Option<EncryptionHandler>>,
@@ -1278,7 +1339,9 @@ impl PdfDocument {
             trailer,
             object_cache: Mutex::new(BoundedObjectCache::new(DEFAULT_OBJECT_CACHE_MAX_BYTES)),
             object_stream_cache: Mutex::new(BoundedObjectStreamCache::new(DEFAULT_OBJECT_STREAM_CACHE_MAX_BYTES)),
-            object_stream_telemetry_seen: Mutex::new(HashSet::new()),
+            object_stream_telemetry_seen: Mutex::new(BoundedRecoveryTelemetry::new(
+                DEFAULT_OBJECT_STREAM_RECOVERY_MARKERS,
+            )),
             encryption_handler: Mutex::new(None),
             encrypt_dict_ref: Mutex::new(None),
             options: ParserOptions::default(),
@@ -3612,10 +3675,13 @@ impl PdfDocument {
         stream_obj_num: u32,
         outcome: &crate::objstm::ObjectStreamParseOutcome,
     ) {
+        if !outcome.has_recovery() {
+            return;
+        }
         if self
             .object_stream_telemetry_seen
             .lock_or_recover()
-            .insert(stream_obj_num)
+            .should_emit(stream_obj_num)
         {
             outcome.trace_recovery();
         }
@@ -4077,8 +4143,8 @@ impl PdfDocument {
                 // Skip a broken entry rather than aborting the whole array (§7.3.10). ~keep
                 Object::Reference(r) => match self.load_object(r) {
                     Ok(o) => o,
-                    Err(e) => {
-                        tracing::warn!("OutputIntents entry {r} could not be loaded ({e:?}); skipping");
+                    Err(error) => {
+                        crate::error::trace_recovery("load_output_intent_entry", &error);
                         continue;
                     }
                 },
@@ -4092,15 +4158,11 @@ impl PdfDocument {
                 Some(p) => p.clone(),
                 None => continue,
             };
-            let profile_label = match &profile_obj {
-                Object::Reference(r) => format!("DestOutputProfile {r}"),
-                _ => "inline DestOutputProfile".to_string(),
-            };
             let profile_stream = match profile_obj {
                 Object::Reference(r) => match self.load_object(r) {
                     Ok(o) => o,
-                    Err(e) => {
-                        tracing::warn!("OutputIntent {profile_label} could not be loaded ({e:?}); skipping");
+                    Err(error) => {
+                        crate::error::trace_recovery("load_output_intent_profile", &error);
                         continue;
                     }
                 },
@@ -4116,16 +4178,19 @@ impl PdfDocument {
             };
             let bytes = match profile_stream.decode_stream_data() {
                 Ok(b) => b,
-                Err(e) => {
-                    tracing::warn!("OutputIntent {profile_label} stream failed to decode ({e:?}); skipping");
+                Err(error) => {
+                    crate::error::trace_recovery("decode_output_intent_profile", &error);
                     continue;
                 }
             };
             match crate::color::IccProfile::parse(bytes, n) {
                 Some(prof) => return Some(std::sync::Arc::new(prof)),
-                None => {
-                    tracing::warn!("OutputIntent {profile_label} is not a valid N=4 ICC profile; skipping")
-                }
+                None => tracing::warn!(
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "parse_output_intent_profile",
+                    error_code = "invalid_icc_profile",
+                    "skipping invalid CMYK output profile"
+                ),
             }
         }
         None
@@ -4521,7 +4586,12 @@ impl PdfDocument {
                 Ok(count)
             }
             _ => {
-                tracing::warn!("Unknown page tree node type: {:?}", node_type.unwrap_or("(none)"));
+                tracing::warn!(
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "traverse_page_tree",
+                    error_code = "unknown_node_type",
+                    "skipping unknown page tree node"
+                );
                 Ok(0)
             }
         }
@@ -26283,7 +26353,132 @@ mod tests {
             ])
         );
         assert_eq!(document.object_stream_cache.lock_or_recover().map.len(), 0);
-        assert_eq!(document.object_stream_telemetry_seen.lock_or_recover().len(), 1);
+        assert_eq!(document.object_stream_telemetry_seen.lock_or_recover().seen.len(), 1);
+    }
+
+    #[test]
+    fn clean_object_stream_does_not_consume_recovery_marker_budget() {
+        let document = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+        let stream = Object::Stream {
+            dict: HashMap::from([
+                ("Type".to_string(), Object::Name("ObjStm".to_string())),
+                ("N".to_string(), Object::Integer(1)),
+                ("First".to_string(), Object::Integer(5)),
+            ]),
+            data: bytes::Bytes::from_static(b"30 0 42"),
+        };
+        let outcome = crate::objstm::parse_object_stream_with_decryption_outcome(&stream, None, 0, 0).unwrap();
+
+        document.trace_object_stream_recovery_once(10, &outcome);
+
+        let marker = document.object_stream_telemetry_seen.lock_or_recover();
+        assert_eq!(marker.seen.len(), 0);
+        assert!(!marker.saturated);
+    }
+
+    fn build_catalog_test_pdf(catalog: &[u8], pages: &[u8], extra_objects: &[(u32, &[u8])]) -> Vec<u8> {
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let max_object_id = extra_objects.iter().map(|(id, _)| *id).max().unwrap_or(2).max(2);
+        let mut offsets = vec![None; max_object_id as usize + 1];
+        for (object_id, body) in std::iter::once((1u32, catalog))
+            .chain(std::iter::once((2u32, pages)))
+            .chain(extra_objects.iter().copied())
+        {
+            offsets[object_id as usize] = Some(pdf.len());
+            pdf.extend_from_slice(format!("{object_id} 0 obj\n").as_bytes());
+            pdf.extend_from_slice(body);
+            pdf.extend_from_slice(b"\nendobj\n");
+        }
+        let xref_offset = pdf.len();
+        pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len()).as_bytes());
+        for offset in offsets.into_iter().skip(1) {
+            match offset {
+                Some(offset) => pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes()),
+                None => pdf.extend_from_slice(b"0000000000 00000 f \n"),
+            }
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n",
+                max_object_id + 1
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
+
+    #[test]
+    fn output_intent_and_page_tree_warnings_hide_attacker_controlled_details() {
+        const SECRET_FILTER: &str = "CONFIDENTIAL_OUTPUT_FILTER_7b91";
+        const SECRET_PROFILE: &str = "CONFIDENTIAL_OUTPUT_PROFILE_34c0";
+        const SECRET_PAGE_TYPE: &str = "CONFIDENTIAL_PAGE_TYPE_a29e";
+        let pages = b"<< /Type /Pages /Kids [] /Count 0 >>";
+        let filtered_profile_body = format!("<< /N 4 /Filter /{SECRET_FILTER} /Length 1 >>\nstream\nx\nendstream");
+        let undecodable_profile = PdfDocument::from_bytes(build_catalog_test_pdf(
+            b"<< /Type /Catalog /Pages 2 0 R /OutputIntents [<< /DestOutputProfile 3 0 R >>] >>",
+            pages,
+            &[(3, filtered_profile_body.as_bytes())],
+        ))
+        .unwrap();
+        let invalid_profile_body = format!(
+            "<< /N 4 /Length {} >>\nstream\n{SECRET_PROFILE}\nendstream",
+            SECRET_PROFILE.len()
+        );
+        let invalid_profile = PdfDocument::from_bytes(build_catalog_test_pdf(
+            b"<< /Type /Catalog /Pages 2 0 R /OutputIntents [<< /DestOutputProfile 3 0 R >>] >>",
+            pages,
+            &[(3, invalid_profile_body.as_bytes())],
+        ))
+        .unwrap();
+        let unknown_page_catalog = b"<< /Type /Catalog /Pages 2 0 R >>";
+        let unknown_page_body = format!("<< /Type /{SECRET_PAGE_TYPE} /Kids [] /Count 0 >>");
+        let unknown_page = PdfDocument::from_bytes(build_catalog_test_pdf(
+            unknown_page_catalog,
+            unknown_page_body.as_bytes(),
+            &[],
+        ))
+        .unwrap();
+
+        let (_, events) = capture_events(|| {
+            crate::error::trace_recovery(
+                "load_output_intent_entry",
+                &Error::InvalidPdf(SECRET_PROFILE.to_string()),
+            );
+            crate::error::trace_recovery(
+                "load_output_intent_profile",
+                &Error::InvalidPdf(SECRET_PROFILE.to_string()),
+            );
+            assert!(undecodable_profile.output_intent_cmyk_profile().is_none());
+            assert!(invalid_profile.output_intent_cmyk_profile().is_none());
+            assert_eq!(unknown_page.count_pages_recursive(ObjectRef::new(2, 0), 0).unwrap(), 0);
+        });
+        let warnings: Vec<_> = events
+            .iter()
+            .filter(|event| event.level == Level::WARN && event.target == crate::LOG_TARGET_ROOT)
+            .collect();
+        for (operation, error_code) in [
+            ("load_output_intent_entry", "invalid_pdf"),
+            ("load_output_intent_profile", "invalid_pdf"),
+            ("decode_output_intent_profile", "unsupported_filter"),
+            ("parse_output_intent_profile", "invalid_icc_profile"),
+            ("traverse_page_tree", "unknown_node_type"),
+        ] {
+            assert_eq!(
+                warnings
+                    .iter()
+                    .filter(|event| {
+                        event.fields.get("operation").map(String::as_str) == Some(operation)
+                            && event.fields.get("error_code").map(String::as_str) == Some(error_code)
+                    })
+                    .count(),
+                1,
+                "missing exact {operation}/{error_code} warning: {events:#?}"
+            );
+        }
+        let rendered = format!("{events:?}");
+        assert!(!rendered.contains(SECRET_FILTER));
+        assert!(!rendered.contains(SECRET_PROFILE));
+        assert!(!rendered.contains(SECRET_PAGE_TYPE));
     }
 
     #[test]
@@ -27835,7 +28030,7 @@ mod tests {
         let first = Arc::new(HashMap::from([(1, Object::String(vec![0; 64]))]));
         let second = Arc::new(HashMap::from([(2, Object::String(vec![0; 64]))]));
         let third = Arc::new(HashMap::from([(3, Object::String(vec![0; 64]))]));
-        let entry_bytes = BoundedObjectStreamCache::estimate_size(&first);
+        let entry_bytes = BoundedObjectStreamCache::estimate_size(&first).unwrap();
         let budget = entry_bytes * 2;
         let mut cache = BoundedObjectStreamCache::new(budget);
 
@@ -27853,6 +28048,31 @@ mod tests {
         assert!(!cache.insert(ObjectRef::new(13, 0), oversized));
         assert!(cache.get(&ObjectRef::new(13, 0)).is_none());
         assert!(cache.current_bytes <= budget);
+    }
+
+    #[test]
+    fn object_stream_cache_rejects_deeply_nested_oversized_string() {
+        let mut nested = Object::String(vec![0; 1024 * 1024]);
+        for _ in 0..9 {
+            nested = Object::Array(vec![nested]);
+        }
+        let mut cache = BoundedObjectStreamCache::new(4 * 1024);
+
+        assert!(!cache.insert(ObjectRef::new(10, 0), Arc::new(HashMap::from([(20, nested)]))));
+        assert_eq!(cache.map.len(), 0);
+        assert_eq!(cache.current_bytes, 0);
+    }
+
+    #[test]
+    fn object_stream_recovery_marker_is_bounded_and_fail_closed() {
+        let mut marker = BoundedRecoveryTelemetry::new(1);
+
+        assert!(marker.should_emit(10));
+        assert!(!marker.should_emit(10));
+        assert!(!marker.should_emit(11));
+        assert!(marker.saturated);
+        assert_eq!(marker.seen.len(), 0);
+        assert!(!marker.should_emit(10));
     }
 
     #[test]
