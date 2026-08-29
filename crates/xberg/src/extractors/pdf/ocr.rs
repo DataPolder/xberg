@@ -1321,6 +1321,26 @@ async fn recover_image_xobjects(
 }
 
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn account_xobject_structured_output(
+    result: &crate::types::ExtractedDocument,
+    budget: &mut crate::extractors::security::SecurityBudget,
+) -> crate::Result<()> {
+    for table in &result.tables {
+        budget.account_text(table.markdown.len())?;
+        for row in &table.cells {
+            budget.add_cells(row.len())?;
+            for cell in row {
+                budget.account_text(cell.len())?;
+            }
+        }
+    }
+    for formula in &result.formulas {
+        budget.account_text(formula.latex.len())?;
+    }
+    Ok(())
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 async fn collect_xobject_recovery_result(
     backend: &std::sync::Arc<dyn crate::plugins::OcrBackend>,
     fallback: &crate::pdf::native::images::PageFallbackImage,
@@ -1347,6 +1367,7 @@ async fn collect_xobject_recovery_result(
         }
         outcome.text.push_str(&result.content);
     }
+    account_xobject_structured_output(&result, budget)?;
     outcome.llm_usage.extend(result.llm_usage.unwrap_or_default());
     if outcome.image_preprocessing.is_none() {
         outcome.image_preprocessing = result.metadata.image_preprocessing;
@@ -13511,7 +13532,7 @@ Name: ___
 
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     struct XObjectPayloadBackend {
-        content: String,
+        result: crate::types::ExtractedDocument,
         calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     }
 
@@ -13551,7 +13572,7 @@ Name: ___
             _: &crate::core::config::OcrConfig,
         ) -> crate::Result<crate::types::ExtractedDocument> {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(xobject_test_payload(&self.content))
+            Ok(self.result.clone())
         }
     }
 
@@ -13560,7 +13581,7 @@ Name: ___
     async fn xobject_recovery_preserves_payload_and_renumbers_document_page() {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let backend: std::sync::Arc<dyn crate::plugins::OcrBackend> = std::sync::Arc::new(XObjectPayloadBackend {
-            content: XOBJECT_RECOVERED_TEXT.to_string(),
+            result: xobject_test_payload(XOBJECT_RECOVERED_TEXT),
             calls,
         });
         let limits = crate::extractors::security::SecurityLimits::default();
@@ -13593,7 +13614,10 @@ Name: ___
     async fn xobject_recovery_rejects_nonempty_output_over_content_budget() {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let backend: std::sync::Arc<dyn crate::plugins::OcrBackend> = std::sync::Arc::new(XObjectPayloadBackend {
-            content: "oversized".to_string(),
+            result: crate::types::ExtractedDocument {
+                content: "oversized".to_string(),
+                ..Default::default()
+            },
             calls: calls.clone(),
         });
         let limits = crate::extractors::security::SecurityLimits {
@@ -13617,11 +13641,107 @@ Name: ___
     }
 
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    async fn assert_xobject_result_exceeds_content_budget(result: crate::types::ExtractedDocument) {
+        let backend: std::sync::Arc<dyn crate::plugins::OcrBackend> = std::sync::Arc::new(XObjectPayloadBackend {
+            result,
+            calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        });
+        let limits = crate::extractors::security::SecurityLimits {
+            max_content_size: 8,
+            ..Default::default()
+        };
+        let mut budget = crate::extractors::security::SecurityBudget::from_limits(&limits);
+
+        let error = recover_image_xobjects(
+            &backend,
+            &fallback_test_images(1),
+            0,
+            &crate::core::config::OcrConfig::default(),
+            &mut budget,
+        )
+        .await
+        .expect_err("structured recovery text above max_content_size must fail closed");
+
+        assert!(matches!(error, crate::XbergError::Security { .. }));
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    async fn xobject_recovery_rejects_oversized_structured_text() {
+        use crate::types::{ExtractedDocument, Formula, Table};
+
+        let oversized = "123456789".to_string();
+        let results = [
+            ExtractedDocument {
+                tables: vec![Table {
+                    markdown: oversized.clone(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ExtractedDocument {
+                tables: vec![Table {
+                    cells: vec![vec![oversized.clone()]],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ExtractedDocument {
+                formulas: vec![Formula {
+                    latex: oversized,
+                    bbox: None,
+                    page: None,
+                }],
+                ..Default::default()
+            },
+        ];
+
+        for result in results {
+            assert_xobject_result_exceeds_content_budget(result).await;
+        }
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    async fn xobject_recovery_rejects_tables_over_cell_budget() {
+        let backend: std::sync::Arc<dyn crate::plugins::OcrBackend> = std::sync::Arc::new(XObjectPayloadBackend {
+            result: crate::types::ExtractedDocument {
+                tables: vec![crate::types::Table {
+                    cells: vec![vec!["one".to_string(), "two".to_string()]],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        });
+        let limits = crate::extractors::security::SecurityLimits {
+            max_table_cells: 1,
+            ..Default::default()
+        };
+        let mut budget = crate::extractors::security::SecurityBudget::from_limits(&limits);
+
+        let error = recover_image_xobjects(
+            &backend,
+            &fallback_test_images(1),
+            0,
+            &crate::core::config::OcrConfig::default(),
+            &mut budget,
+        )
+        .await
+        .expect_err("recovery tables above max_table_cells must fail closed");
+
+        assert!(matches!(error, crate::XbergError::Security { .. }));
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     #[tokio::test]
     async fn xobject_recovery_bounds_backend_attempts_by_iteration_budget() {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let backend: std::sync::Arc<dyn crate::plugins::OcrBackend> = std::sync::Arc::new(XObjectPayloadBackend {
-            content: "ok".to_string(),
+            result: crate::types::ExtractedDocument {
+                content: "ok".to_string(),
+                ..Default::default()
+            },
             calls: calls.clone(),
         });
         let limits = crate::extractors::security::SecurityLimits {
