@@ -8,6 +8,12 @@ use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::core::config::concurrency::LayoutBatchWorkload;
 
+#[test]
+fn extraction_cache_namespaces_invalidate_pre_f32_pdf_results() {
+    assert_eq!(CACHE_KEY_NAMESPACE, b"xberg-engine-extract-v2");
+    assert_eq!(BATCH_CACHE_KEY_NAMESPACE, b"xberg-engine-extract-batch-v2");
+}
+
 #[tokio::test]
 async fn extract_bytes_input_returns_envelope() {
     let config = ExtractionConfig::default();

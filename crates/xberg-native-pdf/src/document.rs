@@ -268,6 +268,75 @@ thread_local! {
     static RECURSION_DEPTH: RefCell<u32> = const { RefCell::new(0) };
 }
 
+const FONT_IDENTITY_MAX_REFERENCE_DEPTH: usize = 32;
+const FONT_IDENTITY_MAX_RESOLVED_REFERENCES: usize = 4096;
+const FONT_HASH_REFERENCE_LIMIT_MARKER: u8 = 248;
+const FONT_HASH_RESOLVED_REFERENCE_MARKER: u8 = 249;
+const FONT_HASH_DEPTH_LIMIT_MARKER: u8 = 250;
+const FONT_HASH_UNRESOLVED_REFERENCE_MARKER: u8 = 251;
+const FONT_HASH_REFERENCE_CYCLE_MARKER: u8 = 252;
+const FONT_IDENTITY_SEMANTIC_FIELDS: &[&str] = &[
+    "Encoding",
+    "ToUnicode",
+    "FontDescriptor",
+    "Widths",
+    "DescendantFonts",
+    "FontMatrix",
+];
+const FONT_IDENTITY_CONSUMED_DICTIONARY_FIELDS: &[&str] = &[
+    "Ascent",
+    "BaseEncoding",
+    "BitsPerComponent",
+    "BlackIs1",
+    "CIDSystemInfo",
+    "CIDToGIDMap",
+    "CMapName",
+    "ColorTransform",
+    "Colors",
+    "Columns",
+    "DW",
+    "DW2",
+    "DamagedRowsBeforeError",
+    "DecodeParms",
+    "Descent",
+    "Differences",
+    "EarlyChange",
+    "EncodedByteAlign",
+    "EndOfBlock",
+    "EndOfLine",
+    "Filter",
+    "Flags",
+    "FontDescriptor",
+    "FontFile",
+    "FontFile2",
+    "FontFile3",
+    "FontWeight",
+    "JBIG2Globals",
+    "K",
+    "Name",
+    "Ordering",
+    "Predictor",
+    "Registry",
+    "StemV",
+    "Subtype",
+    "Supplement",
+    "W",
+    "W2",
+];
+
+#[derive(Clone, Copy)]
+struct FontIdentityHash {
+    value: u64,
+    cacheable: bool,
+}
+
+#[derive(Default)]
+struct FontHashTraversal {
+    resolving: HashSet<ObjectRef>,
+    resolved_hashes: HashMap<ObjectRef, FontIdentityHash>,
+    resolved_references: usize,
+}
+
 /// PDF document.
 ///
 /// This structure represents an open PDF document, providing access to:
@@ -357,15 +426,16 @@ pub struct PdfDocument {
     /// Stores the resolved font set (Arc-wrapped to avoid cloning) plus a combined
     /// identity hash over ALL fonts for verification before reuse. Bounded at 256 entries.
     font_name_set_cache: Mutex<BoundedEntryCache<u64, (Arc<Vec<(String, Arc<crate::fonts::FontInfo>)>>, u64)>>,
-    /// Per-font identity cache keyed by font_identity_hash (BaseFont + Subtype + Encoding +
-    /// ToUnicode + FontDescriptor + DescendantFonts references). Skips expensive
-    /// `FontInfo::from_dict()` when a structurally identical font was already parsed.
+    /// Per-font identity cache keyed by the resolved semantic content consumed by
+    /// `FontInfo::from_dict`. Skips expensive parsing when a structurally identical
+    /// font was already parsed.
     /// Bounded at 512 entries.
     font_identity_cache: Mutex<BoundedEntryCache<u64, Arc<crate::fonts::FontInfo>>>,
-    /// Per-object `font_identity_hash_cheap`, memoized. An object's content is
-    /// fixed within a document, so the Layer-4 cache guard need not
-    /// re-load and re-hash each font's `/Widths` on every page.
-    font_id_hash_cache: Mutex<HashMap<ObjectRef, u64>>,
+    /// Per-object resolved font identity, memoized. An object's content is fixed
+    /// within a document, so the Layer-4 cache guard need not traverse each font's
+    /// indirect semantic objects on every page. `None` means the identity was not
+    /// safe for cross-object or cross-document reuse.
+    font_id_hash_cache: Mutex<HashMap<ObjectRef, Option<u64>>>,
     /// Cached structure tree (None = not yet checked, Some(None) = untagged, Some(Some) = tagged).
     /// Uses Arc to avoid expensive deep clones on every page extraction.
     /// Mutex provides interior mutability for `&self` read-path methods.
@@ -16858,305 +16928,224 @@ impl PdfDocument {
     /// `font_identity_hash_cheap` of `font_ref`'s object, memoized (an object's
     /// content is fixed within a document).
     fn cached_font_identity_hash(&self, font_ref: ObjectRef) -> Option<u64> {
-        if let Some(&h) = self.font_id_hash_cache.lock_or_recover().get(&font_ref) {
-            return Some(h);
+        if let Some(cached) = self.font_id_hash_cache.lock_or_recover().get(&font_ref) {
+            return *cached;
         }
         let font = self.load_object(font_ref).ok()?;
-        let h = self.font_identity_hash_with_descendants(&font);
-        self.font_id_hash_cache.lock_or_recover().insert(font_ref, h);
-        Some(h)
+        let identity = self.font_identity_hash_details(&font);
+        let cached = identity.cacheable.then_some(identity.value);
+        self.font_id_hash_cache.lock_or_recover().insert(font_ref, cached);
+        cached
     }
 
-    /// Document-aware extension of `font_identity_hash_cheap` that folds the
-    /// *content* of a font's document-specific streams — its `/ToUnicode` CMap
-    /// and embedded font program(s) — plus the descendant CIDFont's width
-    /// metrics (`/DW`, `/DW2`, `/W`, `/W2`) and stream-form `/CIDToGIDMap` into
-    /// the identity hash.
-    ///
-    /// Why content, not just references: `font_identity_hash_cheap` folds only
-    /// the *reference* (object id/gen) of `/ToUnicode`, and the global cache is
-    /// skipped only for *canonical* subset fonts (`AAAAAA+`, six uppercase
-    /// letters + `+`; see `is_subset_basefont`). A non-canonical subset tag
-    /// such as `/CIDFont+F1` is therefore still shared cross-document, and
-    /// PDFs emitted from a common template reuse the same `/ToUnicode` object
-    /// number — so two genuinely different fonts that merely share a
-    /// `/BaseFont` name produce an identical cheap hash. Keyed only by that
-    /// hash, the cross-document global cache (Layer 6) served a later document
-    /// the *earlier* font's parsed `FontInfo`, and its glyph→Unicode mapping
-    /// came out as a constant-offset cipher or control/PUA junk (e.g.
-    /// `SUMMARY` → `6800$5<`). Folding the `/ToUnicode` stream bytes — and the
-    /// embedded `/FontFile{,2,3}` bytes — gives such fonts distinct keys so
-    /// they can never collide regardless of subset-tag form or object reuse,
-    /// while genuinely identical fonts still dedup. This completes the
-    /// cross-document hardening (which folded the
-    /// `/ToUnicode` *reference* and the `/Widths`, and excluded canonical
-    /// `AAAAAA+` subsets), applied to the field that actually decodes text.
-    ///
-    /// Cost: a few extra `load_object` calls (the `/ToUnicode` stream, each
-    /// descendant CIDFont, the `/FontDescriptor`s and their font programs) on
-    /// the first encounter of a font per document; subsequent calls hit
-    /// `font_id_hash_cache`, and the loads themselves are served from the
-    /// object cache that `FontInfo::from_dict` populates anyway. Stream bytes
-    /// are folded *raw* (still encoded) — see `fold_stream_bytes`.
+    fn font_set_identity_hash(&self, entries: &[(&String, &Object)]) -> Option<u64> {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for (name, font_obj) in entries {
+            let font_ref = font_obj.as_reference()?;
+            let font_hash = self.cached_font_identity_hash(font_ref)?;
+            name.as_str().hash(&mut hasher);
+            font_hash.hash(&mut hasher);
+        }
+        Some(hasher.finish())
+    }
+
+    /// Document-aware font identity that follows every indirect object consumed
+    /// by `FontInfo::from_dict`. PDF object numbers are local to one document;
+    /// only resolved content can safely key the process-wide cache. ~keep
+    #[cfg(test)]
     fn font_identity_hash_with_descendants(&self, font_obj: &Object) -> u64 {
+        self.font_identity_hash_details(font_obj).value
+    }
+
+    fn font_identity_hash_details(&self, font_obj: &Object) -> FontIdentityHash {
         use std::hash::{Hash, Hasher};
         let base = Self::font_identity_hash_cheap(font_obj);
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         base.hash(&mut hasher);
+        // Encrypted stream bytes are document-key-dependent ciphertext. Hashing
+        // them raw cannot establish semantic equality across documents, while
+        // decoding them solely for a cache key would duplicate expensive font
+        // decompression. Keep encrypted fonts on the object-reference cache. ~keep
+        let mut cacheable = !self.is_encrypted();
 
-        if let Some(d) = font_obj.as_dict() {
-            if let Some(to_unicode) = d.get("ToUnicode") {
-                17u8.hash(&mut hasher);
-                self.fold_stream_bytes(to_unicode, &mut hasher);
-            }
-
-            if let Some(enc) = d.get("Encoding")
-                && let Some(enc_obj) = self.resolve_indirect_for_hash(enc)
-                && let Some(enc_dict) = enc_obj.as_dict()
-            {
-                20u8.hash(&mut hasher);
-                if let Some(Object::Name(base)) = enc_dict.get("BaseEncoding") {
-                    base.hash(&mut hasher);
-                }
-                if let Some(diffs) = enc_dict.get("Differences")
-                    && let Some(diffs_obj) = self.resolve_indirect_for_hash(diffs)
-                    && let Some(arr) = diffs_obj.as_array()
-                {
-                    for item in arr {
-                        match item {
-                            Object::Integer(i) => i.hash(&mut hasher),
-                            Object::Name(n) => n.hash(&mut hasher),
-                            Object::Reference(r) => {
-                                r.id.hash(&mut hasher);
-                                r.generation.hash(&mut hasher);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
-            if let Some(fd) = d.get("FontDescriptor")
-                && let Some(fd_obj) = self.resolve_indirect_for_hash(fd)
-            {
-                self.fold_font_program(&fd_obj, 18, &mut hasher);
-            }
-
-            if let Some(Object::Array(arr)) = d.get("DescendantFonts") {
-                11u8.hash(&mut hasher);
-                for item in arr {
-                    let resolved = match item {
-                        Object::Reference(r) => self.load_object(*r).ok(),
-                        Object::Dictionary(_) => Some(item.clone()),
-                        _ => None,
-                    };
-                    let desc = match resolved {
-                        Some(d) => d,
-                        None => continue,
-                    };
-                    let dd = match desc.as_dict() {
-                        Some(dd) => dd,
-                        None => continue,
-                    };
-
-                    if let Some(dw) = dd.get("DW") {
-                        12u8.hash(&mut hasher);
-                        Self::hash_pdf_object_deterministic(dw, &mut hasher);
-                    }
-                    if let Some(dw2) = dd.get("DW2") {
-                        13u8.hash(&mut hasher);
-                        Self::hash_pdf_object_deterministic(dw2, &mut hasher);
-                    }
-                    if let Some(w) = dd.get("W") {
-                        14u8.hash(&mut hasher);
-                        Self::hash_pdf_object_deterministic(w, &mut hasher);
-                    }
-                    if let Some(w2) = dd.get("W2") {
-                        15u8.hash(&mut hasher);
-                        Self::hash_pdf_object_deterministic(w2, &mut hasher);
-                    }
-                    if let Some(csi) = dd.get("CIDSystemInfo") {
-                        16u8.hash(&mut hasher);
-                        Self::hash_pdf_object_deterministic(csi, &mut hasher);
-                    }
-                    // Descendant /Subtype: CIDFontType0 (CFF) and CIDFontType2
-                    // (TrueType) are not interchangeable even with identical
-                    // name + metrics; the top-level Subtype is `Type0` for both. ~keep
-                    if let Some(st) = dd.get("Subtype") {
-                        19u8.hash(&mut hasher);
-                        Self::hash_pdf_object_deterministic(st, &mut hasher);
-                    }
-                    // Embedded CIDFont program lives on the descendant's
-                    // /FontDescriptor (/FontFile2 for TrueType, /FontFile3 for
-                    // CFF). Folded under a distinct section so it cannot alias
-                    // a simple font's top-level program. ~keep
-                    if let Some(fd) = dd.get("FontDescriptor")
-                        && let Some(fd_obj) = self.resolve_indirect_for_hash(fd)
-                    {
-                        self.fold_font_program(&fd_obj, 20, &mut hasher);
-                    }
-                    // Descendant /CIDToGIDMap: the *stream* form remaps
-                    // CID→glyph (§9.7.4.3), so two otherwise-identical embedded
-                    // CIDFontType2 fonts with different maps select different
-                    // glyphs and must not alias. The `/Identity` name — and an
-                    // absent entry, which defaults to Identity — fold nothing,
-                    // so the common path's key is unchanged (and an explicit
-                    // `/Identity` still dedups with an absent one). ~keep
-                    if let Some(c2g) = dd.get("CIDToGIDMap")
-                        && !matches!(c2g, Object::Name(_))
-                    {
-                        21u8.hash(&mut hasher);
-                        self.fold_stream_bytes(c2g, &mut hasher);
-                    }
+        if let Some(font_dict) = font_obj.as_dict() {
+            let mut traversal = FontHashTraversal::default();
+            for field in FONT_IDENTITY_SEMANTIC_FIELDS {
+                if let Some(value) = font_dict.get(*field) {
+                    field.hash(&mut hasher);
+                    cacheable &= self.hash_pdf_object_resolved(value, &mut hasher, &mut traversal, 0);
                 }
             }
         }
 
-        hasher.finish()
+        FontIdentityHash {
+            value: hasher.finish(),
+            cacheable,
+        }
     }
 
-    /// Resolve a single level of indirection for hashing: returns the
-    /// referenced object, the object itself when already inline, or `None`
-    /// when a reference cannot be loaded (cycle/missing). Used only to reach a
-    /// `/FontDescriptor` dict — it never re-enters the font dict, so it cannot
-    /// loop.
-    fn resolve_indirect_for_hash(&self, obj: &Object) -> Option<Object> {
+    /// Hash an object by resolved content, not by its document-local object id.
+    /// Any missing reference, cycle, or depth overflow makes the identity
+    /// ineligible for the shared caches while remaining deterministic. ~keep
+    fn hash_pdf_object_resolved<H: std::hash::Hasher>(
+        &self,
+        obj: &Object,
+        hasher: &mut H,
+        traversal: &mut FontHashTraversal,
+        depth: usize,
+    ) -> bool {
+        use std::hash::Hash;
+        if depth >= FONT_IDENTITY_MAX_REFERENCE_DEPTH {
+            FONT_HASH_DEPTH_LIMIT_MARKER.hash(hasher);
+            obj.type_name().hash(hasher);
+            return false;
+        }
+
         match obj {
-            Object::Reference(r) => self.load_object(*r).ok(),
-            other => Some(other.clone()),
-        }
-    }
-
-    /// Fold the *raw* bytes of a (possibly indirectly-referenced) stream into
-    /// the hash. Folds nothing when the object is absent, unreadable, or not a
-    /// stream.
-    ///
-    /// Raw — still-encoded — bytes are deliberate. They are a sufficient
-    /// discriminator: different decoded content yields different encoded bytes
-    /// under any deterministic filter, so this never produces a *false* dedup
-    /// (two different fonts sharing a key). It avoids inflating large font
-    /// programs on the cache-key path. The only cost is a *missed* dedup when
-    /// the same logical content is stored under two different filters
-    /// (e.g. raw vs. FlateDecode) — harmless, and not a pattern a single
-    /// producer emits within a corpus.
-    fn fold_stream_bytes<H: std::hash::Hasher>(&self, obj: &Object, hasher: &mut H) {
-        use std::hash::Hash;
-        let owned;
-        let stream: &Object = match obj {
-            Object::Stream { .. } => obj,
-            Object::Reference(r) => match self.load_object(*r) {
-                Ok(o) => {
-                    owned = o;
-                    &owned
-                }
-                Err(_) => return,
-            },
-            _ => return,
-        };
-        if let Object::Stream { data, .. } = stream {
-            (data.len() as u64).hash(hasher);
-            data.as_ref().hash(hasher);
-        }
-    }
-
-    /// Fold any embedded font program (`/FontFile`, `/FontFile2`,
-    /// `/FontFile3`) reachable from a `/FontDescriptor` dict into the hash,
-    /// namespaced by `section` so a simple font's program and a descendant
-    /// CIDFont's program cannot alias each other.
-    fn fold_font_program<H: std::hash::Hasher>(&self, descriptor: &Object, section: u8, hasher: &mut H) {
-        use std::hash::Hash;
-        let dict = match descriptor.as_dict() {
-            Some(d) => d,
-            None => return,
-        };
-        for (variant, key) in ["FontFile", "FontFile2", "FontFile3"].iter().enumerate() {
-            if let Some(ff) = dict.get(*key) {
-                section.hash(hasher);
-                (variant as u8).hash(hasher);
-                self.fold_stream_bytes(ff, hasher);
+            Object::Reference(reference) => self.hash_pdf_reference_resolved(*reference, hasher, traversal, depth),
+            Object::Null
+            | Object::Boolean(_)
+            | Object::Integer(_)
+            | Object::Real(_)
+            | Object::String(_)
+            | Object::Name(_) => Self::hash_pdf_scalar(obj, hasher),
+            Object::Array(values) => self.hash_pdf_array_resolved(values, hasher, traversal, depth),
+            Object::Dictionary(dict) => {
+                7u8.hash(hasher);
+                self.hash_pdf_dictionary_resolved(dict, hasher, traversal, depth + 1)
+            }
+            Object::Stream { dict, data } => {
+                8u8.hash(hasher);
+                let cacheable = self.hash_pdf_dictionary_resolved(dict, hasher, traversal, depth + 1);
+                data.len().hash(hasher);
+                data.as_ref().hash(hasher);
+                cacheable
             }
         }
     }
 
-    /// Hash a PDF `Object` deterministically. Used by the descendant-aware
-    /// font identity hash to fold raw width-array content into the key.
-    ///
-    /// Cycles are not possible for /W, /W2, /DW2 or /CIDSystemInfo content
-    /// in any conformant PDF: these are pure data subtrees (numbers,
-    /// arrays of numbers, occasional name/integer dicts), never indirect
-    /// references back to a font dict. We still avoid recursing into
-    /// streams (whose data we deliberately exclude from the cheap hash)
-    /// and into unresolved references (we hash the ref's id/gen, not the
-    /// pointed-to bytes — the per-font cache key already covers the
-    /// referenced descendant CIDFont).
-    fn hash_pdf_object_deterministic<H: std::hash::Hasher>(obj: &Object, hasher: &mut H) {
+    fn hash_pdf_reference_resolved<H: std::hash::Hasher>(
+        &self,
+        reference: ObjectRef,
+        hasher: &mut H,
+        traversal: &mut FontHashTraversal,
+        depth: usize,
+    ) -> bool {
+        use std::hash::Hash;
+        FONT_HASH_RESOLVED_REFERENCE_MARKER.hash(hasher);
+        if let Some(identity) = traversal.resolved_hashes.get(&reference) {
+            identity.value.hash(hasher);
+            return identity.cacheable;
+        }
+        if traversal.resolved_references >= FONT_IDENTITY_MAX_RESOLVED_REFERENCES {
+            FONT_HASH_REFERENCE_LIMIT_MARKER.hash(hasher);
+            return false;
+        }
+        if !traversal.resolving.insert(reference) {
+            FONT_HASH_REFERENCE_CYCLE_MARKER.hash(hasher);
+            return false;
+        }
+
+        traversal.resolved_references += 1;
+        let identity = self.resolve_font_reference_identity(reference, traversal, depth + 1);
+        traversal.resolving.remove(&reference);
+        identity.value.hash(hasher);
+        traversal.resolved_hashes.insert(reference, identity);
+        identity.cacheable
+    }
+
+    fn resolve_font_reference_identity(
+        &self,
+        reference: ObjectRef,
+        traversal: &mut FontHashTraversal,
+        depth: usize,
+    ) -> FontIdentityHash {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let cacheable = match self.load_object(reference) {
+            Ok(resolved) => self.hash_pdf_object_resolved(&resolved, &mut hasher, traversal, depth),
+            Err(_) => {
+                FONT_HASH_UNRESOLVED_REFERENCE_MARKER.hash(&mut hasher);
+                false
+            }
+        };
+        FontIdentityHash {
+            value: hasher.finish(),
+            cacheable,
+        }
+    }
+
+    fn hash_pdf_array_resolved<H: std::hash::Hasher>(
+        &self,
+        values: &[Object],
+        hasher: &mut H,
+        traversal: &mut FontHashTraversal,
+        depth: usize,
+    ) -> bool {
+        use std::hash::Hash;
+        6u8.hash(hasher);
+        values.len().hash(hasher);
+        let mut cacheable = true;
+        for value in values {
+            cacheable &= self.hash_pdf_object_resolved(value, hasher, traversal, depth + 1);
+        }
+        cacheable
+    }
+
+    fn hash_pdf_scalar<H: std::hash::Hasher>(obj: &Object, hasher: &mut H) -> bool {
         use std::hash::Hash;
         match obj {
             Object::Null => 0u8.hash(hasher),
-            Object::Boolean(b) => {
+            Object::Boolean(value) => {
                 1u8.hash(hasher);
-                b.hash(hasher);
+                value.hash(hasher);
             }
-            Object::Integer(i) => {
+            Object::Integer(value) => {
                 2u8.hash(hasher);
-                i.hash(hasher);
+                value.hash(hasher);
             }
-            // Bit-pattern hash so two equal values hash identically without
-            // tripping over f64's missing `Hash` impl. NaN is not produced
-            // by PDF parsers from numeric tokens. ~keep
-            Object::Real(r) => {
+            Object::Real(value) => {
                 3u8.hash(hasher);
-                r.to_bits().hash(hasher);
+                value.to_bits().hash(hasher);
             }
-            Object::String(s) => {
+            Object::String(value) => {
                 4u8.hash(hasher);
-                s.hash(hasher);
+                value.hash(hasher);
             }
-            Object::Name(n) => {
+            Object::Name(value) => {
                 5u8.hash(hasher);
-                n.hash(hasher);
+                value.hash(hasher);
             }
-            Object::Array(arr) => {
-                6u8.hash(hasher);
-                (arr.len() as u64).hash(hasher);
-                for item in arr {
-                    Self::hash_pdf_object_deterministic(item, hasher);
-                }
-            }
-            Object::Dictionary(d) => {
-                7u8.hash(hasher);
-                // Sort keys for deterministic ordering — HashMap iteration
-                // is randomized per process. ~keep
-                let mut keys: Vec<&str> = d.keys().map(|k| k.as_str()).collect();
-                keys.sort_unstable();
-                (keys.len() as u64).hash(hasher);
-                for k in keys {
-                    k.hash(hasher);
-                    if let Some(v) = d.get(k) {
-                        Self::hash_pdf_object_deterministic(v, hasher);
-                    }
-                }
-            }
-            Object::Reference(r) => {
-                8u8.hash(hasher);
-                r.id.hash(hasher);
-                r.generation.hash(hasher);
-            }
-            // Streams: dict shape only; we do not pull stream data into
-            // the font identity hash (kept consistent with the cheap path). ~keep
-            Object::Stream { dict, .. } => {
-                9u8.hash(hasher);
-                let mut keys: Vec<&str> = dict.keys().map(|k| k.as_str()).collect();
-                keys.sort_unstable();
-                (keys.len() as u64).hash(hasher);
-                for k in keys {
-                    k.hash(hasher);
-                    if let Some(v) = dict.get(k) {
-                        Self::hash_pdf_object_deterministic(v, hasher);
-                    }
-                }
-            }
+            _ => return false,
         }
+        true
+    }
+
+    fn hash_pdf_dictionary_resolved<H: std::hash::Hasher>(
+        &self,
+        dict: &HashMap<String, Object>,
+        hasher: &mut H,
+        traversal: &mut FontHashTraversal,
+        depth: usize,
+    ) -> bool {
+        use std::hash::Hash;
+        let mut keys: Vec<&str> = dict
+            .keys()
+            .map(String::as_str)
+            .filter(|key| FONT_IDENTITY_CONSUMED_DICTIONARY_FIELDS.contains(key))
+            .collect();
+        keys.sort_unstable();
+        keys.len().hash(hasher);
+        let mut cacheable = true;
+        for key in keys {
+            key.hash(hasher);
+            let value_cacheable = dict
+                .get(key)
+                .is_some_and(|value| self.hash_pdf_object_resolved(value, hasher, traversal, depth));
+            cacheable &= value_cacheable;
+        }
+        cacheable
     }
 
     fn font_identity_hash_cheap(font_obj: &Object) -> u64 {
@@ -17183,22 +17172,14 @@ impl PdfDocument {
             }
             if let Some(to_unicode) = d.get("ToUnicode") {
                 4u8.hash(&mut hasher);
-                if let Some(r) = to_unicode.as_reference() {
-                    r.id.hash(&mut hasher);
-                    r.generation.hash(&mut hasher);
-                }
+                to_unicode.type_name().hash(&mut hasher);
             }
             if d.get("FontDescriptor").is_some() {
                 5u8.hash(&mut hasher);
             }
             if let Some(Object::Array(arr)) = d.get("DescendantFonts") {
                 6u8.hash(&mut hasher);
-                for item in arr {
-                    if let Some(r) = item.as_reference() {
-                        r.id.hash(&mut hasher);
-                        r.generation.hash(&mut hasher);
-                    }
-                }
+                arr.len().hash(&mut hasher);
             }
             // Width metrics: two non-subset fonts can share
             // BaseFont + Subtype + Encoding yet ship different glyph widths —
@@ -17206,12 +17187,9 @@ impl PdfDocument {
             // (§9.6.2.2), and differently-optimized embeds of the same named
             // font diverge similarly. Without folding widths into the key,
             // such fonts collide on the cross-document cache and the second
-            // document gets the first's advances. We hash the simple-font
-            // char range + width table and the Type0 default width. Only
-            // values present inline on this dict are reachable (this is a pure
-            // function over the font object); a referenced /Widths or the
-            // descendant CIDFont /W array falls back to the coarser key — an
-            // accepted, documented limitation, not a new regression. ~keep
+            // document gets the first's advances. The cheap seed covers direct
+            // simple-font widths; the document-aware identity resolves indirect
+            // widths and every descendant CIDFont metric. ~keep
             if let Some(Object::Integer(first_char)) = d.get("FirstChar") {
                 7u8.hash(&mut hasher);
                 first_char.hash(&mut hasher);
@@ -17232,22 +17210,6 @@ impl PdfDocument {
                         _ => 0u8.hash(&mut hasher),
                     }
                 }
-            }
-            if let Some(Object::Integer(dw)) = d.get("DW") {
-                10u8.hash(&mut hasher);
-                dw.hash(&mut hasher);
-            }
-            // Vertical writing metrics (§9.7.4.3). Folded the same way as the
-            // document-aware sibling (font_identity_hash_with_descendants),
-            // via the generic deterministic object hash, so two fonts that
-            // differ only in vertical advances cannot collide on this key. ~keep
-            if let Some(dw2) = d.get("DW2") {
-                11u8.hash(&mut hasher);
-                Self::hash_pdf_object_deterministic(dw2, &mut hasher);
-            }
-            if let Some(w2) = d.get("W2") {
-                12u8.hash(&mut hasher);
-                Self::hash_pdf_object_deterministic(w2, &mut hasher);
             }
         }
         hasher.finish()
@@ -17410,20 +17372,7 @@ impl PdfDocument {
                     // spot-check is insufficient because it only guards one entry
                     // lets differing sibling fonts (F2, F3 …) slip through unchecked.
                     // Fixes the regression described above. ~keep
-                    let current_combined = {
-                        use std::hash::{Hash, Hasher};
-                        let mut h = std::collections::hash_map::DefaultHasher::new();
-                        for (name, font_obj) in &sorted_font_entries {
-                            if let Some(font_ref) = font_obj.as_reference()
-                                && let Some(fh) = self.cached_font_identity_hash(font_ref)
-                            {
-                                name.as_str().hash(&mut h);
-                                fh.hash(&mut h);
-                            }
-                        }
-                        h.finish()
-                    };
-                    if current_combined == check_hash {
+                    if self.font_set_identity_hash(&sorted_font_entries) == Some(check_hash) {
                         for (name, font_arc) in cached_set.iter() {
                             extractor.add_font_shared(name.clone(), Arc::clone(font_arc));
                         }
@@ -17451,14 +17400,11 @@ impl PdfDocument {
                         all_from_cache = false;
                         let font = self.load_object(font_ref)?;
 
-                        // Compute identity hash. For Type0 fonts this also
-                        // resolves the descendant CIDFont and folds its
-                        // /DW, /DW2, /W, /W2 into the key — otherwise two
-                        // Type0 fonts whose top-level dicts have identical
-                        // inline shape but whose CIDFonts ship different
-                        // horizontal or vertical metrics would collide on
-                        // the Layer 5/6 caches. ~keep
-                        let id_hash = self.font_identity_hash_with_descendants(&font);
+                        // Resolve and hash every indirect semantic subtree that
+                        // `FontInfo::from_dict` consumes. PDF object numbers are
+                        // document-local and cannot identify shared cache entries. ~keep
+                        let identity = self.font_identity_hash_details(&font);
+                        let id_hash = identity.value;
 
                         // Type 3 fonts and subset fonts must not cross
                         // PdfDocument boundaries via the global cache — their
@@ -17469,7 +17415,10 @@ impl PdfDocument {
 
                         // Layer 5: Per-font identity cache — skip from_dict when a
                         // structurally identical font was already parsed elsewhere. ~keep
-                        let cached_identity_opt = self.font_identity_cache.lock_or_recover().get(&id_hash).cloned();
+                        let cached_identity_opt = identity
+                            .cacheable
+                            .then(|| self.font_identity_cache.lock_or_recover().get(&id_hash).cloned())
+                            .flatten();
                         if let Some(cached) = cached_identity_opt {
                             self.font_cache.lock_or_recover().insert(font_ref, Arc::clone(&cached));
                             extractor.add_font_shared((*name).clone(), cached);
@@ -17479,7 +17428,8 @@ impl PdfDocument {
                         // Layer 6: Global cross-document font cache — reuse fonts
                         // parsed by previous PdfDocument instances in this process.
                         // Skipped entirely for document-local fonts. ~keep
-                        if !is_document_local
+                        if identity.cacheable
+                            && !is_document_local
                             && let Some(cached) = crate::fonts::global_cache::global_font_cache_get(id_hash)
                         {
                             self.font_identity_cache
@@ -17496,12 +17446,14 @@ impl PdfDocument {
                                 // Populate the document-level caches always; the
                                 // global cross-document cache only for fonts that
                                 // are safe to share across documents. ~keep
-                                if !is_document_local {
+                                if identity.cacheable && !is_document_local {
                                     crate::fonts::global_cache::global_font_cache_insert(id_hash, Arc::clone(&arc));
                                 }
-                                self.font_identity_cache
-                                    .lock_or_recover()
-                                    .insert(id_hash, Arc::clone(&arc));
+                                if identity.cacheable {
+                                    self.font_identity_cache
+                                        .lock_or_recover()
+                                        .insert(id_hash, Arc::clone(&arc));
+                                }
                                 self.font_cache.lock_or_recover().insert(font_ref, Arc::clone(&arc));
                                 extractor.add_font_shared((*name).clone(), arc);
                             }
@@ -17558,27 +17510,16 @@ impl PdfDocument {
                 // not just one. This prevents false positives when pages reuse the
                 // same font key names with different per-page subsets. ~keep
                 if !all_from_cache {
-                    let combined_check_hash = {
-                        use std::hash::{Hash, Hasher};
-                        let mut h = std::collections::hash_map::DefaultHasher::new();
-                        for (name, font_obj) in &sorted_font_entries {
-                            if let Some(font_ref) = font_obj.as_reference()
-                                && let Some(fh) = self.cached_font_identity_hash(font_ref)
-                            {
-                                name.as_str().hash(&mut h);
-                                fh.hash(&mut h);
-                            }
-                        }
-                        h.finish()
-                    };
                     let l4_set: Vec<(String, Arc<FontInfo>)> = font_set
                         .iter()
                         .filter(|(k, _)| !extractor_names_before.contains(k.as_str()))
                         .map(|(k, v)| (k.clone(), Arc::clone(v)))
                         .collect();
-                    self.font_name_set_cache
-                        .lock_or_recover()
-                        .insert(name_hash, (Arc::new(l4_set), combined_check_hash));
+                    if let Some(combined_check_hash) = self.font_set_identity_hash(&sorted_font_entries) {
+                        self.font_name_set_cache
+                            .lock_or_recover()
+                            .insert(name_hash, (Arc::new(l4_set), combined_check_hash));
+                    }
                 }
 
                 return Ok(());
@@ -23609,63 +23550,62 @@ mod tests {
         );
     }
 
-    // Vertical writing metrics (/W2, /DW2; ISO 32000-1 §9.7.4.3) were folded
-    // into font_identity_hash_with_descendants but not into
-    // font_identity_hash_cheap. Two fonts differing only in vertical metrics
-    // therefore collided on the cross-document global font cache and the
-    // second document silently inherited the first document's vertical
-    // advances. ~keep
+    // Vertical metrics live on the descendant CIDFont. Their resolved content,
+    // never the PDF-local object number, determines shared font identity. ~keep
     #[test]
     fn vertical_metrics_differentiate_font_cache_key() {
-        let base = || {
-            let mut d = std::collections::HashMap::new();
-            d.insert("BaseFont".to_string(), Object::Name("Identity-CIDFont".to_string()));
-            d.insert("Subtype".to_string(), Object::Name("Type0".to_string()));
-            d
+        let doc = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+        let same_w2 = Object::Array(vec![
+            Object::Integer(1),
+            Object::Integer(3),
+            Object::Array(vec![Object::Integer(880), Object::Integer(-500), Object::Integer(500)]),
+        ]);
+        let different_w2 = Object::Array(vec![
+            Object::Integer(1),
+            Object::Integer(3),
+            Object::Array(vec![Object::Integer(880), Object::Integer(-600), Object::Integer(600)]),
+        ]);
+        doc.object_cache
+            .lock_or_recover()
+            .insert(ObjectRef::new(100, 0), same_w2.clone());
+        doc.object_cache
+            .lock_or_recover()
+            .insert(ObjectRef::new(200, 0), same_w2);
+        doc.object_cache
+            .lock_or_recover()
+            .insert(ObjectRef::new(201, 0), different_w2);
+        let font = |w2_reference, default_vertical_advance| {
+            let descendant = Object::Dictionary(std::collections::HashMap::from([
+                ("Subtype".to_string(), Object::Name("CIDFontType2".to_string())),
+                (
+                    "DW2".to_string(),
+                    Object::Array(vec![Object::Integer(880), Object::Integer(default_vertical_advance)]),
+                ),
+                ("W2".to_string(), Object::Reference(w2_reference)),
+            ]));
+            Object::Dictionary(std::collections::HashMap::from([
+                ("BaseFont".to_string(), Object::Name("Identity-CIDFont".to_string())),
+                ("Subtype".to_string(), Object::Name("Type0".to_string())),
+                ("DescendantFonts".to_string(), Object::Array(vec![descendant])),
+            ]))
         };
 
-        let mut a = base();
-        a.insert(
-            "DW2".to_string(),
-            Object::Array(vec![Object::Integer(880), Object::Integer(-1000)]),
-        );
-        let mut b = base();
-        b.insert(
-            "DW2".to_string(),
-            Object::Array(vec![Object::Integer(880), Object::Integer(-880)]),
-        );
-        let hash_a = PdfDocument::font_identity_hash_cheap(&Object::Dictionary(a));
-        let hash_b = PdfDocument::font_identity_hash_cheap(&Object::Dictionary(b));
-        assert_ne!(
-            hash_a, hash_b,
-            "fonts with identical BaseFont/Subtype but different /DW2 must not \
-             share a cross-document cache key"
-        );
+        let hash_100 = doc.font_identity_hash_with_descendants(&font(ObjectRef::new(100, 0), -1000));
+        let hash_200 = doc.font_identity_hash_with_descendants(&font(ObjectRef::new(200, 0), -1000));
+        let different_w2_hash = doc.font_identity_hash_with_descendants(&font(ObjectRef::new(201, 0), -1000));
+        let different_dw2_hash = doc.font_identity_hash_with_descendants(&font(ObjectRef::new(100, 0), -880));
 
-        let mut c = base();
-        c.insert(
-            "W2".to_string(),
-            Object::Array(vec![
-                Object::Integer(1),
-                Object::Integer(3),
-                Object::Array(vec![Object::Integer(880), Object::Integer(-500), Object::Integer(500)]),
-            ]),
+        assert_eq!(
+            hash_100, hash_200,
+            "identical indirect /W2 content at different object numbers must share a cache key"
         );
-        let mut e = base();
-        e.insert(
-            "W2".to_string(),
-            Object::Array(vec![
-                Object::Integer(1),
-                Object::Integer(3),
-                Object::Array(vec![Object::Integer(880), Object::Integer(-600), Object::Integer(600)]),
-            ]),
-        );
-        let hash_c = PdfDocument::font_identity_hash_cheap(&Object::Dictionary(c));
-        let hash_e = PdfDocument::font_identity_hash_cheap(&Object::Dictionary(e));
         assert_ne!(
-            hash_c, hash_e,
-            "fonts with identical BaseFont/Subtype but different /W2 must not \
-             share a cross-document cache key"
+            hash_100, different_w2_hash,
+            "different descendant /W2 content must not share a cache key"
+        );
+        assert_ne!(
+            hash_100, different_dw2_hash,
+            "different descendant /DW2 content must not share a cache key"
         );
     }
 
@@ -24746,6 +24686,253 @@ mod tests {
             doc.font_identity_hash_with_descendants(&font(100)),
             doc.font_identity_hash_with_descendants(&font(100)),
         );
+    }
+
+    #[test]
+    fn font_identity_hash_ignores_document_local_reference_numbers() {
+        let doc = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+        let cmap = Object::Stream {
+            dict: std::collections::HashMap::new(),
+            data: bytes::Bytes::from_static(b"same semantic cmap"),
+        };
+        doc.object_cache
+            .lock_or_recover()
+            .insert(ObjectRef::new(100, 0), cmap.clone());
+        doc.object_cache.lock_or_recover().insert(ObjectRef::new(200, 0), cmap);
+        let font = |reference| {
+            Object::Dictionary(std::collections::HashMap::from([
+                ("BaseFont".to_string(), Object::Name("CIDFont+F1".to_string())),
+                ("Subtype".to_string(), Object::Name("Type0".to_string())),
+                ("ToUnicode".to_string(), Object::Reference(reference)),
+            ]))
+        };
+
+        assert_eq!(
+            doc.font_identity_hash_with_descendants(&font(ObjectRef::new(100, 0))),
+            doc.font_identity_hash_with_descendants(&font(ObjectRef::new(200, 0))),
+            "resolved semantic content, not a document-local object number, defines font identity"
+        );
+    }
+
+    // Regression for F32: object numbers are document-local. Two PDFs can use
+    // the same `/Widths 100 0 R` reference for different width arrays, so the
+    // cross-document cache key must fold the referenced array's content. ~keep
+    #[test]
+    fn font_identity_hash_folds_referenced_simple_widths_content() {
+        let document_with_widths = |widths: Vec<Object>| {
+            let doc = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+            doc.object_cache
+                .lock_or_recover()
+                .insert(ObjectRef::new(100, 0), Object::Array(widths));
+            doc
+        };
+        let font = || {
+            let mut dict = std::collections::HashMap::new();
+            dict.insert("BaseFont".to_string(), Object::Name("Helvetica".to_string()));
+            dict.insert("Subtype".to_string(), Object::Name("Type1".to_string()));
+            dict.insert("Encoding".to_string(), Object::Name("WinAnsiEncoding".to_string()));
+            dict.insert("FirstChar".to_string(), Object::Integer(65));
+            dict.insert("LastChar".to_string(), Object::Integer(67));
+            dict.insert("Widths".to_string(), Object::Reference(ObjectRef::new(100, 0)));
+            Object::Dictionary(dict)
+        };
+
+        let narrow = document_with_widths(vec![Object::Integer(400), Object::Integer(400), Object::Integer(400)]);
+        let wide = document_with_widths(vec![Object::Integer(700), Object::Integer(700), Object::Integer(700)]);
+
+        assert_ne!(
+            narrow.font_identity_hash_with_descendants(&font()),
+            wide.font_identity_hash_with_descendants(&font()),
+            "the same object id must not alias different referenced /Widths content across documents"
+        );
+    }
+
+    // Regression for F32's Type0 variant: descendant `/W` arrays are commonly
+    // indirect, and their object numbers are no identity across documents. ~keep
+    #[test]
+    fn font_identity_hash_folds_referenced_descendant_widths_content() {
+        let document_with_widths = |widths: Vec<Object>| {
+            let doc = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+            let mut descendant = std::collections::HashMap::new();
+            descendant.insert("Subtype".to_string(), Object::Name("CIDFontType2".to_string()));
+            descendant.insert("W".to_string(), Object::Reference(ObjectRef::new(200, 0)));
+            descendant.insert(
+                "CIDSystemInfo".to_string(),
+                Object::Dictionary(std::collections::HashMap::from([
+                    ("Registry".to_string(), Object::String(b"Adobe".to_vec())),
+                    ("Ordering".to_string(), Object::String(b"Identity".to_vec())),
+                    ("Supplement".to_string(), Object::Integer(0)),
+                ])),
+            );
+            doc.object_cache
+                .lock_or_recover()
+                .insert(ObjectRef::new(6, 0), Object::Dictionary(descendant));
+            doc.object_cache
+                .lock_or_recover()
+                .insert(ObjectRef::new(200, 0), Object::Array(widths));
+            doc
+        };
+        let font = || {
+            let mut dict = std::collections::HashMap::new();
+            dict.insert("BaseFont".to_string(), Object::Name("CIDFont+F1".to_string()));
+            dict.insert("Subtype".to_string(), Object::Name("Type0".to_string()));
+            dict.insert("Encoding".to_string(), Object::Name("Identity-H".to_string()));
+            dict.insert(
+                "DescendantFonts".to_string(),
+                Object::Array(vec![Object::Reference(ObjectRef::new(6, 0))]),
+            );
+            Object::Dictionary(dict)
+        };
+
+        let narrow = document_with_widths(vec![
+            Object::Integer(1),
+            Object::Array(vec![Object::Integer(400), Object::Integer(400)]),
+        ]);
+        let wide = document_with_widths(vec![
+            Object::Integer(1),
+            Object::Array(vec![Object::Integer(900), Object::Integer(900)]),
+        ]);
+
+        assert_ne!(
+            narrow.font_identity_hash_with_descendants(&font()),
+            wide.font_identity_hash_with_descendants(&font()),
+            "the same object id must not alias different referenced descendant /W content across documents"
+        );
+    }
+
+    #[test]
+    fn font_identity_hash_resolves_indirect_descendant_array_and_descriptor_content() {
+        let document_with_descriptor = |flags: i64, program: &'static [u8]| {
+            let doc = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+            doc.object_cache.lock_or_recover().insert(
+                ObjectRef::new(100, 0),
+                Object::Array(vec![Object::Reference(ObjectRef::new(6, 0))]),
+            );
+            doc.object_cache.lock_or_recover().insert(
+                ObjectRef::new(6, 0),
+                Object::Dictionary(std::collections::HashMap::from([
+                    ("Subtype".to_string(), Object::Name("CIDFontType2".to_string())),
+                    (
+                        "CIDSystemInfo".to_string(),
+                        Object::Dictionary(std::collections::HashMap::from([
+                            ("Registry".to_string(), Object::String(b"Adobe".to_vec())),
+                            ("Ordering".to_string(), Object::String(b"Identity".to_vec())),
+                            ("Supplement".to_string(), Object::Integer(0)),
+                        ])),
+                    ),
+                    ("FontDescriptor".to_string(), Object::Reference(ObjectRef::new(7, 0))),
+                ])),
+            );
+            doc.object_cache.lock_or_recover().insert(
+                ObjectRef::new(7, 0),
+                Object::Dictionary(std::collections::HashMap::from([
+                    ("Flags".to_string(), Object::Integer(flags)),
+                    ("FontFile2".to_string(), Object::Reference(ObjectRef::new(8, 0))),
+                ])),
+            );
+            doc.object_cache.lock_or_recover().insert(
+                ObjectRef::new(8, 0),
+                Object::Stream {
+                    dict: std::collections::HashMap::new(),
+                    data: bytes::Bytes::from_static(program),
+                },
+            );
+            doc
+        };
+        let font = || {
+            Object::Dictionary(std::collections::HashMap::from([
+                ("BaseFont".to_string(), Object::Name("CIDFont+F1".to_string())),
+                ("Subtype".to_string(), Object::Name("Type0".to_string())),
+                ("Encoding".to_string(), Object::Name("Identity-H".to_string())),
+                ("DescendantFonts".to_string(), Object::Reference(ObjectRef::new(100, 0))),
+            ]))
+        };
+
+        let first = document_with_descriptor(4, b"first font program");
+        let second = document_with_descriptor(32, b"second font program");
+
+        assert_ne!(
+            first.font_identity_hash_with_descendants(&font()),
+            second.font_identity_hash_with_descendants(&font()),
+            "indirect DescendantFonts, FontDescriptor metrics, and font-program content must be resolved"
+        );
+    }
+
+    #[test]
+    fn cyclic_and_oversized_font_reference_graphs_are_not_shared() {
+        let cyclic = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+        cyclic
+            .object_cache
+            .lock_or_recover()
+            .insert(ObjectRef::new(100, 0), Object::Reference(ObjectRef::new(100, 0)));
+        let font = |reference| {
+            Object::Dictionary(std::collections::HashMap::from([
+                ("BaseFont".to_string(), Object::Name("Helvetica".to_string())),
+                ("Subtype".to_string(), Object::Name("Type1".to_string())),
+                ("Widths".to_string(), Object::Reference(reference)),
+            ]))
+        };
+
+        assert!(
+            !cyclic
+                .font_identity_hash_details(&font(ObjectRef::new(100, 0)))
+                .cacheable
+        );
+
+        let overdeep = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+        for object_id in 100..=132 {
+            overdeep.object_cache.lock_or_recover().insert(
+                ObjectRef::new(object_id, 0),
+                Object::Reference(ObjectRef::new(object_id + 1, 0)),
+            );
+        }
+        overdeep
+            .object_cache
+            .lock_or_recover()
+            .insert(ObjectRef::new(133, 0), Object::Array(vec![Object::Integer(400)]));
+
+        assert!(
+            !overdeep
+                .font_identity_hash_details(&font(ObjectRef::new(100, 0)))
+                .cacheable
+        );
+
+        let overwide = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+        let mut references = Vec::with_capacity(FONT_IDENTITY_MAX_RESOLVED_REFERENCES + 1);
+        for offset in 0..=FONT_IDENTITY_MAX_RESOLVED_REFERENCES {
+            let object_id = 1000 + u32::try_from(offset).expect("reference cap fits u32");
+            let reference = ObjectRef::new(object_id, 0);
+            overwide
+                .object_cache
+                .lock_or_recover()
+                .insert(reference, Object::Integer(400));
+            references.push(Object::Reference(reference));
+        }
+        overwide
+            .object_cache
+            .lock_or_recover()
+            .insert(ObjectRef::new(999, 0), Object::Array(references));
+
+        assert!(
+            !overwide
+                .font_identity_hash_details(&font(ObjectRef::new(999, 0)))
+                .cacheable
+        );
+    }
+
+    #[test]
+    fn encrypted_font_identity_is_not_shared_from_raw_ciphertext() {
+        let mut document = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+        document.trailer = Object::Dictionary(std::collections::HashMap::from([(
+            "Encrypt".to_string(),
+            Object::Reference(ObjectRef::new(99, 0)),
+        )]));
+        let font = Object::Dictionary(std::collections::HashMap::from([
+            ("BaseFont".to_string(), Object::Name("Helvetica".to_string())),
+            ("Subtype".to_string(), Object::Name("Type1".to_string())),
+        ]));
+
+        assert!(!document.font_identity_hash_details(&font).cacheable);
     }
 
     fn build_pdf_with_annotations(annot_objects: Vec<(usize, Vec<u8>)>) -> Vec<u8> {

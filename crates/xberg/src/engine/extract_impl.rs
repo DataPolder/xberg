@@ -56,8 +56,8 @@ const BATCH_PROGRESS_STAGE_ERROR: &str = "extract_batch_error";
 
 /// Namespace prefix mixed into the content-hash cache key so a future,
 /// incompatible key derivation can never collide with entries this version wrote.
-const CACHE_KEY_NAMESPACE: &[u8] = b"xberg-engine-extract-v1";
-const BATCH_CACHE_KEY_NAMESPACE: &[u8] = b"xberg-engine-extract-batch-v1";
+const CACHE_KEY_NAMESPACE: &[u8] = b"xberg-engine-extract-v2";
+const BATCH_CACHE_KEY_NAMESPACE: &[u8] = b"xberg-engine-extract-batch-v2";
 
 /// Extract content from a single bytes or URI input.
 ///

@@ -134,6 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed process-global native PDF font-cache collisions that made glyph spacing, geometry, and
+  batch output depend on document order and concurrency when fonts used indirect width tables.
 - Fixed Markdown OCR metadata so word counts and confidence statistics describe only text retained
   after dictionary filtering; fully filtered output now reports zero words and omits confidence
   quantiles.
