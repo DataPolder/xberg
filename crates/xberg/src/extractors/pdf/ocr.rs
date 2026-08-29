@@ -1266,6 +1266,7 @@ fn page_needs_xobject_fallback(
 
 /// What one page's image-XObject OCR recovery attempt produced.
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+#[derive(Debug)]
 struct XObjectRecoveryOutcome {
     /// Concatenated OCR text of every embedded image that yielded any; empty when none did.
     text: String,
@@ -1273,6 +1274,93 @@ struct XObjectRecoveryOutcome {
     attempted: usize,
     /// The recovered images themselves, provenance-tagged for the output's `images` array.
     images: Vec<crate::types::ExtractedImage>,
+    /// LLM usage emitted while retrying the embedded image bytes.
+    llm_usage: Vec<crate::types::LlmUsage>,
+    /// Structured tables emitted by the recovery backend.
+    tables: Vec<crate::types::Table>,
+    /// Formulas emitted by the recovery backend.
+    formulas: Vec<crate::types::Formula>,
+    /// First preprocessing record in paint order, matching the per-page metadata surface.
+    image_preprocessing: Option<crate::types::ImagePreprocessingMetadata>,
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+async fn recover_image_xobjects(
+    backend: &std::sync::Arc<dyn crate::plugins::OcrBackend>,
+    fallback_images: &[crate::pdf::native::images::PageFallbackImage],
+    page_idx: usize,
+    ocr_config: &crate::core::config::OcrConfig,
+    budget: &mut crate::extractors::security::SecurityBudget,
+) -> crate::Result<XObjectRecoveryOutcome> {
+    let mut outcome = XObjectRecoveryOutcome {
+        text: String::new(),
+        attempted: fallback_images.len(),
+        images: Vec::with_capacity(fallback_images.len()),
+        llm_usage: Vec::new(),
+        tables: Vec::new(),
+        formulas: Vec::new(),
+        image_preprocessing: None,
+    };
+    for (image_index, fallback) in fallback_images.iter().enumerate() {
+        budget.step()?;
+        collect_xobject_recovery_result(backend, fallback, page_idx, ocr_config, budget, &mut outcome).await?;
+        outcome.images.push(crate::types::ExtractedImage {
+            data: fallback.bytes.clone(),
+            format: std::borrow::Cow::Borrowed(fallback.format),
+            image_index: image_index as u32,
+            page_number: Some((page_idx + 1) as u32),
+            source_path: Some(format!("xobject:page{}:{}", page_idx + 1, image_index)),
+            description: Some(format!(
+                "recovered from raw image XObject ({}) after the page rasterizer produced a blank page",
+                fallback.recovery.as_str()
+            )),
+            ..Default::default()
+        });
+    }
+    Ok(outcome)
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+async fn collect_xobject_recovery_result(
+    backend: &std::sync::Arc<dyn crate::plugins::OcrBackend>,
+    fallback: &crate::pdf::native::images::PageFallbackImage,
+    page_idx: usize,
+    ocr_config: &crate::core::config::OcrConfig,
+    budget: &mut crate::extractors::security::SecurityBudget,
+    outcome: &mut XObjectRecoveryOutcome,
+) -> crate::Result<()> {
+    let result = match backend.process_image(&fallback.bytes, ocr_config).await {
+        Ok(result) => result,
+        Err(error) => {
+            tracing::debug!(
+                page = page_idx,
+                "force_ocr fallback: OCR of embedded image bytes failed: {error}"
+            );
+            return Ok(());
+        }
+    };
+    if !result.content.trim().is_empty() {
+        let separator_len = usize::from(!outcome.text.is_empty()) * 2;
+        budget.account_text(separator_len.saturating_add(result.content.len()))?;
+        if separator_len != 0 {
+            outcome.text.push_str("\n\n");
+        }
+        outcome.text.push_str(&result.content);
+    }
+    outcome.llm_usage.extend(result.llm_usage.unwrap_or_default());
+    if outcome.image_preprocessing.is_none() {
+        outcome.image_preprocessing = result.metadata.image_preprocessing;
+    }
+    let page_number = (page_idx + 1) as u32;
+    outcome.tables.extend(result.tables.into_iter().map(|mut table| {
+        table.page_number = page_number;
+        table
+    }));
+    outcome.formulas.extend(result.formulas.into_iter().map(|mut formula| {
+        formula.page = Some(page_number);
+        formula
+    }));
+    Ok(())
 }
 
 /// OCR a page's embedded image XObjects directly, bypassing the whole-page rasterizer.
@@ -1295,49 +1383,15 @@ async fn recover_page_text_from_image_xobjects(
     render_doc: &xberg_native_pdf::PdfDocument,
     page_idx: usize,
     ocr_config: &crate::core::config::OcrConfig,
-) -> Option<XObjectRecoveryOutcome> {
+    budget: &mut crate::extractors::security::SecurityBudget,
+) -> crate::Result<Option<XObjectRecoveryOutcome>> {
     let fallback_images = crate::pdf::native::images::page_ocr_fallback_image_bytes(render_doc, page_idx);
     if fallback_images.is_empty() {
-        return None;
+        return Ok(None);
     }
-
-    let mut recovered = String::new();
-    let mut provenance = Vec::with_capacity(fallback_images.len());
-    for (image_index, fallback) in fallback_images.iter().enumerate() {
-        match backend.process_image(&fallback.bytes, ocr_config).await {
-            Ok(result) if !result.content.trim().is_empty() => {
-                if !recovered.is_empty() {
-                    recovered.push_str("\n\n");
-                }
-                recovered.push_str(&result.content);
-            }
-            Ok(_) => {}
-            Err(error) => {
-                tracing::debug!(
-                    page = page_idx,
-                    "force_ocr fallback: OCR of embedded image bytes failed: {error}"
-                );
-            }
-        }
-        provenance.push(crate::types::ExtractedImage {
-            data: fallback.bytes.clone(),
-            format: std::borrow::Cow::Borrowed(fallback.format),
-            image_index: image_index as u32,
-            page_number: Some((page_idx + 1) as u32),
-            source_path: Some(format!("xobject:page{}:{}", page_idx + 1, image_index)),
-            description: Some(format!(
-                "recovered from raw image XObject ({}) after the page rasterizer produced a blank page",
-                fallback.recovery.as_str()
-            )),
-            ..Default::default()
-        });
-    }
-
-    Some(XObjectRecoveryOutcome {
-        text: recovered,
-        attempted: fallback_images.len(),
-        images: provenance,
-    })
+    recover_image_xobjects(backend, &fallback_images, page_idx, ocr_config, budget)
+        .await
+        .map(Some)
 }
 
 /// The warning that makes an image-XObject recovery visible in the output.
@@ -2284,7 +2338,6 @@ pub(crate) async fn extract_mixed_ocr_native(
     let mut captured_rasters: Vec<crate::types::ExtractedImage> = Vec::new();
     let mut preprocessing_by_page: ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata> =
         ahash::AHashMap::new();
-
     for batch_start in (0..total).step_by(batch_size) {
         let batch_end = (batch_start + batch_size).min(total);
         let default_security_limits = crate::extractors::security::SecurityLimits::default();
@@ -4789,6 +4842,8 @@ async fn extract_with_ocr_for_page(
     // blank by xberg_native_pdf but carrying image XObjects the renderer couldn't paint.
     #[cfg(feature = "pdf")]
     let mut image_fallback_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
+    #[cfg(feature = "pdf")]
+    let mut xobject_recovery_budget = crate::extractors::security::SecurityBudget::from_config(config);
 
     // #1444: a backend failure on one page used to propagate with `?`, aborting the whole
     // extraction and — crucially — never reaching the image-XObject fallback below, which is
@@ -5069,6 +5124,24 @@ async fn extract_with_ocr_for_page(
                 accumulated_llm_usage.extend(usage);
             }
 
+            let mut backend_tables = std::mem::take(&mut ocr_result.tables);
+            for table in &mut backend_tables {
+                table.page_number = document_page_number;
+            }
+            #[cfg(feature = "pdf")]
+            if let Some((doc, _, _)) = lazy_pdf_render_state.as_ref() {
+                let (page_width_pt, page_height_pt) = page_dimensions_pt(doc, page_idx);
+                rescale_ocr_bboxes_to_page_points(
+                    None,
+                    &mut backend_tables,
+                    encoded_batch[offset].2,
+                    encoded_batch[offset].3,
+                    page_width_pt,
+                    page_height_pt,
+                );
+            }
+            collected_tables.append(&mut backend_tables);
+
             if let Some(ref mut elems) = ocr_result.ocr_elements {
                 #[cfg(feature = "pdf")]
                 let public_elements = {
@@ -5144,16 +5217,32 @@ async fn extract_with_ocr_for_page(
                         render_doc,
                         document_page_idx,
                         &ocr_config_owned,
+                        &mut xobject_recovery_budget,
                     )
-                    .await
+                    .await?
                 {
-                    if !recovery.text.is_empty() {
-                        ocr_result.content = recovery.text;
+                    let XObjectRecoveryOutcome {
+                        text,
+                        attempted,
+                        images,
+                        mut llm_usage,
+                        mut tables,
+                        mut formulas,
+                        image_preprocessing,
+                    } = recovery;
+                    if !text.is_empty() {
+                        ocr_result.content = text;
+                    }
+                    accumulated_llm_usage.append(&mut llm_usage);
+                    collected_tables.append(&mut tables);
+                    accumulated_formulas.append(&mut formulas);
+                    if let Some(metadata) = image_preprocessing {
+                        preprocessing_by_page.insert(document_page_number, metadata);
                     }
                     if capture_rasters {
-                        captured_rasters.extend(recovery.images);
+                        captured_rasters.extend(images);
                     }
-                    image_fallback_warnings.push(xobject_fallback_warning(document_page_idx, recovery.attempted));
+                    image_fallback_warnings.push(xobject_fallback_warning(document_page_idx, attempted));
                 }
             }
 
@@ -5889,60 +5978,126 @@ fn attach_ocr_fallback_warnings(
 ///
 /// Uses the highest-priority *available* stage's backend, which is the one the pipeline
 /// itself would have preferred. Returns `None` when there is no PDF content, no usable
-/// backend, or no page yielded any text — the caller must then still report the failure.
+/// backend, or no page yielded any recoverable payload — the caller must then still report the failure.
 #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
-#[allow(clippy::type_complexity)]
+struct PipelineXObjectRecoveryOutcome {
+    text: String,
+    page_texts: Vec<String>,
+    images: Vec<crate::types::ExtractedImage>,
+    warnings: Vec<crate::types::ProcessingWarning>,
+    llm_usage: Vec<crate::types::LlmUsage>,
+    tables: Vec<crate::types::Table>,
+    formulas: Vec<crate::types::Formula>,
+    preprocessing: ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata>,
+}
+
+#[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+impl PipelineXObjectRecoveryOutcome {
+    fn new(page_count: usize) -> Self {
+        Self {
+            text: String::new(),
+            page_texts: vec![String::new(); page_count],
+            images: Vec::new(),
+            warnings: Vec::new(),
+            llm_usage: Vec::new(),
+            tables: Vec::new(),
+            formulas: Vec::new(),
+            preprocessing: ahash::AHashMap::new(),
+        }
+    }
+
+    fn has_content(&self) -> bool {
+        self.page_texts.iter().any(|text| !text.trim().is_empty())
+            || !self.tables.is_empty()
+            || !self.formulas.is_empty()
+    }
+}
+
+#[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+async fn collect_pipeline_xobject_pages(
+    backend: &std::sync::Arc<dyn crate::plugins::OcrBackend>,
+    doc: &xberg_native_pdf::PdfDocument,
+    page_count: usize,
+    ocr_config: &crate::core::config::OcrConfig,
+    budget: &mut crate::extractors::security::SecurityBudget,
+) -> crate::Result<PipelineXObjectRecoveryOutcome> {
+    let mut outcome = PipelineXObjectRecoveryOutcome::new(page_count);
+    for page_idx in 0..page_count {
+        let Some(mut recovery) =
+            recover_page_text_from_image_xobjects(backend, doc, page_idx, ocr_config, budget).await?
+        else {
+            continue;
+        };
+        let recovered_payload =
+            !recovery.text.is_empty() || !recovery.tables.is_empty() || !recovery.formulas.is_empty();
+        outcome.page_texts[page_idx] = std::mem::take(&mut recovery.text);
+        if recovered_payload {
+            outcome
+                .warnings
+                .push(xobject_fallback_warning(page_idx, recovery.attempted));
+        }
+        outcome.llm_usage.append(&mut recovery.llm_usage);
+        outcome.tables.append(&mut recovery.tables);
+        outcome.formulas.append(&mut recovery.formulas);
+        if let Some(metadata) = recovery.image_preprocessing {
+            outcome.preprocessing.insert((page_idx + 1) as u32, metadata);
+        }
+        outcome.images.append(&mut recovery.images);
+    }
+    Ok(outcome)
+}
+
+#[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+fn join_pipeline_xobject_text(
+    page_texts: &[String],
+    config: &ExtractionConfig,
+    budget: &mut crate::extractors::security::SecurityBudget,
+) -> crate::Result<String> {
+    let page_marker_cfg = config.pages.as_ref().filter(|pages| pages.insert_page_markers);
+    let mut text = String::new();
+    for (page_idx, page_text) in page_texts.iter().enumerate() {
+        if let Some(cfg) = page_marker_cfg {
+            let marker = cfg.marker_format.replace("{page_num}", &(page_idx + 1).to_string());
+            budget.account_text(marker.len())?;
+            text.push_str(&marker);
+        } else if page_idx > 0 {
+            budget.account_text(2)?;
+            text.push_str("\n\n");
+        }
+        text.push_str(page_text);
+    }
+    Ok(text)
+}
+
+#[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
 async fn recover_pipeline_document_from_image_xobjects(
     content: Option<&[u8]>,
     config: &ExtractionConfig,
     ocr_config: &crate::core::config::OcrConfig,
     backend_name: &str,
-) -> Option<(
-    String,
-    Vec<String>,
-    Vec<crate::types::ExtractedImage>,
-    Vec<crate::types::ProcessingWarning>,
-)> {
-    let content = content?;
+) -> crate::Result<Option<PipelineXObjectRecoveryOutcome>> {
+    let Some(content) = content else {
+        return Ok(None);
+    };
     let backend = {
         let registry = crate::plugins::registry::get_ocr_backend_registry();
         let registry = registry.read();
-        registry.get(backend_name).ok()?
-    };
-    let (doc, page_count, _) = open_pdf_for_full_ocr(content).ok()?;
-
-    let mut page_texts = vec![String::new(); page_count];
-    let mut recovered_images: Vec<crate::types::ExtractedImage> = Vec::new();
-    let mut warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
-    for (page_idx, page_text) in page_texts.iter_mut().enumerate() {
-        let Some(recovery) = recover_page_text_from_image_xobjects(&backend, &doc, page_idx, ocr_config).await else {
-            continue;
+        let Ok(backend) = registry.get(backend_name) else {
+            return Ok(None);
         };
-        if !recovery.text.is_empty() {
-            *page_text = recovery.text;
-            warnings.push(xobject_fallback_warning(page_idx, recovery.attempted));
-        }
-        recovered_images.extend(recovery.images);
-    }
+        backend
+    };
+    let Ok((doc, page_count, _)) = open_pdf_for_full_ocr(content) else {
+        return Ok(None);
+    };
 
-    if page_texts.iter().all(|text| text.trim().is_empty()) {
-        return None;
+    let mut budget = crate::extractors::security::SecurityBudget::from_config(config);
+    let mut outcome = collect_pipeline_xobject_pages(&backend, &doc, page_count, ocr_config, &mut budget).await?;
+    if !outcome.has_content() {
+        return Ok(None);
     }
-
-    // Same page joining rule as `extract_with_ocr_for_page`, so a recovered document reads
-    // identically to a normally-OCR'd one.
-    let page_marker_cfg = config.pages.as_ref().filter(|pages| pages.insert_page_markers);
-    let mut text = String::new();
-    for (page_idx, page_text) in page_texts.iter().enumerate() {
-        if let Some(cfg) = page_marker_cfg {
-            text.push_str(&cfg.marker_format.replace("{page_num}", &(page_idx + 1).to_string()));
-        } else if page_idx > 0 {
-            text.push_str("\n\n");
-        }
-        text.push_str(page_text);
-    }
-
-    Some((text, page_texts, recovered_images, warnings))
+    outcome.text = join_pipeline_xobject_text(&outcome.page_texts, config, &mut budget)?;
+    Ok(Some(outcome))
 }
 
 /// Run a multi-backend OCR pipeline with quality-based fallback.
@@ -6309,25 +6464,30 @@ async fn run_ocr_pipeline_for_page(
             // images are the only place the text ever was.
             #[cfg(feature = "pdf")]
             if let Some(first_stage) = available_stages.first()
-                && let Some((text, page_texts, recovered_images, warnings)) = Box::pin(
-                    recover_pipeline_document_from_image_xobjects(content, config, ocr_config, &first_stage.backend),
-                )
-                .await
+                && let Some(mut recovery) = Box::pin(recover_pipeline_document_from_image_xobjects(
+                    content,
+                    config,
+                    ocr_config,
+                    &first_stage.backend,
+                ))
+                .await?
             {
-                let doc = attach_ocr_pipeline_stage_warnings(None, &text, &unavailable_backends, &stage_failures);
-                let doc = attach_ocr_fallback_warnings(doc, &text, warnings);
+                accumulated_usage.append(&mut recovery.llm_usage);
+                let doc =
+                    attach_ocr_pipeline_stage_warnings(None, &recovery.text, &unavailable_backends, &stage_failures);
+                let doc = attach_ocr_fallback_warnings(doc, &recovery.text, recovery.warnings);
                 let capture_rasters = config.images.as_ref().is_some_and(|c| c.include_page_rasters);
                 return Ok((
-                    text,
-                    Vec::new(),
+                    recovery.text,
+                    recovery.tables,
                     Vec::new(),
                     doc,
                     accumulated_usage,
-                    page_texts,
-                    if capture_rasters { Some(recovered_images) } else { None },
+                    recovery.page_texts,
+                    if capture_rasters { Some(recovery.images) } else { None },
+                    recovery.formulas,
                     Vec::new(),
-                    Vec::new(),
-                    ahash::AHashMap::new(),
+                    recovery.preprocessing,
                 ));
             }
 
@@ -9252,7 +9412,7 @@ mod tests {
     async fn test_llm_usage_propagated_through_extract_with_ocr() {
         use crate::core::config::OcrConfig;
         use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
-        use crate::types::{ExtractedDocument, LlmUsage};
+        use crate::types::ExtractedDocument;
         use std::sync::Arc;
 
         struct VlmMockBackend;
@@ -9266,19 +9426,7 @@ mod tests {
                 true
             }
             async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
-                Ok(ExtractedDocument {
-                    content: "page text".to_string(),
-                    llm_usage: Some(vec![LlmUsage {
-                        model: "gpt-4o".to_string(),
-                        source: "vlm_ocr".to_string(),
-                        input_tokens: Some(100),
-                        output_tokens: Some(50),
-                        total_tokens: Some(150),
-                        estimated_cost: Some(0.001),
-                        finish_reason: Some("stop".to_string()),
-                    }]),
-                    ..Default::default()
-                })
+                Ok(xobject_test_payload("page text"))
             }
             fn supports_document_processing(&self) -> bool {
                 false
@@ -9338,16 +9486,25 @@ mod tests {
 
         crate::plugins::unregister_ocr_backend("vlm-mock").unwrap();
 
-        let (_, _, _, _, _, llm_usage, _, _, _, _) = result.expect("extract_with_ocr should succeed");
+        let (_, _, tables, _, _, llm_usage, _, _, formulas, preprocessing) =
+            result.expect("extract_with_ocr should succeed");
         assert_eq!(
             llm_usage.len(),
             2,
             "should have one LlmUsage entry per page, got {}",
             llm_usage.len()
         );
-        assert_eq!(llm_usage[0].model, "gpt-4o");
+        assert_eq!(llm_usage[0].model, "recovery-model");
         assert_eq!(llm_usage[0].source, "vlm_ocr");
         assert_eq!(llm_usage[0].total_tokens, Some(150));
+        assert_eq!(tables.iter().map(|table| table.page_number).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(
+            formulas.iter().map(|formula| formula.page).collect::<Vec<_>>(),
+            [Some(1), Some(2)]
+        );
+        assert_eq!(preprocessing.len(), 2);
+        assert_eq!(preprocessing[&1].target_dpi, 321);
+        assert_eq!(preprocessing[&2].target_dpi, 321);
     }
 
     #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -10151,15 +10308,11 @@ Buffers:           50000 kB
             }
             async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
                 let call_number = self.calls.fetch_add(1, Ordering::SeqCst);
-                let content = if call_number == 0 {
-                    String::new()
+                if call_number == 0 {
+                    Ok(ExtractedDocument::default())
                 } else {
-                    RECOVERED_TEXT.to_string()
-                };
-                Ok(ExtractedDocument {
-                    content,
-                    ..Default::default()
-                })
+                    Ok(xobject_test_payload(RECOVERED_TEXT))
+                }
             }
             fn supports_document_processing(&self) -> bool {
                 false
@@ -10230,7 +10383,7 @@ Buffers:           50000 kB
 
         crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
 
-        let (text, _, _, doc, _, _, _, _, _) = result.expect("pipeline run must succeed");
+        let (text, tables, _, doc, usage, _, _, formulas, preprocessing) = result.expect("pipeline run must succeed");
         assert_eq!(
             text, RECOVERED_TEXT,
             "recovered fallback text must replace the blank OCR result in the pipeline route"
@@ -10240,6 +10393,13 @@ Buffers:           50000 kB
             2,
             "expected exactly one full-page OCR call and one fallback OCR call"
         );
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].model, "recovery-model");
+        assert_eq!(tables.len(), 1);
+        assert_eq!(tables[0].page_number, 1);
+        assert_eq!(formulas.len(), 1);
+        assert_eq!(formulas[0].page, Some(1));
+        assert_eq!(preprocessing[&1].target_dpi, 321);
 
         let warnings = doc
             .expect("the fallback warning must produce an internal document")
@@ -13291,6 +13451,199 @@ Name: ___
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     const XOBJECT_RECOVERED_TEXT: &str = "RECOVERED FROM EMBEDDED IMAGE XOBJECT";
 
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    fn xobject_test_payload(content: &str) -> crate::types::ExtractedDocument {
+        use crate::types::{Formula, ImagePreprocessingMetadata, LlmUsage, Metadata, Table};
+
+        crate::types::ExtractedDocument {
+            content: content.to_string(),
+            metadata: Metadata {
+                image_preprocessing: Some(ImagePreprocessingMetadata {
+                    original_dimensions: (10, 20).into(),
+                    original_dpi: (72.0, 72.0).into(),
+                    target_dpi: 321,
+                    scale_factor: 1.0,
+                    auto_adjusted: false,
+                    final_dpi: 321,
+                    new_dimensions: None,
+                    resample_method: "test".to_string(),
+                    dimension_clamped: false,
+                    calculated_dpi: None,
+                    skipped_resize: true,
+                    resize_error: None,
+                }),
+                ..Default::default()
+            },
+            tables: vec![Table {
+                cells: vec![vec!["header".to_string()], vec!["value".to_string()]],
+                markdown: "| header |\n| --- |\n| value |\n".to_string(),
+                page_number: 99,
+                ..Default::default()
+            }],
+            formulas: vec![Formula {
+                latex: "x^2".to_string(),
+                bbox: None,
+                page: Some(99),
+            }],
+            llm_usage: Some(vec![LlmUsage {
+                model: "recovery-model".to_string(),
+                source: "vlm_ocr".to_string(),
+                input_tokens: Some(100),
+                output_tokens: Some(50),
+                total_tokens: Some(150),
+                estimated_cost: Some(0.001),
+                finish_reason: Some("stop".to_string()),
+            }]),
+            ..Default::default()
+        }
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    fn fallback_test_images(count: usize) -> Vec<crate::pdf::native::images::PageFallbackImage> {
+        (0..count)
+            .map(|_| crate::pdf::native::images::PageFallbackImage {
+                bytes: bytes::Bytes::from_static(b"ignored image bytes"),
+                format: "jpeg",
+                recovery: crate::pdf::native::images::XObjectRecovery::EmbeddedJpeg,
+            })
+            .collect()
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    struct XObjectPayloadBackend {
+        content: String,
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    impl crate::plugins::Plugin for XObjectPayloadBackend {
+        fn name(&self) -> &str {
+            "xobject-payload-test-backend"
+        }
+
+        fn version(&self) -> String {
+            "1.0.0".to_string()
+        }
+
+        fn initialize(&self) -> crate::Result<()> {
+            Ok(())
+        }
+
+        fn shutdown(&self) -> crate::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[async_trait::async_trait]
+    impl crate::plugins::OcrBackend for XObjectPayloadBackend {
+        fn backend_type(&self) -> crate::plugins::OcrBackendType {
+            crate::plugins::OcrBackendType::Custom
+        }
+
+        fn supports_language(&self, _: &str) -> bool {
+            true
+        }
+
+        async fn process_image(
+            &self,
+            _: &[u8],
+            _: &crate::core::config::OcrConfig,
+        ) -> crate::Result<crate::types::ExtractedDocument> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(xobject_test_payload(&self.content))
+        }
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    async fn xobject_recovery_preserves_payload_and_renumbers_document_page() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let backend: std::sync::Arc<dyn crate::plugins::OcrBackend> = std::sync::Arc::new(XObjectPayloadBackend {
+            content: XOBJECT_RECOVERED_TEXT.to_string(),
+            calls,
+        });
+        let limits = crate::extractors::security::SecurityLimits::default();
+        let mut budget = crate::extractors::security::SecurityBudget::from_limits(&limits);
+
+        let recovery = recover_image_xobjects(
+            &backend,
+            &fallback_test_images(1),
+            6,
+            &crate::core::config::OcrConfig::default(),
+            &mut budget,
+        )
+        .await
+        .expect("bounded recovery must succeed");
+
+        assert_eq!(recovery.text, XOBJECT_RECOVERED_TEXT);
+        assert_eq!(recovery.llm_usage.len(), 1);
+        assert_eq!(recovery.tables.len(), 1);
+        assert_eq!(recovery.tables[0].page_number, 7);
+        assert_eq!(recovery.formulas.len(), 1);
+        assert_eq!(recovery.formulas[0].page, Some(7));
+        assert_eq!(
+            recovery.image_preprocessing.expect("metadata must survive").target_dpi,
+            321
+        );
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    async fn xobject_recovery_rejects_nonempty_output_over_content_budget() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let backend: std::sync::Arc<dyn crate::plugins::OcrBackend> = std::sync::Arc::new(XObjectPayloadBackend {
+            content: "oversized".to_string(),
+            calls: calls.clone(),
+        });
+        let limits = crate::extractors::security::SecurityLimits {
+            max_content_size: 8,
+            ..Default::default()
+        };
+        let mut budget = crate::extractors::security::SecurityBudget::from_limits(&limits);
+
+        let error = recover_image_xobjects(
+            &backend,
+            &fallback_test_images(1),
+            0,
+            &crate::core::config::OcrConfig::default(),
+            &mut budget,
+        )
+        .await
+        .expect_err("nonempty recovery output above max_content_size must fail closed");
+
+        assert!(matches!(error, crate::XbergError::Security { .. }));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    async fn xobject_recovery_bounds_backend_attempts_by_iteration_budget() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let backend: std::sync::Arc<dyn crate::plugins::OcrBackend> = std::sync::Arc::new(XObjectPayloadBackend {
+            content: "ok".to_string(),
+            calls: calls.clone(),
+        });
+        let limits = crate::extractors::security::SecurityLimits {
+            max_iterations: 1,
+            ..Default::default()
+        };
+        let mut budget = crate::extractors::security::SecurityBudget::from_limits(&limits);
+
+        let error = recover_image_xobjects(
+            &backend,
+            &fallback_test_images(2),
+            0,
+            &crate::core::config::OcrConfig::default(),
+            &mut budget,
+        )
+        .await
+        .expect_err("more XObject attempts than max_iterations must fail closed");
+
+        assert!(matches!(error, crate::XbergError::Security { .. }));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
     /// The reporter's error in #1444, verbatim.
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     const VLM_NO_CONTENT_ERROR: &str = "VLM OCR returned no content";
@@ -13556,10 +13909,7 @@ Name: ___
                         plugin_name: "ocr".to_string(),
                     });
                 }
-                Ok(ExtractedDocument {
-                    content: XOBJECT_RECOVERED_TEXT.to_string(),
-                    ..Default::default()
-                })
+                Ok(xobject_test_payload(XOBJECT_RECOVERED_TEXT))
             }
             fn supports_document_processing(&self) -> bool {
                 false
@@ -13619,7 +13969,7 @@ Name: ___
 
         crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
 
-        let (text, _, _, doc, _, _, _, _, _) =
+        let (text, tables, _, doc, usage, _, _, formulas, preprocessing) =
             result.expect("the pipeline must try the pages' embedded images before reporting total failure");
         assert_eq!(text, XOBJECT_RECOVERED_TEXT);
         assert_eq!(
@@ -13627,6 +13977,13 @@ Name: ___
             3,
             "expected one page-raster call, one in-stage fallback call, and one pipeline-level recovery call"
         );
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].model, "recovery-model");
+        assert_eq!(tables.len(), 1);
+        assert_eq!(tables[0].page_number, 1);
+        assert_eq!(formulas.len(), 1);
+        assert_eq!(formulas[0].page, Some(1));
+        assert_eq!(preprocessing[&1].target_dpi, 321);
 
         let warnings = doc
             .expect("recovery warnings must produce a document")
