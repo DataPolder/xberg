@@ -1660,9 +1660,8 @@ criterion = { workspace = true }
 dotenvy = "0.15"
 filetime = "0.2"
 image = { workspace = true, default-features = false, features = ["png"] }
-# default-features=false drops jsonschema's `resolve-http` (reqwest→native-tls→openssl-sys);
-# tests validate local schemas only. Keeps the test build openssl-free.
-jsonschema = { version = "0.52", default-features = false }
+# Test retrieval features prove runtime compilation stays offline under Cargo feature unification. ~keep
+jsonschema = { version = "0.52", default-features = false, features = ["resolve-file", "resolve-http", "tls-ring"] }
 qrcode = { version = "0.14", default-features = false, features = ["image"] }
 # Test-only: builds an in-memory model2vec fixture (safetensors bytes) for the
 # static_engine unit tests, without a network fetch.
