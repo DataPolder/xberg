@@ -134,6 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed repeated bold PDF presenter labels and same-row legend keys being promoted to headings,
+  which could invert document hierarchy and fragment retrieval chunks.
 - Fixed PDF OCR so fragmented, low-confidence, and dictionary-suspect non-empty text is retained
   with a processing warning by default instead of silently emptying pages. Set
   `ocr.quality_thresholds.discard_suspected_ocr_noise = true` (or the equivalent pipeline quality

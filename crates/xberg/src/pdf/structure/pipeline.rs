@@ -259,7 +259,12 @@ fn build_heading_map(
     Ok((heading_map, struct_tree_needs_classify))
 }
 
-fn opens_aligned_body_block(candidate: &PdfParagraph, following: &PdfParagraph, body_font_size: f32) -> bool {
+fn opens_aligned_body_block(
+    candidate: &PdfParagraph,
+    following: &PdfParagraph,
+    body_font_size: f32,
+    is_same_page: bool,
+) -> bool {
     if following.word_count < MIN_OPENED_BODY_WORDS
         || following.heading_level.is_some()
         || is_body_size_bold_signal(following, body_font_size)
@@ -267,16 +272,22 @@ fn opens_aligned_body_block(candidate: &PdfParagraph, following: &PdfParagraph, 
         return false;
     }
 
-    let (Some(candidate_bbox), Some(following_bbox)) = (candidate.block_bbox, following.block_bbox) else {
-        return true;
-    };
     let coordinates_are_finite = |bbox: (f32, f32, f32, f32)| {
         let (left, bottom, right, top) = bbox;
         left.is_finite() && bottom.is_finite() && right.is_finite() && top.is_finite()
     };
-    coordinates_are_finite(candidate_bbox)
-        && coordinates_are_finite(following_bbox)
-        && candidate_bbox.0 <= following_bbox.0 + body_font_size * BODY_SIZE_BOLD_ALIGNMENT_TOLERANCE_EM
+    if candidate.block_bbox.is_some_and(|bbox| !coordinates_are_finite(bbox))
+        || following.block_bbox.is_some_and(|bbox| !coordinates_are_finite(bbox))
+    {
+        return false;
+    }
+    let (Some(candidate_bbox), Some(following_bbox)) = (candidate.block_bbox, following.block_bbox) else {
+        return true;
+    };
+
+    let is_horizontally_aligned =
+        candidate_bbox.0 <= following_bbox.0 + body_font_size * BODY_SIZE_BOLD_ALIGNMENT_TOLERANCE_EM;
+    is_horizontally_aligned && (!is_same_page || candidate_bbox.1 >= following_bbox.3)
 }
 
 fn is_explicit_numbered_body_size_section(text: &str) -> bool {
@@ -305,18 +316,24 @@ fn is_explicit_numbered_body_size_section(text: &str) -> bool {
 fn body_size_heading_eligibility(all_pages: &[Vec<PdfParagraph>], body_font_size: f32) -> Vec<Vec<bool>> {
     let mut next_content = None;
     let mut eligibility = Vec::with_capacity(all_pages.len());
-    for page in all_pages.iter().rev() {
+    for (page_index, page) in all_pages.iter().enumerate().rev() {
         let mut page_eligibility = Vec::with_capacity(page.len());
         for paragraph in page.iter().rev() {
             let is_candidate = is_body_size_bold_heading_candidate(paragraph, body_font_size);
             page_eligibility.push(
                 is_candidate
                     && (is_explicit_numbered_body_size_section(paragraph_text_raw(paragraph).trim())
-                        || next_content
-                            .is_some_and(|following| opens_aligned_body_block(paragraph, following, body_font_size))),
+                        || next_content.is_some_and(|(following_page_index, following)| {
+                            opens_aligned_body_block(
+                                paragraph,
+                                following,
+                                body_font_size,
+                                page_index == following_page_index,
+                            )
+                        })),
             );
             if paragraph.word_count > 0 && !paragraph.is_page_furniture {
-                next_content = Some(paragraph);
+                next_content = Some((page_index, paragraph));
             }
         }
         page_eligibility.reverse();
@@ -7726,6 +7743,17 @@ mod tests {
         paragraph
     }
 
+    fn body_size_paragraph_with_bbox(
+        text: &str,
+        is_bold: bool,
+        heading_level: Option<u8>,
+        bbox: (f32, f32, f32, f32),
+    ) -> PdfParagraph {
+        let mut paragraph = body_size_paragraph(text, is_bold, heading_level);
+        paragraph.block_bbox = Some(bbox);
+        paragraph
+    }
+
     fn heading_page(heading: &str, heading_size: f32, body: &str) -> Vec<SegmentData> {
         let mut heading_segment = seg_heuristic(heading, heading_size, 700.0);
         heading_segment.is_bold = true;
@@ -9768,12 +9796,17 @@ where new shares are issued;";
         )]);
         aligned_section_pages.extend((1..9).map(|index| {
             vec![
-                body_size_paragraph_at(&format!("Genuine repeated section heading {index}"), true, None, 74.0),
-                body_size_paragraph_at(
+                body_size_paragraph_with_bbox(
+                    &format!("Genuine repeated section heading {index}"),
+                    true,
+                    None,
+                    (74.0, 700.0, 274.0, 712.0),
+                ),
+                body_size_paragraph_with_bbox(
                     &format!("Section {index} opens a block of ordinary body text."),
                     false,
                     None,
-                    74.0,
+                    (74.0, 660.0, 274.0, 690.0),
                 ),
             ]
         }));
@@ -9895,6 +9928,182 @@ where new shares are issued;";
             numbered_section_pages.last().and_then(|page| page[0].heading_level),
             None,
             "an attribution followed only by a short role label must remain a paragraph"
+        );
+    }
+
+    #[test]
+    fn should_not_promote_same_row_presenter_labels_as_repeated_body_size_headings() {
+        let mut pages = vec![vec![body_size_paragraph_with_bbox(
+            "Existing document title",
+            true,
+            Some(1),
+            (74.0, 740.0, 274.0, 752.0),
+        )]];
+        pages.extend((0..3).map(|index| {
+            vec![
+                body_size_paragraph_with_bbox(
+                    &format!("Presenter Role Label {index}"),
+                    true,
+                    None,
+                    (74.0, 700.0, 190.0, 712.0),
+                ),
+                body_size_paragraph_with_bbox(
+                    &format!("Named participant {index} and their professional affiliation"),
+                    false,
+                    None,
+                    (210.0, 700.0, 430.0, 712.0),
+                ),
+            ]
+        }));
+        pages.extend((0..3).map(|index| {
+            vec![
+                body_size_paragraph_with_bbox(
+                    &format!("Genuine repeated section heading {index}"),
+                    true,
+                    None,
+                    (74.0, 700.0, 300.0, 712.0),
+                ),
+                body_size_paragraph_with_bbox(
+                    &format!("Section {index} opens a substantive ordinary body paragraph."),
+                    false,
+                    None,
+                    (74.0, 660.0, 430.0, 690.0),
+                ),
+            ]
+        }));
+
+        assert_eq!(
+            pages
+                .iter()
+                .skip(1)
+                .filter(|page| is_body_size_bold_heading_candidate(&page[0], 12.0))
+                .count(),
+            6,
+            "all controls must reach the repeated body-size heading promotion predicate"
+        );
+        assert_eq!(
+            pages
+                .iter()
+                .skip(1)
+                .take(3)
+                .filter(|page| page[0]
+                    .block_bbox
+                    .zip(page[1].block_bbox)
+                    .is_some_and(|(candidate, following)| { candidate.1 < following.3 && following.1 < candidate.3 }))
+                .count(),
+            MIN_BODY_SIZE_BOLD_SIGNALS,
+            "the negative controls must overlap vertically and meet the document-wide promotion threshold"
+        );
+
+        promote_repeated_body_size_bold_headings(&mut pages, Some(12.0));
+
+        assert_eq!(
+            pages
+                .iter()
+                .skip(1)
+                .take(3)
+                .filter(|page| page[0].heading_level == Some(3))
+                .count(),
+            0,
+            "same-row presenter labels must remain subordinate text"
+        );
+        assert_eq!(
+            pages
+                .iter()
+                .skip(4)
+                .filter(|page| page[0].heading_level == Some(3))
+                .count(),
+            3,
+            "vertically ordered headings must retain repeated body-size promotion"
+        );
+    }
+
+    #[test]
+    fn should_reject_non_finite_geometry_when_the_other_bbox_is_missing() {
+        let mut missing_candidate_pages = vec![vec![body_size_paragraph_at(
+            "Existing document title",
+            true,
+            Some(1),
+            74.0,
+        )]];
+        missing_candidate_pages.extend((0..MIN_BODY_SIZE_BOLD_SIGNALS).map(|index| {
+            let mut following = body_size_paragraph_at(
+                &format!("Following ordinary body content {index} has invalid geometry."),
+                false,
+                None,
+                74.0,
+            );
+            following.block_bbox = Some((74.0, f32::NAN, 274.0, 12.0));
+            vec![
+                body_size_paragraph(
+                    &format!("Candidate without geometry {index} opens body content"),
+                    true,
+                    None,
+                ),
+                following,
+            ]
+        }));
+
+        assert_eq!(
+            missing_candidate_pages
+                .iter()
+                .skip(1)
+                .filter(|page| is_body_size_bold_heading_candidate(&page[0], 12.0))
+                .count(),
+            MIN_BODY_SIZE_BOLD_SIGNALS,
+            "candidate-missing controls must reach the document-wide promotion threshold"
+        );
+        promote_repeated_body_size_bold_headings(&mut missing_candidate_pages, Some(12.0));
+
+        let mut missing_following_pages = vec![vec![body_size_paragraph_at(
+            "Existing document title",
+            true,
+            Some(1),
+            74.0,
+        )]];
+        missing_following_pages.extend((0..MIN_BODY_SIZE_BOLD_SIGNALS).map(|index| {
+            let mut candidate = body_size_paragraph_at(
+                &format!("Candidate with invalid geometry {index} opens body content"),
+                true,
+                None,
+                74.0,
+            );
+            candidate.block_bbox = Some((f32::INFINITY, 0.0, 274.0, 12.0));
+            vec![
+                candidate,
+                body_size_paragraph(
+                    &format!("Following ordinary body content {index} lacks geometry."),
+                    false,
+                    None,
+                ),
+            ]
+        }));
+
+        assert_eq!(
+            missing_following_pages
+                .iter()
+                .skip(1)
+                .filter(|page| is_body_size_bold_heading_candidate(&page[0], 12.0))
+                .count(),
+            MIN_BODY_SIZE_BOLD_SIGNALS,
+            "following-missing controls must reach the document-wide promotion threshold"
+        );
+        promote_repeated_body_size_bold_headings(&mut missing_following_pages, Some(12.0));
+
+        let promoted_with_non_finite_following = missing_candidate_pages
+            .iter()
+            .skip(1)
+            .filter(|page| page[0].heading_level == Some(3))
+            .count();
+        let promoted_with_non_finite_candidate = missing_following_pages
+            .iter()
+            .skip(1)
+            .filter(|page| page[0].heading_level == Some(3))
+            .count();
+        assert_eq!(
+            (promoted_with_non_finite_following, promoted_with_non_finite_candidate),
+            (0, 0),
+            "a present non-finite bbox must fail closed regardless of which side lacks geometry"
         );
     }
 
