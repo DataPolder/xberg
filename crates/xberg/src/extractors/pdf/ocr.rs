@@ -2230,6 +2230,7 @@ pub(crate) async fn extract_mixed_ocr_native(
                             page_rotation_degrees,
                             true,
                             points_per_pixel_override,
+                            idx,
                         ))
                         .await;
                         (idx, result)
@@ -2346,6 +2347,7 @@ pub(crate) async fn extract_mixed_ocr_native(
                         page_rotation_degrees,
                         true,
                         points_per_pixel_override,
+                        *page_idx,
                     ))
                     .await?;
                     accumulated_llm_usage.extend(usage);
@@ -4321,6 +4323,7 @@ pub(crate) async fn extract_with_ocr(
         0,
         false,
         None,
+        0,
     ))
     .await?;
     Ok((
@@ -4368,6 +4371,10 @@ pub(crate) async fn extract_with_ocr(
 /// `extract_mixed_ocr_native`'s per-page pipeline route) needs the same override here: without
 /// it, `content: None` makes the lookup fall back to `1.0` (pixels treated as points), silently
 /// defeating the document-global heading heuristic's absolute-point font-gap comparisons.
+///
+/// `page_index_offset` maps this function's local image indices back to document page
+/// indices when a caller supplies a detached page image. It affects externally visible page
+/// identity only; internal vectors remain indexed from zero.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 // Each parameter is independently documented above and forwarded verbatim by every caller
 // (see `run_ocr_pipeline_for_page`); bundling them into a params struct would only move the
@@ -4384,6 +4391,7 @@ async fn extract_with_ocr_for_page(
     page_rotation_override: u32,
     skip_document_global_heuristic: bool,
     points_per_pixel_override: Option<f32>,
+    page_index_offset: usize,
 ) -> crate::Result<(
     String,
     Option<f64>,
@@ -4764,7 +4772,11 @@ async fn extract_with_ocr_for_page(
                 match ocr_result {
                     Ok(document) => batch_ocr_results[page_idx - batch_start] = Some(document),
                     Err(error) => {
-                        tracing::warn!(page = page_idx + 1, error = %error, "OCR backend failed for page");
+                        tracing::warn!(
+                            page = page_index_offset + page_idx + 1,
+                            error = %error,
+                            "OCR backend failed for page"
+                        );
                         batch_page_errors[page_idx - batch_start] = Some(error.to_string());
                         batch_ocr_results[page_idx - batch_start] = Some(crate::types::ExtractedDocument::default());
                     }
@@ -4814,7 +4826,11 @@ async fn extract_with_ocr_for_page(
                 match ocr_result {
                     Ok(document) => batch_ocr_results[page_idx - batch_start] = Some(document),
                     Err(error) => {
-                        tracing::warn!(page = page_idx + 1, error = %error, "OCR backend failed for page");
+                        tracing::warn!(
+                            page = page_index_offset + page_idx + 1,
+                            error = %error,
+                            "OCR backend failed for page"
+                        );
                         batch_page_errors[page_idx - batch_start] = Some(error.to_string());
                         batch_ocr_results[page_idx - batch_start] = Some(crate::types::ExtractedDocument::default());
                     }
@@ -4824,9 +4840,11 @@ async fn extract_with_ocr_for_page(
 
         for offset in 0..batch_count {
             let page_idx = batch_start + offset;
+            let document_page_idx = page_index_offset + page_idx;
+            let document_page_number = (document_page_idx + 1) as u32;
             let mut ocr_result = batch_ocr_results[offset].take().expect("OCR result missing for page");
             if let Some(metadata) = ocr_result.metadata.image_preprocessing.clone() {
-                preprocessing_by_page.insert((page_idx + 1) as u32, metadata);
+                preprocessing_by_page.insert(document_page_number, metadata);
             }
             #[cfg(feature = "pdf")]
             {
@@ -4861,7 +4879,7 @@ async fn extract_with_ocr_for_page(
                     let (public_elements, outcome) = public_ocr_elements_for_pdf_page(
                         elems,
                         base_ocr_config,
-                        (page_idx + 1) as u32,
+                        document_page_number,
                         layout_height,
                         page_margins,
                     );
@@ -4876,7 +4894,7 @@ async fn extract_with_ocr_for_page(
                 #[cfg(not(feature = "pdf"))]
                 let public_elements = {
                     for elem in elems.iter_mut() {
-                        elem.page_number = (page_idx + 1) as u32;
+                        elem.page_number = document_page_number;
                     }
                     filter_public_ocr_elements(elems, base_ocr_config)
                 };
@@ -4884,7 +4902,7 @@ async fn extract_with_ocr_for_page(
             }
 
             for mut formula in ocr_result.formulas {
-                formula.page = Some((page_idx + 1) as u32);
+                formula.page = Some(document_page_number);
                 #[cfg(feature = "pdf")]
                 if let Some((doc, _, _)) = lazy_pdf_render_state.as_ref() {
                     let (w, h) = (encoded_batch[offset].2, encoded_batch[offset].3);
@@ -4918,8 +4936,13 @@ async fn extract_with_ocr_for_page(
                     None => fallback_render_document(&mut fallback_pdf_state, content),
                 };
                 if let Some(render_doc) = render_doc
-                    && let Some(recovery) =
-                        recover_page_text_from_image_xobjects(&backend, render_doc, page_idx, &ocr_config_owned).await
+                    && let Some(recovery) = recover_page_text_from_image_xobjects(
+                        &backend,
+                        render_doc,
+                        document_page_idx,
+                        &ocr_config_owned,
+                    )
+                    .await
                 {
                     if !recovery.text.is_empty() {
                         ocr_result.content = recovery.text;
@@ -4927,7 +4950,7 @@ async fn extract_with_ocr_for_page(
                     if capture_rasters {
                         captured_rasters.extend(recovery.images);
                     }
-                    image_fallback_warnings.push(xobject_fallback_warning(page_idx, recovery.attempted));
+                    image_fallback_warnings.push(xobject_fallback_warning(document_page_idx, recovery.attempted));
                 }
             }
 
@@ -4942,12 +4965,12 @@ async fn extract_with_ocr_for_page(
                         format!(
                             "OCR of page {} failed ({error}); its text was recovered from the page's \
                              embedded image XObjects instead.",
-                            page_idx + 1
+                            document_page_number
                         )
                     } else {
                         format!(
                             "OCR of page {} failed and could not be recovered: {error}",
-                            page_idx + 1
+                            document_page_number
                         )
                     }),
                 });
@@ -5023,7 +5046,7 @@ async fn extract_with_ocr_for_page(
                         // pages are processed strictly in increasing `page_idx` order
                         // above, so push order is deterministic document order. ~keep
                         let table_index = collected_tables.len();
-                        collected_tables.push(recognized_table_to_public_table(rt, (page_idx + 1) as u32, table_index));
+                        collected_tables.push(recognized_table_to_public_table(rt, document_page_number, table_index));
                     }
                 }
 
@@ -5069,7 +5092,7 @@ async fn extract_with_ocr_for_page(
                     }
 
                     tracing::debug!(
-                        page = page_idx + 1,
+                        page = document_page_number,
                         paragraphs = paragraphs.len(),
                         raw_content_len = ocr_result.content.len(),
                         "OCR page layout classification complete"
@@ -5081,7 +5104,7 @@ async fn extract_with_ocr_for_page(
                 if capture_rasters {
                     let (_, png_arc, w, h) = &encoded_batch[offset];
                     let png_bytes = bytes::Bytes::copy_from_slice(png_arc.as_ref());
-                    captured_rasters.push(build_page_raster_image(page_idx, png_bytes, *w, *h));
+                    captured_rasters.push(build_page_raster_image(document_page_idx, png_bytes, *w, *h));
                 }
                 let dict_invalid_word_ratio = ocr_result
                     .metadata
@@ -5104,7 +5127,7 @@ async fn extract_with_ocr_for_page(
                 #[cfg(not(feature = "pdf"))]
                 let page_content = ocr_result.content;
                 let (page_text, page_rejected) = accept_or_reject_ocr_page(
-                    page_idx,
+                    document_page_idx,
                     page_content,
                     &ocr_output_thresholds,
                     &mut recognition_noise_warnings,
@@ -5154,7 +5177,7 @@ async fn extract_with_ocr_for_page(
             if capture_rasters {
                 let (_, png_arc, w, h) = &encoded_batch[offset];
                 let png_bytes = bytes::Bytes::copy_from_slice(png_arc.as_ref());
-                captured_rasters.push(build_page_raster_image(page_idx, png_bytes, *w, *h));
+                captured_rasters.push(build_page_raster_image(document_page_idx, png_bytes, *w, *h));
             }
             let dict_invalid_word_ratio = ocr_result
                 .metadata
@@ -5177,7 +5200,7 @@ async fn extract_with_ocr_for_page(
             #[cfg(not(feature = "pdf"))]
             let page_content = ocr_result.content;
             let (page_text, page_rejected) = accept_or_reject_ocr_page(
-                page_idx,
+                document_page_idx,
                 page_content,
                 &ocr_output_thresholds,
                 &mut recognition_noise_warnings,
@@ -5221,7 +5244,9 @@ async fn extract_with_ocr_for_page(
     let mut result = String::new();
     for (i, text) in page_texts.iter().enumerate() {
         if let Some(cfg) = page_marker_cfg {
-            let marker = cfg.marker_format.replace("{page_num}", &(i + 1).to_string());
+            let marker = cfg
+                .marker_format
+                .replace("{page_num}", &(page_index_offset + i + 1).to_string());
             result.push_str(&marker);
         } else if i > 0 {
             result.push_str("\n\n");
@@ -5750,6 +5775,7 @@ pub(crate) async fn run_ocr_pipeline(
             0,
             false,
             None,
+            0,
         ))
         .await?;
     Ok((
@@ -5784,6 +5810,8 @@ pub(crate) async fn run_ocr_pipeline(
 /// element, so callers get back exactly the material a stage never got to structure itself.
 /// `points_per_pixel_override` is likewise forwarded verbatim to every stage's
 /// [`extract_with_ocr_for_page`] call. See that function's doc comments for why both exist.
+/// `page_index_offset` carries the detached image's original zero-based document page index
+/// through each stage so warnings, traces, and structured payloads retain their real page.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 // Same rationale as `extract_with_ocr_for_page`, whose full parameter set this function
 // forwards to every pipeline stage verbatim (see doc comment above).
@@ -5798,6 +5826,7 @@ async fn run_ocr_pipeline_for_page(
     page_rotation_degrees: u32,
     skip_document_global_heuristic: bool,
     points_per_pixel_override: Option<f32>,
+    page_index_offset: usize,
 ) -> crate::Result<(
     String,
     Vec<crate::types::Table>,
@@ -5904,6 +5933,7 @@ async fn run_ocr_pipeline_for_page(
             page_rotation_degrees,
             skip_document_global_heuristic,
             points_per_pixel_override,
+            page_index_offset,
         ))
         .await;
 
@@ -9585,7 +9615,7 @@ Buffers:           50000 kB
 
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     #[tokio::test]
-    async fn mixed_pipeline_propagates_destructive_noise_policy_once() {
+    async fn mixed_pipeline_later_page_warning_uses_document_page_number() {
         use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
         use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
         use crate::types::{ExtractedDocument, PageBoundary};
@@ -9629,13 +9659,22 @@ Buffers:           50000 kB
 
         crate::plugins::register_ocr_backend(Arc::new(LowQualityBackend)).unwrap();
 
-        let pdf = crate::pdf::render::build_minimal_pdf_with_mediabox(612.0, 792.0);
-        let native_text = "native text";
-        let boundaries = vec![PageBoundary {
-            byte_start: 0,
-            byte_end: native_text.len(),
-            page_number: 1,
-        }];
+        let pdf = build_minimal_two_page_pdf(612.0, 792.0);
+        let page1_text = "page one native text";
+        let page2_text = "page two native text";
+        let native_text = format!("{page1_text}\n{page2_text}");
+        let boundaries = vec![
+            PageBoundary {
+                byte_start: 0,
+                byte_end: page1_text.len(),
+                page_number: 1,
+            },
+            PageBoundary {
+                byte_start: page1_text.len() + 1,
+                byte_end: native_text.len(),
+                page_number: 2,
+            },
+        ];
 
         let config = ExtractionConfig {
             ocr: Some(OcrConfig {
@@ -9660,7 +9699,7 @@ Buffers:           50000 kB
             ..Default::default()
         };
 
-        let result = extract_mixed_ocr_native(native_text, &boundaries, &[1], &pdf, &config, None)
+        let result = extract_mixed_ocr_native(&native_text, &boundaries, &[2], &pdf, &config, None)
             .await
             .unwrap();
         let warnings = result.7;
@@ -9679,6 +9718,14 @@ Buffers:           50000 kB
             "pipeline noise warning must propagate exactly once"
         );
         assert!(noise_warnings[0].message.contains("discarded"));
+        assert!(
+            noise_warnings[0].message.contains("Page 2"),
+            "warning must name the detached image's document page: {noise_warnings:?}"
+        );
+        assert!(
+            !noise_warnings[0].message.contains("Page 1"),
+            "warning must not report the detached image as local page 1: {noise_warnings:?}"
+        );
 
         crate::plugins::unregister_ocr_backend("below-threshold-warning-test-backend").unwrap();
     }
