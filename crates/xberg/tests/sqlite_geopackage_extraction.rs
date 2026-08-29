@@ -3,6 +3,7 @@ mod helpers;
 use helpers::extract_bytes_document;
 use rusqlite::Connection;
 use tempfile::TempDir;
+use xberg::extractors::security::SecurityError;
 use xberg::{
     ExtractInput, ExtractionConfig, OutputFormat, SecurityLimits, XbergError, detect_mime_type,
     detect_mime_type_from_bytes, extract, get_extensions_for_mime, list_supported_formats,
@@ -402,7 +403,13 @@ async fn should_enforce_the_table_cell_limit_across_the_database() {
     let error = extraction_error(bytes, "cells.sqlite", &config).await;
 
     assert!(matches!(&error, XbergError::Security { .. }));
-    assert!(error.to_string().contains("Too many table cells: 4 (max: 3)"));
+    let source = std::error::Error::source(&error)
+        .and_then(|source| source.downcast_ref::<SecurityError>())
+        .expect("security violation should retain the structured source error");
+    assert!(
+        matches!(source, SecurityError::TooManyCells { cells: 4, max: 3 }),
+        "unexpected structured security source: {source:?}"
+    );
 }
 
 #[tokio::test]

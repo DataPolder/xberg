@@ -179,7 +179,7 @@ pub enum SecurityError {
         max: usize,
     },
 
-    /// Too many table cells
+    /// Aggregate table-cell limit exceeded. ~keep
     TooManyCells {
         /// Accumulated cell count.
         cells: usize,
