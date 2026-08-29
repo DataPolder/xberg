@@ -2695,8 +2695,7 @@ mod tests {
             if let (Some(local_x), Some(local_y)) = (local_x, local_y)
                 && local_x < WIDTH
                 && local_y < HEIGHT
-                && (local_x < STROKE
-                    || local_x >= WIDTH - STROKE
+                && (!(STROKE..WIDTH - STROKE).contains(&local_x)
                     || (HEIGHT / 2..HEIGHT / 2 + STROKE).contains(&local_y))
             {
                 return true;

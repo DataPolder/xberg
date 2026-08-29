@@ -478,10 +478,11 @@ mod tests {
     #[async_trait]
     impl DocumentExtractor for PublicMockExtractor {
         async fn extract(&self, _input: ExtractInput, _config: &ExtractionConfig) -> Result<ExtractedDocument> {
-            let mut document = ExtractedDocument::default();
-            document.mime_type = "application/x-public".into();
-            document.extraction_method = self.extraction_method;
-            Ok(document)
+            Ok(ExtractedDocument {
+                mime_type: "application/x-public".into(),
+                extraction_method: self.extraction_method,
+                ..Default::default()
+            })
         }
 
         fn supported_mime_types(&self) -> &[&str] {
