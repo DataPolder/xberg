@@ -114,8 +114,8 @@ fn render_pdf(bytes: &[u8], dpi: u32) -> Result<Vec<PageImage>, RasterizeError> 
 }
 
 fn render_image(bytes: &[u8]) -> Result<Vec<PageImage>, RasterizeError> {
-    let img =
-        image::load_from_memory(bytes).map_err(|e| RasterizeError::Image(format!("failed to decode image: {e}")))?;
+    let img = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(bytes)
+        .map_err(|error| RasterizeError::Image(format!("failed to decode image: {error}")))?;
 
     let mut png_bytes = Vec::new();
     img.write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
@@ -165,6 +165,18 @@ mod tests {
         assert_eq!(pages.len(), 1);
         assert_eq!(pages[0].page_number, 1);
         assert!(pages[0].png_bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]), "PNG magic");
+    }
+
+    #[test]
+    fn image_rasterization_rejects_oversized_declared_dimensions_before_decode() {
+        let bytes = crate::extraction::image_decode::bmp_with_declared_dimensions(6000, 6000);
+
+        let error = render_all_pages(&bytes, "image/bmp", 200)
+            .expect_err("structured image rasterization must use the default decode budget");
+
+        assert!(matches!(error, RasterizeError::Image(_)));
+        assert!(error.to_string().contains("6000x6000"));
+        assert!(error.to_string().contains("security_limits.max_content_size"));
     }
 
     #[tokio::test]

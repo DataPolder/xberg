@@ -134,6 +134,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed compressed image inputs with oversized declared dimensions exhausting memory during OCR,
+  layout and QR detection, image classification, re-encoding, HEIF conversion, or structured-image
+  rasterization; decoded allocations now obey `security_limits.max_content_size` and are rejected
+  from the image header before pixel decode.
 - Fixed PDF OCR fallback being suppressed for image-only pages when dot leaders or other
   non-textual native content pushed the document below the alphanumeric-ratio threshold.
 - Fixed process-global native PDF font-cache collisions that made glyph spacing, geometry, and

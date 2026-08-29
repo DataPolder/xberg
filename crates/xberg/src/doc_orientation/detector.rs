@@ -116,10 +116,10 @@ impl DocOrientationDetector {
     /// image bytes (PNG/JPEG/…) rather than a decoded [`RgbImage`] — notably the
     /// WASM bridge, which receives image bytes from JS.
     pub fn detect_image_bytes(&self, image_bytes: &[u8]) -> Result<OrientationResult> {
-        let image = image::load_from_memory(image_bytes)
-            .map_err(|e| XbergError::Ocr {
-                message: format!("Failed to decode image for orientation detection: {e}"),
-                source: None,
+        let image = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(image_bytes)
+            .map_err(|error| XbergError::Ocr {
+                message: format!("Failed to decode image for orientation detection: {error}"),
+                source: Some(Box::new(error)),
             })?
             .to_rgb8();
         self.detect(&image)
@@ -391,6 +391,20 @@ mod tests {
         for probabilities in [vec![0.5, 0.5], vec![f32::NAN, 0.0, 0.0, 1.0], vec![0.5, 0.5, 0.5, 0.5]] {
             assert!(orientation_from_probabilities(&probabilities).is_err());
         }
+    }
+
+    #[test]
+    fn should_reject_oversized_declared_dimensions_before_orientation_inference() {
+        let detector = DocOrientationDetector::from_bytes(Vec::new(), None);
+        let bytes = crate::extraction::image_decode::bmp_with_declared_dimensions(6000, 6000);
+
+        let error = detector
+            .detect_image_bytes(&bytes)
+            .expect_err("orientation decode must reject the image before loading the model");
+
+        assert!(matches!(error, XbergError::Ocr { .. }));
+        assert!(error.to_string().contains("6000x6000"));
+        assert!(error.to_string().contains("security_limits.max_content_size"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

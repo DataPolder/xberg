@@ -5,15 +5,39 @@
 
 use crate::error::{Result, XbergError};
 use crate::extraction::exif::extract_exif_data;
-#[cfg(feature = "heic")]
-use crate::extraction::heif::decode_heic_to_png;
 use crate::extraction::heif::is_heif_container;
-use image::ImageReader;
+#[cfg(feature = "ocr")]
+use crate::extraction::image_decode::image_dimension_error;
+use crate::extraction::image_decode::{
+    ImageDecodeBudget, decode_standard_image_with_security_limits, decoded_byte_count,
+    probe_standard_image_with_security_limits,
+};
+use crate::extractors::security::SecurityLimits;
 use std::collections::HashMap;
+#[cfg(feature = "ocr")]
 use std::io::Cursor;
 
 /// JP2 file signature: 12-byte box starting with length 0x0000000C and type "jP  "
 const JP2_MAGIC: &[u8] = &[0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20];
+
+#[cfg(feature = "ocr")]
+fn jp2_peak_decoded_bytes(width: u32, height: u32, num_channels: u8, has_alpha: bool) -> Result<u64> {
+    let pixel_count = decoded_byte_count(width, height, 1)?;
+    let source_channels = u64::from(num_channels) + u64::from(u8::from(has_alpha));
+    let source_bytes = pixel_count
+        .checked_mul(source_channels)
+        .ok_or_else(|| image_dimension_error(width, height, u64::MAX, u64::MAX))?;
+    let rgb_bytes = pixel_count
+        .checked_mul(u64::from(image::ColorType::Rgb8.bytes_per_pixel()))
+        .ok_or_else(|| image_dimension_error(width, height, u64::MAX, u64::MAX))?;
+    if num_channels == 3 && !has_alpha {
+        Ok(rgb_bytes)
+    } else {
+        source_bytes
+            .checked_add(rgb_bytes)
+            .ok_or_else(|| image_dimension_error(width, height, u64::MAX, u64::MAX))
+    }
+}
 
 /// Check if bytes start with JPEG 2000 magic bytes.
 pub(crate) fn is_jp2(bytes: &[u8]) -> bool {
@@ -202,8 +226,14 @@ fn parse_j2k_siz(bytes: &[u8]) -> Result<ExtractedImageMetadata> {
 /// Decode JPEG 2000 image bytes to an RGB image using hayro-jpeg2000.
 ///
 /// Pure Rust, memory-safe decoder. No temp files needed.
-#[cfg(feature = "ocr")]
+#[cfg(all(feature = "ocr", test))]
 pub(crate) fn decode_jp2_to_rgb(bytes: &[u8]) -> Result<image::RgbImage> {
+    let limits = SecurityLimits::default();
+    decode_jp2_to_rgb_with_security_limits(bytes, &limits)
+}
+
+#[cfg(feature = "ocr")]
+fn decode_jp2_to_rgb_with_security_limits(bytes: &[u8], limits: &SecurityLimits) -> Result<image::RgbImage> {
     use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image as Jp2Image};
 
     let jp2 = Jp2Image::new(bytes, &DecodeSettings::default())
@@ -212,6 +242,8 @@ pub(crate) fn decode_jp2_to_rgb(bytes: &[u8]) -> Result<image::RgbImage> {
     let height = jp2.height();
     let has_alpha = jp2.has_alpha();
     let num_channels = jp2.color_space().num_channels();
+    let peak_decoded_bytes = jp2_peak_decoded_bytes(width, height, num_channels, has_alpha)?;
+    ImageDecodeBudget::from_security_limits(limits).validate(width, height, peak_decoded_bytes)?;
     // hayro-jpeg2000 0.4 threads a caller-owned `DecoderContext` through `decode` so the
     // sample buffers can be reused across images, and returns a borrowing `DecodedImage`
     // rather than the interleaved `Vec<u8>` 0.3 handed back. `data_u8` is that same
@@ -291,22 +323,39 @@ pub(crate) fn is_jbig2(bytes: &[u8]) -> bool {
 /// JBIG2 is a bi-level (1-bit) image compression format commonly used in scanned PDFs.
 /// The decoder converts black/white pixels to grayscale (0/255) for OCR processing.
 #[cfg(feature = "ocr")]
-pub(crate) fn decode_jbig2_to_gray(bytes: &[u8]) -> Result<image::GrayImage> {
+fn decode_jbig2_to_gray_with_security_limits(bytes: &[u8], limits: &SecurityLimits) -> Result<image::GrayImage> {
     use hayro_jbig2::{Decoder, Image};
 
     struct GrayDecoder {
         pixels: Vec<u8>,
+        max_pixels: usize,
+        exceeded_dimensions: bool,
     }
 
     impl Decoder for GrayDecoder {
         fn push_pixel(&mut self, black: bool) {
+            if self.pixels.len() >= self.max_pixels {
+                self.exceeded_dimensions = true;
+                return;
+            }
             self.pixels.push(if black { 0 } else { 255 });
         }
 
         fn push_pixel_chunk(&mut self, black: bool, chunk_count: u32) {
             let luma = if black { 0 } else { 255 };
-            let count = chunk_count as usize * 8;
-            self.pixels.resize(self.pixels.len() + count, luma);
+            let Some(count) = (chunk_count as usize).checked_mul(8) else {
+                self.exceeded_dimensions = true;
+                return;
+            };
+            let Some(new_len) = self.pixels.len().checked_add(count) else {
+                self.exceeded_dimensions = true;
+                return;
+            };
+            if new_len > self.max_pixels {
+                self.exceeded_dimensions = true;
+                return;
+            }
+            self.pixels.resize(new_len, luma);
         }
 
         fn next_line(&mut self) {}
@@ -315,13 +364,29 @@ pub(crate) fn decode_jbig2_to_gray(bytes: &[u8]) -> Result<image::GrayImage> {
     let jbig2_image = Image::new(bytes).map_err(|e| XbergError::parsing(format!("JBIG2 decode failed: {e}")))?;
     let width = jbig2_image.width();
     let height = jbig2_image.height();
+    let decoded_bytes = decoded_byte_count(width, height, u64::from(image::ColorType::L8.bytes_per_pixel()))?;
+    ImageDecodeBudget::from_security_limits(limits).validate(width, height, decoded_bytes)?;
 
+    let max_pixels = usize::try_from(decoded_bytes)
+        .map_err(|_| image_dimension_error(width, height, decoded_bytes, decoded_bytes))?;
+    let mut pixels = Vec::new();
+    pixels
+        .try_reserve_exact(max_pixels)
+        .map_err(|error| XbergError::parsing(format!("Failed to reserve JBIG2 decoded image buffer: {error}")))?;
     let mut decoder = GrayDecoder {
-        pixels: Vec::with_capacity((width * height) as usize),
+        pixels,
+        max_pixels,
+        exceeded_dimensions: false,
     };
     jbig2_image
         .decode(&mut decoder)
         .map_err(|e| XbergError::parsing(format!("JBIG2 decode failed: {e}")))?;
+    if decoder.exceeded_dimensions {
+        return Err(XbergError::Validation {
+            message: format!("JBIG2 decompressed beyond its declared {width}x{height} image dimensions"),
+            source: None,
+        });
+    }
 
     image::GrayImage::from_raw(width, height, decoder.pixels)
         .ok_or_else(|| XbergError::parsing("Failed to construct grayscale image from JBIG2 data".to_string()))
@@ -335,26 +400,52 @@ pub(crate) fn decode_jbig2_to_gray(bytes: &[u8]) -> Result<image::GrayImage> {
 /// for all other formats.
 #[cfg(feature = "ocr")]
 pub(crate) fn load_image_for_ocr(image_bytes: &[u8]) -> Result<image::DynamicImage> {
-    if is_jp2(image_bytes) || is_j2k(image_bytes) {
-        decode_jp2_to_rgb(image_bytes).map(image::DynamicImage::ImageRgb8)
-    } else if is_jbig2(image_bytes) {
-        decode_jbig2_to_gray(image_bytes).map(image::DynamicImage::ImageLuma8)
-    } else {
-        image::load_from_memory(image_bytes).map_err(|e| XbergError::parsing(format!("Failed to decode image: {}", e)))
+    let limits = SecurityLimits::default();
+    decode_image_with_security_limits(image_bytes, &limits)
+}
+
+pub(crate) fn decode_image_with_security_limits(
+    image_bytes: &[u8],
+    limits: &SecurityLimits,
+) -> Result<image::DynamicImage> {
+    #[cfg(feature = "ocr")]
+    {
+        if is_jp2(image_bytes) || is_j2k(image_bytes) {
+            return decode_jp2_to_rgb_with_security_limits(image_bytes, limits).map(image::DynamicImage::ImageRgb8);
+        }
+        if is_jbig2(image_bytes) {
+            return decode_jbig2_to_gray_with_security_limits(image_bytes, limits).map(image::DynamicImage::ImageLuma8);
+        }
     }
+    decode_standard_image_with_security_limits(image_bytes, limits)
 }
 
 /// Extract metadata from image bytes.
 ///
 /// Extracts dimensions, format, and EXIF data from the image.
-/// Attempts to decode using the standard image crate first, then falls back to
-/// pure Rust JP2 box parsing for JPEG 2000 formats if the standard decoder fails.
-/// HEIF-family containers (HEIC/HEIF/AVIF/HEICS/AVCS) are decoded via libheif when
-/// the `heic` feature is enabled; EXIF is read from the original bytes either way.
+/// Standard formats are header-probed without allocating their pixel buffers; JPEG 2000
+/// dimensions come from JP2/J2K headers, and HEIF-family dimensions come from the primary
+/// image handle when the `heic` feature is enabled. EXIF is read from the original bytes.
+#[cfg(test)]
 pub(crate) fn extract_image_metadata(bytes: &[u8]) -> Result<ExtractedImageMetadata> {
+    let limits = SecurityLimits::default();
+    extract_image_metadata_with_security_limits(bytes, &limits)
+}
+
+pub(crate) fn extract_image_metadata_with_security_limits(
+    bytes: &[u8],
+    limits: &SecurityLimits,
+) -> Result<ExtractedImageMetadata> {
+    let budget = ImageDecodeBudget::from_security_limits(limits);
     if (is_jp2(bytes) || (bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0x4F))
         && let Ok(metadata) = decode_jp2_metadata(bytes)
     {
+        let decoded_bytes = decoded_byte_count(
+            metadata.width,
+            metadata.height,
+            u64::from(image::ColorType::Rgb8.bytes_per_pixel()),
+        )?;
+        budget.validate(metadata.width, metadata.height, decoded_bytes)?;
         return Ok(metadata);
     }
 
@@ -362,16 +453,21 @@ pub(crate) fn extract_image_metadata(bytes: &[u8]) -> Result<ExtractedImageMetad
         let exif_data = extract_exif_data(bytes);
         #[cfg(feature = "heic")]
         {
-            let png = decode_heic_to_png(bytes)?;
-            let reader = ImageReader::new(Cursor::new(&png))
-                .with_guessed_format()
-                .map_err(|e| XbergError::parsing(format!("Failed to re-read decoded HEIF PNG: {e}")))?;
-            let dims = reader
-                .into_dimensions()
-                .map_err(|e| XbergError::parsing(format!("Failed to read HEIF dimensions: {e}")))?;
+            use xberg_libheif::HeifContext;
+
+            let context = HeifContext::read_from_bytes(bytes)
+                .map_err(|error| XbergError::parsing(format!("Failed to read HEIF container: {error}")))?;
+            let handle = context
+                .primary_image_handle()
+                .map_err(|error| XbergError::parsing(format!("Failed to read HEIF primary image handle: {error}")))?;
+            let width = handle.width();
+            let height = handle.height();
+            let decoded_bytes =
+                decoded_byte_count(width, height, u64::from(image::ColorType::Rgba8.bytes_per_pixel()))?;
+            budget.validate(width, height, decoded_bytes)?;
             return Ok(ExtractedImageMetadata {
-                width: dims.0,
-                height: dims.1,
+                width,
+                height,
                 format: "HEIF".to_string(),
                 exif_data,
             });
@@ -385,30 +481,13 @@ pub(crate) fn extract_image_metadata(bytes: &[u8]) -> Result<ExtractedImageMetad
         }
     }
 
-    let reader = ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|e| XbergError::parsing(format!("Failed to read image format: {}", e)))?;
-
-    let format = reader
-        .format()
-        .ok_or_else(|| XbergError::parsing("Could not determine image format".to_string()))?;
-
-    match reader.decode() {
-        Ok(image) => {
-            let width = image.width();
-            let height = image.height();
-            let format_str = format!("{:?}", format).to_uppercase();
-            let exif_data = extract_exif_data(bytes);
-
-            Ok(ExtractedImageMetadata {
-                width,
-                height,
-                format: format_str,
-                exif_data,
-            })
-        }
-        Err(decode_err) => Err(XbergError::parsing(format!("Failed to decode image: {}", decode_err))),
-    }
+    let probe = probe_standard_image_with_security_limits(bytes, limits)?;
+    Ok(ExtractedImageMetadata {
+        width: probe.0,
+        height: probe.1,
+        format: format!("{:?}", probe.2).to_uppercase(),
+        exif_data: extract_exif_data(bytes),
+    })
 }
 
 /// Result of OCR extraction from an image with optional page tracking.
@@ -556,6 +635,40 @@ mod tests {
         let mut cursor = Cursor::new(&mut bytes);
         img.write_to(&mut cursor, format).unwrap();
         bytes
+    }
+
+    #[cfg(feature = "ocr")]
+    fn image_decode_limits(max_content_size: usize) -> crate::extractors::security::SecurityLimits {
+        crate::extractors::security::SecurityLimits {
+            max_content_size,
+            ..Default::default()
+        }
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_reject_oversized_declared_dimensions_before_ocr_decode() {
+        let bytes = crate::extraction::image_decode::bmp_with_declared_dimensions(100, 100);
+        let limits = image_decode_limits(1024);
+
+        let error = decode_image_with_security_limits(&bytes, &limits)
+            .expect_err("oversized decoded dimensions must be rejected from the header probe");
+
+        assert!(matches!(error, XbergError::Validation { .. }));
+        assert!(error.to_string().contains("100x100"));
+        assert!(error.to_string().contains("security_limits.max_content_size"));
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn should_decode_normal_image_within_security_budget() {
+        let bytes = create_test_image(2, 2, ImageFormat::Png);
+        let limits = image_decode_limits(1024);
+
+        let image = decode_image_with_security_limits(&bytes, &limits)
+            .expect("normal image within the decoded-byte budget should load");
+
+        assert_eq!((image.width(), image.height()), (2, 2));
     }
 
     #[test]

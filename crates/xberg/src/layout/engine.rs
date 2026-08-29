@@ -300,7 +300,9 @@ impl LayoutEngine {
     /// image bytes (PNG/JPEG/…) rather than a decoded [`RgbImage`] — notably the
     /// WASM bridge, which receives image bytes from JS.
     pub fn detect_image_bytes(&mut self, image_bytes: &[u8]) -> Result<DetectionResult, LayoutError> {
-        let img = image::load_from_memory(image_bytes)?.to_rgb8();
+        let img = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(image_bytes)
+            .map_err(|error| LayoutError::Image(image::ImageError::IoError(std::io::Error::other(error))))?
+            .to_rgb8();
         self.detect(&img)
     }
 
@@ -426,6 +428,44 @@ impl LayoutEngine {
 mod cache_key_tests {
     use super::*;
     use crate::core::config::acceleration::{AccelerationConfig, ExecutionProviderType};
+
+    struct NeverCalledModel;
+
+    impl LayoutModel for NeverCalledModel {
+        fn detect(&mut self, _img: &RgbImage) -> Result<Vec<crate::layout::types::LayoutDetection>, LayoutError> {
+            panic!("oversized image must be rejected before layout inference")
+        }
+
+        fn detect_with_threshold(
+            &mut self,
+            _img: &RgbImage,
+            _threshold: f32,
+        ) -> Result<Vec<crate::layout::types::LayoutDetection>, LayoutError> {
+            panic!("oversized image must be rejected before layout inference")
+        }
+
+        fn name(&self) -> &str {
+            "never-called"
+        }
+    }
+
+    #[test]
+    fn detect_image_bytes_rejects_oversized_dimensions_before_inference() {
+        let mut engine = LayoutEngine {
+            model: Box::new(NeverCalledModel),
+            config: LayoutEngineConfig::default(),
+            #[cfg(feature = "layout-detection")]
+            thread_budget: 1,
+        };
+        let bytes = crate::extraction::image_decode::bmp_with_declared_dimensions(6000, 6000);
+
+        let error = engine
+            .detect_image_bytes(&bytes)
+            .expect_err("layout decoding must apply the default security budget");
+
+        assert!(error.to_string().contains("6000x6000"));
+        assert!(error.to_string().contains("security_limits.max_content_size"));
+    }
 
     #[test]
     fn engine_config_equality_covers_every_session_and_output_setting() {

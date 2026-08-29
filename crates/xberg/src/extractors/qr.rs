@@ -22,6 +22,10 @@
 
 use crate::types::qr::{QrBoundingBox, QrCode};
 
+fn decode_qr_image(image_bytes: &[u8]) -> crate::Result<image::DynamicImage> {
+    crate::extraction::image_decode::decode_standard_image_with_default_security_limits(image_bytes)
+}
+
 /// Detect QR codes in the bytes of an [`crate::types::ExtractedImage`].
 ///
 /// `format_hint` is currently unused — the `image` crate auto-detects the
@@ -45,7 +49,7 @@ pub fn detect_qr_codes(image_bytes: &[u8], _format_hint: Option<&str>) -> Vec<Qr
         return Vec::new();
     }
 
-    let dynamic = match image::load_from_memory(image_bytes) {
+    let dynamic = match decode_qr_image(image_bytes) {
         Ok(img) => img,
         Err(error) => {
             tracing::warn!(error = %error, "qr: image decode failed; skipping");
@@ -129,5 +133,15 @@ mod tests {
     #[test]
     fn invalid_bytes_returns_empty() {
         assert!(detect_qr_codes(&[0, 1, 2, 3, 4], Some("image/png")).is_empty());
+    }
+
+    #[test]
+    fn rejects_oversized_declared_dimensions_before_qr_decode() {
+        let bytes = crate::extraction::image_decode::bmp_with_declared_dimensions(6000, 6000);
+
+        let error = decode_qr_image(&bytes).expect_err("QR image decode must use the default security budget");
+
+        assert!(matches!(error, crate::XbergError::Validation { .. }));
+        assert!(error.to_string().contains("6000x6000"));
     }
 }

@@ -186,9 +186,9 @@ pub struct ExtractionConfig {
     ///
     /// Controls maximum archive size, compression ratio, file count, and other
     /// security thresholds to prevent decompression bomb attacks. Also caps
-    /// nesting depth, iteration count, entity / token length, total
-    /// content size, and table cell count for every extraction path that
-    /// ingests user-controlled bytes.
+    /// nesting depth, iteration count, entity / token length, total content size,
+    /// decoded image allocation, and table cell count for every extraction path
+    /// that ingests user-controlled bytes.
     /// When `None`, default limits are used.
     #[serde(default)]
     pub security_limits: Option<crate::extractors::security::SecurityLimits>,

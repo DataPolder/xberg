@@ -44,7 +44,7 @@ pub struct SecurityLimits {
     /// caught by `max_content_size` instead.
     pub max_entity_length: usize,
 
-    /// Maximum string growth per document (100 MB)
+    /// Maximum string growth and decoded image allocation per document (100 MB)
     pub max_content_size: usize,
 
     /// Maximum iterations per operation

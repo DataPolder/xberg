@@ -484,6 +484,9 @@ impl OcrBackend for GlmOcrBackend {
             LayoutMode::WholePage => {
                 let task = opts.task;
                 let device = opts.device;
+                crate::extraction::image_decode::validate_standard_image_with_default_security_limits(
+                    &image_bytes_owned,
+                )?;
                 let content = tokio::task::spawn_blocking(move || {
                     let engine = get_or_init_engine(device, dtype, cache_dir, revision)?;
                     let output = engine.process_image_with_task(&image_bytes_owned, task).map_err(|e| {
@@ -592,10 +595,10 @@ async fn process_paired(
     use crate::layout::models::LayoutModel;
 
     tokio::task::spawn_blocking(move || {
-        let img = image::load_from_memory(&image_bytes)
-            .map_err(|e| crate::XbergError::Ocr {
-                message: format!("GLM-OCR paired: image decode failed: {e}"),
-                source: Some(Box::new(e)),
+        let img = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(&image_bytes)
+            .map_err(|error| crate::XbergError::Ocr {
+                message: format!("GLM-OCR paired: image decode failed: {error}"),
+                source: Some(Box::new(error)),
             })?
             .to_rgb8();
 
@@ -770,6 +773,21 @@ mod tests {
         assert!(langs.contains(&"eng".to_string()));
         assert!(langs.contains(&"zho".to_string()));
         assert!(langs.contains(&"fra".to_string()));
+    }
+
+    #[tokio::test]
+    async fn should_reject_oversized_declared_dimensions_before_loading_glm_model() {
+        let backend = GlmOcrBackend::new(GlmOcrTask::default(), LayoutMode::WholePage);
+        let bytes = crate::extraction::image_decode::bmp_with_declared_dimensions(6000, 6000);
+
+        let error = backend
+            .process_image(&bytes, &OcrConfig::default())
+            .await
+            .expect_err("GLM-OCR must validate the decoded-byte budget before model initialization");
+
+        assert!(matches!(error, crate::XbergError::Validation { .. }));
+        assert!(error.to_string().contains("6000x6000"));
+        assert!(error.to_string().contains("security_limits.max_content_size"));
     }
 
     #[test]

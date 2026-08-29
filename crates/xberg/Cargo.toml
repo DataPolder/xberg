@@ -321,7 +321,7 @@ sceptre-ocr-candle-metal = ["sceptre-ocr-candle", "sceptre/candle-metal"]
 sceptre-ocr-candle-cuda = ["sceptre-ocr-candle", "sceptre/candle-cuda"]
 # Opt-in browser engine used by the separate worker-backed WASM build. It
 # intentionally omits the async OCR registry and default `wasm-target`. ~keep
-sceptre-wasm = ["dep:sceptre", "sceptre/tract"]
+sceptre-wasm = ["dep:sceptre", "sceptre/tract", "image-encode"]
 # Dev default: downloads the pyke prebuilt ONNX Runtime (needs glibc >= 2.38 to run).
 # Release links Microsoft's runtime instead (system strategy) — see publish.yaml (#1284).
 ort-bundled = ["ort?/download-binaries", "ort?/tls-rustls", "xberg-gliner?/ort-bundled"]

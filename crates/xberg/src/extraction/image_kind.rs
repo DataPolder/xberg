@@ -26,7 +26,7 @@ const HIGH_ENTROPY_THRESHOLD: f64 = 6.0;
 const LOW_ENTROPY_THRESHOLD: f64 = 3.0;
 /// Hard cap on the source-image pixel count we are willing to fully decode for
 /// entropy analysis. Beyond this we skip the entropy step rather than risk a
-/// multi-gigabyte allocation in `image::load_from_memory`.
+/// multi-gigabyte decoded allocation.
 const MAX_CLASSIFY_PIXELS: u64 = 64 * 1024 * 1024;
 
 /// Classify an image based on its metadata and visual properties.
@@ -161,7 +161,8 @@ fn uf_union(parent: &mut [usize], x: usize, y: usize) {
 fn compute_entropy_on_thumbnail(bytes: &[u8], _width: u32, _height: u32) -> Result<f64, String> {
     use image::imageops::FilterType;
 
-    let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+    let img = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(bytes)
+        .map_err(|error| error.to_string())?;
 
     let thumb = img.resize_exact(64, 64, FilterType::Lanczos3);
 
@@ -435,6 +436,20 @@ mod tests {
         let (kind, conf) = classify(&bytes, "png", Some(100), Some(100), None, None, false);
         assert_eq!(kind, ImageKind::Photograph);
         assert!(conf >= 0.6, "confidence {} should be >= 0.6", conf);
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-wasm"))]
+    #[test]
+    fn should_reject_oversized_declared_dimensions_before_entropy_decode() {
+        let oversized = crate::extraction::image_decode::bmp_with_declared_dimensions(6_000, 6_000);
+
+        let error = compute_entropy_on_thumbnail(&oversized, 6_000, 6_000)
+            .expect_err("oversized image must fail at the decoded-image budget");
+
+        assert!(
+            error.contains("security_limits.max_content_size"),
+            "unexpected error: {error}"
+        );
     }
 
     #[cfg(any(feature = "ocr", feature = "ocr-wasm"))]

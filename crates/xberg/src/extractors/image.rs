@@ -2,7 +2,7 @@
 
 use crate::Result;
 use crate::core::config::ExtractionConfig;
-use crate::extraction::image::extract_image_metadata;
+use crate::extraction::image::extract_image_metadata_with_security_limits;
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::internal::InternalDocument;
 use crate::types::internal_builder::InternalDocumentBuilder;
@@ -882,13 +882,11 @@ async fn detect_image_layout(
     content: &[u8],
     layout_config: crate::core::config::LayoutDetectionConfig,
     thread_budget: usize,
+    security_limits: crate::extractors::security::SecurityLimits,
 ) -> Result<(image::RgbImage, crate::layout::DetectionResult)> {
     let layout_content = content.to_vec();
     tokio::task::spawn_blocking(move || -> Result<_> {
-        let image = image::load_from_memory(&layout_content).map_err(|error| crate::XbergError::Parsing {
-            message: format!("Failed to decode image for layout detection: {error}"),
-            source: None,
-        })?;
+        let image = crate::extraction::image::decode_image_with_security_limits(&layout_content, &security_limits)?;
         drop(layout_content);
         let rgb = image.to_rgb8();
         let mut engine = crate::layout::take_or_create_engine(&layout_config, thread_budget)
@@ -1140,7 +1138,8 @@ async fn prepare_layout_ocr(
 ) -> Result<LayoutOcrPreparation> {
     let whole_image_result = extractor.extract_with_ocr(content, mime_type, config).await;
     let thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
-    let (rgb, detection) = match detect_image_layout(content, layout_config, thread_budget).await {
+    let security_limits = config.security_limits.clone().unwrap_or_default();
+    let (rgb, detection) = match detect_image_layout(content, layout_config, thread_budget, security_limits).await {
         Ok(result) => result,
         Err(error) => {
             return cached_whole_image_after_layout_error(&whole_image_result, error)
@@ -1333,51 +1332,52 @@ struct NormalizedOcrImage {
 }
 
 #[cfg(feature = "ocr-pipeline")]
+fn unchanged_ocr_image(content: &[u8]) -> NormalizedOcrImage {
+    NormalizedOcrImage {
+        bytes: content.to_vec(),
+        metadata: None,
+    }
+}
+
+#[cfg(feature = "ocr-pipeline")]
 fn normalize_image_bytes_for_ocr(
     content: &[u8],
     images_config: &crate::core::config::ImageExtractionConfig,
-) -> NormalizedOcrImage {
-    let Ok(decoded) = image::load_from_memory(content) else {
-        return NormalizedOcrImage {
-            bytes: content.to_vec(),
-            metadata: None,
-        };
+    security_limits: &crate::extractors::security::SecurityLimits,
+) -> Result<NormalizedOcrImage> {
+    let decoded = match crate::extraction::image::decode_image_with_security_limits(content, security_limits) {
+        Ok(decoded) => decoded,
+        Err(error @ crate::XbergError::Validation { .. }) => return Err(error),
+        Err(_) => return Ok(unchanged_ocr_image(content)),
     };
     let rgb = decoded.into_rgb8();
     let (width, height) = rgb.dimensions();
     let dpi_config = crate::types::ImageDpiConfig::from(images_config);
-
-    match crate::image::preprocessing::normalize_image_dpi_owned(
+    let result = match crate::image::preprocessing::normalize_image_dpi_owned(
         rgb.into_raw(),
         width as usize,
         height as usize,
         &dpi_config,
         None,
     ) {
-        Ok(result) => {
-            let (new_width, new_height) = result.dimensions;
-            match encode_rgb_as_png(&result.rgb_data, new_width as u32, new_height as u32) {
-                Ok(bytes) => NormalizedOcrImage {
-                    bytes,
-                    metadata: Some(result.metadata),
-                },
-                Err(error) => {
-                    tracing::warn!(%error, "failed to encode normalized OCR image; using original image");
-                    NormalizedOcrImage {
-                        bytes: content.to_vec(),
-                        metadata: None,
-                    }
-                }
-            }
-        }
+        Ok(result) => result,
         Err((error, _)) => {
             tracing::warn!(%error, "failed to normalize OCR image; using original image");
-            NormalizedOcrImage {
-                bytes: content.to_vec(),
-                metadata: None,
-            }
+            return Ok(unchanged_ocr_image(content));
         }
-    }
+    };
+    let (new_width, new_height) = result.dimensions;
+    let bytes = match encode_rgb_as_png(&result.rgb_data, new_width as u32, new_height as u32) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            tracing::warn!(%error, "failed to encode normalized OCR image; using original image");
+            return Ok(unchanged_ocr_image(content));
+        }
+    };
+    Ok(NormalizedOcrImage {
+        bytes,
+        metadata: Some(result.metadata),
+    })
 }
 
 #[cfg(feature = "ocr-pipeline")]
@@ -1581,10 +1581,15 @@ impl ImageExtractor {
         // `ImageExtractionConfig` has to happen here, once, before any backend
         // ever sees the bytes (issue #209). ~keep
         #[cfg(feature = "ocr-pipeline")]
+        let default_security_limits = crate::extractors::security::SecurityLimits::default();
+        #[cfg(feature = "ocr-pipeline")]
+        let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+        #[cfg(feature = "ocr-pipeline")]
         let normalized_ocr_bytes = config
             .images
             .as_ref()
-            .map(|images_config| normalize_image_bytes_for_ocr(content, images_config));
+            .map(|images_config| normalize_image_bytes_for_ocr(content, images_config, security_limits))
+            .transpose()?;
         #[cfg(feature = "ocr-pipeline")]
         let ocr_input: &[u8] = normalized_ocr_bytes
             .as_ref()
@@ -1750,10 +1755,9 @@ impl ImageExtractor {
         config: &ExtractionConfig,
         pipeline: &crate::core::config::OcrPipelineConfig,
     ) -> Result<InternalDocument> {
-        let image = image::load_from_memory(content).map_err(|e| crate::XbergError::Parsing {
-            message: format!("Failed to decode image for OCR pipeline: {e}"),
-            source: None,
-        })?;
+        let default_security_limits = crate::extractors::security::SecurityLimits::default();
+        let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+        let image = crate::extraction::image::decode_image_with_security_limits(content, security_limits)?;
         let images = [image];
 
         let (text, _tables, ocr_elements, pipeline_doc, llm_usage, _page_texts, _rasters, formulas, _) =
@@ -2187,7 +2191,9 @@ impl InternalDocumentExtractor for ImageExtractor {
     ) -> Result<InternalDocument> {
         tracing::debug!(format = "image", size_bytes = content.len(), "extraction starting");
         enforce_image_page_limit(content, mime_type, config)?;
-        let extraction_metadata = extract_image_metadata(content)?;
+        let default_security_limits = crate::extractors::security::SecurityLimits::default();
+        let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+        let extraction_metadata = extract_image_metadata_with_security_limits(content, security_limits)?;
         // Computed against the original bytes (before any HEIC->PNG rebinding
         // below) so it reflects the same input `extract_image_metadata` saw. ~keep
         let exif_warning = crate::extraction::exif::extract_exif_warning(content);
@@ -2196,7 +2202,7 @@ impl InternalDocumentExtractor for ImageExtractor {
         let owned_png;
         #[cfg(feature = "heic")]
         let (content, mime_type): (&[u8], &str) = if crate::extraction::heif::is_heif_container(content) {
-            owned_png = crate::extraction::heif::decode_heic_to_png(content)?;
+            owned_png = crate::extraction::heif::decode_heic_to_png(content, security_limits)?;
             (owned_png.as_slice(), "image/png")
         } else {
             (content, mime_type)
@@ -2370,6 +2376,28 @@ impl InternalDocumentExtractor for ImageExtractor {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn rejects_declared_image_dimensions_over_configured_security_budget() {
+        let content = crate::extraction::image_decode::bmp_with_declared_dimensions(100, 100);
+        let config = ExtractionConfig {
+            disable_ocr: true,
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_content_size: 1024,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let error = ImageExtractor::new()
+            .extract_content(&content, "image/bmp", &config)
+            .await
+            .expect_err("the extractor must apply the configured budget before decoding pixels");
+
+        assert!(matches!(error, crate::XbergError::Validation { .. }));
+        assert!(error.to_string().contains("100x100"));
+        assert!(error.to_string().contains("security_limits.max_content_size"));
+    }
+
     /// #860: `normalize_image_bytes_for_ocr` applies `ImageExtractionConfig`'s
     /// `max_image_dimension` / DPI settings at the extractor boundary, because OCR
     /// backends only ever see `OcrConfig` and have no route back to them (#209).
@@ -2393,7 +2421,12 @@ mod tests {
             auto_adjust_dpi: false,
             ..Default::default()
         };
-        let normalized = normalize_image_bytes_for_ocr(&png, &images_config);
+        let normalized = normalize_image_bytes_for_ocr(
+            &png,
+            &images_config,
+            &crate::extractors::security::SecurityLimits::default(),
+        )
+        .expect("normal image should remain within the default decode budget");
 
         assert_ne!(
             normalized.bytes, png,
