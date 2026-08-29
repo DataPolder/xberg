@@ -31,6 +31,11 @@ const PUA_RANGE_END: u32 = 0xF8FF;
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 type EncodedPage = (usize, std::sync::Arc<Vec<u8>>, u32, u32);
 
+/// OCR may legitimately clean a native text layer, but recovering less than half of an
+/// independently healthy page is evidence of destructive recognition rather than cleanup. ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const MIN_OCR_NATIVE_ALNUM_RETENTION_RATIO: f64 = 0.5;
+
 /// Returns `true` for characters that indicate a broken glyph-to-Unicode mapping rather
 /// than legible text: Unicode Private Use Area codepoints (a common fallback target for
 /// undecodable CID/glyph indices), the replacement character (U+FFFD), and non-whitespace
@@ -2674,7 +2679,8 @@ pub(crate) async fn extract_mixed_ocr_native(
         }
     }
 
-    let accepted_replacements = accepted_ocr_page_replacements(native_text, boundaries, &ocr_results);
+    let accepted_replacements =
+        accepted_ocr_page_replacements(native_text, boundaries, &ocr_results, &ocr_output_thresholds);
     structured_ocr_pages.retain(|page, _| accepted_replacements.contains_key(page));
     retain_ocr_formulas_for_accepted_pages(&mut accumulated_formulas, &accepted_replacements);
 
@@ -2798,8 +2804,25 @@ pub(crate) fn merge_ocr_pages_into_native(
     boundaries: &[crate::types::PageBoundary],
     ocr_results: &ahash::AHashMap<u32, String>,
 ) -> String {
-    let accepted = accepted_ocr_page_replacements(native_text, boundaries, ocr_results);
+    let accepted =
+        accepted_ocr_page_replacements(native_text, boundaries, ocr_results, &OcrQualityThresholds::default());
     apply_ocr_page_replacements(native_text, boundaries, &accepted)
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn destructive_ocr_information_loss(
+    native_page: &str,
+    ocr_text: &str,
+    thresholds: &OcrQualityThresholds,
+) -> Option<(usize, usize)> {
+    let native_decision = evaluate_native_text_for_ocr(native_page, Some(1), thresholds);
+    if native_decision.fallback {
+        return None;
+    }
+
+    let ocr_stats = NativeTextStats::compute(ocr_text, thresholds);
+    let retained_ratio = ocr_stats.alnum as f64 / native_decision.stats.alnum.max(1) as f64;
+    (retained_ratio < MIN_OCR_NATIVE_ALNUM_RETENTION_RATIO).then_some((native_decision.stats.alnum, ocr_stats.alnum))
 }
 
 /// Keep only OCR results that can be applied consistently to every mixed-output
@@ -2809,6 +2832,7 @@ fn accepted_ocr_page_replacements(
     native_text: &str,
     boundaries: &[crate::types::PageBoundary],
     ocr_results: &ahash::AHashMap<u32, String>,
+    thresholds: &OcrQualityThresholds,
 ) -> ahash::AHashMap<u32, String> {
     let mut page_counts = std::collections::HashMap::new();
     for boundary in boundaries {
@@ -2842,14 +2866,14 @@ fn accepted_ocr_page_replacements(
         }
     }
 
-    let valid_pages: std::collections::HashSet<u32> = valid_boundaries
+    let valid_page_ranges: std::collections::HashMap<u32, (usize, usize)> = valid_boundaries
         .into_iter()
         .filter(|boundary| !overlapping_pages.contains(&boundary.page_number))
-        .map(|boundary| boundary.page_number)
+        .map(|boundary| (boundary.page_number, (boundary.byte_start, boundary.byte_end)))
         .collect();
 
     for (&page, text) in ocr_results {
-        if !text.trim().is_empty() && !valid_pages.contains(&page) {
+        if !text.trim().is_empty() && !valid_page_ranges.contains_key(&page) {
             tracing::warn!(
                 page,
                 "rejecting mixed OCR page without one valid, non-overlapping text boundary"
@@ -2866,14 +2890,24 @@ fn accepted_ocr_page_replacements(
     ocr_results
         .iter()
         .filter(|(page, text)| {
-            if !valid_pages.contains(page) {
+            let Some(&(byte_start, byte_end)) = valid_page_ranges.get(page) else {
                 return false;
-            }
+            };
             if crate::extraction::blank_detection::is_page_text_blank(text) {
                 tracing::warn!(
                     page = **page,
                     chars = text.trim().chars().count(),
                     "rejecting mixed OCR page whose OCR output is blank; keeping native text for this page"
+                );
+                return false;
+            }
+            let native_page = &native_text[byte_start..byte_end];
+            if let Some((native_alnum, ocr_alnum)) = destructive_ocr_information_loss(native_page, text, thresholds) {
+                tracing::warn!(
+                    page = **page,
+                    native_alnum,
+                    ocr_alnum,
+                    "rejecting mixed OCR page that would discard most of a healthy native text layer"
                 );
                 return false;
             }
@@ -6672,7 +6706,8 @@ mod tests {
         // What a blank page render actually produces: a scrap of noise.
         ocr_results.insert(1, "  a \n".to_string());
 
-        let accepted = accepted_ocr_page_replacements(native, &boundaries, &ocr_results);
+        let accepted =
+            accepted_ocr_page_replacements(native, &boundaries, &ocr_results, &OcrQualityThresholds::default());
         assert!(
             accepted.is_empty(),
             "blank OCR output must not be accepted as a replacement, got {accepted:?}"
@@ -6699,12 +6734,34 @@ mod tests {
         let mut ocr_results: ahash::AHashMap<u32, String> = ahash::AHashMap::new();
         ocr_results.insert(1, "ORDINANCE NO. 2197\n".to_string());
 
-        let accepted = accepted_ocr_page_replacements(native, &boundaries, &ocr_results);
+        let accepted =
+            accepted_ocr_page_replacements(native, &boundaries, &ocr_results, &OcrQualityThresholds::default());
         assert_eq!(accepted.len(), 1, "a page with real OCR text must be accepted");
 
         let merged = apply_ocr_page_replacements(native, &boundaries, &accepted);
         assert!(merged.contains("ORDINANCE NO. 2197"), "OCR text must reach the output");
         assert!(merged.contains("Page two native."), "untouched pages must be preserved");
+    }
+
+    #[test]
+    #[cfg(feature = "ocr")]
+    fn should_keep_rich_native_text_when_ocr_recovers_less_content() {
+        let native = "বাংলা ভাষায় লেখা এই অনুসন্ধানযোগ্য অনুচ্ছেদে নির্ভরযোগ্য তথ্য এবং পরিমাপ রয়েছে। ".repeat(24);
+        let boundaries = vec![boundary(1, 0, native.len())];
+        let ocr_results = ahash::AHashMap::from_iter([(
+            1,
+            "A short English OCR fragment with much less recovered information.".to_string(),
+        )]);
+
+        let accepted =
+            accepted_ocr_page_replacements(&native, &boundaries, &ocr_results, &OcrQualityThresholds::default());
+        assert!(
+            accepted.is_empty(),
+            "lower-information OCR must not overwrite a strong native text layer"
+        );
+
+        let merged = apply_ocr_page_replacements(&native, &boundaries, &accepted);
+        assert_eq!(merged, native);
     }
 
     /// Replacing a page with OCR text of a different length shifts every later offset, so
@@ -7648,7 +7705,7 @@ mod tests {
         raw.insert(6, "overlap two".to_string());
         raw.insert(7, "   ".to_string());
 
-        let accepted = accepted_ocr_page_replacements(native, &boundaries, &raw);
+        let accepted = accepted_ocr_page_replacements(native, &boundaries, &raw, &OcrQualityThresholds::default());
 
         assert_eq!(accepted.len(), 1);
         assert_eq!(accepted.get(&1).map(String::as_str), Some("accepted"));
@@ -7672,7 +7729,7 @@ mod tests {
         ];
         let raw = ahash::AHashMap::from_iter([(2, "page two".to_string()), (1, "page one|".to_string())]);
 
-        let accepted = accepted_ocr_page_replacements("", &boundaries, &raw);
+        let accepted = accepted_ocr_page_replacements("", &boundaries, &raw, &OcrQualityThresholds::default());
         let merged = apply_ocr_page_replacements("", &boundaries, &accepted);
 
         assert_eq!(merged, "page one|page two");
