@@ -471,14 +471,14 @@ impl TextRasterizer {
     /// Emit the tally's warning for glyphs a paint path advanced past
     /// without drawing, subject to the page-scoped latch.
     fn report_drops(&self, tally: &GlyphDropTally, font_name: &str) {
-        self.emit_drop_warning(tally, font_name, tally.warning(font_name));
+        self.emit_drop_warning(tally, font_name, tally.warning("redacted"));
     }
 
     /// Emit the tally's warning for codes the decode could not map, so the
     /// shaped text never carried them. Only paths that paint from the
     /// decoded string may call this.
     fn report_omitted_drops(&self, tally: &GlyphDropTally, font_name: &str) {
-        self.emit_drop_warning(tally, font_name, tally.warning_omitted(font_name));
+        self.emit_drop_warning(tally, font_name, tally.warning_omitted("redacted"));
     }
 
     fn emit_drop_warning(
@@ -487,14 +487,11 @@ impl TextRasterizer {
         font_name: &str,
         warning: Option<crate::extractors::warnings::Warning>,
     ) {
-        let (Some(mut warning), Some(reason)) = (warning, tally.reason()) else {
+        let (Some(warning), Some(reason)) = (warning, tally.reason()) else {
             return;
         };
         if !self.first_report_for(font_name, reason) {
             return;
-        }
-        if !font_name.is_empty() {
-            warning.message = warning.message.replace(font_name, "PDF font");
         }
         tracing::warn!(
             target: "xberg_native_pdf::fonts",
@@ -575,7 +572,7 @@ impl TextRasterizer {
         // Warnings on the bounded failure/fallback branches (missing font,
         // failed CID/CFF load, …) stay at WARN since they fire only for the
         // subset of runs that actually degrade. ~keep
-        tracing::trace!("Decoded text: '{}' (font={:?})", unicode_text, gs.font_name);
+        tracing::trace!("Decoded text: '{}'", unicode_text);
 
         // Create paint from fill color, then apply the pipeline-resolved
         // override when present. `create_fill_paint` reads gs.fill_*
@@ -613,8 +610,7 @@ impl TextRasterizer {
         if let Some(ref info) = font_info {
             if let Some(collection) = info.cjk_substitution {
                 tracing::trace!(
-                    "Routing font '{}' through CJK substitution path (collection {:?})",
-                    info.base_font,
+                    "Routing PDF font through CJK substitution path (collection {:?})",
                     collection
                 );
                 return self.render_substituted_cjk(
@@ -652,10 +648,7 @@ impl TextRasterizer {
                     // unsound under concurrency. ~keep
                     let (is_byte_indexed, has_unicode_cmap) = classify_embedded_font(embedded);
                     if info.subtype != "Type0" && is_byte_indexed {
-                        tracing::trace!(
-                            "Using embedded font '{}' with byte-indexed cmap (simple TrueType subset)",
-                            info.base_font
-                        );
+                        tracing::trace!("Using embedded PDF font with byte-indexed cmap (simple TrueType subset)");
                         return self.render_cid_direct(
                             pixmap,
                             text,
@@ -670,16 +663,13 @@ impl TextRasterizer {
                     }
 
                     if has_unicode_cmap {
-                        tracing::trace!("Using embedded font data for '{}'", info.base_font);
+                        tracing::trace!("Using embedded PDF font data");
                         Some((None, Arc::clone(embedded), 0, false))
                     } else if info.subtype == "Type0"
                         && info.cid_to_gid_map.is_some()
                         && info.cid_font_type.as_deref() == Some("CIDFontType2")
                     {
-                        tracing::trace!(
-                            "Using embedded font '{}' with CIDToGIDMap (CIDFontType2)",
-                            info.base_font
-                        );
+                        tracing::trace!("Using embedded PDF font with CIDToGIDMap (CIDFontType2)");
                         Some((None, Arc::clone(embedded), 0, true))
                     } else if info.cff_gid_map.is_some()
                         || (info.subtype == "Type0" && info.cid_font_type.as_deref() == Some("CIDFontType0"))
@@ -707,13 +697,10 @@ impl TextRasterizer {
                         // CFF outlines for sfnt-wrapped OpenType-CFF (OTTO); raw
                         // CFF streams were already wrapped by
                         // `font_dict::wrap_cff_in_opentype` at load time. ~keep
-                        tracing::trace!("Using embedded CFF font '{}' with direct GID mapping", info.base_font);
+                        tracing::trace!("Using embedded CFF PDF font with direct GID mapping");
                         Some((None, Arc::clone(embedded), 0, true))
                     } else {
-                        tracing::trace!(
-                            "Embedded font '{}' lacks usable cmap, falling back to system font",
-                            info.base_font
-                        );
+                        tracing::trace!("Embedded PDF font lacks usable cmap, falling back to system font");
                         self.load_font_data(&info.base_font)
                             .map(|(id, d, i)| (Some(id), d, i, false))
                     }
@@ -1054,21 +1041,12 @@ impl TextRasterizer {
 
             if let Some(id) = self.font_db().query(&query) {
                 if let Some((arc_data, index)) = cached_font_bytes(id, self.font_db()) {
-                    tracing::trace!(
-                        "Matched system font for {}: variant={}, index={}, size={} bytes",
-                        pdf_font_name,
-                        variant,
-                        index,
-                        arc_data.len()
-                    );
+                    tracing::trace!("Matched system font: index={}, size={} bytes", index, arc_data.len());
                     return Some((id, arc_data, index));
                 }
             }
         }
-        tracing::trace!(
-            "No system font matched for '{}' after trying all fallback variants",
-            pdf_font_name
-        );
+        tracing::trace!("No system font matched after trying all fallback variants");
         None
     }
 
@@ -1182,8 +1160,7 @@ impl TextRasterizer {
 
         let scale = font_size / units_per_em;
         tracing::trace!(
-            "render_unicode_text: pdf_font={}, units_per_em={}, font_size={}, scale={}",
-            pdf_font_name,
+            "render_unicode_text: units_per_em={}, font_size={}, scale={}",
             units_per_em,
             font_size,
             scale
@@ -1837,9 +1814,8 @@ impl TextRasterizer {
 
         if glyphs_missing > 0 {
             tracing::trace!(
-                "Font '{}': CJK substitution painted {} glyphs, skipped {} \
+                "CJK substitution painted {} glyphs, skipped {} \
                  (no Unicode mapping or no glyph in Droid Sans Fallback)",
-                font_info.base_font,
                 glyphs_painted,
                 glyphs_missing
             );
@@ -2067,6 +2043,9 @@ mod tests {
     #[test]
     fn glyph_drop_warning_hides_font_and_preserves_details() {
         const SECRET_FONT: &str = "CONFIDENTIAL_FONT_27f4";
+        const EXPECTED_MESSAGE: &str = "font 'redacted' painted nothing for 3 glyph(s) while advancing the cursor; \
+            first was code 0x41 (glyph 7): no outline. The page renders with a gap that reads as whitespace \
+            downstream. Reported once per font per page.";
         let _ = crate::extractors::warnings::drain_global_warnings();
         let mut tally = GlyphDropTally::default();
         tally.record("no outline", 0x41, 7);
@@ -2074,19 +2053,20 @@ mod tests {
         tally.record("no outline", 0x43, 9);
         let rasterizer = TextRasterizer::with_fontdb(Arc::new(fontdb::Database::new()));
 
-        let events = capture_events(|| rasterizer.report_drops(&tally, SECRET_FONT));
+        let events = capture_events(|| {
+            for font_name in [SECRET_FONT, "3", "no outline", "font"] {
+                rasterizer.report_drops(&tally, font_name);
+            }
+        });
         let warnings = crate::extractors::warnings::drain_global_warnings();
-        assert_eq!(warnings.len(), 1);
-        let warning = &warnings[0];
-        assert_eq!(
-            warning.category,
-            crate::extractors::warnings::WarningCategory::GlyphDropped
-        );
-        assert!(!warning.message.contains(SECRET_FONT));
-        assert!(warning.message.contains("3 glyph(s)"));
-        assert!(warning.message.contains("0x41"));
-        assert!(warning.message.contains("(glyph 7)"));
-        assert!(warning.message.contains("no outline"));
+        assert_eq!(warnings.len(), 4);
+        for warning in &warnings {
+            assert_eq!(
+                warning.category,
+                crate::extractors::warnings::WarningCategory::GlyphDropped
+            );
+            assert_eq!(warning.message, EXPECTED_MESSAGE);
+        }
         let rendered = format!("{events:?}");
         assert!(!rendered.contains(SECRET_FONT));
         assert_eq!(
@@ -2098,8 +2078,36 @@ mod tests {
                         && event.fields.get("error_code").map(String::as_str) == Some("glyph_dropped")
                 })
                 .count(),
-            1
+            4
         );
+    }
+
+    #[test]
+    fn tracing_macros_do_not_reference_pdf_font_names() {
+        let source = include_str!("text_rasterizer.rs");
+        let mut invocation = String::new();
+        let mut collecting = false;
+
+        for line in source.lines() {
+            if line.contains("tracing::") {
+                invocation.clear();
+                collecting = true;
+            }
+            if collecting {
+                invocation.push_str(line);
+                invocation.push('\n');
+                if line.contains(");") {
+                    for forbidden in ["base_font", "pdf_font_name", "gs.font_name"] {
+                        assert!(
+                            !invocation.contains(forbidden),
+                            "tracing macro exposes {forbidden}: {invocation}"
+                        );
+                    }
+                    collecting = false;
+                }
+            }
+        }
+        assert!(!collecting, "unterminated tracing macro in source audit");
     }
 
     #[test]
