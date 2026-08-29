@@ -14,7 +14,6 @@ use crate::object::Object;
 use skrifa::instance::{LocationRef, Size};
 use skrifa::metrics::{GlyphMetrics, Metrics};
 use skrifa::{FontRef, GlyphId, MetadataProvider};
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -2791,6 +2790,10 @@ impl FontInfo {
                 return None;
             }
         }
+        self.get_standard_font_intrinsic_width(char_code)
+    }
+
+    fn get_standard_font_intrinsic_width(&self, char_code: u16) -> Option<f32> {
         // The name classification below is a pure function of `base_font`, but
         // this runs once per glyph — so it is resolved once and memoized. ~keep
         let std14 = (*self.std14_memo.get_or_init(|| self.classify_std14()))?;
@@ -3700,11 +3703,7 @@ impl FontInfo {
     /// Eliminates per-byte bounds check and subtraction in advance_position.
     #[inline]
     pub fn get_byte_to_width_table(&self) -> &[f32; 256] {
-        self.byte_to_width_table.get_or_init(|| {
-            let mut tbl = self.declared_byte_widths();
-            self.repair_zero_extraction_widths(&mut tbl);
-            tbl
-        })
+        self.byte_to_width_table.get_or_init(|| self.declared_byte_widths())
     }
 
     fn declared_byte_widths(&self) -> [f32; 256] {
@@ -3761,7 +3760,7 @@ impl FontInfo {
             (metrics.units_per_em > 0 && advance > 0.0).then_some(advance * 1000.0 / metrics.units_per_em as f32)
         });
         embedded_width
-            .or_else(|| self.get_standard_font_width(code as u16))
+            .or_else(|| self.get_standard_font_intrinsic_width(code as u16))
             .filter(|width| width.is_finite() && *width > 0.0)
     }
 
@@ -3793,15 +3792,11 @@ impl FontInfo {
         }
     }
 
-    /// Extraction-only widths for malformed simple fonts whose declared zero
-    /// conflicts with a positive embedded or Standard-14 advance. Rendering and
-    /// [`FontInfo::get_glyph_width`] retain the authored PDF width. ~keep
-    pub(crate) fn extraction_byte_widths(&self, repair_zero_widths: bool) -> Cow<'_, [f32; 256]> {
-        if repair_zero_widths {
-            Cow::Borrowed(self.get_byte_to_width_table())
-        } else {
-            Cow::Owned(self.declared_byte_widths())
-        }
+    /// Builds extraction-only widths without changing either public authored-width API. ~keep
+    pub(crate) fn build_extraction_byte_widths(&self) -> [f32; 256] {
+        let mut widths = self.declared_byte_widths();
+        self.repair_zero_extraction_widths(&mut widths);
+        widths
     }
 
     /// Convert a character code to Unicode string.
@@ -9616,6 +9611,19 @@ mod tests {
         assert_eq!(table[67], 400.0);
         assert_eq!(table[0], 500.0);
         assert_eq!(table[100], 500.0);
+    }
+
+    #[test]
+    fn test_public_byte_width_table_preserves_authored_zero() {
+        let font = make_font(|font| {
+            font.base_font = "Helvetica".to_string();
+            font.subtype = "Type1".to_string();
+            font.widths = Some(vec![0.0]);
+            font.first_char = Some(65);
+            font.last_char = Some(65);
+        });
+        assert_eq!(font.get_glyph_width(65), 0.0);
+        assert_eq!(font.get_byte_to_width_table()[65], 0.0);
     }
 
     #[test]

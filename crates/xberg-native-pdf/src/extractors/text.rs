@@ -2273,6 +2273,11 @@ pub struct TextExtractor<'doc> {
     /// Cached current font (updated on Tf). Avoids per-Tj HashMap lookup
     /// in advance_position_for_string.
     cached_current_font: Option<Arc<FontInfo>>,
+    /// Extraction-only simple-font width tables, keyed by stable `Arc` identity.
+    /// Each embedded font is parsed at most once per extractor. ~keep
+    extraction_width_tables: HashMap<usize, (Arc<FontInfo>, Arc<[f32; 256]>)>,
+    /// Width table paired with `cached_current_font` for the text hot path. ~keep
+    cached_extraction_widths: Option<Arc<[f32; 256]>>,
     /// Stack of MCID content-stream scopes (ISO 32000-1:2008 §14.7.4.3).
     ///
     /// Bottom of the stack is the page's own content-stream scope
@@ -2371,6 +2376,8 @@ impl<'doc> TextExtractor<'doc> {
             current_x_position: 0.0,
             word_boundary_mode,
             cached_current_font: None,
+            extraction_width_tables: HashMap::new(),
+            cached_extraction_widths: None,
             // Default to Page(0); `set_page_index` overrides before
             // extraction. Form XObject `Do` invocations push their
             // own scope on top. ~keep
@@ -2392,6 +2399,30 @@ impl<'doc> TextExtractor<'doc> {
         } else {
             self.mcid_scope_stack
                 .push(crate::structure::McidScope::Page(page_index));
+        }
+    }
+
+    fn set_cached_current_font(&mut self, font: Option<Arc<FontInfo>>) {
+        self.cached_extraction_widths = font.as_ref().filter(|font| font.subtype != "Type0").map(|font| {
+            let key = Arc::as_ptr(font) as usize;
+            self.extraction_width_tables
+                .entry(key)
+                .or_insert_with(|| (font.clone(), Arc::new(font.build_extraction_byte_widths())))
+                .1
+                .clone()
+        });
+        self.cached_current_font = font;
+    }
+
+    fn simple_widths<'a>(
+        cached: Option<&'a [f32; 256]>,
+        font: &'a FontInfo,
+        repair_zero_widths: bool,
+    ) -> &'a [f32; 256] {
+        if repair_zero_widths {
+            cached.unwrap_or_else(|| font.get_byte_to_width_table())
+        } else {
+            font.get_byte_to_width_table()
         }
     }
 
@@ -4741,7 +4772,8 @@ impl<'doc> TextExtractor<'doc> {
                     // new buffer to avoid decoding with the wrong ToUnicode CMap. ~keep
                     self.flush_tj_span_buffer()?;
 
-                    self.cached_current_font = self.fonts.get(&font).cloned();
+                    let current_font = self.fonts.get(&font).cloned();
+                    self.set_cached_current_font(current_font);
                     // Cache wmode on the graphics state so the advance hot
                     // path branches on a single primitive read instead of
                     // dereferencing the FontInfo every glyph. ~keep
@@ -5174,13 +5206,14 @@ impl<'doc> TextExtractor<'doc> {
             Operator::RestoreState => {
                 self.flush_tj_span_buffer()?;
                 self.state_stack.restore();
-                self.cached_current_font = self
+                let current_font = self
                     .state_stack
                     .current()
                     .font_name
                     .as_ref()
                     .and_then(|name| self.fonts.get(name))
                     .cloned();
+                self.set_cached_current_font(current_font);
                 if !self.excluded_inks.is_empty() {
                     let cs = self.state_stack.current().fill_color_space.clone();
                     self.inside_excluded_ink = self.is_excluded_ink_color_space(&cs);
@@ -6376,13 +6409,14 @@ impl<'doc> TextExtractor<'doc> {
 
                 // Restore graphics state (implicit Q per ISO 32000-1 §8.10.1) ~keep
                 self.state_stack.restore();
-                self.cached_current_font = self
+                let current_font = self
                     .state_stack
                     .current()
                     .font_name
                     .as_ref()
                     .and_then(|name| self.fonts.get(name))
                     .cloned();
+                self.set_cached_current_font(current_font);
 
                 if let Some(fonts) = saved_fonts {
                     self.fonts = fonts;
@@ -6602,7 +6636,11 @@ impl<'doc> TextExtractor<'doc> {
                     if let Some(ref name) = font_name
                         && let Some(font) = self.fonts.get(name)
                     {
-                        let width_table = font.extraction_byte_widths(!Self::has_following_tj_displacement(array, idx));
+                        let width_table = Self::simple_widths(
+                            self.cached_extraction_widths.as_deref(),
+                            font,
+                            !Self::has_following_tj_displacement(array, idx),
+                        );
                         for &byte in s.iter() {
                             // Normalize character code through encoding.
                             // This ensures word boundary detection works on actual characters,
@@ -7168,7 +7206,8 @@ impl<'doc> TextExtractor<'doc> {
         let total_width = if let Some(font) = font {
             if font.subtype != "Type0" {
                 // Fast path: use precomputed 256-entry width table (simple fonts) ~keep
-                let width_table = font.extraction_byte_widths(repair_zero_widths);
+                let width_table =
+                    Self::simple_widths(self.cached_extraction_widths.as_deref(), font, repair_zero_widths);
                 let mut w_sum = 0.0f32;
                 for &byte in text {
                     let mut w = width_table[byte as usize] * fs_factor * hs_factor;
@@ -7285,7 +7324,7 @@ impl<'doc> TextExtractor<'doc> {
                         && let Ok(decoded) = std::str::from_utf8(text)
                         && decoded.chars().any(|c| c as u32 > 0xFF)
                     {
-                        let width_table = font.extraction_byte_widths(true);
+                        let width_table = Self::simple_widths(self.cached_extraction_widths.as_deref(), font, true);
                         let mut w_sum = 0.0f32;
                         for &byte in text {
                             let mut w = width_table[byte as usize] * fs_factor * hs_factor;
@@ -7312,7 +7351,7 @@ impl<'doc> TextExtractor<'doc> {
                 }
 
                 let char_table = font.get_byte_to_char_table();
-                let width_table = font.extraction_byte_widths(true);
+                let width_table = Self::simple_widths(self.cached_extraction_widths.as_deref(), font, true);
                 let mut w_sum = 0.0f32;
                 for &byte in text {
                     let len_before = buffer.unicode.len();
@@ -7469,7 +7508,11 @@ impl<'doc> TextExtractor<'doc> {
                         if let Ok(decoded) = std::str::from_utf8(text) {
                             let has_non_latin1 = decoded.chars().any(|c| c as u32 > 0xFF);
                             if has_non_latin1 {
-                                let width_table = font.extraction_byte_widths(repair_zero_widths);
+                                let width_table = Self::simple_widths(
+                                    self.cached_extraction_widths.as_deref(),
+                                    font,
+                                    repair_zero_widths,
+                                );
                                 let mut w_sum = 0.0f32;
                                 for &byte in text {
                                     let mut w = width_table[byte as usize] * fs_factor * hs_factor;
@@ -7513,7 +7556,8 @@ impl<'doc> TextExtractor<'doc> {
                 }
 
                 let char_table = font.get_byte_to_char_table();
-                let width_table = font.extraction_byte_widths(repair_zero_widths);
+                let width_table =
+                    Self::simple_widths(self.cached_extraction_widths.as_deref(), font, repair_zero_widths);
                 let mut w_sum = 0.0f32;
                 for &byte in text {
                     let len_before = buffer.unicode.len();
@@ -7968,7 +8012,7 @@ impl<'doc> TextExtractor<'doc> {
 
         let simple_widths = font
             .filter(|font| font.subtype != "Type0")
-            .map(|font| font.extraction_byte_widths(repair_zero_widths));
+            .map(|font| Self::simple_widths(self.cached_extraction_widths.as_deref(), font, repair_zero_widths));
 
         for (char_code, nbytes) in TextCharIter::new(text, font) {
             // Get current text matrix (may be updated by previous characters in this string) ~keep
@@ -13993,7 +14037,8 @@ mod tests {
         let mut extractor = TextExtractor::new();
         let font = create_test_font();
         extractor.add_font("F1".to_string(), font);
-        extractor.cached_current_font = extractor.fonts.get("F1").cloned();
+        let current_font = extractor.fonts.get("F1").cloned();
+        extractor.set_cached_current_font(current_font);
         extractor.state_stack.current_mut().font_size = 12.0;
         extractor.state_stack.current_mut().font_name = Some("F1".to_string());
         extractor.state_stack.current_mut().horizontal_scaling = 100.0;
