@@ -315,7 +315,9 @@ fn opens_aligned_body_block(
         return false;
     }
 
-    candidate_bbox.0 <= following_bbox.0 + body_font_size * BODY_SIZE_BOLD_ALIGNMENT_TOLERANCE_EM
+    let candidate_left = candidate_bbox.0.min(candidate_bbox.2);
+    let following_left = following_bbox.0.min(following_bbox.2);
+    candidate_left <= following_left + body_font_size * BODY_SIZE_BOLD_ALIGNMENT_TOLERANCE_EM
 }
 
 fn is_explicit_numbered_body_size_section(text: &str) -> bool {
@@ -342,15 +344,24 @@ fn is_explicit_numbered_body_size_section(text: &str) -> bool {
 }
 
 fn body_size_heading_eligibility(all_pages: &[Vec<PdfParagraph>], body_font_size: f32) -> Vec<Vec<bool>> {
-    let mut next_content = None;
+    let mut next_content: Option<(usize, &PdfParagraph)> = None;
     let mut eligibility = Vec::with_capacity(all_pages.len());
     for (page_index, page) in all_pages.iter().enumerate().rev() {
         let mut page_eligibility = Vec::with_capacity(page.len());
         for paragraph in page.iter().rev() {
             let is_candidate = is_body_size_bold_heading_candidate(paragraph, body_font_size);
             let is_explicit_section = is_explicit_numbered_body_size_section(paragraph_text_raw(paragraph).trim());
+            let has_non_finite_geometry = paragraph
+                .block_bbox
+                .is_some_and(|bbox| !bbox_coordinates_are_finite(bbox))
+                || next_content.is_some_and(|(_, following)| {
+                    following
+                        .block_bbox
+                        .is_some_and(|bbox| !bbox_coordinates_are_finite(bbox))
+                });
             page_eligibility.push(
                 is_candidate
+                    && !has_non_finite_geometry
                     && if is_explicit_section {
                         !next_content.is_some_and(|(following_page_index, following)| {
                             shares_same_text_row(paragraph, following, page_index == following_page_index)
@@ -10083,6 +10094,20 @@ where new shares are issued;";
             ]);
         }
         pages.push(vec![
+            body_size_paragraph_with_bbox(
+                "Policy Heading With Inverted Bounds",
+                true,
+                None,
+                (300.0, 700.0, 74.0, 714.0),
+            ),
+            body_size_paragraph_with_bbox(
+                "The normalized outdented heading opens this ordinary body paragraph.",
+                false,
+                None,
+                (110.0, 680.0, 430.0, 702.0),
+            ),
+        ]);
+        pages.push(vec![
             body_size_paragraph_with_bbox("1. TABLE CELL LABEL", true, None, (74.0, 600.0, 190.0, 612.0)),
             body_size_paragraph_with_bbox(
                 "Adjacent table value with enough words",
@@ -10091,10 +10116,38 @@ where new shares are issued;";
                 (210.0, 600.0, 430.0, 612.0),
             ),
         ]);
+        let mut invalid_candidate =
+            body_size_paragraph_with_bbox("2. INVALID CANDIDATE GEOMETRY", true, None, (74.0, 560.0, 190.0, 572.0));
+        invalid_candidate.block_bbox = Some((f32::NAN, 560.0, 190.0, 572.0));
+        pages.push(vec![
+            invalid_candidate,
+            body_size_paragraph_with_bbox(
+                "A valid adjacent value must not excuse invalid candidate geometry.",
+                false,
+                None,
+                (210.0, 560.0, 430.0, 572.0),
+            ),
+        ]);
+        let mut invalid_following = body_size_paragraph_with_bbox(
+            "An invalid adjacent value must not excuse valid candidate geometry.",
+            false,
+            None,
+            (210.0, 520.0, 430.0, 532.0),
+        );
+        invalid_following.block_bbox = Some((210.0, 520.0, f32::INFINITY, 532.0));
+        pages.push(vec![
+            body_size_paragraph_with_bbox(
+                "3. INVALID FOLLOWING GEOMETRY",
+                true,
+                None,
+                (74.0, 520.0, 190.0, 532.0),
+            ),
+            invalid_following,
+        ]);
 
         promote_repeated_body_size_bold_headings(&mut pages, Some(12.0));
 
-        for page in pages.iter().skip(1).take(5) {
+        for page in pages.iter().skip(1).take(6) {
             assert_eq!(
                 page[0].heading_level,
                 Some(3),
@@ -10103,8 +10156,13 @@ where new shares are issued;";
             );
         }
         assert_eq!(
-            pages[6][0].heading_level, None,
+            pages[7][0].heading_level, None,
             "an explicitly numbered table cell must not bypass the same-row guard"
+        );
+        assert_eq!(
+            (pages[8][0].heading_level, pages[9][0].heading_level),
+            (None, None),
+            "explicit numbering must not turn non-finite candidate or following geometry into a heading exemption"
         );
     }
 
