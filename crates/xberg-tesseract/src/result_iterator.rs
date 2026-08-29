@@ -53,6 +53,30 @@ pub struct ResultIterator {
     pub handle: Arc<Mutex<*mut c_void>>,
 }
 
+struct TessTextGuard<D: FnMut(*mut c_char)> {
+    pointer: *mut c_char,
+    deleter: D,
+}
+
+impl<D: FnMut(*mut c_char)> Drop for TessTextGuard<D> {
+    fn drop(&mut self) {
+        (self.deleter)(self.pointer);
+    }
+}
+
+/// Copy a NUL-terminated Tesseract string and release it on every return path. ~keep
+///
+/// # Safety
+///
+/// `pointer` must reference a valid NUL-terminated allocation that remains readable until
+/// `deleter` releases it. `deleter` must accept that allocation exactly once. ~keep
+unsafe fn copy_and_delete_tess_text(pointer: *mut c_char, deleter: impl FnMut(*mut c_char)) -> Result<String> {
+    let text = TessTextGuard { pointer, deleter };
+    // SAFETY: the caller guarantees that the guarded pointer is readable and NUL-terminated. ~keep
+    let c_str = unsafe { CStr::from_ptr(text.pointer) };
+    Ok(c_str.to_str()?.to_owned())
+}
+
 unsafe impl Send for ResultIterator {}
 unsafe impl Sync for ResultIterator {}
 
@@ -87,9 +111,13 @@ impl ResultIterator {
         if text_ptr.is_null() {
             return Err(TesseractError::NullPointerError);
         }
-        let c_str = unsafe { CStr::from_ptr(text_ptr) };
-        let result = c_str.to_str()?.to_owned();
-        unsafe { TessDeleteText(text_ptr as *mut c_char) };
+        // SAFETY: Tesseract returned this NUL-terminated allocation and requires TessDeleteText. ~keep
+        let result = unsafe {
+            copy_and_delete_tess_text(text_ptr, |pointer| {
+                // SAFETY: the guard calls this exactly once with the pointer returned by Tesseract. ~keep
+                TessDeleteText(pointer);
+            })
+        }?;
         Ok(result)
     }
 
@@ -375,12 +403,13 @@ fn extract_word_data_unlocked(raw: *mut c_void) -> Result<WordData> {
     if text_ptr.is_null() {
         return Err(TesseractError::NullPointerError);
     }
-    let text = {
-        let c_str = unsafe { CStr::from_ptr(text_ptr) };
-        let owned = c_str.to_str()?.to_owned();
-        unsafe { TessDeleteText(text_ptr as *mut c_char) };
-        owned
-    };
+    // SAFETY: Tesseract returned this NUL-terminated allocation and requires TessDeleteText. ~keep
+    let text = unsafe {
+        copy_and_delete_tess_text(text_ptr, |pointer| {
+            // SAFETY: the guard calls this exactly once with the pointer returned by Tesseract. ~keep
+            TessDeleteText(pointer);
+        })
+    }?;
 
     let mut left = 0;
     let mut top = 0;
@@ -512,6 +541,7 @@ ffi_extern! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     fn sample_word(text: &str) -> WordData {
         WordData {
@@ -529,6 +559,18 @@ mod tests {
     fn invalid_utf8_error() -> TesseractError {
         let invalid_bytes: Vec<u8> = vec![0xFF, 0xFE];
         std::str::from_utf8(&invalid_bytes).unwrap_err().into()
+    }
+
+    #[test]
+    fn should_delete_iterator_text_when_utf8_conversion_fails() {
+        let mut invalid_text = vec![0xff_u8, 0];
+        let deleted = Cell::new(false);
+
+        // SAFETY: the vector is NUL-terminated and remains alive for the call; the test deleter does not free it. ~keep
+        let result = unsafe { copy_and_delete_tess_text(invalid_text.as_mut_ptr().cast(), |_| deleted.set(true)) };
+
+        assert!(matches!(result, Err(TesseractError::Utf8Error(_))));
+        assert!(deleted.get(), "the native text deleter must run on conversion errors");
     }
 
     /// Drives [`record_word_extraction_result`] over a fixed, known sequence of
