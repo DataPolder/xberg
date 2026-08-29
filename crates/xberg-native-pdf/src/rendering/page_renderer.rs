@@ -3119,7 +3119,12 @@ impl PageRenderer {
         let shading = match shading_obj.as_ref().and_then(|o| o.as_dict()) {
             Some(d) => d.clone(),
             None => {
-                tracing::warn!("Shading '{}' not found in resources", name);
+                tracing::warn!(
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "render_shading",
+                    error_code = "missing_resource",
+                    "skipping missing shading resource"
+                );
                 return Ok(());
             }
         };
@@ -3183,7 +3188,13 @@ impl PageRenderer {
                 )
             }
             _ => {
-                tracing::warn!("Unsupported shading type {} for '{}'", shading_type, name);
+                tracing::warn!(
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "render_shading",
+                    error_code = "unsupported_shading_type",
+                    shading_type,
+                    "skipping unsupported shading"
+                );
                 Ok(())
             }
         }
@@ -3837,11 +3848,8 @@ impl PageRenderer {
                                                             );
                                                             decompressed
                                                         }
-                                                        Err(e) => {
-                                                            tracing::warn!(
-                                                                "CCITT decompression failed: {}, using raw data",
-                                                                e
-                                                            );
+                                                        Err(error) => {
+                                                            trace_ccitt_mask_decode_failure(&error);
                                                             raw_mask_data
                                                         }
                                                     }
@@ -9352,10 +9360,65 @@ fn intersect_with_inherited(mut mask: tiny_skia::Mask, inherited: Option<&tiny_s
     mask
 }
 
+fn trace_ccitt_mask_decode_failure(error: &Error) {
+    crate::error::trace_recovery("decode_ccitt_image_mask", error);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::object::Object;
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+    use tracing::Level;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    #[derive(Clone, Debug)]
+    struct CapturedEvent {
+        level: Level,
+        target: String,
+        fields: BTreeMap<String, String>,
+    }
+
+    #[derive(Clone, Default)]
+    struct EventCapture(Arc<Mutex<Vec<CapturedEvent>>>);
+
+    impl<S: tracing::Subscriber> Layer<S> for EventCapture {
+        fn on_event(&self, event: &tracing::Event<'_>, _context: tracing_subscriber::layer::Context<'_, S>) {
+            let mut fields = FieldCapture::default();
+            event.record(&mut fields);
+            self.0.lock().unwrap().push(CapturedEvent {
+                level: *event.metadata().level(),
+                target: event.metadata().target().to_string(),
+                fields: fields.0,
+            });
+        }
+    }
+
+    #[derive(Default)]
+    struct FieldCapture(BTreeMap<String, String>);
+
+    impl tracing::field::Visit for FieldCapture {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            self.0.insert(field.name().to_string(), format!("{value:?}"));
+        }
+
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            self.0.insert(field.name().to_string(), value.to_string());
+        }
+
+        fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+            self.0.insert(field.name().to_string(), value.to_string());
+        }
+    }
+
+    fn capture_events(operation: impl FnOnce()) -> Vec<CapturedEvent> {
+        let capture = EventCapture::default();
+        let subscriber = tracing_subscriber::registry().with(capture.clone());
+        tracing::subscriber::with_default(subscriber, operation);
+        capture.0.lock().unwrap().clone()
+    }
 
     fn pdf_doc_with_extra_object(extra: Option<&[u8]>) -> PdfDocument {
         let mut pdf = b"%PDF-1.4\n".to_vec();
@@ -9386,6 +9449,88 @@ mod tests {
 
     fn minimal_pdf_doc() -> PdfDocument {
         pdf_doc_with_extra_object(None)
+    }
+
+    #[test]
+    fn renderer_recovery_warnings_exclude_untrusted_names_and_errors() {
+        const SECRET_NAME: &str = "CONFIDENTIAL_SHADING_d1a2";
+        const SECRET_ERROR: &str = "CONFIDENTIAL_CCITT_8b4f";
+        let doc = minimal_pdf_doc();
+        let renderer = PageRenderer::new(RenderOptions::default());
+        let mut pixmap = Pixmap::new(1, 1).unwrap();
+        let graphics_state = GraphicsState::new();
+        let missing_resources = Object::Dictionary(HashMap::new());
+        let unsupported_resources = Object::Dictionary(HashMap::from([(
+            "Shading".to_string(),
+            Object::Dictionary(HashMap::from([(
+                SECRET_NAME.to_string(),
+                Object::Dictionary(HashMap::from([("ShadingType".to_string(), Object::Integer(99))])),
+            )])),
+        )]));
+
+        let events = capture_events(|| {
+            renderer
+                .render_shading(
+                    &mut pixmap,
+                    SECRET_NAME,
+                    Transform::identity(),
+                    &graphics_state,
+                    &missing_resources,
+                    &doc,
+                    None,
+                )
+                .unwrap();
+            renderer
+                .render_shading(
+                    &mut pixmap,
+                    SECRET_NAME,
+                    Transform::identity(),
+                    &graphics_state,
+                    &unsupported_resources,
+                    &doc,
+                    None,
+                )
+                .unwrap();
+            trace_ccitt_mask_decode_failure(&Error::Decode(SECRET_ERROR.to_string()));
+        });
+
+        let warnings: Vec<_> = events
+            .iter()
+            .filter(|event| event.level == Level::WARN && event.target == crate::LOG_TARGET_ROOT)
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            3,
+            "expected exact renderer recovery events: {events:#?}"
+        );
+        assert_eq!(
+            warnings[0].fields.get("operation").map(String::as_str),
+            Some("render_shading")
+        );
+        assert_eq!(
+            warnings[0].fields.get("error_code").map(String::as_str),
+            Some("missing_resource")
+        );
+        assert_eq!(
+            warnings[1].fields.get("operation").map(String::as_str),
+            Some("render_shading")
+        );
+        assert_eq!(
+            warnings[1].fields.get("error_code").map(String::as_str),
+            Some("unsupported_shading_type")
+        );
+        assert_eq!(warnings[1].fields.get("shading_type").map(String::as_str), Some("99"));
+        assert_eq!(
+            warnings[2].fields.get("operation").map(String::as_str),
+            Some("decode_ccitt_image_mask")
+        );
+        assert_eq!(
+            warnings[2].fields.get("error_code").map(String::as_str),
+            Some("decode_error")
+        );
+        let rendered = format!("{events:?}");
+        assert!(!rendered.contains(SECRET_NAME));
+        assert!(!rendered.contains(SECRET_ERROR));
     }
 
     fn image_mask_dict(width: i64, height: i64) -> HashMap<String, Object> {

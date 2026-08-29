@@ -609,7 +609,12 @@ impl FontInfo {
                 "Font '{}' is Type 3 - may require special glyph name mapping",
                 base_font
             );
-            tracing::warn!("{}", msg);
+            tracing::warn!(
+                target: crate::LOG_TARGET_ROOT,
+                operation = "load_font",
+                error_code = "type3_font",
+                "using Type 3 glyph-name fallback"
+            );
             // push into the structured warning
             // sink. PDF Spec §9.6.4 "Type 3 Fonts" describes the
             // user-defined CharProcs glyph-program model; the
@@ -1021,7 +1026,12 @@ impl FontInfo {
         } else {
             if subtype == "Type0" {
                 let msg = format!("Type0 font '{}' has no ToUnicode entry!", base_font);
-                tracing::warn!("{}", msg);
+                tracing::warn!(
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "load_font",
+                    error_code = "missing_tounicode",
+                    "using composite-font fallback mapping"
+                );
                 // push to the structured sink. PDF
                 // Spec §9.10.2 "ToUnicode CMaps" describes the
                 // mapping; absent ToUnicode triggers the fallback
@@ -1335,13 +1345,12 @@ impl FontInfo {
                 (Some(n), _) => Some(n),
                 (None, _) => None,
             };
-            if let Some(c) = collection {
+            if collection.is_some() {
                 tracing::warn!(
-                    "Font '{}': flagged for CJK predefined-CIDFont substitution \
-                     (collection {:?}); no embedded outlines, base name is an \
-                     Adobe predefined CIDFont per ISO 32000-2 §9.7.5.2",
-                    base_font,
-                    c
+                    target: crate::LOG_TARGET_ROOT,
+                    operation = "load_cid_font",
+                    error_code = "predefined_font_substitution",
+                    "using bundled predefined CID font"
                 );
             }
             collection
@@ -1349,17 +1358,17 @@ impl FontInfo {
             if subtype == "Type0" && super::predefined_cidfont::is_predefined(&base_font).is_some() {
                 if has_font_program && embedded_font_data.is_none() {
                     tracing::warn!(
-                        "Font '{}': /FontFile{{,2,3}} present but the font program \
-                         failed to load/decode (see warnings above); NOT substituting \
-                         the bundled CJK fallback — glyphs for this font will not render",
-                        base_font
+                        target: crate::LOG_TARGET_ROOT,
+                        operation = "load_cid_font",
+                        error_code = "embedded_font_unavailable",
+                        "skipping predefined CID font substitution"
                     );
                 } else if !has_font_program && !matches!(encoding, Encoding::Identity) {
                     tracing::warn!(
-                        "Font '{}': Adobe predefined CIDFont without embedded outlines, \
-                         but /Encoding is a non-Identity CMap — charcodes are not CIDs, \
-                         so CJK substitution is skipped",
-                        base_font
+                        target: crate::LOG_TARGET_ROOT,
+                        operation = "load_cid_font",
+                        error_code = "unsupported_predefined_encoding",
+                        "skipping predefined CID font substitution"
                     );
                 }
             }
@@ -2598,14 +2607,24 @@ impl FontInfo {
                                 current_code += 1;
                             }
                             _ => {
-                                tracing::warn!("Unexpected item in /Differences array: {:?}", actual_item);
+                                tracing::warn!(
+                                    target: crate::LOG_TARGET_ROOT,
+                                    operation = "parse_font_encoding",
+                                    error_code = "invalid_differences_entry",
+                                    "skipping malformed font encoding entry"
+                                );
                             }
                         }
                     }
 
                     tracing::debug!("Parsed /Differences array with {} custom mappings", encoding_map.len());
                 } else {
-                    tracing::warn!("/Differences is not an array: {:?}", diff_obj);
+                    tracing::warn!(
+                        target: crate::LOG_TARGET_ROOT,
+                        operation = "parse_font_encoding",
+                        error_code = "invalid_differences_type",
+                        "ignoring malformed font differences"
+                    );
                 }
             }
 
@@ -6184,13 +6203,11 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct MessageVisitor(String);
+    struct MessageVisitor(Vec<String>);
 
     impl tracing::field::Visit for MessageVisitor {
         fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-            if field.name() == "message" {
-                self.0 = format!("{:?}", value);
-            }
+            self.0.push(format!("{}={value:?}", field.name()));
         }
     }
 
@@ -6208,10 +6225,13 @@ mod tests {
         fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
 
         fn event(&self, event: &tracing::Event<'_>) {
+            if *event.metadata().level() != tracing::Level::WARN {
+                return;
+            }
             let mut visitor = MessageVisitor::default();
             event.record(&mut visitor);
             if let Ok(mut messages) = self.messages.lock() {
-                messages.push(visitor.0);
+                messages.push(visitor.0.join(" "));
             }
         }
 
@@ -6227,6 +6247,50 @@ mod tests {
         let messages = std::sync::Arc::clone(&subscriber.messages);
         tracing::subscriber::with_default(subscriber, f);
         messages.lock().map(|guard| guard.clone()).unwrap_or_default()
+    }
+
+    #[test]
+    fn font_dictionary_warnings_exclude_untrusted_names_and_objects() {
+        const SECRET_FONT: &str = "CONFIDENTIAL_FONT_73da";
+        const SECRET_OBJECT: &str = "CONFIDENTIAL_DIFFERENCE_916c";
+        let doc = minimal_pdf_doc();
+        let type3 = Object::Dictionary(HashMap::from([
+            ("Subtype".to_string(), Object::Name("Type3".to_string())),
+            ("BaseFont".to_string(), Object::Name(SECRET_FONT.to_string())),
+        ]));
+        let encoding = Object::Dictionary(HashMap::from([(
+            "Differences".to_string(),
+            Object::Array(vec![Object::String(SECRET_OBJECT.as_bytes().to_vec())]),
+        )]));
+
+        crate::extractors::warnings::drain_global_warnings();
+        let logs = capture_warnings(|| {
+            FontInfo::from_dict(&type3, &doc).expect("minimal Type3 dictionary must parse");
+            FontInfo::parse_encoding(&encoding, &doc, None).expect("malformed differences must recover");
+        });
+        crate::extractors::warnings::drain_global_warnings();
+
+        assert_eq!(logs.len(), 2, "expected exactly two recovery warnings: {logs:#?}");
+        assert_eq!(
+            logs.iter()
+                .filter(|event| {
+                    event.contains("operation=\"load_font\"") && event.contains("error_code=\"type3_font\"")
+                })
+                .count(),
+            1
+        );
+        assert_eq!(
+            logs.iter()
+                .filter(|event| {
+                    event.contains("operation=\"parse_font_encoding\"")
+                        && event.contains("error_code=\"invalid_differences_entry\"")
+                })
+                .count(),
+            1
+        );
+        let rendered = format!("{logs:?}");
+        assert!(!rendered.contains(SECRET_FONT));
+        assert!(!rendered.contains(SECRET_OBJECT));
     }
 
     /// A font whose /ToUnicode CMap fails to parse must WARN about the

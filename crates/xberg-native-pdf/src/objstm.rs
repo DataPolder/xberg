@@ -31,6 +31,37 @@ use crate::object::Object;
 use crate::parser::parse_object;
 use std::collections::HashMap;
 
+const MAX_OBJECT_STREAM_OBJECTS: i64 = 1_000_000;
+const MAX_OBJECT_STREAM_FIRST_OFFSET: i64 = 10_000_000;
+
+pub(crate) struct ObjectStreamParseOutcome {
+    pub(crate) objects: HashMap<u32, Object>,
+    recovery: Option<ObjectStreamRecovery>,
+}
+
+struct ObjectStreamRecovery {
+    invalid_offset_count: usize,
+    parse_failure_count: usize,
+}
+
+impl ObjectStreamParseOutcome {
+    pub(crate) fn trace_recovery(&self) {
+        let Some(recovery) = &self.recovery else {
+            return;
+        };
+        let skipped_count = recovery.invalid_offset_count + recovery.parse_failure_count;
+        tracing::warn!(
+            target: crate::LOG_TARGET_ROOT,
+            operation = "parse_object_stream",
+            error_code = "invalid_embedded_object",
+            skipped_count,
+            parse_failure_count = recovery.parse_failure_count,
+            invalid_offset_count = recovery.invalid_offset_count,
+            "object stream entries were skipped"
+        );
+    }
+}
+
 /// Parse an object stream and extract all objects.
 ///
 /// This is a convenience method that calls `parse_object_stream_with_decryption`
@@ -89,6 +120,17 @@ pub fn parse_object_stream_with_decryption(
     obj_num: u32,
     gen_num: u32,
 ) -> Result<HashMap<u32, Object>> {
+    let outcome = parse_object_stream_with_decryption_outcome(stream_obj, decryption_fn, obj_num, gen_num)?;
+    outcome.trace_recovery();
+    Ok(outcome.objects)
+}
+
+pub(crate) fn parse_object_stream_with_decryption_outcome(
+    stream_obj: &Object,
+    decryption_fn: Option<&dyn Fn(&[u8]) -> Result<Vec<u8>>>,
+    obj_num: u32,
+    gen_num: u32,
+) -> Result<ObjectStreamParseOutcome> {
     let dict = match stream_obj {
         Object::Stream { dict, .. } => dict,
         _ => return Err(Error::InvalidPdf("object stream is not a Stream object".to_string())),
@@ -114,11 +156,11 @@ pub fn parse_object_stream_with_decryption(
         .and_then(|o| o.as_integer())
         .ok_or_else(|| Error::InvalidPdf("object stream missing /First entry".to_string()))?;
 
-    if !(0..=1_000_000).contains(&n) {
+    if !(0..=MAX_OBJECT_STREAM_OBJECTS).contains(&n) {
         return Err(Error::InvalidPdf(format!("invalid object stream /N value: {}", n)));
     }
 
-    if !(0..=10_000_000).contains(&first) {
+    if !(0..=MAX_OBJECT_STREAM_FIRST_OFFSET).contains(&first) {
         return Err(Error::InvalidPdf(format!(
             "invalid object stream /First value: {}",
             first
@@ -141,7 +183,10 @@ pub fn parse_object_stream_with_decryption(
     let pairs_data = &decoded_data[..first];
     let pairs = parse_object_number_pairs(pairs_data, n)?;
 
-    let objects_data = &decoded_data[first..];
+    Ok(parse_embedded_objects(&decoded_data[first..], pairs))
+}
+
+fn parse_embedded_objects(objects_data: &[u8], pairs: Vec<(u32, usize)>) -> ObjectStreamParseOutcome {
     let mut result = HashMap::new();
     let mut invalid_offset_count = 0usize;
     let mut parse_failure_count = 0usize;
@@ -166,20 +211,14 @@ pub fn parse_object_stream_with_decryption(
         }
     }
 
-    let skipped_count = invalid_offset_count + parse_failure_count;
-    if skipped_count > 0 {
-        tracing::warn!(
-            target: crate::LOG_TARGET_ROOT,
-            operation = "parse_object_stream",
-            error_code = "invalid_embedded_object",
-            skipped_count,
-            parse_failure_count,
-            invalid_offset_count,
-            "object stream entries were skipped"
-        );
+    let recovery = (invalid_offset_count + parse_failure_count > 0).then_some(ObjectStreamRecovery {
+        invalid_offset_count,
+        parse_failure_count,
+    });
+    ObjectStreamParseOutcome {
+        objects: result,
+        recovery,
     }
-
-    Ok(result)
 }
 
 /// Parse the pairs section of an object stream.

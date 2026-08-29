@@ -116,8 +116,8 @@ const DEFAULT_OBJECT_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
 /// Default maximum number of entries for the XObject span/image caches.
 const DEFAULT_XOBJECT_CACHE_MAX_ENTRIES: usize = 1024;
 
-/// Default maximum number of parsed object streams retained per document.
-const DEFAULT_OBJECT_STREAM_CACHE_MAX_ENTRIES: usize = 1024;
+/// Maximum accounted bytes retained as parsed object-stream maps.
+const DEFAULT_OBJECT_STREAM_CACHE_MAX_BYTES: usize = DEFAULT_OBJECT_CACHE_MAX_BYTES / 4;
 
 /// Heuristic multiplier for the forward-gap guard in the main
 /// assembly loop's compound newline predicate
@@ -151,6 +151,67 @@ struct BoundedObjectCache {
     insertion_order: std::collections::VecDeque<ObjectRef>,
     current_bytes: usize,
     max_bytes: usize,
+}
+
+/// Byte-accounted FIFO cache for decoded object-stream maps.
+struct BoundedObjectStreamCache {
+    map: HashMap<ObjectRef, Arc<HashMap<u32, Object>>>,
+    insertion_order: std::collections::VecDeque<ObjectRef>,
+    current_bytes: usize,
+    max_bytes: usize,
+}
+
+impl BoundedObjectStreamCache {
+    fn new(max_bytes: usize) -> Self {
+        Self {
+            map: HashMap::new(),
+            insertion_order: std::collections::VecDeque::new(),
+            current_bytes: 0,
+            max_bytes,
+        }
+    }
+
+    fn get(&self, key: &ObjectRef) -> Option<&Arc<HashMap<u32, Object>>> {
+        self.map.get(key)
+    }
+
+    fn insert(&mut self, key: ObjectRef, value: Arc<HashMap<u32, Object>>) -> bool {
+        let entry_size = Self::estimate_size(&value);
+        if entry_size > self.max_bytes {
+            return false;
+        }
+        self.remove(&key);
+        while self.current_bytes.saturating_add(entry_size) > self.max_bytes {
+            let Some(old_key) = self.insertion_order.pop_front() else {
+                return false;
+            };
+            self.remove(&old_key);
+        }
+        self.current_bytes = self.current_bytes.saturating_add(entry_size);
+        self.map.insert(key, value);
+        self.insertion_order.push_back(key);
+        true
+    }
+
+    fn remove(&mut self, key: &ObjectRef) {
+        if let Some(old_value) = self.map.remove(key) {
+            self.current_bytes = self.current_bytes.saturating_sub(Self::estimate_size(&old_value));
+        }
+        if let Some(position) = self.insertion_order.iter().position(|candidate| candidate == key) {
+            self.insertion_order.remove(position);
+        }
+    }
+
+    fn estimate_size(objects: &HashMap<u32, Object>) -> usize {
+        let headers = std::mem::size_of::<HashMap<u32, Object>>()
+            .saturating_add(std::mem::size_of::<Arc<HashMap<u32, Object>>>());
+        let buckets = objects
+            .capacity()
+            .saturating_mul(std::mem::size_of::<u32>() + std::mem::size_of::<Object>() + std::mem::size_of::<usize>());
+        objects.values().fold(headers.saturating_add(buckets), |total, object| {
+            total.saturating_add(BoundedObjectCache::estimate_size(object))
+        })
+    }
 }
 
 impl BoundedObjectCache {
@@ -427,10 +488,11 @@ pub struct PdfDocument {
     /// Bounded at [`DEFAULT_OBJECT_CACHE_MAX_BYTES`] with FIFO eviction to
     /// prevent unbounded heap growth during multi-page extraction.
     object_cache: Mutex<BoundedObjectCache>,
-    /// Parsed object streams keyed by the stream reference. A stream can contain
-    /// malformed entries or omit objects named by a corrupt xref; retaining the
-    /// parsed result prevents repeated decoding, parsing, and recovery events. ~keep
-    object_stream_cache: Mutex<BoundedEntryCache<ObjectRef, Arc<HashMap<u32, Object>>>>,
+    /// Parsed object streams keyed by the stream reference and bounded by accounted bytes.
+    object_stream_cache: Mutex<BoundedObjectStreamCache>,
+    /// Stream references whose aggregated recovery telemetry has already fired.
+    /// The marker is compact and independent from decoded-map eviction. ~keep
+    object_stream_telemetry_seen: Mutex<HashSet<u32>>,
     /// Encryption handler (if PDF is encrypted).
     /// Wrapped in RefCell for interior mutability (lazy initialization from &self).
     encryption_handler: Mutex<Option<EncryptionHandler>>,
@@ -1215,7 +1277,8 @@ impl PdfDocument {
             xref,
             trailer,
             object_cache: Mutex::new(BoundedObjectCache::new(DEFAULT_OBJECT_CACHE_MAX_BYTES)),
-            object_stream_cache: Mutex::new(BoundedEntryCache::new(DEFAULT_OBJECT_STREAM_CACHE_MAX_ENTRIES)),
+            object_stream_cache: Mutex::new(BoundedObjectStreamCache::new(DEFAULT_OBJECT_STREAM_CACHE_MAX_BYTES)),
+            object_stream_telemetry_seen: Mutex::new(HashSet::new()),
             encryption_handler: Mutex::new(None),
             encrypt_dict_ref: Mutex::new(None),
             options: ParserOptions::default(),
@@ -2197,7 +2260,7 @@ impl PdfDocument {
     /// Runs at most once per document — guarded by `objstm_recovery_done`.
     /// Cost is amortised across every recovered object.
     fn recover_from_object_streams(&self) {
-        use crate::objstm::parse_object_stream_with_decryption;
+        use crate::objstm::parse_object_stream_with_decryption_outcome;
 
         {
             let done = self.objstm_recovery_done.lock_or_recover();
@@ -2256,8 +2319,8 @@ impl PdfDocument {
             // Parse the stream body. ISO 32000-2:2020 §7.6.3 says ObjStm
             // shall NOT be individually encrypted, so skip decryption here
             // — mirrors the default branch in `load_compressed_object`. ~keep
-            let objects_map = match parse_object_stream_with_decryption(&stream_obj, None, 0, 0) {
-                Ok(m) => m,
+            let outcome = match parse_object_stream_with_decryption_outcome(&stream_obj, None, 0, 0) {
+                Ok(outcome) => outcome,
                 Err(error) => {
                     tracing::warn!(
                         target: crate::LOG_TARGET_ROOT,
@@ -2270,16 +2333,21 @@ impl PdfDocument {
                     continue;
                 }
             };
+            self.trace_object_stream_recovery_once(*stream_obj_num, &outcome);
+            let objects_map = Arc::new(outcome.objects);
+            self.object_stream_cache
+                .lock_or_recover()
+                .insert(ObjectRef::new(*stream_obj_num, 0), Arc::clone(&objects_map));
 
             let mut cache = self.object_cache.lock_or_recover();
-            for (obj_num, object) in objects_map {
-                let cache_ref = ObjectRef::new(obj_num, 0);
+            for (obj_num, object) in objects_map.iter() {
+                let cache_ref = ObjectRef::new(*obj_num, 0);
                 // Only overwrite entries we'd otherwise have resolved to
                 // Null (the free-entry short-circuit caches Null). Never
                 // clobber a real object loaded through the normal path. ~keep
                 match cache.get(&cache_ref) {
                     Some(Object::Null) | None => {
-                        cache.insert(cache_ref, object);
+                        cache.insert(cache_ref, object.clone());
                         recovered += 1;
                     }
                     _ => {}
@@ -3494,7 +3562,7 @@ impl PdfDocument {
     }
 
     fn load_object_stream_objects(&self, stream_obj_num: u32) -> Result<Option<(Arc<HashMap<u32, Object>>, bool)>> {
-        use crate::objstm::parse_object_stream_with_decryption;
+        use crate::objstm::parse_object_stream_with_decryption_outcome;
 
         let stream_ref = ObjectRef::new(stream_obj_num, 0);
         if let Some(cached) = self.object_stream_cache.lock_or_recover().get(&stream_ref).cloned() {
@@ -3518,24 +3586,39 @@ impl PdfDocument {
         }
         let stream_obj = self.load_uncompressed_object(stream_ref, stream_entry.offset)?;
         let handler_ref = self.encryption_handler.lock_or_recover();
-        let parsed = if let Some(handler) = handler_ref.as_ref() {
-            match parse_object_stream_with_decryption(&stream_obj, None, 0, 0) {
-                Ok(map) => map,
+        let outcome = if let Some(handler) = handler_ref.as_ref() {
+            match parse_object_stream_with_decryption_outcome(&stream_obj, None, 0, 0) {
+                Ok(outcome) => outcome,
                 Err(_) => {
                     let decrypt_fn =
                         |data: &[u8]| -> Result<Vec<u8>> { handler.decrypt_stream(data, stream_obj_num, 0) };
-                    parse_object_stream_with_decryption(&stream_obj, Some(&decrypt_fn), stream_obj_num, 0)?
+                    parse_object_stream_with_decryption_outcome(&stream_obj, Some(&decrypt_fn), stream_obj_num, 0)?
                 }
             }
         } else {
-            parse_object_stream_with_decryption(&stream_obj, None, 0, 0)?
+            parse_object_stream_with_decryption_outcome(&stream_obj, None, 0, 0)?
         };
         drop(handler_ref);
-        let parsed = Arc::new(parsed);
+        self.trace_object_stream_recovery_once(stream_obj_num, &outcome);
+        let parsed = Arc::new(outcome.objects);
         self.object_stream_cache
             .lock_or_recover()
             .insert(stream_ref, Arc::clone(&parsed));
         Ok(Some((parsed, true)))
+    }
+
+    fn trace_object_stream_recovery_once(
+        &self,
+        stream_obj_num: u32,
+        outcome: &crate::objstm::ObjectStreamParseOutcome,
+    ) {
+        if self
+            .object_stream_telemetry_seen
+            .lock_or_recover()
+            .insert(stream_obj_num)
+        {
+            outcome.trace_recovery();
+        }
     }
 
     fn cache_object_stream_entries(&self, stream_obj_num: u32, objects_map: &HashMap<u32, Object>) {
@@ -26148,7 +26231,7 @@ mod tests {
         pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
         let object_stream_offset = pdf.len();
         pdf.extend_from_slice(
-            b"10 0 obj\n<< /Type /ObjStm /N 1 /First 5 /Length 6 >>\nstream\n10 0 $\nendstream\nendobj\n",
+            b"10 0 obj\n<< /Type /ObjStm /N 2 /First 10 /Length 14 >>\nstream\n30 0 31 3 42 $\nendstream\nendobj\n",
         );
         let xref_offset = pdf.len();
         pdf.extend_from_slice(b"xref\n0 11\n0000000000 65535 f \n");
@@ -26169,6 +26252,7 @@ mod tests {
         let mut document = PdfDocument::from_bytes(pdf).unwrap();
         document.xref.add_entry(20, XRefEntry::compressed(10, 0));
         document.xref.add_entry(21, XRefEntry::compressed(10, 1));
+        document.object_stream_cache = Mutex::new(BoundedObjectStreamCache::new(1));
 
         let ((first, second), events) = capture_events(|| {
             (
@@ -26198,6 +26282,8 @@ mod tests {
                 ("skipped_count".to_string(), "1".to_string()),
             ])
         );
+        assert_eq!(document.object_stream_cache.lock_or_recover().map.len(), 0);
+        assert_eq!(document.object_stream_telemetry_seen.lock_or_recover().len(), 1);
     }
 
     #[test]
@@ -27742,6 +27828,31 @@ mod tests {
         assert!(c.get(&ObjectRef::new(1, 0)).is_none(), "Oldest should be evicted");
         assert!(c.get(&ObjectRef::new(3, 0)).is_some());
         assert!(c.current_bytes <= budget);
+    }
+
+    #[test]
+    fn object_stream_cache_rejects_oversized_entries_and_evicts_to_budget() {
+        let first = Arc::new(HashMap::from([(1, Object::String(vec![0; 64]))]));
+        let second = Arc::new(HashMap::from([(2, Object::String(vec![0; 64]))]));
+        let third = Arc::new(HashMap::from([(3, Object::String(vec![0; 64]))]));
+        let entry_bytes = BoundedObjectStreamCache::estimate_size(&first);
+        let budget = entry_bytes * 2;
+        let mut cache = BoundedObjectStreamCache::new(budget);
+
+        assert!(cache.insert(ObjectRef::new(10, 0), Arc::clone(&first)));
+        assert!(cache.insert(ObjectRef::new(11, 0), Arc::clone(&second)));
+        assert!(cache.insert(ObjectRef::new(12, 0), Arc::clone(&third)));
+        assert!(
+            cache.get(&ObjectRef::new(10, 0)).is_none(),
+            "oldest stream must be evicted"
+        );
+        assert!(cache.get(&ObjectRef::new(12, 0)).is_some());
+        assert!(cache.current_bytes <= budget);
+
+        let oversized = Arc::new(HashMap::from([(4, Object::String(vec![0; budget]))]));
+        assert!(!cache.insert(ObjectRef::new(13, 0), oversized));
+        assert!(cache.get(&ObjectRef::new(13, 0)).is_none());
+        assert!(cache.current_bytes <= budget);
     }
 
     #[test]
