@@ -81,8 +81,8 @@ where
 
 /// Quality thresholds for OCR fallback decisions and pipeline quality gating.
 ///
-/// All fields default to the values that match the previous hardcoded behavior,
-/// so `OcrQualityThresholds::default()` preserves existing semantics exactly.
+/// Fields default to conservative extraction behavior. Suspected OCR recognition noise is
+/// reported but retained unless destructive filtering is explicitly enabled.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OcrQualityThresholds {
@@ -120,7 +120,7 @@ pub struct OcrQualityThresholds {
     pub critical_fragmented_word_ratio: f64,
 
     /// Maximum fraction of short (1-2 char) words an *OCR result* may carry before the page
-    /// is rejected as recognition noise rather than accepted as content.
+    /// is reported as suspected recognition noise.
     ///
     /// This is a different decision, and a different operating point, from
     /// [`Self::max_fragmented_word_ratio`] / [`Self::critical_fragmented_word_ratio`]: those
@@ -132,13 +132,13 @@ pub struct OcrQualityThresholds {
     ///
     /// Measured over the 16 pages of a recorded municipal ordinance (13 prose pages, 3 scanned
     /// survey drawings): prose ran 0.04-0.28, the drawings 0.42-0.47. The default sits in that
-    /// gap with margin on both sides. Raise it to keep more marginal text, lower it to be
-    /// stricter — but note the cost is asymmetric, since a false positive deletes real content
-    /// while a false negative only leaves noise in place.
+    /// gap with margin on both sides. By default, crossing the threshold emits a processing
+    /// warning but retains the recognized text. Set [`Self::discard_suspected_ocr_noise`] to
+    /// `true` to restore destructive filtering.
     #[serde(default = "default_max_ocr_output_fragmented_word_ratio")]
     pub max_ocr_output_fragmented_word_ratio: f64,
 
-    /// Minimum mean OCR confidence (0-100) a page must reach for its text to be accepted.
+    /// Minimum mean OCR confidence (0-100) below which a page is reported as suspected noise.
     ///
     /// This is the engine's own uncertainty about what it read, and it is a far sharper
     /// instrument than any statistic derived from the output text. Measured per page over a
@@ -153,13 +153,14 @@ pub struct OcrQualityThresholds {
     ///
     /// A backend that reports no confidence (no `mean_text_conf` in its result metadata)
     /// skips this check entirely and falls back to
-    /// [`Self::max_ocr_output_fragmented_word_ratio`]. Set to 0.0 to disable.
+    /// [`Self::max_ocr_output_fragmented_word_ratio`]. By default, the signal emits a warning
+    /// without discarding content. Set to 0.0 to disable the signal.
     #[serde(default = "default_min_ocr_mean_confidence")]
     pub min_ocr_mean_confidence: f64,
 
-    /// Minimum word count before [`Self::max_ocr_output_fragmented_word_ratio`] may reject a
+    /// Minimum word count before [`Self::max_ocr_output_fragmented_word_ratio`] may report a
     /// page. Short pages (a signature block, an exhibit title) are legitimately dominated by
-    /// short words, so the ratio is not meaningful on them and the veto stays disabled.
+    /// short words, so the ratio is not meaningful on them and the signal stays disabled.
     #[serde(default = "default_min_words_for_ocr_output_check")]
     pub min_words_for_ocr_output_check: usize,
 
@@ -176,11 +177,16 @@ pub struct OcrQualityThresholds {
     /// ordinance's prose vs. drawing pages), this ratio has not yet had a page-level
     /// measurement run over a labeled corpus. The default therefore disables the check
     /// entirely (`1.01`, above the `[0.0, 1.0]` range a ratio can reach) rather than guess an
-    /// operating point. Do not lower this without running that measurement first — the cost
-    /// of a wrong threshold here is the same as for the fragmented-word-ratio veto: a false
-    /// positive deletes real content, a false negative only leaves noise in place.
+    /// operating point. Do not lower this without running that measurement first.
     #[serde(default = "default_max_ocr_output_dict_invalid_word_ratio")]
     pub max_ocr_output_dict_invalid_word_ratio: f64,
+
+    /// Discard non-empty OCR text when any configured recognition-noise signal fires.
+    ///
+    /// Defaults to `false`: suspected noise is retained and surfaced through
+    /// `processing_warnings`. Set to `true` to preserve the legacy destructive behavior.
+    #[serde(default)]
+    pub discard_suspected_ocr_noise: bool,
 
     /// Minimum average word length. Below this with enough words indicates garbled extraction.
     #[serde(default = "default_min_avg_word_length")]
@@ -321,6 +327,7 @@ impl Default for OcrQualityThresholds {
             max_ocr_output_fragmented_word_ratio: default_max_ocr_output_fragmented_word_ratio(),
             min_words_for_ocr_output_check: default_min_words_for_ocr_output_check(),
             max_ocr_output_dict_invalid_word_ratio: default_max_ocr_output_dict_invalid_word_ratio(),
+            discard_suspected_ocr_noise: false,
             min_avg_word_length: 2.0,
             min_words_for_avg_length_check: 50,
             min_consecutive_repeat_ratio: 0.08,
@@ -2008,6 +2015,22 @@ mod tests {
         assert_eq!(thresholds.min_meaningful_words, 3);
         assert_eq!(thresholds.min_garbage_chars, 5);
         assert!((thresholds.pipeline_min_quality - 0.5).abs() < f64::EPSILON);
+        assert!(!thresholds.discard_suspected_ocr_noise);
+    }
+
+    #[test]
+    fn destructive_ocr_noise_filter_defaults_disabled() {
+        assert!(!OcrQualityThresholds::default().discard_suspected_ocr_noise);
+    }
+
+    #[test]
+    fn should_roundtrip_destructive_ocr_noise_filter_opt_in() {
+        let thresholds: OcrQualityThresholds = serde_json::from_str(r#"{"discard_suspected_ocr_noise":true}"#).unwrap();
+        assert!(thresholds.discard_suspected_ocr_noise);
+
+        let serialized = serde_json::to_string(&thresholds).unwrap();
+        let roundtripped: OcrQualityThresholds = serde_json::from_str(&serialized).unwrap();
+        assert!(roundtripped.discard_suspected_ocr_noise);
     }
 
     fn config_with_quality_thresholds(thresholds: OcrQualityThresholds) -> crate::ExtractionConfig {

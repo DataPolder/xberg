@@ -1137,7 +1137,14 @@ The native-text-to-OCR fallback decision (should a PDF page with an embedded tex
 | `min_meaningful_words`           | `3`     | Minimum count of meaningful words before native text is accepted instead of OCR.              |
 | `min_alnum_ratio`                | `0.3`   | Minimum alphanumeric ratio of non-whitespace characters.                                      |
 | `critical_fragmented_word_ratio` | `0.80`  | Fraction of 1-2 character words that forces OCR regardless of other signals.                  |
+| `max_ocr_output_fragmented_word_ratio` | `0.35` | Fraction of short words that reports OCR output as suspected recognition noise. |
+| `min_ocr_mean_confidence`        | `75.0`  | Calibrated backend confidence below which OCR output is reported as suspected noise. |
+| `discard_suspected_ocr_noise`    | `false` | Discard non-empty OCR output when a recognition-noise signal fires. By default, Xberg retains the text and adds a processing warning. |
 | `min_undecodable_ratio`          | `0.5`   | Minimum fraction of non-whitespace characters that must be undecodable (PUA, replacement, or control garbage) before a page's text layer is treated as unreadable and routed to OCR. See [Automatic OCR for Undecodable Text Layers](#automatic-ocr-for-undecodable-text-layers). |
+
+Inspect `processing_warnings` for pages flagged by fragmented-word, calibrated-confidence, or configured
+dictionary-invalid-word signals. To preserve the pre-1.1 destructive behavior, set
+`discard_suspected_ocr_noise = true`; blank OCR pages remain blank without a recognition-noise warning.
 
 <Tabs syncKey="lang">
 <TabItem label="Python">
@@ -1176,6 +1183,8 @@ let config = ExtractionConfig {
 ```toml title="xberg.toml"
 [ocr.quality_thresholds]
 pipeline_min_quality = 0.6
+# Opt in only when discarding suspected OCR noise is preferable to retaining marginal text.
+discard_suspected_ocr_noise = true
 ```
 
 </TabItem>

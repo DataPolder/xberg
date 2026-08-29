@@ -631,50 +631,12 @@ fn repaired_marker_line(line: &str, kind: &LineMarkerKind) -> String {
     out
 }
 
-/// Resolve a backend's confidence semantics from the object the registry holds for it,
-/// never from its name.
-///
-/// `min_ocr_mean_confidence` is an ABSOLUTE 0-100 floor, and a floor only means something
-/// against a known scale. Tesseract's `mean_text_conf` tracks legibility: on a recorded
-/// ordinance its prose pages scored 89-95 and its scanned drawings 36-62 — that backend
-/// reports [`ConfidenceSemantics::Legibility`].
-///
-/// Sceptre's does not. On the same document every page landed between 36 and 74 — the entire
-/// document below a floor calibrated for Tesseract — and the ordering is inverted: the real
-/// Plant List page scored 39 while a pure drawing scored 74. Applying the floor there
-/// discarded all 16 pages and produced an empty document. Sceptre reports
-/// [`ConfidenceSemantics::Uncalibrated`], so the gate never applies to it.
-///
-/// Prefers the backend object the single-backend route above already resolved. The
-/// multi-stage pipeline route resolves a backend per stage internally and never surfaces one
-/// to this call site, so when `backend` is `None` this falls back to a fresh registry lookup
-/// by the top-level configured name — the same lookup that resolved `backend` above — and
-/// asks the returned object directly. That fallback is a known approximation: a pipeline
-/// page's actual producing backend can differ per page (whichever stage succeeded for it),
-/// and nothing here tracks that per page.
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-fn resolve_confidence_semantics(
-    backend: Option<&std::sync::Arc<dyn crate::plugins::OcrBackend>>,
-    backend_name: &str,
-) -> crate::plugins::ConfidenceSemantics {
-    if let Some(backend) = backend {
-        return backend.confidence_semantics();
-    }
-    let registry = crate::plugins::registry::get_ocr_backend_registry();
-    let registry = registry.read();
-    registry
-        .get(backend_name)
-        .map(|backend| backend.confidence_semantics())
-        .unwrap_or(crate::plugins::ConfidenceSemantics::Uncalibrated)
-}
-
 /// The backend-native-scale confidence floor a page's confidence must clear, or `false` if
-/// this backend's confidence cannot be used as an absolute gate at all.
+/// this backend's confidence cannot be used as a calibrated diagnostic at all.
 ///
 /// Only [`ConfidenceSemantics::Legibility`] is normalized (by its `scale_max`) and compared
 /// against the ABSOLUTE 0-100 `min_ocr_mean_confidence` threshold. `Uncalibrated` and `None`
-/// never reject here — their number, if any, does not mean legibility — so callers must fall
-/// back to [`is_ocr_recognition_noise`] for those.
+/// never trigger here because their number, if any, does not mean legibility.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn confidence_gate_rejects(
     semantics: crate::plugins::ConfidenceSemantics,
@@ -690,13 +652,37 @@ fn confidence_gate_rejects(
     confidence.is_some_and(|c| c / scale_max < min_ocr_mean_confidence / 100.0)
 }
 
-/// Whether the confidence gate is authoritative for this page at all — i.e. whether the
-/// backend's semantics are `Legibility` and it actually reported a confidence. When this is
-/// `false`, the text-shape heuristic decides instead of the (possibly meaningless) number.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-fn confidence_gate_applies(semantics: crate::plugins::ConfidenceSemantics, confidence: Option<f64>) -> bool {
-    matches!(semantics, crate::plugins::ConfidenceSemantics::Legibility { scale_max } if scale_max > 0.0)
-        && confidence.is_some()
+#[derive(Debug, Clone, Copy)]
+struct OcrRecognitionNoiseDecision {
+    low_confidence: bool,
+    fragmented_noise: bool,
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+impl OcrRecognitionNoiseDecision {
+    fn suspected(self) -> bool {
+        self.low_confidence || self.fragmented_noise
+    }
+}
+
+/// Apply one recognition-noise policy to every PDF OCR route.
+///
+/// Confidence is consulted only when the producing backend declares a calibrated legibility
+/// scale. Fragmentation remains an independent signal so warnings report every reason that fired. ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn ocr_recognition_noise_decision(
+    content: &str,
+    thresholds: &OcrQualityThresholds,
+    semantics: crate::plugins::ConfidenceSemantics,
+    confidence: Option<f64>,
+) -> OcrRecognitionNoiseDecision {
+    let low_confidence = confidence_gate_rejects(semantics, confidence, thresholds.min_ocr_mean_confidence);
+    let fragmented_noise = is_ocr_recognition_noise(content, thresholds);
+    OcrRecognitionNoiseDecision {
+        low_confidence,
+        fragmented_noise,
+    }
 }
 
 /// Tesseract's mean confidence for a page, 0-100, if the backend reported one.
@@ -740,16 +726,15 @@ fn ocr_output_stats(text: &str, thresholds: &OcrQualityThresholds) -> NativeText
 /// [`compute_quality_score`] cannot make this call. It is a weighted blend, so one
 /// catastrophic signal is diluted by five healthy ones: measured across the 16 pages of a
 /// recorded ordinance, pure drawing noise scored 0.81-0.85 against 0.94-0.98 for clean prose.
-/// A 0.09 separation is not something to threshold on. A *rejection* decision needs a veto on
-/// the one signal that actually discriminates, not an average.
+/// A 0.09 separation is not something to threshold on. A diagnostic needs the signal that
+/// actually discriminates, not an average.
 ///
 /// That signal is the short-word ratio, which [`NativeTextStats`] already computes. On the
 /// same document prose ran 0.04-0.28 and the drawings 0.42-0.47.
 ///
-/// The cost here is asymmetric — a false positive deletes real text, a false negative only
-/// leaves noise in place — so this is deliberately conservative: it declines to judge pages
-/// with too few words to make the ratio meaningful, and its threshold sits in the middle of
-/// the measured gap rather than at either edge.
+/// This is deliberately conservative: it declines to judge pages with too few words to make
+/// the ratio meaningful, and its threshold sits in the middle of the measured gap rather than
+/// at either edge.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(crate) fn is_ocr_recognition_noise(text: &str, thresholds: &OcrQualityThresholds) -> bool {
     let stats = ocr_output_stats(text, thresholds);
@@ -760,8 +745,7 @@ pub(crate) fn is_ocr_recognition_noise(text: &str, thresholds: &OcrQualityThresh
 }
 
 /// Whether a page's Tesseract dictionary-invalid-word ratio crosses the configured
-/// threshold, SUPPLEMENTING [`is_ocr_recognition_noise`] -- never replacing it, and never
-/// making the veto less strict than the fragmented-word-ratio check alone would.
+/// threshold, supplementing [`is_ocr_recognition_noise`] rather than replacing it.
 ///
 /// `dict_invalid_word_ratio` is `None` for every non-Tesseract backend (they never report
 /// this ratio at all) and for Tesseract pages too short to make it meaningful (see
@@ -770,25 +754,16 @@ pub(crate) fn is_ocr_recognition_noise(text: &str, thresholds: &OcrQualityThresh
 /// that cannot compute the signal simply never trips this particular check.
 ///
 /// The default threshold (see `OcrQualityThresholds::max_ocr_output_dict_invalid_word_ratio`)
-/// disables this check until it is calibrated, matching the same conservatism the
-/// fragmented-word-ratio veto was built with: a false positive here deletes real content.
+/// disables this check until it is calibrated.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn is_dictionary_invalid_noise(dict_invalid_word_ratio: Option<f64>, thresholds: &OcrQualityThresholds) -> bool {
     dict_invalid_word_ratio.is_some_and(|ratio| ratio > thresholds.max_ocr_output_dict_invalid_word_ratio)
 }
 
-/// Accept a page's OCR text, or drop it and record why.
+/// Assess a page's OCR text, report suspected recognition noise, and optionally discard it.
 ///
-/// Returns the page's text — empty when rejected — and whether it was rejected. A rejected
-/// page must not fall back to anything: the alternative to noise here is nothing, and a
-/// drawing that produced no readable words genuinely has none. The warning is the only
-/// trace, so it always fires — a page silently losing its text would be worse than the
-/// noise it replaces.
-///
-/// The verdict is returned separately because an empty string does not carry it: a
-/// genuinely blank page yields one too. Callers need to tell the two apart because a
-/// rejected page's *structured paragraphs* have to be discarded as well, and those are
-/// assembled independently of this text.
+/// The boolean verdict is destructive only when `discard_suspected_ocr_noise` is enabled.
+/// Blank pages carry neither a warning nor a destructive verdict.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn accept_or_reject_ocr_page(
     page_index: usize,
@@ -796,12 +771,18 @@ fn accept_or_reject_ocr_page(
     thresholds: &OcrQualityThresholds,
     warnings: &mut Vec<crate::types::ProcessingWarning>,
     dict_invalid_word_ratio: Option<f64>,
+    confidence_semantics: crate::plugins::ConfidenceSemantics,
+    confidence: Option<f64>,
 ) -> (String, bool) {
-    let fragmented_noise = is_ocr_recognition_noise(&content, thresholds);
-    let dictionary_noise = is_dictionary_invalid_noise(dict_invalid_word_ratio, thresholds);
-    if !fragmented_noise && !dictionary_noise {
+    if content.trim().is_empty() {
         return (content, false);
     }
+    let recognition_noise = ocr_recognition_noise_decision(&content, thresholds, confidence_semantics, confidence);
+    let dictionary_noise = is_dictionary_invalid_noise(dict_invalid_word_ratio, thresholds);
+    if !recognition_noise.suspected() && !dictionary_noise {
+        return (content, false);
+    }
+    let discarded = thresholds.discard_suspected_ocr_noise;
     let stats = ocr_output_stats(&content, thresholds);
     tracing::warn!(
         page = page_index + 1,
@@ -810,14 +791,28 @@ fn accept_or_reject_ocr_page(
         threshold = thresholds.max_ocr_output_fragmented_word_ratio,
         dict_invalid_word_ratio = dict_invalid_word_ratio,
         dict_invalid_word_ratio_threshold = thresholds.max_ocr_output_dict_invalid_word_ratio,
+        mean_text_confidence = confidence,
+        low_confidence = recognition_noise.low_confidence,
         rejected_by_dictionary_signal = dictionary_noise,
-        "rejecting OCR output as recognition noise; the page contributes no text"
+        discarded,
+        "OCR output triggered recognition-noise diagnostics"
     );
     // Name only the signals that actually fired. Leading with the fragmentation numbers
     // unconditionally would report a ratio *below* its own threshold as the reason whenever
     // the dictionary signal is what rejected the page.
     let mut reasons: Vec<String> = Vec::new();
-    if fragmented_noise {
+    if recognition_noise.low_confidence {
+        let scale_max = match confidence_semantics {
+            crate::plugins::ConfidenceSemantics::Legibility { scale_max } => scale_max,
+            _ => 100.0,
+        };
+        reasons.push(format!(
+            "mean confidence {:.0}% of scale is below threshold {:.0}%",
+            (confidence.unwrap_or_default() / scale_max) * 100.0,
+            thresholds.min_ocr_mean_confidence
+        ));
+    }
+    if recognition_noise.fragmented_noise {
         reasons.push(format!(
             "{:.0}% of {} words are 1-2 characters, threshold {:.0}%",
             stats.fragmented_word_ratio * 100.0,
@@ -829,21 +824,34 @@ fn accept_or_reject_ocr_page(
         && dictionary_noise
     {
         reasons.push(format!(
-            "{:.0}% of dictionary-checkable words are not real words, threshold {:.0}%",
+            "{:.0}% of dictionary-checkable words are dictionary-invalid, threshold {:.0}%",
             ratio * 100.0,
             thresholds.max_ocr_output_dict_invalid_word_ratio * 100.0
         ));
     }
     warnings.push(crate::types::ProcessingWarning {
         source: std::borrow::Cow::Borrowed("ocr"),
-        message: std::borrow::Cow::Owned(format!(
-            "Page {} produced OCR output that is recognition noise rather than text ({}); the \
-             page is most likely a drawing or diagram. Its text was discarded.",
-            page_index + 1,
-            reasons.join("; ")
-        )),
+        message: std::borrow::Cow::Owned(if discarded {
+            format!(
+                "Page {} produced suspected OCR recognition noise ({}); its text was discarded \
+                 because discard_suspected_ocr_noise is enabled.",
+                page_index + 1,
+                reasons.join("; ")
+            )
+        } else {
+            format!(
+                "Page {} produced suspected OCR recognition noise ({}); its text was retained. \
+                 Set discard_suspected_ocr_noise to true to discard suspected noise.",
+                page_index + 1,
+                reasons.join("; ")
+            )
+        }),
     });
-    (String::new(), true)
+    if discarded {
+        (String::new(), true)
+    } else {
+        (content, false)
+    }
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -2124,6 +2132,7 @@ pub(crate) async fn extract_mixed_ocr_native(
     // Tesseract's own mean confidence for each page it read, 0-100. Captured here because
     // the per-page metadata is gone by the time `ocr_results` is judged.
     let mut page_mean_confidence: ahash::AHashMap<u32, f64> = ahash::AHashMap::new();
+    let mut page_dictionary_invalid_word_ratio: ahash::AHashMap<u32, f64> = ahash::AHashMap::new();
     let mut structured_ocr_pages: ahash::AHashMap<u32, crate::types::internal::InternalDocument> =
         ahash::AHashMap::with_capacity(total);
     // Bare, unclassified per-page paragraphs for every OCR'd page, real 1-indexed page
@@ -2535,6 +2544,14 @@ pub(crate) async fn extract_mixed_ocr_native(
                 if let Some(conf) = mean_text_conf_of(&extraction_result.metadata.additional) {
                     page_mean_confidence.insert((page_idx + 1) as u32, conf);
                 }
+                if let Some(ratio) = extraction_result
+                    .metadata
+                    .additional
+                    .get(crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY)
+                    .and_then(serde_json::Value::as_f64)
+                {
+                    page_dictionary_invalid_word_ratio.insert((page_idx + 1) as u32, ratio);
+                }
                 ocr_results.insert((page_idx + 1) as u32, extraction_result.content);
             }
         }
@@ -2601,6 +2618,14 @@ pub(crate) async fn extract_mixed_ocr_native(
                 if let Some(conf) = mean_text_conf_of(&extraction_result.metadata.additional) {
                     page_mean_confidence.insert((*page_idx + 1) as u32, conf);
                 }
+                if let Some(ratio) = extraction_result
+                    .metadata
+                    .additional
+                    .get(crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY)
+                    .and_then(serde_json::Value::as_f64)
+                {
+                    page_dictionary_invalid_word_ratio.insert((*page_idx + 1) as u32, ratio);
+                }
                 ocr_results.insert((*page_idx + 1) as u32, extraction_result.content);
             }
         }
@@ -2613,81 +2638,32 @@ pub(crate) async fn extract_mixed_ocr_native(
         }
     }
 
-    // Drop pages whose OCR is recognition noise before they are accepted as replacements.
-    // A rejected page keeps its native text, which for a scanned drawing is nothing — the
-    // correct outcome, since the page has no readable words to begin with.
+    // Pipeline stages already assess their output in `extract_with_ocr_for_page` using the
+    // actual producing backend. Assess only the direct single-backend route here to avoid
+    // duplicate warnings and guessed pipeline confidence semantics. ~keep
     let ocr_output_thresholds = config
         .ocr
         .as_ref()
         .and_then(|ocr| ocr.quality_thresholds.clone())
         .unwrap_or_default();
-    let backend_name = config.ocr.as_ref().map(|ocr| ocr.backend.as_str()).unwrap_or_default();
-    let confidence_semantics = resolve_confidence_semantics(backend.as_ref(), backend_name);
-    ocr_results.retain(|page_number, text| {
-        let confidence = page_mean_confidence.get(page_number).copied();
-        tracing::debug!(page = *page_number, ?confidence, "OCR page mean confidence");
-
-        // The engine's own confidence is the sharper instrument, so it decides — but only
-        // where its scale is known to mean legibility (`ConfidenceSemantics::Legibility`).
-        // Elsewhere the text heuristic runs; an `Uncalibrated` or `None` backend must never
-        // have its (possibly meaningless, possibly inverted) number empty a document.
-        let rejected_by_confidence = confidence_gate_rejects(
-            confidence_semantics,
-            confidence,
-            ocr_output_thresholds.min_ocr_mean_confidence,
-        );
-        let judged_by_confidence = confidence_gate_applies(confidence_semantics, confidence);
-        if !rejected_by_confidence && (judged_by_confidence || !is_ocr_recognition_noise(text, &ocr_output_thresholds))
-        {
-            return true;
-        }
-        if rejected_by_confidence {
-            let conf = confidence.unwrap_or_default();
-            let scale_max = match confidence_semantics {
-                crate::plugins::ConfidenceSemantics::Legibility { scale_max } => scale_max,
-                _ => 100.0,
-            };
-            tracing::warn!(
-                page = *page_number,
-                mean_confidence = conf,
-                scale_max,
-                threshold = ocr_output_thresholds.min_ocr_mean_confidence,
-                "rejecting OCR output as recognition noise; the page contributes no text"
+    if let Some(producing_backend) = backend.as_ref() {
+        let confidence_semantics = producing_backend.confidence_semantics();
+        for (page_number, text) in &mut ocr_results {
+            let confidence = page_mean_confidence.get(page_number).copied();
+            let dictionary_ratio = page_dictionary_invalid_word_ratio.get(page_number).copied();
+            tracing::debug!(page = *page_number, ?confidence, "OCR page mean confidence");
+            let (assessed_text, _) = accept_or_reject_ocr_page(
+                (*page_number as usize).saturating_sub(1),
+                std::mem::take(text),
+                &ocr_output_thresholds,
+                &mut accumulated_warnings,
+                dictionary_ratio,
+                confidence_semantics,
+                confidence,
             );
-            accumulated_warnings.push(crate::types::ProcessingWarning {
-                source: std::borrow::Cow::Borrowed("ocr"),
-                message: std::borrow::Cow::Owned(format!(
-                    "Page {page_number} produced OCR output the engine had little confidence in \
-                     (mean confidence {:.0}% of scale, threshold {:.0}%); the page is most likely \
-                     a drawing or diagram. Its text was discarded.",
-                    (conf / scale_max) * 100.0,
-                    ocr_output_thresholds.min_ocr_mean_confidence
-                )),
-            });
-            return false;
+            *text = assessed_text;
         }
-        let stats = ocr_output_stats(text, &ocr_output_thresholds);
-        tracing::warn!(
-            page = *page_number,
-            words = stats.word_count,
-            fragmented_word_ratio = stats.fragmented_word_ratio,
-            threshold = ocr_output_thresholds.max_ocr_output_fragmented_word_ratio,
-            "rejecting OCR output as recognition noise; the page contributes no text"
-        );
-        accumulated_warnings.push(crate::types::ProcessingWarning {
-            source: std::borrow::Cow::Borrowed("ocr"),
-            message: std::borrow::Cow::Owned(format!(
-                "Page {} produced OCR output that is recognition noise rather than text \
-                 ({:.0}% of {} words are 1-2 characters, threshold {:.0}%); the page is most \
-                 likely a drawing or diagram. Its text was discarded.",
-                page_number,
-                stats.fragmented_word_ratio * 100.0,
-                stats.word_count,
-                ocr_output_thresholds.max_ocr_output_fragmented_word_ratio * 100.0
-            )),
-        });
-        false
-    });
+    }
 
     for text in ocr_results.values_mut() {
         if let std::borrow::Cow::Owned(repaired) = repair_ocr_list_markers(text) {
@@ -2710,8 +2686,8 @@ pub(crate) async fn extract_mixed_ocr_native(
             vec![Vec::new(); page_count];
         for (&page_number, paragraphs) in &ocr_page_paragraphs {
             // `structured_ocr_pages` (not `ocr_page_paragraphs`) is the source of truth for
-            // which pages are still in play: the confidence/noise retain above may have
-            // dropped a page after its paragraphs were already collected.
+            // which pages are still in play: the destructive noise-filter opt-in above may
+            // have dropped a page after its paragraphs were already collected.
             if structured_ocr_pages.contains_key(&page_number)
                 && let Some(slot) = pages_for_heuristic.get_mut((page_number - 1) as usize)
             {
@@ -4454,7 +4430,8 @@ async fn extract_with_ocr_for_page(
     // means legibility; anything else (`Uncalibrated`, `None`) must never be turned into a
     // normalized confidence, or a page-rejection gate downstream would compare it against an
     // absolute floor it was never calibrated against (see `resolve_confidence_semantics`).
-    let backend_confidence_scale = match backend.confidence_semantics() {
+    let backend_confidence_semantics = backend.confidence_semantics();
+    let backend_confidence_scale = match backend_confidence_semantics {
         crate::plugins::ConfidenceSemantics::Legibility { scale_max } if scale_max > 0.0 => Some(scale_max),
         _ => None,
     };
@@ -5110,6 +5087,7 @@ async fn extract_with_ocr_for_page(
                     .additional
                     .get(crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY)
                     .and_then(|v| v.as_f64());
+                let confidence = mean_text_conf_of(&ocr_result.metadata.additional);
                 #[cfg(feature = "pdf")]
                 if (page_margins.top != 0.0 || page_margins.bottom != 0.0)
                     && !margin_filter_complete
@@ -5130,6 +5108,8 @@ async fn extract_with_ocr_for_page(
                     &ocr_output_thresholds,
                     &mut recognition_noise_warnings,
                     dict_invalid_word_ratio,
+                    backend_confidence_semantics,
+                    confidence,
                 );
                 page_texts[page_idx] = page_text;
                 rejected_pages[page_idx] = page_rejected;
@@ -5180,6 +5160,7 @@ async fn extract_with_ocr_for_page(
                 .additional
                 .get(crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY)
                 .and_then(|v| v.as_f64());
+            let confidence = mean_text_conf_of(&ocr_result.metadata.additional);
             #[cfg(feature = "pdf")]
             if (page_margins.top != 0.0 || page_margins.bottom != 0.0)
                 && !margin_filter_complete
@@ -5200,6 +5181,8 @@ async fn extract_with_ocr_for_page(
                 &ocr_output_thresholds,
                 &mut recognition_noise_warnings,
                 dict_invalid_word_ratio,
+                backend_confidence_semantics,
+                confidence,
             );
             page_texts[page_idx] = page_text;
             rejected_pages[page_idx] = page_rejected;
@@ -5895,6 +5878,7 @@ async fn run_ocr_pipeline_for_page(
         if let Some(ref pc) = stage.paddle_ocr_config {
             stage_ocr.paddle_ocr_config = Some(pc.clone());
         }
+        stage_ocr.quality_thresholds = Some(pipeline.quality_thresholds.clone());
         stage_ocr.vlm_config = stage.vlm_config.clone();
         stage_ocr.backend_options = stage.backend_options.clone();
 
@@ -9563,13 +9547,9 @@ Buffers:           50000 kB
         crate::plugins::unregister_ocr_backend("later-page-marker-test-backend").unwrap();
     }
 
-    /// Regression test (review follow-up to #1341): `ProcessingWarning`s produced by
-    /// the nested `run_ocr_pipeline` call (e.g. "no stage cleared the quality
-    /// threshold") must propagate out of `extract_mixed_ocr_native` instead of being
-    /// silently dropped along with the per-page `InternalDocument`.
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     #[tokio::test]
-    async fn mixed_ocr_pipeline_route_propagates_below_threshold_warning() {
+    async fn mixed_pipeline_propagates_destructive_noise_policy_once() {
         use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
         use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
         use crate::types::{ExtractedDocument, PageBoundary};
@@ -9587,7 +9567,7 @@ Buffers:           50000 kB
             }
             async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
                 Ok(ExtractedDocument {
-                    content: "low quality text".to_string(),
+                    content: "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A B C D".to_string(),
                     ..Default::default()
                 })
             }
@@ -9633,10 +9613,9 @@ Buffers:           50000 kB
                         vlm_config: None,
                         backend_options: None,
                     }],
-                    // Impossible to clear: forces the best-effort fallback branch, which
-                    // pushes a "scored below threshold" ProcessingWarning.
                     quality_thresholds: OcrQualityThresholds {
-                        pipeline_min_quality: 1.1,
+                        pipeline_min_quality: 0.0,
+                        discard_suspected_ocr_noise: true,
                         ..Default::default()
                     },
                 }),
@@ -9650,16 +9629,146 @@ Buffers:           50000 kB
             .unwrap();
         let warnings = result.7;
 
-        assert!(
-            !warnings.is_empty(),
-            "below-threshold pipeline warnings must propagate out of extract_mixed_ocr_native"
+        assert_eq!(
+            result.0, native_text,
+            "destructive opt-in must not replace native text with noise"
         );
-        assert!(
-            warnings.iter().any(|w| w.message.contains("quality threshold")),
-            "expected a below-threshold warning, got: {warnings:?}"
+        let noise_warnings = warnings
+            .iter()
+            .filter(|warning| warning.message.contains("suspected OCR recognition noise"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            noise_warnings.len(),
+            1,
+            "pipeline noise warning must propagate exactly once"
         );
+        assert!(noise_warnings[0].message.contains("discarded"));
 
         crate::plugins::unregister_ocr_backend("below-threshold-warning-test-backend").unwrap();
+    }
+
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn mixed_direct_route_retains_overlapping_noise_signals_with_one_warning() {
+        use crate::core::config::{OcrConfig, OcrQualityThresholds};
+        use crate::plugins::{ConfidenceSemantics, OcrBackend, OcrBackendType, Plugin};
+        use crate::types::{ExtractedDocument, Metadata, PageBoundary};
+        use std::sync::Arc;
+
+        const BACKEND_NAME: &str = "mixed-noise-diagnostic-test-backend";
+        const SUSPECTED_NOISE: &str = "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A B C D";
+
+        struct NoiseDiagnosticBackend;
+
+        #[async_trait::async_trait]
+        impl OcrBackend for NoiseDiagnosticBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                let mut metadata = Metadata::default();
+                metadata
+                    .additional
+                    .insert("mean_text_conf".into(), serde_json::json!(18.0));
+                metadata.additional.insert(
+                    crate::ocr_metadata_keys::OCR_TESSERACT_DICT_INVALID_WORD_RATIO_METADATA_KEY.into(),
+                    serde_json::json!(0.9),
+                );
+                Ok(ExtractedDocument {
+                    content: SUSPECTED_NOISE.to_string(),
+                    metadata,
+                    ..Default::default()
+                })
+            }
+            fn confidence_semantics(&self) -> ConfidenceSemantics {
+                ConfidenceSemantics::Legibility { scale_max: 100.0 }
+            }
+        }
+
+        impl Plugin for NoiseDiagnosticBackend {
+            fn name(&self) -> &str {
+                BACKEND_NAME
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        crate::plugins::register_ocr_backend(Arc::new(NoiseDiagnosticBackend)).unwrap();
+        let pdf = crate::pdf::render::build_minimal_pdf_with_mediabox(612.0, 792.0);
+        let native_text = "native text";
+        let boundaries = [PageBoundary {
+            byte_start: 0,
+            byte_end: native_text.len(),
+            page_number: 1,
+        }];
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                backend: BACKEND_NAME.to_string(),
+                quality_thresholds: Some(OcrQualityThresholds {
+                    max_ocr_output_dict_invalid_word_ratio: 0.5,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let images = [image::DynamicImage::new_rgb8(100, 100)];
+        let full_result = extract_with_ocr(
+            None,
+            Some(&images),
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            None,
+        )
+        .await
+        .unwrap();
+        let result = extract_mixed_ocr_native(native_text, &boundaries, &[1], &pdf, &config, None)
+            .await
+            .unwrap();
+        crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
+
+        assert_eq!(full_result.0, SUSPECTED_NOISE);
+        assert_eq!(full_result.6, [SUSPECTED_NOISE]);
+        let full_warnings = full_result
+            .4
+            .as_ref()
+            .expect("diagnostic warning must attach to the full OCR document")
+            .processing_warnings
+            .iter()
+            .filter(|warning| warning.message.contains("suspected OCR recognition noise"))
+            .collect::<Vec<_>>();
+        assert_eq!(full_warnings.len(), 1, "full OCR must report overlapping signals once");
+        assert_eq!(result.0, SUSPECTED_NOISE);
+        assert_eq!(result.1.get(&1).map(String::as_str), Some(SUSPECTED_NOISE));
+        let warnings = result
+            .7
+            .iter()
+            .filter(|warning| warning.message.contains("suspected OCR recognition noise"))
+            .collect::<Vec<_>>();
+        assert_eq!(warnings.len(), 1, "overlapping signals must produce one warning");
+        for reason in ["mean confidence", "1-2 characters", "dictionary-invalid", "retained"] {
+            assert!(
+                full_warnings[0].message.contains(reason),
+                "full OCR warning omitted {reason}: {full_warnings:?}"
+            );
+            assert!(
+                warnings[0].message.contains(reason),
+                "warning omitted {reason}: {warnings:?}"
+            );
+        }
     }
 
     /// #1444: `run_ocr_pipeline` has no OCR execution loop of its own -- every stage is
@@ -13299,11 +13408,7 @@ Name: ___
     }
 }
 
-/// Coverage for the OCR recognition-noise veto.
-///
-/// The asymmetry is the whole design: a false positive deletes a page of real text, a false
-/// negative only leaves noise in place. So the negative cases here — legitimate pages that
-/// must survive — carry more weight than the positive ones.
+/// Coverage for OCR recognition-noise diagnostics and optional destructive filtering.
 #[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline")))]
 mod recognition_noise_tests {
     use super::{
@@ -13333,36 +13438,89 @@ Planned Development (PD) District Final Development Plan; and WHEREAS, the City 
 and Zoning Commission forwarded its final report to the City Council, recommending \
 approval of the rezoning request; and";
 
-    /// The verdict has to leave this function, not just the emptied text. A rejected page's
-    /// structured paragraphs are assembled separately and were rendered regardless of the
-    /// verdict -- the survey plat lost its text, logged its warning, and printed its garbage
-    /// anyway. Callers now drop those paragraphs, which they can only do if `rejected` is
-    /// distinguishable from "this page was blank".
     #[test]
-    fn should_report_the_rejection_verdict_alongside_the_text() {
+    fn should_retain_suspected_fragmented_noise_with_warning_by_default() {
         let thresholds = OcrQualityThresholds::default();
         let mut warnings = Vec::new();
 
-        let (text, rejected) =
-            accept_or_reject_ocr_page(3, PLAT_DRAWING_NOISE.to_string(), &thresholds, &mut warnings, None);
-        assert!(
-            rejected,
-            "the plat drawing must be reported as rejected, not merely emptied"
+        let (text, rejected) = accept_or_reject_ocr_page(
+            3,
+            PLAT_DRAWING_NOISE.to_string(),
+            &thresholds,
+            &mut warnings,
+            None,
+            crate::plugins::ConfidenceSemantics::Uncalibrated,
+            None,
         );
-        assert!(text.is_empty(), "a rejected page contributes no text");
-        assert_eq!(warnings.len(), 1, "rejection must always leave a trace");
+        assert!(!rejected, "diagnostic-only mode must retain suspected OCR noise");
+        assert_eq!(text, PLAT_DRAWING_NOISE, "recognized content must remain verbatim");
+        assert_eq!(warnings.len(), 1, "the recognition-noise signal must remain visible");
+        assert!(warnings[0].message.contains("retained"));
+    }
 
-        let (prose, prose_rejected) =
-            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &thresholds, &mut warnings, None);
-        assert!(!prose_rejected, "ordinary legal prose must not be reported as rejected");
-        assert_eq!(prose, ORDINANCE_PROSE, "an accepted page keeps its text verbatim");
-        assert_eq!(warnings.len(), 1, "an accepted page adds no warning");
+    #[test]
+    fn should_preserve_legacy_destructive_filtering_when_opted_in() {
+        let thresholds = OcrQualityThresholds {
+            discard_suspected_ocr_noise: true,
+            ..Default::default()
+        };
+        let mut warnings = Vec::new();
+        let (text, rejected) = accept_or_reject_ocr_page(
+            3,
+            PLAT_DRAWING_NOISE.to_string(),
+            &thresholds,
+            &mut warnings,
+            None,
+            crate::plugins::ConfidenceSemantics::Uncalibrated,
+            None,
+        );
+        assert!(rejected, "opt-in must preserve the legacy destructive verdict");
+        assert!(text.is_empty(), "opt-in must discard suspected OCR noise");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("discarded"));
+    }
 
-        // A blank page is NOT a rejection: both yield empty text, and conflating them would
-        // make the caller discard the paragraphs of every legitimately empty page.
-        let (blank, blank_rejected) = accept_or_reject_ocr_page(1, String::new(), &thresholds, &mut warnings, None);
+    #[test]
+    fn should_leave_blank_pages_blank_without_a_false_warning() {
+        let thresholds = OcrQualityThresholds::default();
+        let mut warnings = Vec::new();
+        let (blank, blank_rejected) = accept_or_reject_ocr_page(
+            1,
+            String::new(),
+            &thresholds,
+            &mut warnings,
+            None,
+            crate::plugins::ConfidenceSemantics::Uncalibrated,
+            None,
+        );
         assert!(!blank_rejected, "an empty page is blank, not rejected");
         assert!(blank.is_empty());
+        assert!(
+            warnings.is_empty(),
+            "blank pages must not be reported as recognition noise"
+        );
+    }
+
+    #[test]
+    fn should_not_discard_blank_page_with_calibrated_low_confidence() {
+        let thresholds = OcrQualityThresholds {
+            discard_suspected_ocr_noise: true,
+            ..Default::default()
+        };
+        let mut warnings = Vec::new();
+        let (blank, rejected) = accept_or_reject_ocr_page(
+            1,
+            String::new(),
+            &thresholds,
+            &mut warnings,
+            None,
+            crate::plugins::ConfidenceSemantics::Legibility { scale_max: 100.0 },
+            Some(0.0),
+        );
+
+        assert!(blank.is_empty());
+        assert!(!rejected, "blank OCR output must not carry a destructive verdict");
+        assert!(warnings.is_empty(), "missing text is not recognition noise");
     }
 
     #[test]
@@ -13817,7 +13975,7 @@ Revenue is reported in thousands of dollars and growth is year over year.";
         // discarded all 16 pages, emptying the document. An `Uncalibrated` backend's number
         // must never be able to do that: the gate must not apply at all, and a legible page
         // must survive on the text-shape heuristic instead.
-        use super::{confidence_gate_applies, confidence_gate_rejects};
+        use super::confidence_gate_rejects;
         let thresholds = OcrQualityThresholds::default();
         let semantics = crate::plugins::ConfidenceSemantics::Uncalibrated;
 
@@ -13825,13 +13983,11 @@ Revenue is reported in thousands of dollars and growth is year over year.";
             let confidence = Some(sceptre_like_confidence);
             let rejected_by_confidence =
                 confidence_gate_rejects(semantics, confidence, thresholds.min_ocr_mean_confidence);
-            let judged_by_confidence = confidence_gate_applies(semantics, confidence);
             assert!(
                 !rejected_by_confidence,
                 "confidence {sceptre_like_confidence} must never gate an Uncalibrated backend's page"
             );
-            let kept = !rejected_by_confidence
-                && (judged_by_confidence || !is_ocr_recognition_noise(ORDINANCE_PROSE, &thresholds));
+            let kept = !rejected_by_confidence && !is_ocr_recognition_noise(ORDINANCE_PROSE, &thresholds);
             assert!(
                 kept,
                 "a legible page (confidence {sceptre_like_confidence}) must survive when the \
@@ -13885,7 +14041,7 @@ Revenue is reported in thousands of dollars and growth is year over year.";
     }
 
     #[test]
-    fn resolve_confidence_semantics_reads_the_backend_object_not_its_name() {
+    fn confidence_semantics_comes_from_the_backend_object_not_its_name() {
         // A backend named to look calibrated but whose `confidence_semantics()` says
         // otherwise: the gate must trust the object, not a name-based guess. If this ever
         // regresses to matching on the name, this backend would be wrongly treated as
@@ -13929,7 +14085,7 @@ Revenue is reported in thousands of dollars and growth is year over year.";
         }
 
         let backend: Arc<dyn OcrBackend> = Arc::new(DeceptivelyNamedBackend);
-        let semantics = super::resolve_confidence_semantics(Some(&backend), "tesseract-lookalike");
+        let semantics = backend.confidence_semantics();
         assert_eq!(
             semantics,
             ConfidenceSemantics::Uncalibrated,
@@ -14017,11 +14173,8 @@ Revenue is reported in thousands of dollars and growth is year over year.";
         assert!(!is_dictionary_invalid_noise(Some(0.2), &configured));
     }
 
-    /// The dictionary signal must SUPPLEMENT the fragmented-word-ratio veto: a page that
-    /// passes the fragmented-word check but fails an explicitly configured dictionary
-    /// threshold must still be rejected by `accept_or_reject_ocr_page`.
     #[test]
-    fn should_reject_via_dictionary_signal_even_when_fragmentation_is_fine() {
+    fn should_retain_dictionary_suspect_content_with_warning_by_default() {
         let configured = OcrQualityThresholds {
             max_ocr_output_dict_invalid_word_ratio: 0.5,
             ..Default::default()
@@ -14032,14 +14185,43 @@ Revenue is reported in thousands of dollars and growth is year over year.";
         );
 
         let mut warnings = Vec::new();
-        let (text, rejected) =
-            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &configured, &mut warnings, Some(0.9));
-        assert!(
-            rejected,
-            "a page failing only the dictionary signal must still be rejected"
+        let (text, rejected) = accept_or_reject_ocr_page(
+            0,
+            ORDINANCE_PROSE.to_string(),
+            &configured,
+            &mut warnings,
+            Some(0.9),
+            crate::plugins::ConfidenceSemantics::Uncalibrated,
+            None,
         );
-        assert!(text.is_empty());
+        assert!(
+            !rejected,
+            "diagnostic-only mode must not discard dictionary-suspect text"
+        );
+        assert_eq!(text, ORDINANCE_PROSE);
         assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("dictionary-invalid"));
+        assert!(warnings[0].message.contains("retained"));
+    }
+
+    #[test]
+    fn should_retain_low_confidence_content_with_warning_by_default() {
+        let thresholds = OcrQualityThresholds::default();
+        let mut warnings = Vec::new();
+        let (text, rejected) = accept_or_reject_ocr_page(
+            0,
+            ORDINANCE_PROSE.to_string(),
+            &thresholds,
+            &mut warnings,
+            None,
+            crate::plugins::ConfidenceSemantics::Legibility { scale_max: 100.0 },
+            Some(18.0),
+        );
+        assert!(!rejected, "diagnostic-only mode must not discard low-confidence text");
+        assert_eq!(text, ORDINANCE_PROSE);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("mean confidence"));
+        assert!(warnings[0].message.contains("retained"));
     }
 
     /// A `dict_invalid_word_ratio` of `None` on the same fixture, same threshold, must NOT
@@ -14052,8 +14234,15 @@ Revenue is reported in thousands of dollars and growth is year over year.";
             ..Default::default()
         };
         let mut warnings = Vec::new();
-        let (text, rejected) =
-            accept_or_reject_ocr_page(0, ORDINANCE_PROSE.to_string(), &configured, &mut warnings, None);
+        let (text, rejected) = accept_or_reject_ocr_page(
+            0,
+            ORDINANCE_PROSE.to_string(),
+            &configured,
+            &mut warnings,
+            None,
+            crate::plugins::ConfidenceSemantics::Uncalibrated,
+            None,
+        );
         assert!(!rejected, "an absent ratio must never itself trigger rejection");
         assert_eq!(text, ORDINANCE_PROSE);
         assert!(warnings.is_empty());
