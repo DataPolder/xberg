@@ -572,7 +572,7 @@ impl TextRasterizer {
         // Warnings on the bounded failure/fallback branches (missing font,
         // failed CID/CFF load, …) stay at WARN since they fire only for the
         // subset of runs that actually degrade. ~keep
-        tracing::trace!("Decoded text: '{}'", unicode_text);
+        tracing::trace!("Decoded PDF text for rendering");
 
         // Create paint from fill color, then apply the pipeline-resolved
         // override when present. `create_fill_paint` reads gs.fill_*
@@ -2083,7 +2083,7 @@ mod tests {
     }
 
     #[test]
-    fn tracing_macros_do_not_reference_pdf_font_names() {
+    fn tracing_macros_do_not_reference_sensitive_pdf_payloads() {
         let source = include_str!("text_rasterizer.rs");
         let mut invocation = String::new();
         let mut collecting = false;
@@ -2097,12 +2097,18 @@ mod tests {
                 invocation.push_str(line);
                 invocation.push('\n');
                 if line.contains(");") {
-                    for forbidden in ["base_font", "pdf_font_name", "gs.font_name"] {
+                    for forbidden in ["base_font", "pdf_font_name", "unicode_text"] {
                         assert!(
-                            !invocation.contains(forbidden),
+                            !invocation
+                                .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+                                .any(|identifier| identifier == forbidden),
                             "tracing macro exposes {forbidden}: {invocation}"
                         );
                     }
+                    assert!(
+                        !invocation.contains("gs.font_name"),
+                        "tracing macro exposes gs.font_name: {invocation}"
+                    );
                     collecting = false;
                 }
             }
