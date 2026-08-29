@@ -422,6 +422,7 @@ const CLEAN_PAGE_DARK_PIXEL_FRACTION_THRESHOLD: f64 = 0.005;
 const CLEAN_PAGE_DARK_PIXEL_COUNT_THRESHOLD: usize = 8;
 const CLEAN_PAGE_TEXT_COMPONENT_MAX_FILL_NUMERATOR: usize = 3;
 const CLEAN_PAGE_TEXT_COMPONENT_MAX_FILL_DENOMINATOR: usize = 4;
+const CLEAN_PAGE_TEXT_COMPONENT_MIN_NARROW_ASPECT_RATIO: usize = 3;
 /// Maximum value of an 8-bit RGB channel.
 const RGB_CHANNEL_MAX: f64 = u8::MAX as f64;
 /// Number of channels in an RGB pixel.
@@ -681,18 +682,20 @@ fn structured_component_size(
         }
     }
 
-    if component_has_text_density(size, min_x, max_x, min_y, max_y) {
+    if component_is_text_like(size, min_x, max_x, min_y, max_y) {
         size
     } else {
         0
     }
 }
 
-fn component_has_text_density(size: usize, min_x: usize, max_x: usize, min_y: usize, max_y: usize) -> bool {
+fn component_is_text_like(size: usize, min_x: usize, max_x: usize, min_y: usize, max_y: usize) -> bool {
     if min_x >= max_x || min_y >= max_y {
         return false;
     }
-    let Some(area) = (max_x - min_x + 1).checked_mul(max_y - min_y + 1) else {
+    let component_width = max_x - min_x + 1;
+    let component_height = max_y - min_y + 1;
+    let Some(area) = component_width.checked_mul(component_height) else {
         return false;
     };
     let Some(scaled_size) = size.checked_mul(CLEAN_PAGE_TEXT_COMPONENT_MAX_FILL_DENOMINATOR) else {
@@ -701,7 +704,12 @@ fn component_has_text_density(size: usize, min_x: usize, max_x: usize, min_y: us
     let Some(maximum_fill) = area.checked_mul(CLEAN_PAGE_TEXT_COMPONENT_MAX_FILL_NUMERATOR) else {
         return false;
     };
-    scaled_size <= maximum_fill
+    let short_side = component_width.min(component_height);
+    let long_side = component_width.max(component_height);
+    let is_narrow = short_side
+        .checked_mul(CLEAN_PAGE_TEXT_COMPONENT_MIN_NARROW_ASPECT_RATIO)
+        .is_some_and(|minimum_long_side| long_side >= minimum_long_side);
+    scaled_size <= maximum_fill || is_narrow
 }
 
 fn prepare_preprocessed_ocr_image(
@@ -2859,6 +2867,37 @@ mod tests {
         );
         assert!(!prepared.apply_pix_preprocessing, "a solid blob is not text structure");
         assert_eq!(prepared.data, rgb_data);
+    }
+
+    #[test]
+    fn should_preserve_three_narrow_solid_glyphs_with_the_same_dark_pixel_count() {
+        const GLYPH_WIDTH: u32 = 4;
+        const GLYPH_HEIGHT: u32 = 32;
+        let (mut rgb_data, glyph_pixels) = contrast_fixture(BRIGHT_BLUE_FILL, true, 0);
+        assert_eq!(3 * GLYPH_WIDTH as usize * GLYPH_HEIGHT as usize, glyph_pixels);
+
+        for left in [4, 12, 20] {
+            for y in 44..44 + GLYPH_HEIGHT {
+                for x in left..left + GLYPH_WIDTH {
+                    let pixel_index = (y as usize * CONTRAST_FIXTURE_WIDTH as usize + x as usize) * RGB_CHANNEL_COUNT;
+                    rgb_data[pixel_index..pixel_index + RGB_CHANNEL_COUNT].copy_from_slice(&DARK_TEXT);
+                }
+            }
+        }
+
+        let prepared = prepare_ocr_image(
+            rgb_data,
+            CONTRAST_FIXTURE_WIDTH,
+            CONTRAST_FIXTURE_HEIGHT,
+            None,
+            None,
+            false,
+            Some(300.0),
+        );
+        assert!(
+            prepared.apply_pix_preprocessing,
+            "narrow solid glyphs remain text structure"
+        );
     }
 
     #[test]
