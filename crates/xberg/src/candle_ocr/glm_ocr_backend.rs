@@ -595,12 +595,11 @@ async fn process_paired(
     use crate::layout::models::LayoutModel;
 
     tokio::task::spawn_blocking(move || {
-        let img = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(&image_bytes)
+        let img = crate::extraction::image_decode::decode_standard_rgb8_with_default_security_limits(&image_bytes)
             .map_err(|error| crate::XbergError::Ocr {
                 message: format!("GLM-OCR paired: image decode failed: {error}"),
                 source: Some(Box::new(error)),
-            })?
-            .to_rgb8();
+            })?;
 
         let manager = LayoutModelManager::new(None);
         let model_path = manager

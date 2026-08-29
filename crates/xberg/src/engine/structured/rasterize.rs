@@ -116,6 +116,15 @@ fn render_pdf(bytes: &[u8], dpi: u32) -> Result<Vec<PageImage>, RasterizeError> 
 fn render_image(bytes: &[u8]) -> Result<Vec<PageImage>, RasterizeError> {
     let img = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(bytes)
         .map_err(|error| RasterizeError::Image(format!("failed to decode image: {error}")))?;
+    const PNG_ENCODE_BYTES_PER_PIXEL: u64 = 4;
+    const PNG_ENCODE_FIXED_OVERHEAD_BYTES: u64 = 256 * 1024;
+    crate::extraction::image_decode::validate_dynamic_image_additional_live_bytes(
+        &img,
+        &crate::extractors::security::SecurityLimits::default(),
+        PNG_ENCODE_BYTES_PER_PIXEL,
+        PNG_ENCODE_FIXED_OVERHEAD_BYTES,
+    )
+    .map_err(|error| RasterizeError::Image(format!("failed to encode image within security budget: {error}")))?;
 
     let mut png_bytes = Vec::new();
     img.write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)

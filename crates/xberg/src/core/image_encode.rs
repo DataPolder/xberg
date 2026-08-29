@@ -21,6 +21,7 @@ use crate::extraction::image_decode::{
 };
 use crate::extraction::image_decode::{
     decode_standard_image_with_default_security_limits, decode_standard_image_with_format_and_default_security_limits,
+    validate_dynamic_image_additional_live_bytes,
 };
 #[cfg(feature = "heic")]
 use crate::extractors::security::SecurityLimits;
@@ -159,6 +160,7 @@ pub(crate) fn re_encode(
     }
 
     let dynamic = decode_source(image)?;
+    validate_reencode_peak(&dynamic, target)?;
 
     let (new_bytes, new_format) = encode_to_target(&dynamic, target)?;
 
@@ -166,6 +168,32 @@ pub(crate) fn re_encode(
     image.format = Cow::Borrowed(new_format);
 
     Ok(true)
+}
+
+const ENCODE_FIXED_OVERHEAD_BYTES: u64 = 256 * 1024;
+const PNG_WEBP_ENCODE_BYTES_PER_PIXEL: u64 = 4;
+const JPEG_ENCODE_BYTES_PER_PIXEL: u64 = 3;
+const HEIF_ENCODE_LIVE_BYTES_PER_PIXEL: u64 = 12;
+
+fn validate_reencode_peak(image: &DynamicImage, target: ImageOutputFormat) -> Result<(), EncodeWarning> {
+    let additional_bytes_per_pixel = match target {
+        ImageOutputFormat::Native => 0,
+        ImageOutputFormat::Png | ImageOutputFormat::Webp { .. } => PNG_WEBP_ENCODE_BYTES_PER_PIXEL,
+        ImageOutputFormat::Jpeg { .. } => JPEG_ENCODE_BYTES_PER_PIXEL,
+        ImageOutputFormat::Heif { .. } => HEIF_ENCODE_LIVE_BYTES_PER_PIXEL,
+        #[cfg(feature = "svg")]
+        ImageOutputFormat::Svg => 0,
+    };
+    validate_dynamic_image_additional_live_bytes(
+        image,
+        &crate::extractors::security::SecurityLimits::default(),
+        additional_bytes_per_pixel,
+        ENCODE_FIXED_OVERHEAD_BYTES,
+    )
+    .map_err(|error| EncodeWarning::EncodeFailed {
+        target_format: "raster",
+        message: error.to_string(),
+    })
 }
 
 /// Returns `true` when `target` already matches the source `format` string,

@@ -161,8 +161,14 @@ fn uf_union(parent: &mut [usize], x: usize, y: usize) {
 fn compute_entropy_on_thumbnail(bytes: &[u8], _width: u32, _height: u32) -> Result<f64, String> {
     use image::imageops::FilterType;
 
-    let img = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(bytes)
+    const THUMBNAIL_RGB_BYTES: u64 = 64 * 64 * 3;
+    let rgb =
+        crate::extraction::image_decode::decode_standard_rgb8_with_additional_live_bytes_and_default_security_limits(
+            bytes,
+            THUMBNAIL_RGB_BYTES,
+        )
         .map_err(|error| error.to_string())?;
+    let img = image::DynamicImage::ImageRgb8(rgb);
 
     let thumb = img.resize_exact(64, 64, FilterType::Lanczos3);
 

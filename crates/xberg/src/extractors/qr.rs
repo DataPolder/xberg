@@ -22,8 +22,8 @@
 
 use crate::types::qr::{QrBoundingBox, QrCode};
 
-fn decode_qr_image(image_bytes: &[u8]) -> crate::Result<image::DynamicImage> {
-    crate::extraction::image_decode::decode_standard_image_with_default_security_limits(image_bytes)
+fn decode_qr_image(image_bytes: &[u8]) -> crate::Result<image::GrayImage> {
+    crate::extraction::image_decode::decode_standard_luma8_with_default_security_limits(image_bytes)
 }
 
 /// Detect QR codes in the bytes of an [`crate::types::ExtractedImage`].
@@ -49,7 +49,7 @@ pub fn detect_qr_codes(image_bytes: &[u8], _format_hint: Option<&str>) -> Vec<Qr
         return Vec::new();
     }
 
-    let dynamic = match decode_qr_image(image_bytes) {
+    let luma = match decode_qr_image(image_bytes) {
         Ok(img) => img,
         Err(error) => {
             tracing::warn!(error = %error, "qr: image decode failed; skipping");
@@ -57,7 +57,6 @@ pub fn detect_qr_codes(image_bytes: &[u8], _format_hint: Option<&str>) -> Vec<Qr
         }
     };
 
-    let luma = dynamic.to_luma8();
     let (width, height) = luma.dimensions();
     let raw = luma.into_raw();
     let mut prepared = rqrr::PreparedImage::prepare_from_greyscale(width as usize, height as usize, |x, y| {

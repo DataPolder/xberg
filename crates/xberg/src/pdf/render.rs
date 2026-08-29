@@ -646,10 +646,14 @@ pub(crate) fn rotate_png_page_if_needed(
     if rotation_degrees.is_multiple_of(360) {
         return Ok((png_data, width, height));
     }
-    let img = image::load_from_memory(&png_data).map_err(|e| XbergError::Parsing {
+    let rgb = crate::extraction::image_decode::decode_standard_rgb8_with_same_sized_output_and_default_security_limits(
+        &png_data,
+    )
+    .map_err(|e| XbergError::Parsing {
         message: format!("failed to decode rendered page for rotation correction: {e}"),
         source: None,
     })?;
+    let img = image::DynamicImage::ImageRgb8(rgb);
     let rotated = rotate_dynamic_image(img, rotation_degrees);
     let (w, h) = (rotated.width(), rotated.height());
     let mut buf = Vec::new();

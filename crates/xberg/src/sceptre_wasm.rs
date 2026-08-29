@@ -72,8 +72,7 @@ impl SceptreWasmEngine {
 }
 
 fn decode_sceptre_wasm_image(image_bytes: &[u8]) -> Result<sceptre::Image> {
-    let decoded = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(image_bytes)
-        .map(image::DynamicImage::into_rgb8)
+    let decoded = crate::extraction::image_decode::decode_standard_rgb8_with_default_security_limits(image_bytes)
         .map_err(|error| XbergError::Ocr {
             message: "Sceptre OCR operation failed".to_string(),
             source: Some(Box::new(error)),

@@ -300,9 +300,8 @@ impl LayoutEngine {
     /// image bytes (PNG/JPEG/…) rather than a decoded [`RgbImage`] — notably the
     /// WASM bridge, which receives image bytes from JS.
     pub fn detect_image_bytes(&mut self, image_bytes: &[u8]) -> Result<DetectionResult, LayoutError> {
-        let img = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(image_bytes)
-            .map_err(|error| LayoutError::Image(image::ImageError::IoError(std::io::Error::other(error))))?
-            .to_rgb8();
+        let img = crate::extraction::image_decode::decode_standard_rgb8_with_default_security_limits(image_bytes)
+            .map_err(|error| LayoutError::Image(image::ImageError::IoError(std::io::Error::other(error))))?;
         self.detect(&img)
     }
 

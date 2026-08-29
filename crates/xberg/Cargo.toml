@@ -1668,6 +1668,7 @@ qrcode = { version = "0.14", default-features = false, features = ["image"] }
 # static_engine unit tests, without a network fetch.
 safetensors = "0.8"
 serial_test = "3.5.0"
+syn = { version = "2", features = ["full", "visit"] }
 tar = "^0.4"
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "time"] }

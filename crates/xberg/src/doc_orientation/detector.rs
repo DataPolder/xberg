@@ -116,12 +116,11 @@ impl DocOrientationDetector {
     /// image bytes (PNG/JPEG/…) rather than a decoded [`RgbImage`] — notably the
     /// WASM bridge, which receives image bytes from JS.
     pub fn detect_image_bytes(&self, image_bytes: &[u8]) -> Result<OrientationResult> {
-        let image = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(image_bytes)
+        let image = crate::extraction::image_decode::decode_standard_rgb8_with_default_security_limits(image_bytes)
             .map_err(|error| XbergError::Ocr {
                 message: format!("Failed to decode image for orientation detection: {error}"),
                 source: Some(Box::new(error)),
-            })?
-            .to_rgb8();
+            })?;
         self.detect(&image)
     }
 

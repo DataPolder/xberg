@@ -462,9 +462,8 @@ fn render_layout_page(
         rendered.data
     };
 
-    image::load_from_memory(&rendered_data)
-        .map(image::DynamicImage::into_rgb8)
-        .map_err(|error| {
+    crate::extraction::image_decode::decode_standard_rgb8_with_default_security_limits(&rendered_data).map_err(
+        |error| {
             tracing::warn!(
                 page = page_index + 1,
                 page_width_pts,
@@ -473,7 +472,8 @@ fn render_layout_page(
                 "layout runner: skipping page (PNG decode failed), returning empty detections"
             );
             format!("page {} PNG decode failed: {error}", page_index + 1)
-        })
+        },
+    )
 }
 
 /// Whether a page joins the ONNX batch: it must both be gate-selected and

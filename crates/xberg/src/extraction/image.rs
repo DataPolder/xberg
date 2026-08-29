@@ -9,8 +9,8 @@ use crate::extraction::heif::is_heif_container;
 #[cfg(feature = "ocr")]
 use crate::extraction::image_decode::image_dimension_error;
 use crate::extraction::image_decode::{
-    ImageDecodeBudget, decode_standard_image_with_security_limits, decoded_byte_count,
-    probe_standard_image_with_security_limits,
+    ImageDecodeBudget, decode_standard_image_with_security_limits, decode_standard_rgb8_with_security_limits,
+    decoded_byte_count,
 };
 use crate::extractors::security::SecurityLimits;
 use std::collections::HashMap;
@@ -401,9 +401,34 @@ fn decode_jbig2_to_gray_with_security_limits(bytes: &[u8], limits: &SecurityLimi
 #[cfg(feature = "ocr")]
 pub(crate) fn load_image_for_ocr(image_bytes: &[u8]) -> Result<image::DynamicImage> {
     let limits = SecurityLimits::default();
-    decode_image_with_security_limits(image_bytes, &limits)
+    decode_image_to_rgb8_with_security_limits(image_bytes, &limits).map(image::DynamicImage::ImageRgb8)
 }
 
+pub(crate) fn decode_image_to_rgb8_with_security_limits(
+    image_bytes: &[u8],
+    limits: &SecurityLimits,
+) -> Result<image::RgbImage> {
+    #[cfg(feature = "ocr")]
+    {
+        if is_jp2(image_bytes) || is_j2k(image_bytes) {
+            return decode_jp2_to_rgb_with_security_limits(image_bytes, limits);
+        }
+        if is_jbig2(image_bytes) {
+            let gray = decode_jbig2_to_gray_with_security_limits(image_bytes, limits)?;
+            let (width, height) = gray.dimensions();
+            let gray_bytes = decoded_byte_count(width, height, u64::from(image::ColorType::L8.bytes_per_pixel()))?;
+            let rgb_bytes = decoded_byte_count(width, height, u64::from(image::ColorType::Rgb8.bytes_per_pixel()))?;
+            let peak_bytes = gray_bytes
+                .checked_add(rgb_bytes)
+                .ok_or_else(|| image_dimension_error(width, height, u64::MAX, u64::MAX))?;
+            ImageDecodeBudget::from_security_limits(limits).validate(width, height, peak_bytes)?;
+            return Ok(image::DynamicImage::ImageLuma8(gray).into_rgb8());
+        }
+    }
+    decode_standard_rgb8_with_security_limits(image_bytes, limits)
+}
+
+#[cfg(test)]
 pub(crate) fn decode_image_with_security_limits(
     image_bytes: &[u8],
     limits: &SecurityLimits,
@@ -446,6 +471,8 @@ pub(crate) fn extract_image_metadata_with_security_limits(
             u64::from(image::ColorType::Rgb8.bytes_per_pixel()),
         )?;
         budget.validate(metadata.width, metadata.height, decoded_bytes)?;
+        #[cfg(feature = "ocr")]
+        decode_jp2_to_rgb_with_security_limits(bytes, limits)?;
         return Ok(metadata);
     }
 
@@ -481,11 +508,13 @@ pub(crate) fn extract_image_metadata_with_security_limits(
         }
     }
 
-    let probe = probe_standard_image_with_security_limits(bytes, limits)?;
+    let decoded = decode_standard_image_with_security_limits(bytes, limits)?;
+    let format = image::guess_format(bytes)
+        .map_err(|error| XbergError::parsing(format!("Failed to read image format: {error}")))?;
     Ok(ExtractedImageMetadata {
-        width: probe.0,
-        height: probe.1,
-        format: format!("{:?}", probe.2).to_uppercase(),
+        width: decoded.width(),
+        height: decoded.height(),
+        format: format!("{format:?}").to_uppercase(),
         exif_data: extract_exif_data(bytes),
     })
 }
@@ -669,6 +698,17 @@ mod tests {
             .expect("normal image within the decoded-byte budget should load");
 
         assert_eq!((image.width(), image.height()), (2, 2));
+    }
+
+    #[test]
+    fn metadata_rejects_corrupt_pixels_within_security_budget() {
+        let bytes = crate::extraction::image_decode::bmp_with_declared_dimensions(10, 10);
+        let limits = image_decode_limits(10_000);
+
+        let error = extract_image_metadata_with_security_limits(&bytes, &limits)
+            .expect_err("metadata extraction must validate bounded pixel data, not only the header");
+
+        assert!(matches!(error, XbergError::Parsing { .. }));
     }
 
     #[test]

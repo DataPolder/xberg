@@ -1117,11 +1117,11 @@ const MAX_INK_PROBE_TEXT_CHARS: usize = 200;
 /// [`is_page_text_blank`]: crate::extraction::blank_detection::is_page_text_blank
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 fn page_raster_is_blank(png_bytes: &[u8]) -> bool {
-    let Ok(decoded) = image::load_from_memory(png_bytes) else {
+    let Ok(luma) = crate::extraction::image_decode::decode_standard_luma8_with_default_security_limits(png_bytes)
+    else {
         tracing::debug!("ink probe: page raster could not be decoded; not treating it as blank");
         return false;
     };
-    let luma = decoded.to_luma8();
     let (width, height) = luma.dimensions();
     if width == 0 || height == 0 {
         return true;
@@ -1345,10 +1345,12 @@ fn render_selected_pages_from_document(
             rendered.height,
             rotation,
         )?;
-        let img = image::load_from_memory(&data).map_err(|e| crate::XbergError::Parsing {
-            message: format!("Failed to decode rendered page {}: {}", idx + 1, e),
-            source: None,
-        })?;
+        let img = crate::extraction::image_decode::decode_standard_image_with_default_security_limits(&data).map_err(
+            |e| crate::XbergError::Parsing {
+                message: format!("Failed to decode rendered page {}: {}", idx + 1, e),
+                source: None,
+            },
+        )?;
         images.push((idx, img));
     }
 
@@ -5057,12 +5059,11 @@ async fn extract_with_ocr_for_page(
                             slice[offset].to_rgb8()
                         } else {
                             let png_data = &encoded_batch[offset].1;
-                            let decoded =
-                                image::load_from_memory(png_data).map_err(|e| crate::XbergError::Parsing {
+                            crate::extraction::image_decode::decode_standard_rgb8_with_default_security_limits(png_data)
+                                .map_err(|e| crate::XbergError::Parsing {
                                     message: format!("Failed to decode PNG for TATR: {}", e),
                                     source: None,
-                                })?;
-                            decoded.to_rgb8()
+                                })?
                         };
                         crate::ocr::layout_assembly::recognize_page_tables(
                             &rgb,

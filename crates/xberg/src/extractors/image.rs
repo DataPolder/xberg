@@ -385,12 +385,10 @@ fn whole_image_layout_mapping_retention(
 
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 fn source_image_is_proven_single_frame(content: &[u8], mime_type: &str) -> bool {
-    let cursor = std::io::Cursor::new(content);
     match mime_type {
-        "image/png" => image::codecs::png::PngDecoder::new(cursor)
-            .and_then(|decoder| decoder.is_apng())
-            .is_ok_and(|is_animated| !is_animated),
-        "image/webp" => image::codecs::webp::WebPDecoder::new(cursor).is_ok_and(|decoder| !decoder.has_animation()),
+        "image/png" | "image/webp" => {
+            crate::extraction::image_decode::standard_image_is_single_frame(content, mime_type)
+        }
         "image/jpeg" | "image/jpg" | "image/pjpeg" => !content.windows(4).any(|window| window == b"MPF\0"),
         "image/bmp"
         | "image/x-bmp"
@@ -401,7 +399,7 @@ fn source_image_is_proven_single_frame(content: &[u8], mime_type: &str) -> bool 
         | "image/x-portable-pixmap" => true,
         #[cfg(feature = "ocr")]
         "image/tiff" | "image/x-tiff" => {
-            tiff::decoder::Decoder::new(cursor).is_ok_and(|decoder| !decoder.more_images())
+            crate::extraction::image_decode::standard_image_is_single_frame(content, mime_type)
         }
         _ => false,
     }
@@ -886,9 +884,9 @@ async fn detect_image_layout(
 ) -> Result<(image::RgbImage, crate::layout::DetectionResult)> {
     let layout_content = content.to_vec();
     tokio::task::spawn_blocking(move || -> Result<_> {
-        let image = crate::extraction::image::decode_image_with_security_limits(&layout_content, &security_limits)?;
+        let rgb =
+            crate::extraction::image::decode_image_to_rgb8_with_security_limits(&layout_content, &security_limits)?;
         drop(layout_content);
-        let rgb = image.to_rgb8();
         let mut engine = crate::layout::take_or_create_engine(&layout_config, thread_budget)
             .map_err(|error| crate::XbergError::Other(format!("Layout engine init failed: {error}")))?;
         let detection = engine.detect(&rgb);
@@ -1345,12 +1343,11 @@ fn normalize_image_bytes_for_ocr(
     images_config: &crate::core::config::ImageExtractionConfig,
     security_limits: &crate::extractors::security::SecurityLimits,
 ) -> Result<NormalizedOcrImage> {
-    let decoded = match crate::extraction::image::decode_image_with_security_limits(content, security_limits) {
+    let rgb = match crate::extraction::image::decode_image_to_rgb8_with_security_limits(content, security_limits) {
         Ok(decoded) => decoded,
         Err(error @ crate::XbergError::Validation { .. }) => return Err(error),
         Err(_) => return Ok(unchanged_ocr_image(content)),
     };
-    let rgb = decoded.into_rgb8();
     let (width, height) = rgb.dimensions();
     let dpi_config = crate::types::ImageDpiConfig::from(images_config);
     let result = match crate::image::preprocessing::normalize_image_dpi_owned(
@@ -1757,7 +1754,8 @@ impl ImageExtractor {
     ) -> Result<InternalDocument> {
         let default_security_limits = crate::extractors::security::SecurityLimits::default();
         let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
-        let image = crate::extraction::image::decode_image_with_security_limits(content, security_limits)?;
+        let image = crate::extraction::image::decode_image_to_rgb8_with_security_limits(content, security_limits)?;
+        let image = image::DynamicImage::ImageRgb8(image);
         let images = [image];
 
         let (text, _tables, ocr_elements, pipeline_doc, llm_usage, _page_texts, _rasters, formulas, _) =
