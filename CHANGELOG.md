@@ -134,6 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed PDF OCR fallback being suppressed for image-only pages when dot leaders or other
+  non-textual native content pushed the document below the alphanumeric-ratio threshold.
 - Fixed process-global native PDF font-cache collisions that made glyph spacing, geometry, and
   batch output depend on document order and concurrency when fonts used indirect width tables.
 - Fixed Markdown OCR metadata so word counts and confidence statistics describe only text retained

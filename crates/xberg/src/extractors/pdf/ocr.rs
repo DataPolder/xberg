@@ -123,6 +123,7 @@ pub(crate) fn evaluate_ocr_skip_gate(
     let skip_for_non_text = pre_rendered_doc_present
         && total_chars >= thresholds.non_text_min_chars
         && alnum_ws_ratio < thresholds.alnum_ws_ratio_threshold
+        && !decision.fallback
         && !decision.whole_doc_failure;
 
     let has_substantive_doc = pre_rendered_doc_present
@@ -7300,6 +7301,41 @@ mod tests {
             outcome,
             OcrGateOutcome::RunFallback,
             "a whole-document quality failure must route to OCR, not SkipNonText"
+        );
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_per_page_fallback_overrides_non_text_skip() {
+        let thresholds = t();
+        let mut decision = gate_decision(true, false);
+        decision.failing_pages = vec![3];
+
+        let outcome = evaluate_ocr_skip_gate(true, thresholds.non_text_min_chars, 0.1, &decision, &thresholds);
+
+        assert_eq!(outcome, OcrGateOutcome::RunFallbackOnPages(vec![3]));
+    }
+
+    #[cfg(feature = "ocr")]
+    #[test]
+    fn test_dot_leader_toc_fallback_overrides_non_text_ratio() {
+        let thresholds = t();
+        let text = "Introduction....................1\nMethods.................7";
+        let total_chars = text.chars().count();
+        let alnum_ws_chars = text
+            .chars()
+            .filter(|character| character.is_alphanumeric() || character.is_whitespace())
+            .count();
+        let alnum_ws_ratio = alnum_ws_chars as f64 / total_chars as f64;
+        let mut decision = gate_decision(true, false);
+        decision.failing_pages = vec![1];
+
+        assert!((alnum_ws_ratio - 0.374).abs() < 0.002);
+        assert!(alnum_ws_ratio < thresholds.alnum_ws_ratio_threshold);
+        assert!(total_chars >= thresholds.non_text_min_chars);
+        assert_eq!(
+            evaluate_ocr_skip_gate(true, total_chars, alnum_ws_ratio, &decision, &thresholds),
+            OcrGateOutcome::RunFallbackOnPages(vec![1])
         );
     }
 

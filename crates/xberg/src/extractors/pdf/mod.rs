@@ -5536,23 +5536,25 @@ mod tests {
         );
     }
 
-    /// Non-textual content (charts, diagrams) with a pre-rendered structured doc
-    /// present should skip OCR regardless of the per-page fallback flag — OCR
-    /// won't improve extraction quality for non-textual pages.
+    /// Fallback must win over the non-text skip even with a pre-rendered document. ~keep
+    /// Otherwise scanned ToC-like pages are suppressed. ~keep
     #[cfg(feature = "ocr")]
     #[test]
-    fn test_ocr_gate_skips_non_textual_content_even_when_fallback_requested() {
+    fn test_ocr_gate_fallback_overrides_non_textual_skip() {
         let thresholds = OcrQualityThresholds::default();
 
-        // `fallback = true` (a per-page fallback flag) but `whole_doc_failure = false`: the
-        // document still has trustworthy native text, it just looks non-textual. A genuine
-        // whole-document failure instead routes to OCR (issue #1338), so this case must set
-        // `whole_doc_failure = false` to exercise the non-text skip it claims to test.
         let outcome = ocr::evaluate_ocr_skip_gate(true, 500, 0.1, &mk_decision(true, false, vec![]), &thresholds);
         assert_eq!(
             outcome,
+            ocr::OcrGateOutcome::RunFallback,
+            "fallback must route to OCR rather than being suppressed as non-text"
+        );
+
+        let control = ocr::evaluate_ocr_skip_gate(true, 500, 0.1, &mk_decision(false, false, vec![]), &thresholds);
+        assert_eq!(
+            control,
             ocr::OcrGateOutcome::SkipNonText,
-            "non-textual content with a structured doc must skip OCR even if per-page fallback was requested"
+            "genuinely non-textual content without a fallback decision must still skip OCR"
         );
     }
 
