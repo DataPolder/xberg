@@ -3162,8 +3162,16 @@ impl<'doc> TextExtractor<'doc> {
     /// # Returns
     ///
     /// Vector of TextSpan objects in reading order
-    #[tracing::instrument(name = "pdf.extract_spans", skip_all, fields(bytes = content_stream.len()), err)]
+    #[tracing::instrument(name = "pdf.extract_spans", skip_all, fields(bytes = content_stream.len()))]
     pub fn extract_text_spans(&mut self, content_stream: &[u8]) -> Result<Vec<TextSpan>> {
+        let result = self.extract_text_spans_impl(content_stream);
+        if let Err(error) = &result {
+            crate::error::trace_failure("extract_text_spans", error);
+        }
+        result
+    }
+
+    fn extract_text_spans_impl(&mut self, content_stream: &[u8]) -> Result<Vec<TextSpan>> {
         self.extract_spans = true;
         self.spans.clear();
         self.span_sequence_counter = 0;
@@ -5853,9 +5861,13 @@ impl<'doc> TextExtractor<'doc> {
                 // Process Form XObjects to extract text from reusable content.
                 // Form XObjects can contain text that is not duplicated in the main stream.
                 // We track processed XObjects to avoid infinite loops and duplicates. ~keep
-                if let Err(e) = self.process_xobject(&name) {
+                if let Err(error) = self.process_xobject(&name) {
                     // Log error but continue processing - don't fail the entire extraction ~keep
-                    tracing::warn!("Failed to process XObject '{}': {}", name, e);
+                    tracing::warn!(
+                        error_code = error.telemetry_code(),
+                        error_offset = ?error.telemetry_offset(),
+                        "failed to process XObject"
+                    );
                 }
             }
 
@@ -6081,8 +6093,12 @@ impl<'doc> TextExtractor<'doc> {
                             }
                             data
                         }
-                        Err(e) => {
-                            tracing::warn!("Failed to decode Form XObject '{}' stream: {}, skipping", name, e);
+                        Err(error) => {
+                            tracing::warn!(
+                                error_code = error.telemetry_code(),
+                                error_offset = ?error.telemetry_offset(),
+                                "failed to decode Form XObject stream; skipping"
+                            );
                             return Ok(());
                         }
                     }

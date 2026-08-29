@@ -2689,8 +2689,12 @@ fn paint_image_to_plates(
 
     let pdf_image = match extract_image_from_xobject(Some(ctx.doc), xobject, obj_ref, Some(color_spaces)) {
         Ok(img) => img,
-        Err(e) => {
-            tracing::warn!("Skipping image XObject '{name}': {e}");
+        Err(error) => {
+            tracing::warn!(
+                error_code = error.telemetry_code(),
+                error_offset = ?error.telemetry_offset(),
+                "skipping image XObject"
+            );
             return Ok(());
         }
     };

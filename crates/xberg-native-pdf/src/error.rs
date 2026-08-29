@@ -167,6 +167,36 @@ impl Error {
     }
 }
 
+pub(crate) fn trace_recovery(operation: &'static str, error: &Error) {
+    tracing::warn!(
+        target: crate::LOG_TARGET_ROOT,
+        operation,
+        error_code = error.telemetry_code(),
+        error_offset = ?error.telemetry_offset(),
+        "PDF operation degraded"
+    );
+}
+
+pub(crate) fn trace_failure(operation: &'static str, error: &Error) {
+    tracing::error!(
+        target: crate::LOG_TARGET_ROOT,
+        operation,
+        error_code = error.telemetry_code(),
+        error_offset = ?error.telemetry_offset(),
+        "PDF operation failed"
+    );
+}
+
+pub(crate) fn trace_recovery_count(operation: &'static str, error_code: &'static str, skipped_count: usize) {
+    tracing::warn!(
+        target: crate::LOG_TARGET_ROOT,
+        operation,
+        error_code,
+        skipped_count,
+        "PDF recovery skipped malformed input"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

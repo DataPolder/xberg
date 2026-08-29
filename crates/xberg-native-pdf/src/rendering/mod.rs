@@ -345,14 +345,18 @@ where
 /// # Returns
 ///
 /// The rendered image as bytes in the specified format.
-#[tracing::instrument(name = "pdf.render_page", skip_all, fields(page = page_num, dpi = options.dpi), err)]
+#[tracing::instrument(name = "pdf.render_page", skip_all, fields(page = page_num, dpi = options.dpi))]
 pub fn render_page(
     doc: &crate::document::PdfDocument,
     page_num: usize,
     options: &RenderOptions,
 ) -> Result<RenderedImage> {
     let mut renderer = PageRenderer::new(options.clone());
-    renderer.render_page(doc, page_num)
+    let result = renderer.render_page(doc, page_num);
+    if let Err(error) = &result {
+        crate::error::trace_failure("render_page", error);
+    }
+    result
 }
 
 /// Render a rectangular region of a page. `crop_rect_pt` is in PDF

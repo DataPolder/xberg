@@ -253,14 +253,15 @@ impl Object {
                             tracing::debug!(bytes = data.len(), "decryption successful");
                             data
                         }
-                        Err(e) => {
+                        Err(error) => {
                             tracing::error!(
                                 object_id = obj_num,
                                 generation = gen_num,
-                                error = %e,
+                                error_code = error.telemetry_code(),
+                                error_offset = ?error.telemetry_offset(),
                                 "decryption failed"
                             );
-                            return Err(e);
+                            return Err(error);
                         }
                     }
                 } else {

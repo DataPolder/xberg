@@ -705,8 +705,12 @@ impl TextRasterizer {
                     clip_mask,
                 ) {
                     Ok(advance) => return Ok(advance),
-                    Err(e) => {
-                        tracing::warn!("Direct CID/CFF rendering failed: {}, falling back to system font", e);
+                    Err(error) => {
+                        tracing::warn!(
+                            error_code = error.telemetry_code(),
+                            error_offset = ?error.telemetry_offset(),
+                            "direct CID/CFF rendering failed; falling back to system font"
+                        );
                         if let Some((fb_id, fallback_data, fallback_idx)) = self.load_font_data(pdf_font_name) {
                             if let Some(ref info) = font_info {
                                 self.report_omitted_drops(&decode_drops, &info.base_font);

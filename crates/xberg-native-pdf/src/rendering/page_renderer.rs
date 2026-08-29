@@ -2644,15 +2644,23 @@ impl PageRenderer {
                             data: bytes::Bytes::from(data.clone()),
                         };
                         if is_image_mask {
-                            if let Err(e) =
+                            if let Err(error) =
                                 self.render_image_mask(pixmap, &synthetic, None, transform, doc, clip, &gs_clone)
                             {
-                                tracing::warn!("Skipping unrenderable inline ImageMask: {}", e);
+                                tracing::warn!(
+                                    error_code = error.telemetry_code(),
+                                    error_offset = ?error.telemetry_offset(),
+                                    "skipping unrenderable inline ImageMask"
+                                );
                             }
-                        } else if let Err(e) =
+                        } else if let Err(error) =
                             self.render_image(pixmap, &synthetic, None, transform, doc, clip, None, None, &gs_clone)
                         {
-                            tracing::warn!("Skipping unrenderable inline image: {}", e);
+                            tracing::warn!(
+                                error_code = error.telemetry_code(),
+                                error_offset = ?error.telemetry_offset(),
+                                "skipping unrenderable inline image"
+                            );
                         }
                     }
                 }
@@ -3634,22 +3642,26 @@ impl PageRenderer {
                                             let spliced =
                                                 self.pipeline_resolve_paint_gs(doc, gs, PipelinePaintKind::ImageMask);
                                             let render_gs: &GraphicsState = spliced.as_ref().unwrap_or(gs);
-                                            if let Err(e) = self.render_image_mask(
+                                            if let Err(error) = self.render_image_mask(
                                                 pixmap, &xobj, xobj_ref, transform, doc, clip_mask, render_gs,
                                             ) {
                                                 tracing::warn!(
-                                                    "Skipping unrenderable ImageMask XObject '{}': {}",
-                                                    name,
-                                                    e
+                                                    error_code = error.telemetry_code(),
+                                                    error_offset = ?error.telemetry_offset(),
+                                                    "skipping unrenderable ImageMask XObject"
                                                 );
                                             }
                                         } else {
                                             let smask = dict.get("SMask").cloned();
                                             let mask = dict.get("Mask").cloned();
-                                            if let Err(e) = self.render_image(
+                                            if let Err(error) = self.render_image(
                                                 pixmap, &xobj, xobj_ref, transform, doc, clip_mask, smask, mask, gs,
                                             ) {
-                                                tracing::warn!("Skipping unrenderable image XObject '{}': {}", name, e);
+                                                tracing::warn!(
+                                                    error_code = error.telemetry_code(),
+                                                    error_offset = ?error.telemetry_offset(),
+                                                    "skipping unrenderable image XObject"
+                                                );
                                             }
                                         }
                                     }
@@ -3667,7 +3679,7 @@ impl PageRenderer {
                                         let old_cs = self.color_spaces.clone();
                                         self.load_resources(doc, form_resources)?;
 
-                                        if let Err(e) = self.render_form_xobject(
+                                        if let Err(error) = self.render_form_xobject(
                                             pixmap,
                                             &dict,
                                             &stream_data,
@@ -3676,7 +3688,11 @@ impl PageRenderer {
                                             page_num,
                                             form_resources,
                                         ) {
-                                            tracing::warn!("Skipping malformed Form XObject '{}': {}", name, e);
+                                            tracing::warn!(
+                                                error_code = error.telemetry_code(),
+                                                error_offset = ?error.telemetry_offset(),
+                                                "skipping malformed Form XObject"
+                                            );
                                         }
 
                                         self.fonts = old_fonts;

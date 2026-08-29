@@ -962,29 +962,35 @@ fn trace_xref_parse_failure(error: &Error) {
 }
 
 fn trace_recoverable_pdf_error(operation: &'static str, error: &Error) {
-    if let Some(error_offset) = error.telemetry_offset() {
-        tracing::warn!(
-            operation,
-            error_code = error.telemetry_code(),
-            error_offset,
-            "PDF operation degraded"
-        );
-    } else {
-        tracing::warn!(operation, error_code = error.telemetry_code(), "PDF operation degraded");
-    }
+    crate::error::trace_recovery(operation, error);
 }
 
 fn trace_fatal_pdf_error(operation: &'static str, error: &Error) {
-    if let Some(error_offset) = error.telemetry_offset() {
-        tracing::error!(
-            operation,
-            error_code = error.telemetry_code(),
-            error_offset,
-            "PDF operation failed"
-        );
-    } else {
-        tracing::error!(operation, error_code = error.telemetry_code(), "PDF operation failed");
+    crate::error::trace_failure(operation, error);
+}
+
+fn resolve_encrypt_dictionary_references(
+    dictionary: &HashMap<String, Object>,
+    mut load: impl FnMut(ObjectRef) -> Result<Object>,
+) -> HashMap<String, Object> {
+    let mut resolved_dictionary = dictionary.clone();
+    let mut unresolved_reference_count = 0usize;
+    for value in resolved_dictionary.values_mut() {
+        if let Object::Reference(object_reference) = value {
+            match load(*object_reference) {
+                Ok(resolved) => *value = resolved,
+                Err(_) => unresolved_reference_count += 1,
+            }
+        }
     }
+    if unresolved_reference_count > 0 {
+        crate::error::trace_recovery_count(
+            "resolve_encrypt_reference",
+            "unresolved_reference",
+            unresolved_reference_count,
+        );
+    }
+    resolved_dictionary
 }
 
 impl PdfDocument {
@@ -1362,18 +1368,9 @@ impl PdfDocument {
         };
 
         let encrypt_obj = if let Some(dict) = encrypt_obj.as_dict() {
-            let mut resolved_dict = dict.clone();
-            for value in resolved_dict.values_mut() {
-                if let Object::Reference(obj_ref) = value {
-                    match self.load_object(*obj_ref) {
-                        Ok(resolved) => *value = resolved,
-                        Err(error) => {
-                            trace_recoverable_pdf_error("resolve_encrypt_reference", &error);
-                        }
-                    }
-                }
-            }
-            Object::Dictionary(resolved_dict)
+            Object::Dictionary(resolve_encrypt_dictionary_references(dict, |reference| {
+                self.load_object(reference)
+            }))
         } else {
             encrypt_obj
         };
@@ -2570,8 +2567,15 @@ impl PdfDocument {
         match obj {
             Object::Reference(obj_ref) => match self.load_object(*obj_ref) {
                 Ok(resolved) => self.resolve_references(&resolved, max_depth - 1),
-                Err(e) => {
-                    tracing::warn!("Failed to resolve reference {:?}: {}", obj_ref, e);
+                Err(error) => {
+                    tracing::warn!(
+                        operation = "resolve_reference",
+                        object_id = obj_ref.id,
+                        generation = obj_ref.generation,
+                        error_code = error.telemetry_code(),
+                        error_offset = ?error.telemetry_offset(),
+                        "failed to resolve reference"
+                    );
                     Ok(obj.clone())
                 }
             },
@@ -2607,8 +2611,15 @@ impl PdfDocument {
         if let Some(obj_ref) = obj.as_reference() {
             match self.load_object(obj_ref) {
                 Ok(resolved) => resolved,
-                Err(e) => {
-                    tracing::warn!("Failed to resolve indirect reference {:?}: {}", obj_ref, e);
+                Err(error) => {
+                    tracing::warn!(
+                        operation = "resolve_indirect_reference",
+                        object_id = obj_ref.id,
+                        generation = obj_ref.generation,
+                        error_code = error.telemetry_code(),
+                        error_offset = ?error.telemetry_offset(),
+                        "failed to resolve indirect reference"
+                    );
                     obj.clone()
                 }
             }
@@ -4119,18 +4130,24 @@ impl PdfDocument {
                 // For encrypted PDFs any failure to read the page tree means we
                 // cannot access the content, so surface it immediately. ~keep
                 if self.is_encrypted() {
-                    tracing::warn!("Page count failed for encrypted PDF: {}", e);
+                    trace_recoverable_pdf_error("count_encrypted_pages", &e);
                     return Err(Error::EncryptedPdf);
                 }
-                tracing::warn!("Failed to get page count from /Count: {}", e);
-                tracing::warn!("Falling back to scanning page tree");
+                trace_recoverable_pdf_error("count_pages_from_tree", &e);
                 match self.get_page_count_by_scanning() {
                     Ok(count) => {
                         tracing::warn!("Page count from scanning: {}", count);
                         Ok(count)
                     }
                     Err(scan_err) => {
-                        tracing::error!("Both methods failed. Standard: {}, Scan: {}", e, scan_err);
+                        tracing::error!(
+                            operation = "count_pages",
+                            primary_error_code = e.telemetry_code(),
+                            primary_error_offset = ?e.telemetry_offset(),
+                            fallback_error_code = scan_err.telemetry_code(),
+                            fallback_error_offset = ?scan_err.telemetry_offset(),
+                            "all PDF page count strategies failed"
+                        );
                         Err(e)
                     }
                 }
@@ -4335,8 +4352,14 @@ impl PdfDocument {
 
         let node = match self.load_object(node_ref) {
             Ok(n) => n,
-            Err(e) => {
-                tracing::warn!("Failed to load page tree node {}: {}", node_ref, e);
+            Err(error) => {
+                tracing::warn!(
+                    object_id = node_ref.id,
+                    generation = node_ref.generation,
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "failed to load page tree node"
+                );
                 return Ok(0);
             }
         };
@@ -4375,8 +4398,12 @@ impl PdfDocument {
                                 tracing::warn!("Recursion limit exceeded in page tree, skipping branch");
                                 continue;
                             }
-                            Err(e) => {
-                                tracing::warn!("Error counting pages in branch: {}, skipping", e);
+                            Err(error) => {
+                                tracing::warn!(
+                                    error_code = error.telemetry_code(),
+                                    error_offset = ?error.telemetry_offset(),
+                                    "error counting pages in branch; skipping"
+                                );
                                 continue;
                             }
                         }
@@ -4450,7 +4477,7 @@ impl PdfDocument {
         if !self.page_cache_populated.load(Ordering::Acquire) && cache_misses >= LAZY_THRESHOLD {
             self.page_cache_populated.store(true, Ordering::Release);
             if let Err(e) = self.populate_page_cache() {
-                tracing::warn!("Bulk page tree walk failed ({}), falling back to per-page traversal", e);
+                trace_recoverable_pdf_error("populate_page_cache", &e);
             }
             if let Some(cached) = self.page_cache.lock_or_recover().get(&page_index).cloned() {
                 return Ok(cached);
@@ -4484,18 +4511,18 @@ impl PdfDocument {
                 }
                 Ok(page)
             }
-            Err(e) => {
+            Err(error) => {
                 if matches!(
-                    e,
+                    error,
                     Error::InvalidPdf(_)
                         | Error::InvalidObjectType { .. }
                         | Error::CircularReference(_)
                         | Error::ObjectNotFound(_, _)
                 ) {
-                    tracing::warn!("Page tree traversal failed ({}), trying fallback scan method", e);
+                    trace_recoverable_pdf_error("traverse_page_tree", &error);
                     self.get_page_by_scanning(page_index)
                 } else {
-                    Err(e)
+                    Err(error)
                 }
             }
         }?;
@@ -4658,9 +4685,13 @@ impl PdfDocument {
                 if let Some(kids) = node_dict.get("Kids").and_then(|obj| obj.as_array()) {
                     for kid in kids {
                         if let Some(kid_ref) = kid.as_reference()
-                            && let Err(e) = self.collect_all_pages(kid_ref, page_index, inherited, visited)
+                            && let Err(error) = self.collect_all_pages(kid_ref, page_index, inherited, visited)
                         {
-                            tracing::warn!("Error collecting page from tree: {}, skipping branch", e);
+                            tracing::warn!(
+                                error_code = error.telemetry_code(),
+                                error_offset = ?error.telemetry_offset(),
+                                "error collecting page from tree; skipping branch"
+                            );
                         }
                     }
                 }
@@ -5076,13 +5107,17 @@ impl PdfDocument {
     /// No single mode wins on every PDF; when extraction quality is critical
     /// and the layout is unknown, compare `to_plain_text_all` and
     /// markdown-stripped output and keep whichever is better for your corpus.
-    #[tracing::instrument(name = "pdf.extract_text", skip_all, fields(page = page_index), err)]
+    #[tracing::instrument(name = "pdf.extract_text", skip_all, fields(page = page_index))]
     pub fn extract_text(&self, page_index: usize) -> Result<String> {
         let options = crate::converters::ConversionOptions {
             extract_tables: true,
             ..Default::default()
         };
-        self.extract_text_with_options(page_index, &options)
+        let result = self.extract_text_with_options(page_index, &options);
+        if let Err(error) = &result {
+            crate::error::trace_failure("extract_text", error);
+        }
+        result
     }
 
     /// Extract text from a page with specific options.
@@ -6333,8 +6368,13 @@ impl PdfDocument {
             }
             match self.extract_text(i) {
                 Ok(text) => result.push_str(&text),
-                Err(e) => {
-                    tracing::warn!("Failed to extract text from page {}: {}", i, e);
+                Err(error) => {
+                    tracing::warn!(
+                        page_index = i,
+                        error_code = error.telemetry_code(),
+                        error_offset = ?error.telemetry_offset(),
+                        "failed to extract text from page"
+                    );
                 }
             }
         }
@@ -10642,10 +10682,11 @@ impl PdfDocument {
                 Ok(ordered) => {
                     spans = ordered.into_iter().map(|o| o.span).collect();
                 }
-                Err(e) => {
+                Err(_) => {
                     tracing::warn!(
-                        "XY-cut reading order failed on page {page_index} ({e}), \
-                         falling back to row-aware sort"
+                        page_index,
+                        error_code = "reading_order_error",
+                        "XY-cut reading order failed; falling back to row-aware sort"
                     );
                     spans.sort_by(|a, b| crate::utils::row_aware_span_cmp(a.bbox.y, a.bbox.x, b.bbox.y, b.bbox.x));
                     Self::reorder_rowspan_labels(&mut spans);
@@ -15766,12 +15807,13 @@ impl PdfDocument {
                             combined.extend_from_slice(&decoded);
                             combined.push(b'\n');
                         }
-                        Err(e) => {
+                        Err(error) => {
                             tracing::warn!(
                                 target: crate::LOG_TARGET_ROOT,
                                 operation = "decode_optional_page_content",
                                 page_index,
-                                error = %e,
+                                error_code = error.telemetry_code(),
+                                error_offset = ?error.telemetry_offset(),
                                 "skipping corrupt optional page content stream"
                             );
                         }
@@ -15801,12 +15843,13 @@ impl PdfDocument {
                         combined.extend_from_slice(&decoded);
                         combined.push(b'\n');
                     }
-                    Err(e) => {
+                    Err(error) => {
                         tracing::warn!(
                             target: crate::LOG_TARGET_ROOT,
                             operation = "decode_optional_page_content",
                             page_index,
-                            error = %e,
+                            error_code = error.telemetry_code(),
+                            error_offset = ?error.telemetry_offset(),
                             "skipping corrupt optional page content stream"
                         );
                     }
@@ -15823,7 +15866,6 @@ impl PdfDocument {
         tracing::trace!(
             page = page_index,
             bytes = content_data.len(),
-            content = %String::from_utf8_lossy(&content_data),
             "retrieved page content data"
         );
 
@@ -16043,8 +16085,12 @@ impl PdfDocument {
                 }
 
                 Operator::Do { name } => {
-                    if let Err(e) = self.process_form_xobject_paths(&name, &mut extractor, &mut state_stack) {
-                        tracing::warn!("Failed to process XObject '{}' in path extraction: {}", name, e);
+                    if let Err(error) = self.process_form_xobject_paths(&name, &mut extractor, &mut state_stack) {
+                        tracing::warn!(
+                            error_code = error.telemetry_code(),
+                            error_offset = ?error.telemetry_offset(),
+                            "failed to process XObject in path extraction"
+                        );
                     }
                 }
 
@@ -16591,8 +16637,12 @@ impl PdfDocument {
                 Operator::ClipEvenOdd => extractor.clip_even_odd(),
 
                 Operator::Do { name: nested_name } => {
-                    if let Err(e) = self.process_form_xobject_paths(&nested_name, extractor, state_stack) {
-                        tracing::warn!("Failed to process nested XObject '{}': {}", nested_name, e);
+                    if let Err(error) = self.process_form_xobject_paths(&nested_name, extractor, state_stack) {
+                        tracing::warn!(
+                            error_code = error.telemetry_code(),
+                            error_offset = ?error.telemetry_offset(),
+                            "failed to process nested XObject"
+                        );
                     }
                 }
 
@@ -18696,8 +18746,12 @@ impl PdfDocument {
                     }
                     data
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to decode Form XObject stream: {}, skipping", e);
+                Err(error) => {
+                    tracing::warn!(
+                        error_code = error.telemetry_code(),
+                        error_offset = ?error.telemetry_offset(),
+                        "failed to decode Form XObject stream; skipping"
+                    );
                     xobject_stack.pop();
                     return Ok(Vec::new());
                 }
@@ -19128,8 +19182,12 @@ impl PdfDocument {
                     }
                     data
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to decode Form XObject stream: {}, skipping", e);
+                Err(error) => {
+                    tracing::warn!(
+                        error_code = error.telemetry_code(),
+                        error_offset = ?error.telemetry_offset(),
+                        "failed to decode Form XObject stream; skipping"
+                    );
                     xobject_stack.pop();
                     return Ok(Vec::new());
                 }
@@ -25822,7 +25880,11 @@ mod tests {
         });
         let warning = warning.unwrap_or_else(|| panic!("missing optional-content warning: {events:#?}"));
         assert_eq!(warning.fields.get("page_index").map(String::as_str), Some("0"));
-        assert!(warning.fields.contains_key("error"));
+        assert_eq!(
+            warning.fields.get("error_code").map(String::as_str),
+            Some("decode_error")
+        );
+        assert!(!warning.fields.contains_key("error"));
         assert!(events.iter().all(|event| event.level != Level::ERROR));
     }
 
@@ -25971,7 +26033,7 @@ mod tests {
             1,
             "expected exactly one encryption warning: {events:#?}"
         );
-        assert_eq!(warnings[0].target, format!("{}::document", crate::LOG_TARGET_ROOT));
+        assert_eq!(warnings[0].target, crate::LOG_TARGET_ROOT);
         assert_eq!(
             warnings[0].fields.get("operation").map(String::as_str),
             Some("initialize_encryption")
@@ -25984,6 +26046,41 @@ mod tests {
             !format!("{events:?}").contains(CONFIDENTIAL_MARKER),
             "encryption telemetry exposed attacker-controlled error text: {events:#?}"
         );
+    }
+
+    #[test]
+    fn unresolved_encryption_references_emit_one_counted_warning() {
+        let encryption_dictionary = HashMap::from([
+            ("V".to_string(), Object::Reference(ObjectRef::new(900, 0))),
+            ("R".to_string(), Object::Reference(ObjectRef::new(901, 0))),
+        ]);
+
+        let (_, events) = capture_events(|| {
+            resolve_encrypt_dictionary_references(&encryption_dictionary, |_| {
+                Err(Error::InvalidPdf("CONFIDENTIAL_ENCRYPT_REFERENCE".repeat(4096)))
+            })
+        });
+
+        let warnings: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event.level == Level::WARN
+                    && event.target == crate::LOG_TARGET_ROOT
+                    && event.fields.get("operation").map(String::as_str) == Some("resolve_encrypt_reference")
+            })
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected one aggregate encryption warning: {events:#?}"
+        );
+        assert_eq!(
+            warnings[0].fields.get("error_code").map(String::as_str),
+            Some("unresolved_reference")
+        );
+        assert_eq!(warnings[0].fields.get("skipped_count").map(String::as_str), Some("2"));
+        assert!(!warnings[0].fields.contains_key("error"));
+        assert!(!format!("{events:?}").contains("CONFIDENTIAL_ENCRYPT_REFERENCE"));
     }
 
     #[test]

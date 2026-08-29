@@ -342,11 +342,12 @@ fn reconstruct_minimal_trailer<R: Read + Seek>(
                         break;
                     }
                 }
-                Err(e) => {
+                Err(error) => {
                     tracing::trace!(
                         object_id = obj_num,
                         offset = entry.offset,
-                        error = %e,
+                        error_code = error.telemetry_code(),
+                        error_offset = ?error.telemetry_offset(),
                         "failed to load object"
                     );
                     continue;
