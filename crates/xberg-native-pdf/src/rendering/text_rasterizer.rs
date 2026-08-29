@@ -487,14 +487,51 @@ impl TextRasterizer {
         font_name: &str,
         warning: Option<crate::extractors::warnings::Warning>,
     ) {
-        let (Some(warning), Some(reason)) = (warning, tally.reason()) else {
+        let (Some(mut warning), Some(reason)) = (warning, tally.reason()) else {
             return;
         };
         if !self.first_report_for(font_name, reason) {
             return;
         }
-        tracing::warn!(target: "xberg_native_pdf::fonts", "{}", warning.message);
+        if !font_name.is_empty() {
+            warning.message = warning.message.replace(font_name, "PDF font");
+        }
+        tracing::warn!(
+            target: "xberg_native_pdf::fonts",
+            operation = "render_glyph",
+            error_code = "glyph_dropped",
+            message = warning.message,
+            "glyph rendering omitted content"
+        );
         crate::extractors::warnings::push_global_warning(warning);
+    }
+
+    fn warn_font_not_found(_pdf_font_name: &str) {
+        tracing::warn!(
+            target: "xberg_native_pdf::fonts",
+            operation = "resolve_font",
+            error_code = "font_not_found",
+            "no usable PDF font was found; text may render incorrectly; install common system fonts"
+        );
+    }
+
+    fn warn_invalid_embedded_font(_pdf_font_name: &str) {
+        tracing::warn!(
+            target: "xberg_native_pdf::fonts",
+            operation = "parse_embedded_font",
+            error_code = "invalid_font_data",
+            "embedded PDF font data could not be parsed; falling back to a system font"
+        );
+    }
+
+    #[cfg(any(feature = "cjk-render-fallback", test))]
+    fn warn_cjk_fallback_unavailable(_pdf_font_name: &str) {
+        tracing::warn!(
+            target: "xberg_native_pdf::fonts",
+            operation = "load_cjk_fallback",
+            error_code = "font_unavailable",
+            "CJK predefined-CIDFont substitution is unavailable; falling back to advance-only rendering"
+        );
     }
 
     /// Render a text string (Tj operator).
@@ -754,11 +791,7 @@ impl TextRasterizer {
             )?)
         } else {
             let font_name = font_info.as_ref().map(|i| i.base_font.as_str()).unwrap_or("unknown");
-            tracing::warn!(
-                "No font found for '{}', text may render incorrectly. \
-                 Install common fonts (e.g., liberation-fonts, dejavu-fonts, or noto-fonts).",
-                font_name
-            );
+            Self::warn_font_not_found(font_name);
             if let Some(ref info) = font_info {
                 self.report_omitted_drops(&decode_drops, &info.base_font);
             }
@@ -1094,10 +1127,7 @@ impl TextRasterizer {
             let font_opt = harfrust::FontRef::from_index(&font_data, index).ok();
             if font_opt.is_none() {
                 if allow_fallback {
-                    tracing::warn!(
-                        "Failed to create harfrust font from embedded data for '{}', falling back to system font",
-                        pdf_font_name
-                    );
+                    Self::warn_invalid_embedded_font(pdf_font_name);
                     if let Some((fb_id, fallback_data, fallback_index)) = self.load_font_data(pdf_font_name) {
                         return self.render_unicode_text(
                             pixmap,
@@ -1669,12 +1699,7 @@ impl TextRasterizer {
         let face = match render_cjk_fallback_face() {
             Some(f) => f,
             None => {
-                tracing::warn!(
-                    "Font '{}': CJK predefined-CIDFont substitution unavailable — \
-                     bundled Droid Sans Fallback face failed to load. Falling back \
-                     to .notdef paint with advance-only.",
-                    font_info.base_font
-                );
+                Self::warn_cjk_fallback_unavailable(&font_info.base_font);
                 return self.measure_only_advance(bytes, font_info, gs);
             }
         };
@@ -1982,7 +2007,54 @@ mod tests {
     use super::*;
     use crate::content::graphics_state::GraphicsState;
     use crate::fonts::{Encoding, FontInfo, VerticalMetrics};
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
+    use std::sync::{Arc, Mutex};
+    use tracing::Level;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    #[derive(Clone, Debug)]
+    struct CapturedEvent {
+        level: Level,
+        fields: BTreeMap<String, String>,
+    }
+
+    #[derive(Clone, Default)]
+    struct EventCapture(Arc<Mutex<Vec<CapturedEvent>>>);
+
+    impl<S> Layer<S> for EventCapture
+    where
+        S: tracing::Subscriber,
+    {
+        fn on_event(&self, event: &tracing::Event<'_>, _context: tracing_subscriber::layer::Context<'_, S>) {
+            let mut visitor = FieldCapture::default();
+            event.record(&mut visitor);
+            self.0.lock().unwrap().push(CapturedEvent {
+                level: *event.metadata().level(),
+                fields: visitor.0,
+            });
+        }
+    }
+
+    #[derive(Default)]
+    struct FieldCapture(BTreeMap<String, String>);
+
+    impl tracing::field::Visit for FieldCapture {
+        fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            self.0.insert(field.name().to_string(), format!("{value:?}"));
+        }
+
+        fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+            self.0.insert(field.name().to_string(), value.to_string());
+        }
+    }
+
+    fn capture_events(operation: impl FnOnce()) -> Vec<CapturedEvent> {
+        let capture = EventCapture::default();
+        let subscriber = tracing_subscriber::registry().with(capture.clone());
+        tracing::subscriber::with_default(subscriber, operation);
+        capture.0.lock().unwrap().clone()
+    }
 
     /// A run with no drops must produce no warning.
     #[test]
@@ -1990,23 +2062,75 @@ mod tests {
         assert!(GlyphDropTally::default().warning("AnyFont").is_none());
     }
 
-    /// The warning names the font, the first dropped glyph, and the count.
+    /// The warning describes the first dropped glyph and count without
+    /// exposing the PDF-provided font name.
     #[test]
-    fn glyph_drop_warning_names_font_first_glyph_and_count() {
+    fn glyph_drop_warning_hides_font_and_preserves_details() {
+        const SECRET_FONT: &str = "CONFIDENTIAL_FONT_27f4";
+        let _ = crate::extractors::warnings::drain_global_warnings();
         let mut tally = GlyphDropTally::default();
         tally.record("no outline", 0x41, 7);
         tally.record("no glyph id", 0x42, 0);
         tally.record("no outline", 0x43, 9);
-        let warning = tally.warning("AAAAAA+Broken").expect("recorded drops must warn");
+        let rasterizer = TextRasterizer::with_fontdb(Arc::new(fontdb::Database::new()));
+
+        let events = capture_events(|| rasterizer.report_drops(&tally, SECRET_FONT));
+        let warnings = crate::extractors::warnings::drain_global_warnings();
+        assert_eq!(warnings.len(), 1);
+        let warning = &warnings[0];
         assert_eq!(
             warning.category,
             crate::extractors::warnings::WarningCategory::GlyphDropped
         );
-        assert!(warning.message.contains("AAAAAA+Broken"));
+        assert!(!warning.message.contains(SECRET_FONT));
         assert!(warning.message.contains("3 glyph(s)"));
         assert!(warning.message.contains("0x41"));
         assert!(warning.message.contains("(glyph 7)"));
         assert!(warning.message.contains("no outline"));
+        let rendered = format!("{events:?}");
+        assert!(!rendered.contains(SECRET_FONT));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| {
+                    event.level == Level::WARN
+                        && event.fields.get("operation").map(String::as_str) == Some("render_glyph")
+                        && event.fields.get("error_code").map(String::as_str) == Some("glyph_dropped")
+                })
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn font_recovery_warnings_hide_pdf_font_names() {
+        const SECRET_FONT: &str = "CONFIDENTIAL_FONT_8c15";
+        let events = capture_events(|| {
+            TextRasterizer::warn_font_not_found(SECRET_FONT);
+            TextRasterizer::warn_invalid_embedded_font(SECRET_FONT);
+            TextRasterizer::warn_cjk_fallback_unavailable(SECRET_FONT);
+        });
+
+        let rendered = format!("{events:?}");
+        assert!(!rendered.contains(SECRET_FONT));
+        for (operation, error_code) in [
+            ("resolve_font", "font_not_found"),
+            ("parse_embedded_font", "invalid_font_data"),
+            ("load_cjk_fallback", "font_unavailable"),
+        ] {
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| {
+                        event.level == Level::WARN
+                            && event.fields.get("operation").map(String::as_str) == Some(operation)
+                            && event.fields.get("error_code").map(String::as_str) == Some(error_code)
+                    })
+                    .count(),
+                1,
+                "missing exact {operation}/{error_code} warning: {events:#?}"
+            );
+        }
     }
 
     /// A font is named once per page, not once per text run (#991) and not

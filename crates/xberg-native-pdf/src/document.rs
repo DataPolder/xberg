@@ -191,6 +191,10 @@ impl BoundedRecoveryTelemetry {
 }
 
 impl BoundedObjectStreamCache {
+    fn checked_capacity_bytes(capacity: usize, element_size: usize) -> Option<usize> {
+        capacity.checked_mul(element_size)
+    }
+
     fn new(max_bytes: usize) -> Self {
         Self {
             map: HashMap::new(),
@@ -237,9 +241,10 @@ impl BoundedObjectStreamCache {
     fn estimate_size(objects: &HashMap<u32, Object>) -> Option<usize> {
         let headers =
             std::mem::size_of::<HashMap<u32, Object>>().checked_add(std::mem::size_of::<Arc<HashMap<u32, Object>>>())?;
-        let buckets = objects
-            .capacity()
-            .checked_mul(std::mem::size_of::<u32>() + std::mem::size_of::<Object>() + std::mem::size_of::<usize>())?;
+        let buckets = Self::checked_capacity_bytes(
+            objects.capacity(),
+            std::mem::size_of::<u32>() + std::mem::size_of::<Object>() + std::mem::size_of::<usize>(),
+        )?;
         let mut total = headers.checked_add(buckets)?;
         let mut stack: Vec<&Object> = objects.values().collect();
         while let Some(object) = stack.pop() {
@@ -254,7 +259,7 @@ impl BoundedObjectStreamCache {
             Object::Name(value) => Some(value.capacity()),
             Object::Array(values) => {
                 stack.extend(values);
-                values.capacity().checked_mul(std::mem::size_of::<Object>())
+                Self::checked_capacity_bytes(values.capacity(), std::mem::size_of::<Object>())
             }
             Object::Dictionary(values) => Self::estimate_dictionary(values, stack),
             Object::Stream { dict, data } => Self::estimate_dictionary(dict, stack)?.checked_add(data.len()),
@@ -263,7 +268,8 @@ impl BoundedObjectStreamCache {
     }
 
     fn estimate_dictionary<'a>(values: &'a HashMap<String, Object>, stack: &mut Vec<&'a Object>) -> Option<usize> {
-        let buckets = values.capacity().checked_mul(
+        let buckets = Self::checked_capacity_bytes(
+            values.capacity(),
             std::mem::size_of::<String>() + std::mem::size_of::<Object>() + std::mem::size_of::<usize>(),
         )?;
         let mut total = std::mem::size_of::<HashMap<String, Object>>().checked_add(buckets)?;
@@ -26407,6 +26413,16 @@ mod tests {
         pdf
     }
 
+    fn corrupt_third_object_header(mut pdf: Vec<u8>) -> Vec<u8> {
+        const HEADER: &[u8] = b"3 0 obj";
+        let position = pdf
+            .windows(HEADER.len())
+            .position(|window| window == HEADER)
+            .expect("test object header must exist");
+        pdf[position..position + HEADER.len()].copy_from_slice(b"X 0 bad");
+        pdf
+    }
+
     #[test]
     fn output_intent_and_page_tree_warnings_hide_attacker_controlled_details() {
         const SECRET_FILTER: &str = "CONFIDENTIAL_OUTPUT_FILTER_7b91";
@@ -26430,6 +26446,19 @@ mod tests {
             &[(3, invalid_profile_body.as_bytes())],
         ))
         .unwrap();
+        let malformed_indirect_body = format!("<< /{SECRET_PROFILE}");
+        let malformed_entry = PdfDocument::from_bytes(corrupt_third_object_header(build_catalog_test_pdf(
+            b"<< /Type /Catalog /Pages 2 0 R /OutputIntents [3 0 R] >>",
+            pages,
+            &[(3, malformed_indirect_body.as_bytes())],
+        )))
+        .unwrap();
+        let malformed_profile = PdfDocument::from_bytes(corrupt_third_object_header(build_catalog_test_pdf(
+            b"<< /Type /Catalog /Pages 2 0 R /OutputIntents [<< /DestOutputProfile 3 0 R >>] >>",
+            pages,
+            &[(3, malformed_indirect_body.as_bytes())],
+        )))
+        .unwrap();
         let unknown_page_catalog = b"<< /Type /Catalog /Pages 2 0 R >>";
         let unknown_page_body = format!("<< /Type /{SECRET_PAGE_TYPE} /Kids [] /Count 0 >>");
         let unknown_page = PdfDocument::from_bytes(build_catalog_test_pdf(
@@ -26440,14 +26469,8 @@ mod tests {
         .unwrap();
 
         let (_, events) = capture_events(|| {
-            crate::error::trace_recovery(
-                "load_output_intent_entry",
-                &Error::InvalidPdf(SECRET_PROFILE.to_string()),
-            );
-            crate::error::trace_recovery(
-                "load_output_intent_profile",
-                &Error::InvalidPdf(SECRET_PROFILE.to_string()),
-            );
+            assert!(malformed_entry.output_intent_cmyk_profile().is_none());
+            assert!(malformed_profile.output_intent_cmyk_profile().is_none());
             assert!(undecodable_profile.output_intent_cmyk_profile().is_none());
             assert!(invalid_profile.output_intent_cmyk_profile().is_none());
             assert_eq!(unknown_page.count_pages_recursive(ObjectRef::new(2, 0), 0).unwrap(), 0);
@@ -26457,8 +26480,8 @@ mod tests {
             .filter(|event| event.level == Level::WARN && event.target == crate::LOG_TARGET_ROOT)
             .collect();
         for (operation, error_code) in [
-            ("load_output_intent_entry", "invalid_pdf"),
-            ("load_output_intent_profile", "invalid_pdf"),
+            ("load_output_intent_entry", "parse_error"),
+            ("load_output_intent_profile", "parse_error"),
             ("decode_output_intent_profile", "unsupported_filter"),
             ("parse_output_intent_profile", "invalid_icc_profile"),
             ("traverse_page_tree", "unknown_node_type"),
@@ -28061,6 +28084,27 @@ mod tests {
         assert!(!cache.insert(ObjectRef::new(10, 0), Arc::new(HashMap::from([(20, nested)]))));
         assert_eq!(cache.map.len(), 0);
         assert_eq!(cache.current_bytes, 0);
+    }
+
+    #[test]
+    fn object_stream_cache_accounts_for_nested_stream_bytes() {
+        let nested = Object::Array(vec![Object::Dictionary(HashMap::from([(
+            "payload".to_string(),
+            Object::Stream {
+                dict: HashMap::new(),
+                data: bytes::Bytes::from(vec![0; 1024 * 1024]),
+            },
+        )]))]);
+        let mut cache = BoundedObjectStreamCache::new(4 * 1024);
+
+        assert!(!cache.insert(ObjectRef::new(10, 0), Arc::new(HashMap::from([(20, nested)]))));
+        assert_eq!(cache.map.len(), 0);
+        assert_eq!(cache.current_bytes, 0);
+    }
+
+    #[test]
+    fn object_stream_cache_rejects_accounting_overflow() {
+        assert_eq!(BoundedObjectStreamCache::checked_capacity_bytes(usize::MAX, 2), None);
     }
 
     #[test]
