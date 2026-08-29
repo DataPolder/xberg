@@ -971,13 +971,48 @@ fn retained_text_word_confidence_stats(
     for word in words {
         let cleaned = strip_control_characters(&word.text);
         let word_tokens = cleaned.split_whitespace().collect::<Vec<_>>();
-        if word_tokens.is_empty() || !retained_tokens[retained_index..].starts_with(&word_tokens) {
+        if word_tokens.is_empty() {
             continue;
         }
+        let Some(next_retained_index) = find_token_sequence_end(&retained_tokens, retained_index, &word_tokens) else {
+            break;
+        };
         stats.record(f64::from(word.confidence));
-        retained_index = retained_index.saturating_add(word_tokens.len());
+        retained_index = next_retained_index;
     }
     stats
+}
+
+fn find_token_sequence_end(haystack: &[&str], start: usize, needle: &[&str]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(start);
+    }
+
+    let mut prefix_lengths = vec![0usize; needle.len()];
+    for index in 1..needle.len() {
+        let mut matched = prefix_lengths[index - 1];
+        while matched > 0 && needle[index] != needle[matched] {
+            matched = prefix_lengths[matched - 1];
+        }
+        if needle[index] == needle[matched] {
+            matched += 1;
+        }
+        prefix_lengths[index] = matched;
+    }
+
+    let mut matched = 0usize;
+    for (offset, token) in haystack[start..].iter().enumerate() {
+        while matched > 0 && *token != needle[matched] {
+            matched = prefix_lengths[matched - 1];
+        }
+        if *token == needle[matched] {
+            matched += 1;
+            if matched == needle.len() {
+                return Some(start + offset + 1);
+            }
+        }
+    }
+    None
 }
 
 /// Extract OcrElements via Tesseract's iterator APIs with rich metadata.
@@ -2025,6 +2060,19 @@ mod tests {
     };
     use tempfile::tempdir;
 
+    fn confidence_word(text: &str, confidence: f32) -> xberg_tesseract::WordData {
+        xberg_tesseract::WordData {
+            text: text.to_string(),
+            left: 0,
+            top: 0,
+            right: 10,
+            bottom: 10,
+            confidence,
+            font_attrs: None,
+            language: None,
+        }
+    }
+
     #[test]
     fn should_publish_only_retained_hocr_word_confidence_metadata() {
         let hocr = r#"<div class="ocr_page" title="ppageno 0">
@@ -2089,16 +2137,7 @@ mod tests {
 
     #[test]
     fn should_publish_zero_text_confidence_words_when_every_iterator_word_is_filtered() {
-        let words = [xberg_tesseract::WordData {
-            text: "\0".to_string(),
-            left: 0,
-            top: 0,
-            right: 10,
-            bottom: 10,
-            confidence: 95.0,
-            font_attrs: None,
-            language: None,
-        }];
+        let words = [confidence_word("\u{001f}", 95.0)];
         let stats = retained_text_word_confidence_stats("", &words);
         let mut metadata = HashMap::from([
             ("word_count".to_string(), serde_json::json!(1)),
@@ -2119,17 +2158,11 @@ mod tests {
 
     #[test]
     fn should_publish_only_partially_retained_text_word_confidences() {
-        let word = |text: &str, confidence: f32| xberg_tesseract::WordData {
-            text: text.to_string(),
-            left: 0,
-            top: 0,
-            right: 10,
-            bottom: 10,
-            confidence,
-            font_attrs: None,
-            language: None,
-        };
-        let words = [word("RETAINED", 20.0), word("\0", 95.0), word("WORDS", 90.0)];
+        let words = [
+            confidence_word("RETAINED", 20.0),
+            confidence_word("\u{001f}", 95.0),
+            confidence_word("WORDS", 90.0),
+        ];
         let stats = retained_text_word_confidence_stats("RETAINED WORDS", &words);
         let mut metadata = HashMap::from([
             ("word_count".to_string(), serde_json::json!(3)),
@@ -2146,6 +2179,62 @@ mod tests {
         assert_eq!(metadata.get("median_word_conf"), Some(&serde_json::json!(55)));
         assert_eq!(metadata.get("p10_word_conf"), Some(&serde_json::json!(20)));
         assert_eq!(metadata.get("low_conf_word_count"), Some(&serde_json::json!(1)));
+    }
+
+    #[test]
+    fn should_align_words_after_a_retained_iterator_gap() {
+        let words = [confidence_word("FIRST", 10.0), confidence_word("LAST", 90.0)];
+
+        let stats = retained_text_word_confidence_stats("FIRST OMITTED LAST", &words);
+
+        assert_eq!(stats.word_count(), 2);
+        assert_eq!(stats.mean(), Some(50));
+        assert_eq!(stats.median(), Some(50));
+        assert_eq!(stats.p10(), Some(10));
+        assert_eq!(stats.low_confidence_word_count(), 1);
+    }
+
+    #[test]
+    fn should_align_repeated_words_without_losing_later_words() {
+        let words = [confidence_word("A", 20.0), confidence_word("B", 80.0)];
+
+        let stats = retained_text_word_confidence_stats("A A B", &words);
+
+        assert_eq!(stats.word_count(), 2);
+        assert_eq!(stats.mean(), Some(50));
+        assert_eq!(stats.median(), Some(50));
+        assert_eq!(stats.p10(), Some(20));
+        assert_eq!(stats.low_confidence_word_count(), 1);
+    }
+
+    #[test]
+    fn should_align_punctuation_and_unicode_exactly() {
+        let words = [
+            confidence_word("Hello,", 60.0),
+            confidence_word("Gr\u{00fc}\u{00df}e", 70.0),
+            confidence_word("\u{4e16}\u{754c}!", 80.0),
+        ];
+
+        let stats = retained_text_word_confidence_stats("Hello, Gr\u{00fc}\u{00df}e \u{4e16}\u{754c}!", &words);
+
+        assert_eq!(stats.word_count(), 3);
+        assert_eq!(stats.mean(), Some(70));
+        assert_eq!(stats.median(), Some(70));
+        assert_eq!(stats.p10(), Some(60));
+        assert_eq!(stats.low_confidence_word_count(), 0);
+    }
+
+    #[test]
+    fn should_align_multi_token_words_across_whitespace_variants() {
+        let words = [confidence_word("ALPHA\tBETA", 75.0), confidence_word("GAMMA", 85.0)];
+
+        let stats = retained_text_word_confidence_stats("ALPHA  \n BETA\r\nGAMMA", &words);
+
+        assert_eq!(stats.word_count(), 2);
+        assert_eq!(stats.mean(), Some(80));
+        assert_eq!(stats.median(), Some(80));
+        assert_eq!(stats.p10(), Some(75));
+        assert_eq!(stats.low_confidence_word_count(), 0);
     }
 
     /// Exact count: a known number of skipped words must produce exactly the
