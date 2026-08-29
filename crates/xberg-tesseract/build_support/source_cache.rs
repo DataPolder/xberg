@@ -44,6 +44,18 @@ pub(crate) fn source_tree_is_complete(source_dir: &Path) -> bool {
     source_dir.is_dir() && source_dir.join(SOURCE_ROOT_MARKER).is_file()
 }
 
+pub(crate) fn canonicalize_trusted_build_root(path: &Path) -> io::Result<PathBuf> {
+    let canonical = fs::canonicalize(path)?;
+    let metadata = fs::symlink_metadata(&canonical)?;
+    if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+        return Ok(canonical);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("Cargo build root is not a regular directory: {}", path.display()),
+    ))
+}
+
 pub(crate) fn prepare_verified_artifact(
     cache_root: &Path,
     artifact: &SourceArtifact<'_>,

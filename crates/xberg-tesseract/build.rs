@@ -24,8 +24,8 @@ mod source_cache;
 mod build_tesseract {
     use crate::source_archive::{ArchiveLimits, extract_source_archive};
     use crate::source_cache::{
-        PreparedSourceTree, SourceArtifact, copy_verified_artifact, ensure_directory, ensure_private_cache_root,
-        prepare_source_tree, prepare_verified_artifact, read_exact_size,
+        PreparedSourceTree, SourceArtifact, canonicalize_trusted_build_root, copy_verified_artifact, ensure_directory,
+        ensure_private_cache_root, prepare_source_tree, prepare_verified_artifact, read_exact_size,
     };
     use cmake::Config;
     use std::env;
@@ -170,8 +170,7 @@ mod build_tesseract {
     }
 
     fn workspace_cache_dir_from_out_dir() -> Option<PathBuf> {
-        let out_dir = env::var_os("OUT_DIR")?;
-        let mut path = PathBuf::from(out_dir);
+        let mut path = cargo_build_root();
         for _ in 0..4 {
             if !path.pop() {
                 return None;
@@ -426,7 +425,9 @@ mod build_tesseract {
     }
 
     fn cargo_build_root() -> PathBuf {
-        PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR not set"))
+        let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR not set"));
+        canonicalize_trusted_build_root(&out_dir)
+            .unwrap_or_else(|error| panic!("Failed to canonicalize Cargo build root {}: {error}", out_dir.display()))
     }
 
     /// Find the WASI SDK installation directory.

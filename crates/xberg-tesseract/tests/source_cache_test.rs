@@ -347,6 +347,38 @@ fn should_restrict_automatic_cache_root_to_owner() {
 
 #[cfg(unix)]
 #[test]
+fn should_canonicalize_user_owned_symlinks_above_trusted_build_root() {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TestDir::new();
+    let real_workspace = temp_dir.path().join("real-workspace");
+    let real_out_dir = real_workspace.join("target/debug/build/xberg-tesseract/out");
+    fs::create_dir_all(&real_out_dir).expect("create real Cargo build root");
+    let linked_workspace = temp_dir.path().join("linked-workspace");
+    symlink(&real_workspace, &linked_workspace).expect("create user-owned workspace symlink");
+    let linked_out_dir = linked_workspace.join("target/debug/build/xberg-tesseract/out");
+
+    let trusted_root =
+        source_cache::canonicalize_trusted_build_root(&linked_out_dir).expect("canonicalize trusted Cargo build root");
+
+    assert_eq!(
+        trusted_root,
+        fs::canonicalize(&real_out_dir).expect("canonicalize expected root")
+    );
+    let private_cache = trusted_root.join("private-cache");
+    ensure_private_cache_root(&private_cache, &trusted_root).expect("create cache below trusted root");
+
+    let outside = temp_dir.path().join("outside-cache");
+    fs::create_dir(&outside).expect("create outside cache directory");
+    let redirected_cache = trusted_root.join("redirected-cache");
+    symlink(&outside, &redirected_cache).expect("create cache symlink below trusted root");
+    let error = ensure_private_cache_root(&redirected_cache, &trusted_root)
+        .expect_err("symlink below trusted root must fail closed");
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+}
+
+#[cfg(unix)]
+#[test]
 fn should_reject_symlinked_cache_component() {
     use std::os::unix::fs::symlink;
 
