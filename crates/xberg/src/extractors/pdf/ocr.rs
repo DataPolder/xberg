@@ -1323,10 +1323,17 @@ async fn recover_image_xobjects(
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 fn account_xobject_structured_output(
     result: &crate::types::ExtractedDocument,
+    retain_image_preprocessing: bool,
     budget: &mut crate::extractors::security::SecurityBudget,
 ) -> crate::Result<()> {
     for table in &result.tables {
         budget.account_text(table.markdown.len())?;
+        if let Some(table_id) = &table.table_id {
+            budget.account_text(table_id.len())?;
+        }
+        for column in table.columns.iter().flatten() {
+            budget.account_text(column.len())?;
+        }
         for row in &table.cells {
             budget.add_cells(row.len())?;
             for cell in row {
@@ -1336,6 +1343,19 @@ fn account_xobject_structured_output(
     }
     for formula in &result.formulas {
         budget.account_text(formula.latex.len())?;
+    }
+    for usage in result.llm_usage.iter().flatten() {
+        budget.account_text(usage.model.len())?;
+        budget.account_text(usage.source.len())?;
+        if let Some(finish_reason) = &usage.finish_reason {
+            budget.account_text(finish_reason.len())?;
+        }
+    }
+    if retain_image_preprocessing && let Some(metadata) = &result.metadata.image_preprocessing {
+        budget.account_text(metadata.resample_method.len())?;
+        if let Some(resize_error) = &metadata.resize_error {
+            budget.account_text(resize_error.len())?;
+        }
     }
     Ok(())
 }
@@ -1367,7 +1387,7 @@ async fn collect_xobject_recovery_result(
         }
         outcome.text.push_str(&result.content);
     }
-    account_xobject_structured_output(&result, budget)?;
+    account_xobject_structured_output(&result, outcome.image_preprocessing.is_none(), budget)?;
     outcome.llm_usage.extend(result.llm_usage.unwrap_or_default());
     if outcome.image_preprocessing.is_none() {
         outcome.image_preprocessing = result.metadata.image_preprocessing;
@@ -13668,7 +13688,7 @@ Name: ___
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     #[tokio::test]
     async fn xobject_recovery_rejects_oversized_structured_text() {
-        use crate::types::{ExtractedDocument, Formula, Table};
+        use crate::types::{ExtractedDocument, Formula, ImagePreprocessingMetadata, LlmUsage, Metadata, Table};
 
         let oversized = "123456789".to_string();
         let results = [
@@ -13684,6 +13704,81 @@ Name: ___
                     cells: vec![vec![oversized.clone()]],
                     ..Default::default()
                 }],
+                ..Default::default()
+            },
+            ExtractedDocument {
+                tables: vec![Table {
+                    table_id: Some(oversized.clone()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ExtractedDocument {
+                tables: vec![Table {
+                    columns: Some(vec![oversized.clone()]),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ExtractedDocument {
+                llm_usage: Some(vec![LlmUsage {
+                    model: oversized.clone(),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            },
+            ExtractedDocument {
+                llm_usage: Some(vec![LlmUsage {
+                    source: oversized.clone(),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            },
+            ExtractedDocument {
+                llm_usage: Some(vec![LlmUsage {
+                    finish_reason: Some(oversized.clone()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            },
+            ExtractedDocument {
+                metadata: Metadata {
+                    image_preprocessing: Some(ImagePreprocessingMetadata {
+                        original_dimensions: (1, 1).into(),
+                        original_dpi: (72.0, 72.0).into(),
+                        target_dpi: 72,
+                        scale_factor: 1.0,
+                        auto_adjusted: false,
+                        final_dpi: 72,
+                        new_dimensions: None,
+                        resample_method: oversized.clone(),
+                        dimension_clamped: false,
+                        calculated_dpi: None,
+                        skipped_resize: true,
+                        resize_error: None,
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ExtractedDocument {
+                metadata: Metadata {
+                    image_preprocessing: Some(ImagePreprocessingMetadata {
+                        original_dimensions: (1, 1).into(),
+                        original_dpi: (72.0, 72.0).into(),
+                        target_dpi: 72,
+                        scale_factor: 1.0,
+                        auto_adjusted: false,
+                        final_dpi: 72,
+                        new_dimensions: None,
+                        resample_method: String::new(),
+                        dimension_clamped: false,
+                        calculated_dpi: None,
+                        skipped_resize: false,
+                        resize_error: Some(oversized.clone()),
+                    }),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ExtractedDocument {
