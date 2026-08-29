@@ -47,7 +47,9 @@ thiserror = { workspace = true }
 cc = { version = "^1.4.4", optional = true }
 cmake = { version = "0.1.58", optional = true }
 pkg-config = { version = "0.3.34", optional = true }
+libc = { workspace = true }
 sha2 = { workspace = true }
+tempfile = { workspace = true }
 vcpkg = { version = "0.2.15", optional = true }
 zip = { version = ">=7.0.0", optional = true, default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
@@ -60,4 +62,7 @@ reqwest = { workspace = true, default-features = false, features = ["blocking", 
 
 [dev-dependencies]
 image = { workspace = true, features = ["png"] }
+libc = { workspace = true }
 sha2 = { workspace = true }
+tempfile = { workspace = true }
+zip = { version = ">=7.0.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }

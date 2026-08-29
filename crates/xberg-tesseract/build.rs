@@ -8,6 +8,12 @@
     feature = "build-tesseract-wasm",
     all(feature = "build-tesseract", not(feature = "dynamic-linking"))
 ))]
+#[path = "build_support/source_archive.rs"]
+mod source_archive;
+#[cfg(any(
+    feature = "build-tesseract-wasm",
+    all(feature = "build-tesseract", not(feature = "dynamic-linking"))
+))]
 #[path = "build_support/source_cache.rs"]
 mod source_cache;
 
@@ -16,9 +22,10 @@ mod source_cache;
     all(feature = "build-tesseract", not(feature = "dynamic-linking"))
 ))]
 mod build_tesseract {
+    use crate::source_archive::{ArchiveLimits, extract_source_archive};
     use crate::source_cache::{
-        PreparedSourceTree, SourceArtifact, copy_verified_artifact, ensure_directory, prepare_source_tree,
-        prepare_verified_artifact,
+        PreparedSourceTree, SourceArtifact, copy_verified_artifact, ensure_directory, ensure_private_cache_root,
+        prepare_source_tree, prepare_verified_artifact, read_exact_size,
     };
     use cmake::Config;
     use std::env;
@@ -43,21 +50,28 @@ mod build_tesseract {
     const ENG_TRAINEDDATA_SIZE: u64 = 4_113_088;
     const MAX_SOURCE_ARCHIVE_ENTRIES: usize = 50_000;
     const MAX_SOURCE_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
+    const SOURCE_ARCHIVE_LIMITS: ArchiveLimits = ArchiveLimits {
+        max_entries: MAX_SOURCE_ARCHIVE_ENTRIES,
+        max_uncompressed_bytes: MAX_SOURCE_UNCOMPRESSED_BYTES,
+    };
 
     const LEPTONICA_ARTIFACT: SourceArtifact<'static> = SourceArtifact {
         name: "leptonica.zip",
         cache_key: "leptonica-source",
         sha256: LEPTONICA_SHA256,
+        expected_size: LEPTONICA_ARCHIVE_SIZE,
     };
     const TESSERACT_ARTIFACT: SourceArtifact<'static> = SourceArtifact {
         name: "tesseract.zip",
         cache_key: "tesseract-source",
         sha256: TESSERACT_SHA256,
+        expected_size: TESSERACT_ARCHIVE_SIZE,
     };
     const ENG_TRAINEDDATA_ARTIFACT: SourceArtifact<'static> = SourceArtifact {
         name: "eng.traineddata",
         cache_key: "tessdata-fast-eng",
         sha256: ENG_TRAINEDDATA_SHA256,
+        expected_size: ENG_TRAINEDDATA_SIZE,
     };
 
     struct SourceArchiveSpec {
@@ -65,7 +79,6 @@ mod build_tesseract {
         source_name: &'static str,
         archive_root: &'static str,
         license_file: &'static str,
-        expected_size: u64,
     }
 
     const LEPTONICA_SOURCE: SourceArchiveSpec = SourceArchiveSpec {
@@ -73,14 +86,12 @@ mod build_tesseract {
         source_name: "leptonica",
         archive_root: LEPTONICA_ARCHIVE_ROOT,
         license_file: LEPTONICA_LICENSE_FILE,
-        expected_size: LEPTONICA_ARCHIVE_SIZE,
     };
     const TESSERACT_SOURCE: SourceArchiveSpec = SourceArchiveSpec {
         artifact: TESSERACT_ARTIFACT,
         source_name: "tesseract",
         archive_root: TESSERACT_ARCHIVE_ROOT,
         license_file: TESSERACT_LICENSE_FILE,
-        expected_size: TESSERACT_ARCHIVE_SIZE,
     };
 
     fn leptonica_url() -> String {
@@ -116,8 +127,8 @@ mod build_tesseract {
         source: &SourceArchiveSpec,
         url: &str,
     ) -> PreparedSourceTree {
-        let verified_archive = prepare_verified_artifact(artifact_cache_dir, &source.artifact, |destination| {
-            download_file_with_fallback(&[url], destination, source.source_name, source.expected_size)
+        let verified_archive = prepare_verified_artifact(artifact_cache_dir, &source.artifact, || {
+            download_file_with_fallback(&[url], source.source_name, source.artifact.expected_size)
         })
         .unwrap_or_else(|error| panic!("Failed to verify {} source archive: {error}", source.source_name));
 
@@ -125,7 +136,9 @@ mod build_tesseract {
             third_party_dir,
             source.source_name,
             &verified_archive,
-            |archive, destination| extract_source_archive(archive, destination, source.archive_root),
+            |archive, destination| {
+                extract_source_archive(archive, destination, source.archive_root, SOURCE_ARCHIVE_LIMITS)
+            },
         )
         .unwrap_or_else(|error| panic!("Failed to prepare {} source: {error}", source.source_name));
 
@@ -147,11 +160,10 @@ mod build_tesseract {
     fn prepare_eng_traineddata(artifact_cache_dir: &Path, destination: &Path) {
         let urls = tessdata_fast_urls();
         let url_refs = urls.iter().map(String::as_str).collect::<Vec<_>>();
-        let verified_model =
-            prepare_verified_artifact(artifact_cache_dir, &ENG_TRAINEDDATA_ARTIFACT, |temporary_path| {
-                download_file_with_fallback(&url_refs, temporary_path, "eng.traineddata", ENG_TRAINEDDATA_SIZE)
-            })
-            .unwrap_or_else(|error| panic!("Failed to verify eng.traineddata: {error}"));
+        let verified_model = prepare_verified_artifact(artifact_cache_dir, &ENG_TRAINEDDATA_ARTIFACT, || {
+            download_file_with_fallback(&url_refs, "eng.traineddata", ENG_TRAINEDDATA_SIZE)
+        })
+        .unwrap_or_else(|error| panic!("Failed to verify eng.traineddata: {error}"));
 
         copy_verified_artifact(&verified_model, destination)
             .unwrap_or_else(|error| panic!("Failed to prepare bundled eng.traineddata: {error}"));
@@ -168,39 +180,15 @@ mod build_tesseract {
         Some(path.join("xberg-tesseract-cache"))
     }
 
-    fn get_preferred_out_dir() -> PathBuf {
+    fn get_preferred_out_dir() -> (PathBuf, bool) {
         if let Ok(custom) = env::var("TESSERACT_RS_CACHE_DIR") {
-            return PathBuf::from(custom);
+            return (PathBuf::from(custom), false);
         }
 
-        if cfg!(target_os = "windows") {
-            return PathBuf::from("C:\\tess");
-        }
-
-        if let Some(workspace_cache) = workspace_cache_dir_from_out_dir() {
-            return workspace_cache;
-        }
-
-        if cfg!(target_os = "macos") {
-            let home_dir = env::var("HOME").unwrap_or_else(|_| {
-                env::var("USER")
-                    .map(|user| format!("/Users/{}", user))
-                    .expect("Neither HOME nor USER environment variable set")
-            });
-            PathBuf::from(home_dir)
-                .join("Library")
-                .join("Application Support")
-                .join("xberg-tesseract")
-        } else if cfg!(target_os = "linux") {
-            let home_dir = env::var("HOME").unwrap_or_else(|_| {
-                env::var("USER")
-                    .map(|user| format!("/home/{}", user))
-                    .expect("Neither HOME nor USER environment variable set")
-            });
-            PathBuf::from(home_dir).join(".xberg-tesseract")
-        } else {
-            panic!("Unsupported operating system");
-        }
+        (
+            workspace_cache_dir_from_out_dir().unwrap_or_else(|| cargo_build_root().join("xberg-tesseract-cache")),
+            true,
+        )
     }
 
     fn target_triple() -> String {
@@ -415,16 +403,23 @@ mod build_tesseract {
     }
 
     fn prepare_out_dir() -> PathBuf {
-        let preferred = get_preferred_out_dir();
-        match ensure_directory(&preferred) {
+        let (preferred, automatic) = get_preferred_out_dir();
+        let owner_reference = cargo_build_root();
+        let prepared = if automatic {
+            ensure_private_cache_root(&preferred, &owner_reference)
+        } else {
+            ensure_directory(&preferred)
+        };
+        match prepared {
             Ok(_) => preferred,
             Err(err) => {
                 println!(
-                    "cargo:warning=Failed to create cache dir {:?}: {}. Falling back to temp dir.",
+                    "cargo:warning=Failed to create cache dir {:?}: {}. Falling back to the Cargo build directory.",
                     preferred, err
                 );
-                let fallback = env::temp_dir().join("xberg-tesseract-cache");
-                ensure_directory(&fallback).expect("Failed to create fallback cache directory in temp dir");
+                let fallback = cargo_build_root().join("xberg-tesseract-cache");
+                ensure_private_cache_root(&fallback, &owner_reference)
+                    .expect("Failed to create fallback cache directory in Cargo build directory");
                 fallback
             }
         }
@@ -1013,92 +1008,7 @@ mod build_tesseract {
         println!("cargo:rustc-link-search=native={}", env::var("OUT_DIR").unwrap());
     }
 
-    fn extract_source_archive(bytes: &[u8], destination: &Path, expected_root: &str) -> io::Result<()> {
-        use zip::ZipArchive;
-
-        let reader = std::io::Cursor::new(bytes);
-        let mut archive = ZipArchive::new(reader).map_err(invalid_archive)?;
-        if archive.len() > MAX_SOURCE_ARCHIVE_ENTRIES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "source archive contains {} entries, exceeding limit {MAX_SOURCE_ARCHIVE_ENTRIES}",
-                    archive.len()
-                ),
-            ));
-        }
-
-        fs::create_dir_all(destination)?;
-        let mut uncompressed_bytes = 0_u64;
-        for index in 0..archive.len() {
-            let mut file = archive.by_index(index).map_err(invalid_archive)?;
-            uncompressed_bytes = uncompressed_bytes
-                .checked_add(file.size())
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "source archive size overflow"))?;
-            if uncompressed_bytes > MAX_SOURCE_UNCOMPRESSED_BYTES {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("source archive expands beyond {MAX_SOURCE_UNCOMPRESSED_BYTES} bytes"),
-                ));
-            }
-
-            if file.unix_mode().is_some_and(|mode| mode & 0o170_000 == 0o120_000) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("source archive contains a symbolic link: {}", file.name()),
-                ));
-            }
-
-            let enclosed_path = file.enclosed_name().ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("source archive contains an unsafe path: {}", file.name()),
-                )
-            })?;
-            let relative_path = enclosed_path.strip_prefix(expected_root).map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "source archive entry {} is outside expected root {expected_root}",
-                        enclosed_path.display()
-                    ),
-                )
-            })?;
-
-            if relative_path.as_os_str().is_empty() {
-                continue;
-            }
-
-            let target_path = destination.join(relative_path);
-
-            if file.is_dir() {
-                fs::create_dir_all(target_path)?;
-            } else {
-                if let Some(parent) = target_path.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                let mut output = fs::File::create(target_path)?;
-                std::io::copy(&mut file, &mut output)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn invalid_archive(error: zip::result::ZipError) -> io::Error {
-        io::Error::new(io::ErrorKind::InvalidData, format!("invalid source archive: {error}"))
-    }
-
-    /// Download a single file to a destination path with retries.
-    /// Download a single file, trying each URL in order. Each URL gets up to
-    /// `max_attempts` retries with exponential backoff before falling through
-    /// to the next URL.
-    fn download_file_with_fallback(
-        urls: &[&str],
-        destination: &Path,
-        label: &str,
-        expected_size: u64,
-    ) -> io::Result<()> {
+    fn download_file_with_fallback(urls: &[&str], label: &str, expected_size: u64) -> io::Result<Vec<u8>> {
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .http1_only()
@@ -1113,17 +1023,17 @@ mod build_tesseract {
 
             for attempt in 1..=max_attempts {
                 let err_msg = match client.get(*url).send() {
-                    Ok(resp) => {
+                    Ok(mut resp) => {
                         if resp.status().is_success() {
                             if let Some(content_length) = resp.content_length()
                                 && content_length != expected_size
                             {
                                 format!("unexpected Content-Length {content_length}, expected {expected_size}")
                             } else {
-                                match write_bounded_response(resp, destination, expected_size) {
-                                    Ok(()) => {
+                                match read_exact_size(&mut resp, expected_size, label) {
+                                    Ok(bytes) => {
                                         eprintln!("Downloaded {label} ({expected_size} bytes)");
-                                        return Ok(());
+                                        return Ok(bytes);
                                     }
                                     Err(error) => error.to_string(),
                                 }
@@ -1158,26 +1068,6 @@ mod build_tesseract {
             "failed to download {label} after trying {} URL(s): {last_err}",
             urls.len()
         )))
-    }
-
-    fn write_bounded_response(
-        response: reqwest::blocking::Response,
-        destination: &Path,
-        expected_size: u64,
-    ) -> io::Result<()> {
-        use std::io::Read;
-
-        let mut bounded = response.take(expected_size.saturating_add(1));
-        let mut output = fs::File::create(destination)?;
-        let written = io::copy(&mut bounded, &mut output)?;
-        if written != expected_size {
-            let _ = fs::remove_file(destination);
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("downloaded {written} bytes, expected exactly {expected_size}"),
-            ));
-        }
-        Ok(())
     }
 
     fn normalize_cmake_path(path: &Path) -> String {

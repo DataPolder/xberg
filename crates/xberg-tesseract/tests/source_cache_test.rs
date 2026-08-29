@@ -1,11 +1,16 @@
 #[path = "../build_support/source_cache.rs"]
 mod source_cache;
 
-use source_cache::{SourceArtifact, copy_verified_artifact, prepare_source_tree, prepare_verified_artifact};
+use source_cache::{
+    SourceArtifact, copy_verified_artifact, ensure_private_cache_root, prepare_source_tree, prepare_verified_artifact,
+    read_exact_size, read_regular_file_exact_with_swap,
+};
 use std::cell::Cell;
 use std::fs;
 use std::io;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Barrier};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const ARCHIVE_BYTES: &[u8] = b"verified archive bytes";
@@ -15,6 +20,10 @@ const MODEL_BYTES: &[u8] = b"verified model bytes";
 const MODEL_SHA256: &str = "03cfa25d83f5eaa1faac98ed6ceaaf0e7afe3c273a1e1502c2714ebe10b8263e";
 const ALTERED_MODEL_BYTES: &[u8] = b"altered model bytes";
 const BUILD_SCRIPT: &str = include_str!("../build.rs");
+#[cfg(unix)]
+const OWNER_ONLY_DIRECTORY_MODE: u32 = 0o700;
+#[cfg(unix)]
+const ALL_DIRECTORY_PERMISSION_BITS: u32 = 0o777;
 
 const PINNED_BUILD_INPUTS: &[&str] = &[
     "13275a278eb55b5746e33f95fbf5a2c8f604b3ab",
@@ -30,10 +39,8 @@ fn should_store_verified_download_in_digest_addressed_cache() {
     let temp_dir = TestDir::new();
     let artifact = source_artifact();
 
-    let prepared = prepare_verified_artifact(temp_dir.path(), &artifact, |download_path| {
-        fs::write(download_path, ARCHIVE_BYTES)
-    })
-    .expect("prepare verified archive");
+    let prepared = prepare_verified_artifact(temp_dir.path(), &artifact, || Ok(ARCHIVE_BYTES.to_vec()))
+        .expect("prepare verified archive");
 
     assert_eq!(
         prepared.path,
@@ -51,6 +58,14 @@ fn should_store_verified_download_in_digest_addressed_cache() {
 #[test]
 fn should_wire_every_pinned_build_input_through_verification() {
     validate_build_source_contract(BUILD_SCRIPT).expect("build source contract must hold");
+}
+
+#[test]
+fn should_keep_automatic_cache_inside_cargo_build_tree() {
+    assert!(!BUILD_SCRIPT.contains("C:\\tess"));
+    assert!(!BUILD_SCRIPT.contains("env::temp_dir().join(\"xberg-tesseract-cache\")"));
+    assert!(BUILD_SCRIPT.contains("ensure_private_cache_root(&preferred"));
+    assert!(BUILD_SCRIPT.contains("ensure_private_cache_root(&fallback"));
 }
 
 #[test]
@@ -75,15 +90,13 @@ fn should_reject_build_contract_when_model_uses_mutable_branch() {
 fn should_reuse_verified_content_addressed_cache_entry_without_fetching() {
     let temp_dir = TestDir::new();
     let artifact = source_artifact();
-    prepare_verified_artifact(temp_dir.path(), &artifact, |download_path| {
-        fs::write(download_path, ARCHIVE_BYTES)
-    })
-    .expect("seed verified archive");
+    prepare_verified_artifact(temp_dir.path(), &artifact, || Ok(ARCHIVE_BYTES.to_vec()))
+        .expect("seed verified archive");
     let fetch_called = Cell::new(false);
 
-    let prepared = prepare_verified_artifact(temp_dir.path(), &artifact, |_| {
+    let prepared = prepare_verified_artifact(temp_dir.path(), &artifact, || {
         fetch_called.set(true);
-        Ok(())
+        Ok(Vec::new())
     })
     .expect("reuse verified archive");
 
@@ -100,10 +113,41 @@ fn should_reject_download_when_archive_bytes_do_not_match_digest() {
     let temp_dir = TestDir::new();
     let artifact = source_artifact();
 
-    let error = prepare_verified_artifact(temp_dir.path(), &artifact, |download_path| {
-        fs::write(download_path, ALTERED_ARCHIVE_BYTES)
-    })
-    .expect_err("altered archive must be rejected");
+    let error = prepare_verified_artifact(temp_dir.path(), &artifact, || Ok(ALTERED_ARCHIVE_BYTES.to_vec()))
+        .expect_err("altered archive must be rejected");
+
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(!expected_cache_path(temp_dir.path()).exists());
+}
+
+#[test]
+fn should_accept_download_at_exact_expected_size() {
+    let mut reader = Cursor::new(ARCHIVE_BYTES);
+
+    let bytes = read_exact_size(&mut reader, ARCHIVE_BYTES.len() as u64, "archive")
+        .expect("exact download size should be accepted");
+
+    assert_eq!(bytes, ARCHIVE_BYTES);
+}
+
+#[test]
+fn should_reject_download_below_expected_size() {
+    let mut reader = Cursor::new(&ARCHIVE_BYTES[..ARCHIVE_BYTES.len() - 1]);
+
+    let error = read_exact_size(&mut reader, ARCHIVE_BYTES.len() as u64, "archive")
+        .expect_err("short download must be rejected");
+
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn should_reject_download_above_expected_size_without_publishing() {
+    let temp_dir = TestDir::new();
+    let mut oversized = ARCHIVE_BYTES.to_vec();
+    oversized.push(b'!');
+
+    let error = prepare_verified_artifact(temp_dir.path(), &source_artifact(), || Ok(oversized))
+        .expect_err("oversized download must be rejected");
 
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     assert!(!expected_cache_path(temp_dir.path()).exists());
@@ -116,12 +160,13 @@ fn should_reject_artifact_when_digest_is_missing_before_fetching() {
         name: "tesseract.zip",
         cache_key: "native-sources",
         sha256: "",
+        expected_size: ARCHIVE_BYTES.len() as u64,
     };
     let fetch_called = Cell::new(false);
 
-    let error = prepare_verified_artifact(temp_dir.path(), &artifact, |_| {
+    let error = prepare_verified_artifact(temp_dir.path(), &artifact, || {
         fetch_called.set(true);
-        Ok(())
+        Ok(Vec::new())
     })
     .expect_err("missing digest must be rejected");
 
@@ -133,21 +178,171 @@ fn should_reject_artifact_when_digest_is_missing_before_fetching() {
 fn should_reject_corrupt_cache_entry_without_fetching() {
     let temp_dir = TestDir::new();
     let artifact = source_artifact();
-    let prepared = prepare_verified_artifact(temp_dir.path(), &artifact, |download_path| {
-        fs::write(download_path, ARCHIVE_BYTES)
-    })
-    .expect("seed verified archive");
+    let prepared = prepare_verified_artifact(temp_dir.path(), &artifact, || Ok(ARCHIVE_BYTES.to_vec()))
+        .expect("seed verified archive");
     fs::write(&prepared.path, ALTERED_ARCHIVE_BYTES).expect("corrupt cached archive");
     let fetch_called = Cell::new(false);
 
-    let error = prepare_verified_artifact(temp_dir.path(), &artifact, |_| {
+    let error = prepare_verified_artifact(temp_dir.path(), &artifact, || {
         fetch_called.set(true);
-        Ok(())
+        Ok(Vec::new())
     })
     .expect_err("corrupt cache entry must fail closed");
 
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     assert!(!fetch_called.get(), "corrupt cache must not trigger replacement fetch");
+}
+
+#[test]
+fn should_reject_oversized_cache_entry_without_fetching() {
+    let temp_dir = TestDir::new();
+    let cache_path = expected_cache_path(temp_dir.path());
+    fs::create_dir_all(cache_path.parent().expect("cache parent")).expect("create cache parent");
+    let mut oversized = ARCHIVE_BYTES.to_vec();
+    oversized.push(b'!');
+    fs::write(&cache_path, oversized).expect("write oversized cache entry");
+    let fetch_called = Cell::new(false);
+
+    let error = prepare_verified_artifact(temp_dir.path(), &source_artifact(), || {
+        fetch_called.set(true);
+        Ok(ARCHIVE_BYTES.to_vec())
+    })
+    .expect_err("oversized cache entry must fail closed");
+
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(!fetch_called.get(), "oversized cache must fail before fetch");
+}
+
+#[test]
+fn should_publish_concurrent_verified_download_once() {
+    let temp_dir = TestDir::new();
+    let cache_root = temp_dir.path().to_path_buf();
+    let barrier = Arc::new(Barrier::new(2));
+    let mut threads = Vec::new();
+
+    for _ in 0..2 {
+        let cache_root = cache_root.clone();
+        let barrier = Arc::clone(&barrier);
+        threads.push(std::thread::spawn(move || {
+            prepare_verified_artifact(&cache_root, &source_artifact(), || {
+                barrier.wait();
+                Ok(ARCHIVE_BYTES.to_vec())
+            })
+            .expect("publish concurrent verified archive")
+        }));
+    }
+
+    let mut downloaded = threads
+        .into_iter()
+        .map(|thread| thread.join().expect("join publisher").downloaded)
+        .collect::<Vec<_>>();
+    downloaded.sort_unstable();
+
+    assert_eq!(downloaded, [false, true]);
+    assert_eq!(
+        fs::read(expected_cache_path(temp_dir.path())).expect("read cache"),
+        ARCHIVE_BYTES
+    );
+    assert_eq!(
+        fs::read_dir(expected_cache_path(temp_dir.path()).parent().expect("cache parent"))
+            .expect("read cache parent")
+            .count(),
+        1
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn should_not_follow_download_temporary_symlink_swapped_during_fetch() {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TestDir::new();
+    let victim = temp_dir.path().join("victim");
+    fs::write(&victim, b"preserve").expect("write victim sentinel");
+    let digest_dir = temp_dir.path().join("native-sources").join(ARCHIVE_SHA256);
+    fs::create_dir_all(&digest_dir).expect("create digest directory");
+    let old_temporary_path = digest_dir.join(format!(".tesseract.zip.{}.partial", std::process::id()));
+    symlink(&victim, &old_temporary_path).expect("create predictable temporary symlink");
+
+    prepare_verified_artifact(temp_dir.path(), &source_artifact(), || Ok(ARCHIVE_BYTES.to_vec()))
+        .expect("prepare through an unpredictable temporary file");
+
+    assert_eq!(fs::read(&victim).expect("read victim sentinel"), b"preserve");
+    assert_eq!(
+        fs::read_link(&old_temporary_path).expect("read old temporary symlink"),
+        victim
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn should_reject_symlinked_model_destination_without_reading_target() {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TestDir::new();
+    let model = SourceArtifact {
+        name: "eng.traineddata",
+        cache_key: "tessdata",
+        sha256: MODEL_SHA256,
+        expected_size: MODEL_BYTES.len() as u64,
+    };
+    let verified = prepare_verified_artifact(temp_dir.path(), &model, || Ok(MODEL_BYTES.to_vec()))
+        .expect("prepare verified model");
+    let destination = temp_dir.path().join("out").join("eng.traineddata");
+    fs::create_dir_all(destination.parent().expect("model parent")).expect("create model output directory");
+    let victim = temp_dir.path().join("model-victim");
+    fs::write(&victim, MODEL_BYTES).expect("write model victim");
+    symlink(&victim, &destination).expect("create model destination symlink");
+
+    let error = copy_verified_artifact(&verified, &destination).expect_err("model symlinks must fail closed");
+
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert_eq!(fs::read(&victim).expect("read model victim"), MODEL_BYTES);
+}
+
+#[cfg(unix)]
+#[test]
+fn should_reject_file_swapped_to_symlink_between_check_and_open() {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TestDir::new();
+    let artifact_path = temp_dir.path().join("artifact");
+    fs::write(&artifact_path, ARCHIVE_BYTES).expect("write initial artifact");
+    let victim = temp_dir.path().join("victim");
+    fs::write(&victim, ARCHIVE_BYTES).expect("write same-sized victim");
+
+    let error = read_regular_file_exact_with_swap(&artifact_path, ARCHIVE_BYTES.len() as u64, || {
+        fs::remove_file(&artifact_path)?;
+        symlink(&victim, &artifact_path)
+    })
+    .expect_err("nofollow open must reject a swapped symlink");
+
+    assert_ne!(error.kind(), io::ErrorKind::NotFound);
+    assert_eq!(fs::read(&victim).expect("read victim"), ARCHIVE_BYTES);
+}
+
+#[cfg(unix)]
+#[test]
+fn should_restrict_automatic_cache_root_to_owner() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let temp_dir = TestDir::new();
+    let cache_root = temp_dir.path().join("automatic-cache");
+    fs::create_dir(&cache_root).expect("create permissive cache root");
+    fs::set_permissions(&cache_root, fs::Permissions::from_mode(ALL_DIRECTORY_PERMISSION_BITS))
+        .expect("make cache root permissive");
+
+    ensure_private_cache_root(&cache_root, temp_dir.path()).expect("secure automatic cache root");
+
+    let metadata = fs::symlink_metadata(&cache_root).expect("read secured cache root");
+    assert_eq!(
+        metadata.mode() & ALL_DIRECTORY_PERMISSION_BITS,
+        OWNER_ONLY_DIRECTORY_MODE
+    );
+    assert_eq!(
+        metadata.uid(),
+        fs::metadata(temp_dir.path()).expect("read owner reference").uid()
+    );
 }
 
 #[cfg(unix)]
@@ -161,9 +356,9 @@ fn should_reject_symlinked_cache_component() {
     symlink(&outside_dir, temp_dir.path().join("native-sources")).expect("create cache symlink");
     let fetch_called = Cell::new(false);
 
-    let error = prepare_verified_artifact(temp_dir.path(), &source_artifact(), |_| {
+    let error = prepare_verified_artifact(temp_dir.path(), &source_artifact(), || {
         fetch_called.set(true);
-        Ok(())
+        Ok(Vec::new())
     })
     .expect_err("symlinked cache component must fail closed");
 
@@ -186,9 +381,9 @@ fn should_reject_cache_path_beneath_symlinked_root() {
     symlink(&outside_dir, &cache_root).expect("create cache-root symlink");
     let fetch_called = Cell::new(false);
 
-    let error = prepare_verified_artifact(&cache_root.join("source-artifacts"), &source_artifact(), |_| {
+    let error = prepare_verified_artifact(&cache_root.join("source-artifacts"), &source_artifact(), || {
         fetch_called.set(true);
-        Ok(())
+        Ok(Vec::new())
     })
     .expect_err("cache path beneath a symlinked root must fail closed");
 
@@ -208,10 +403,8 @@ fn should_reject_symlinked_source_root_without_removing_target() {
     use std::os::unix::fs::symlink;
 
     let temp_dir = TestDir::new();
-    let archive = prepare_verified_artifact(temp_dir.path(), &source_artifact(), |download_path| {
-        fs::write(download_path, ARCHIVE_BYTES)
-    })
-    .expect("prepare verified archive");
+    let archive = prepare_verified_artifact(temp_dir.path(), &source_artifact(), || Ok(ARCHIVE_BYTES.to_vec()))
+        .expect("prepare verified archive");
     let outside_dir = temp_dir.path().join("outside-source");
     fs::create_dir(&outside_dir).expect("create outside source directory");
     fs::write(outside_dir.join("sentinel"), "preserve").expect("write outside sentinel");
@@ -228,13 +421,46 @@ fn should_reject_symlinked_source_root_without_removing_target() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn should_reject_staging_directory_replaced_after_extraction() {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TestDir::new();
+    let archive = prepare_verified_artifact(temp_dir.path(), &source_artifact(), || Ok(ARCHIVE_BYTES.to_vec()))
+        .expect("prepare verified archive");
+    let outside_dir = temp_dir.path().join("outside-staging");
+    fs::create_dir(&outside_dir).expect("create outside staging directory");
+    fs::write(outside_dir.join("sentinel"), "preserve").expect("write outside sentinel");
+    fs::write(outside_dir.join("CMakeLists.txt"), "redirected build").expect("write redirected build");
+    let third_party_dir = temp_dir.path().join("third-party");
+
+    let error = prepare_source_tree(&third_party_dir, "tesseract", &archive, |_, staging_dir| {
+        fs::write(staging_dir.join("CMakeLists.txt"), "verified build")?;
+        fs::remove_file(staging_dir.join("CMakeLists.txt"))?;
+        fs::remove_dir(staging_dir)?;
+        symlink(&outside_dir, staging_dir)?;
+        Ok(())
+    })
+    .expect_err("staging symlink swap must fail closed");
+
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(!third_party_dir.join("tesseract").exists());
+    assert_eq!(
+        fs::read_to_string(outside_dir.join("CMakeLists.txt")).expect("read redirected build"),
+        "redirected build"
+    );
+    assert_eq!(
+        fs::read_to_string(outside_dir.join("sentinel")).expect("read outside sentinel"),
+        "preserve"
+    );
+}
+
 #[test]
 fn should_replace_poisoned_complete_source_tree_before_extraction() {
     let temp_dir = TestDir::new();
-    let artifact = prepare_verified_artifact(temp_dir.path(), &source_artifact(), |download_path| {
-        fs::write(download_path, ARCHIVE_BYTES)
-    })
-    .expect("prepare verified archive");
+    let artifact = prepare_verified_artifact(temp_dir.path(), &source_artifact(), || Ok(ARCHIVE_BYTES.to_vec()))
+        .expect("prepare verified archive");
     let third_party_dir = temp_dir.path().join("third-party");
     let source_dir = third_party_dir.join("tesseract");
     fs::create_dir_all(&source_dir).expect("create poisoned source tree");
@@ -245,8 +471,13 @@ fn should_replace_poisoned_complete_source_tree_before_extraction() {
     let prepared = prepare_source_tree(&third_party_dir, "tesseract", &artifact, |bytes, destination| {
         extraction_called.set(true);
         assert_eq!(bytes, ARCHIVE_BYTES);
-        assert!(!destination.exists(), "poisoned tree must be removed before extraction");
-        fs::create_dir_all(destination)?;
+        let metadata = fs::symlink_metadata(destination)?;
+        assert!(metadata.file_type().is_dir(), "staging must be a directory");
+        assert!(!metadata.file_type().is_symlink(), "staging must not be a symlink");
+        assert!(
+            source_dir.join("poisoned.cpp").is_file(),
+            "old tree remains until replacement is ready"
+        );
         fs::write(destination.join("CMakeLists.txt"), "verified build")?;
         Ok(())
     })
@@ -269,16 +500,14 @@ fn should_fail_before_source_preparation_when_archive_is_altered() {
     let artifact = source_artifact();
     let extraction_called = Cell::new(false);
 
-    let error = prepare_verified_artifact(temp_dir.path(), &artifact, |download_path| {
-        fs::write(download_path, ALTERED_ARCHIVE_BYTES)
-    })
-    .and_then(|verified| {
-        prepare_source_tree(&temp_dir.path().join("third-party"), "tesseract", &verified, |_, _| {
-            extraction_called.set(true);
-            Ok(())
+    let error = prepare_verified_artifact(temp_dir.path(), &artifact, || Ok(ALTERED_ARCHIVE_BYTES.to_vec()))
+        .and_then(|verified| {
+            prepare_source_tree(&temp_dir.path().join("third-party"), "tesseract", &verified, |_, _| {
+                extraction_called.set(true);
+                Ok(())
+            })
         })
-    })
-    .expect_err("altered archive must fail verification");
+        .expect_err("altered archive must fail verification");
 
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     assert!(
@@ -294,11 +523,10 @@ fn should_reject_altered_existing_model_file() {
         name: "eng.traineddata",
         cache_key: "tessdata",
         sha256: MODEL_SHA256,
+        expected_size: MODEL_BYTES.len() as u64,
     };
-    let verified = prepare_verified_artifact(temp_dir.path(), &model, |download_path| {
-        fs::write(download_path, MODEL_BYTES)
-    })
-    .expect("prepare verified model");
+    let verified = prepare_verified_artifact(temp_dir.path(), &model, || Ok(MODEL_BYTES.to_vec()))
+        .expect("prepare verified model");
     let destination = temp_dir.path().join("out").join("eng.traineddata");
     fs::create_dir_all(destination.parent().expect("model parent")).expect("create model output directory");
     fs::write(&destination, ALTERED_MODEL_BYTES).expect("write altered installed model");
@@ -314,6 +542,7 @@ fn source_artifact() -> SourceArtifact<'static> {
         name: "tesseract.zip",
         cache_key: "native-sources",
         sha256: ARCHIVE_SHA256,
+        expected_size: ARCHIVE_BYTES.len() as u64,
     }
 }
 

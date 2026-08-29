@@ -1,19 +1,30 @@
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io;
+use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
+use tempfile::{Builder, NamedTempFile};
 
 #[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+
+#[cfg(windows)]
+use std::os::windows::fs::{MetadataExt as WindowsMetadataExt, OpenOptionsExt};
 
 const SOURCE_ROOT_MARKER: &str = "CMakeLists.txt";
 const SHA256_HEX_LENGTH: usize = 64;
+#[cfg(unix)]
+const PRIVATE_DIRECTORY_MODE: u32 = 0o700;
+#[cfg(unix)]
+const NON_OWNER_PERMISSION_MASK: u32 = 0o077;
+#[cfg(windows)]
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SourceArtifact<'a> {
     pub(crate) name: &'a str,
     pub(crate) cache_key: &'a str,
     pub(crate) sha256: &'a str,
+    pub(crate) expected_size: u64,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -36,7 +47,7 @@ pub(crate) fn source_tree_is_complete(source_dir: &Path) -> bool {
 pub(crate) fn prepare_verified_artifact(
     cache_root: &Path,
     artifact: &SourceArtifact<'_>,
-    fetch: impl FnOnce(&Path) -> io::Result<()>,
+    fetch: impl FnOnce() -> io::Result<Vec<u8>>,
 ) -> io::Result<VerifiedArtifact> {
     validate_artifact(artifact)?;
     ensure_directory(cache_root)?;
@@ -46,34 +57,27 @@ pub(crate) fn prepare_verified_artifact(
     let digest_dir = cache_key_dir.join(artifact.sha256);
     ensure_directory(&digest_dir)?;
     let artifact_path = digest_dir.join(artifact.name);
-    if artifact_path.exists() {
-        let bytes = read_verified_file(&artifact_path, artifact)?;
-        return Ok(VerifiedArtifact {
-            path: artifact_path,
-            bytes,
-            downloaded: false,
-        });
-    }
-
-    let temporary_path = temporary_path(&artifact_path);
-    remove_if_exists(&temporary_path)?;
-    if let Err(error) = fetch(&temporary_path) {
-        let _ = remove_if_exists(&temporary_path);
-        return Err(error);
-    }
-
-    let bytes = match read_verified_file(&temporary_path, artifact) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            let _ = remove_if_exists(&temporary_path);
-            return Err(error);
+    match fs::symlink_metadata(&artifact_path) {
+        Ok(_) => {
+            let bytes = read_verified_file(&artifact_path, artifact)?;
+            return Ok(VerifiedArtifact {
+                path: artifact_path,
+                bytes,
+                downloaded: false,
+            });
         }
-    };
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
 
-    match fs::rename(&temporary_path, &artifact_path) {
-        Ok(()) => {}
-        Err(_) if artifact_path.exists() => {
-            remove_if_exists(&temporary_path)?;
+    let bytes = fetch()?;
+    verify_artifact_bytes(&bytes, artifact)?;
+    let mut temporary = NamedTempFile::new_in(&digest_dir)?;
+    write_and_verify_temporary(&mut temporary, &bytes, artifact.sha256, artifact.name)?;
+
+    match temporary.persist_noclobber(&artifact_path) {
+        Ok(_) => {}
+        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
             let bytes = read_verified_file(&artifact_path, artifact)?;
             return Ok(VerifiedArtifact {
                 path: artifact_path,
@@ -82,8 +86,7 @@ pub(crate) fn prepare_verified_artifact(
             });
         }
         Err(error) => {
-            let _ = remove_if_exists(&temporary_path);
-            return Err(error);
+            return Err(error.error);
         }
     }
 
@@ -101,18 +104,19 @@ pub(crate) fn prepare_source_tree(
     extract: impl FnOnce(&[u8], &Path) -> io::Result<()>,
 ) -> io::Result<PreparedSourceTree> {
     validate_path_component(source_name, "source name")?;
-    ensure_directory(third_party_dir)?;
+    let owner_reference = third_party_dir.parent().unwrap_or(third_party_dir);
+    ensure_private_cache_root(third_party_dir, owner_reference)?;
 
     let source_dir = third_party_dir.join(source_name);
-    let staging_dir = temporary_path(&source_dir);
-    remove_if_exists(&staging_dir)?;
-    if let Err(error) = extract(&archive.bytes, &staging_dir) {
-        let _ = remove_if_exists(&staging_dir);
-        return Err(error);
-    }
+    let staging = Builder::new()
+        .prefix(&format!(".{source_name}."))
+        .tempdir_in(third_party_dir)?;
+    let staging_dir = staging.path();
+    let staging_identity = fs::symlink_metadata(staging_dir)?;
+    extract(&archive.bytes, staging_dir)?;
+    verify_same_directory(staging_dir, &staging_identity)?;
 
-    if !source_tree_is_complete(&staging_dir) {
-        let _ = remove_if_exists(&staging_dir);
+    if !source_tree_is_complete(staging_dir) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
@@ -123,6 +127,8 @@ pub(crate) fn prepare_source_tree(
     }
 
     remove_if_exists(&source_dir)?;
+    verify_same_directory(staging_dir, &staging_identity)?;
+    let staging_dir = staging.keep();
     if let Err(error) = fs::rename(&staging_dir, &source_dir) {
         let _ = remove_if_exists(&staging_dir);
         return Err(error);
@@ -134,10 +140,60 @@ pub(crate) fn prepare_source_tree(
     })
 }
 
+#[cfg(unix)]
+fn verify_same_directory(path: &Path, expected: &fs::Metadata) -> io::Result<()> {
+    let current = fs::symlink_metadata(path)?;
+    if current.file_type().is_dir()
+        && !current.file_type().is_symlink()
+        && current.dev() == expected.dev()
+        && current.ino() == expected.ino()
+    {
+        return Ok(());
+    }
+    Err(replaced_directory_error(path))
+}
+
+#[cfg(windows)]
+fn verify_same_directory(path: &Path, expected: &fs::Metadata) -> io::Result<()> {
+    let current = fs::symlink_metadata(path)?;
+    if current.file_type().is_dir()
+        && !current.file_type().is_symlink()
+        && current.volume_serial_number() == expected.volume_serial_number()
+        && current.file_index() == expected.file_index()
+    {
+        return Ok(());
+    }
+    Err(replaced_directory_error(path))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn verify_same_directory(path: &Path, _expected: &fs::Metadata) -> io::Result<()> {
+    let current = fs::symlink_metadata(path)?;
+    if current.file_type().is_dir() && !current.file_type().is_symlink() {
+        return Ok(());
+    }
+    Err(replaced_directory_error(path))
+}
+
+fn replaced_directory_error(path: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "source staging directory was replaced during extraction: {}",
+            path.display()
+        ),
+    )
+}
+
 pub(crate) fn copy_verified_artifact(artifact: &VerifiedArtifact, destination: &Path) -> io::Result<()> {
     let expected = sha256_hex(&artifact.bytes);
-    if destination.exists() {
-        return verify_bytes(&fs::read(destination)?, &expected, &destination.display().to_string());
+    match fs::symlink_metadata(destination) {
+        Ok(_) => {
+            let bytes = read_regular_file_exact(destination, artifact.bytes.len() as u64)?;
+            return verify_bytes(&bytes, &expected, &destination.display().to_string());
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
 
     let parent = destination.parent().ok_or_else(|| {
@@ -148,44 +204,143 @@ pub(crate) fn copy_verified_artifact(artifact: &VerifiedArtifact, destination: &
     })?;
     ensure_directory(parent)?;
 
-    let temporary_path = temporary_path(destination);
-    remove_if_exists(&temporary_path)?;
-    fs::write(&temporary_path, &artifact.bytes)?;
-
-    if let Err(error) = verify_bytes(
-        &fs::read(&temporary_path)?,
+    let mut temporary = NamedTempFile::new_in(parent)?;
+    write_and_verify_temporary(
+        &mut temporary,
+        &artifact.bytes,
         &expected,
-        &temporary_path.display().to_string(),
-    ) {
-        let _ = remove_if_exists(&temporary_path);
-        return Err(error);
-    }
+        &destination.display().to_string(),
+    )?;
 
-    match fs::rename(&temporary_path, destination) {
-        Ok(()) => Ok(()),
-        Err(_) if destination.exists() => {
-            remove_if_exists(&temporary_path)?;
-            verify_bytes(&fs::read(destination)?, &expected, &destination.display().to_string())
+    match temporary.persist_noclobber(destination) {
+        Ok(_) => Ok(()),
+        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => {
+            let bytes = read_regular_file_exact(destination, artifact.bytes.len() as u64)?;
+            verify_bytes(&bytes, &expected, &destination.display().to_string())
         }
-        Err(error) => {
-            let _ = remove_if_exists(&temporary_path);
-            Err(error)
-        }
+        Err(error) => Err(error.error),
     }
 }
 
 fn read_verified_file(path: &Path, artifact: &SourceArtifact<'_>) -> io::Result<Vec<u8>> {
+    let bytes = read_regular_file_exact(path, artifact.expected_size)?;
+    verify_artifact_bytes(&bytes, artifact)?;
+    Ok(bytes)
+}
+
+fn read_regular_file_exact(path: &Path, expected_size: u64) -> io::Result<Vec<u8>> {
+    read_regular_file_exact_after_check(path, expected_size, || Ok(()))
+}
+
+fn read_regular_file_exact_after_check(
+    path: &Path,
+    expected_size: u64,
+    after_check: impl FnOnce() -> io::Result<()>,
+) -> io::Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("cached artifact is not a regular file: {}", path.display()),
+            format!("artifact is not a regular file: {}", path.display()),
         ));
     }
+    if metadata.len() != expected_size {
+        return Err(unexpected_size(path, metadata.len(), expected_size));
+    }
 
-    let bytes = fs::read(path)?;
-    verify_bytes(&bytes, artifact.sha256, artifact.name)?;
+    after_check()?;
+    let mut file = open_regular_file_nofollow(path)?;
+    let opened_metadata = file.metadata()?;
+    if !opened_metadata.file_type().is_file() || opened_metadata.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("artifact is not a regular file: {}", path.display()),
+        ));
+    }
+    if opened_metadata.len() != expected_size {
+        return Err(unexpected_size(path, opened_metadata.len(), expected_size));
+    }
+    read_exact_size(&mut file, expected_size, &path.display().to_string())
+}
+
+#[cfg(test)]
+pub(crate) fn read_regular_file_exact_with_swap(
+    path: &Path,
+    expected_size: u64,
+    after_check: impl FnOnce() -> io::Result<()>,
+) -> io::Result<Vec<u8>> {
+    read_regular_file_exact_after_check(path, expected_size, after_check)
+}
+
+#[cfg(unix)]
+fn open_regular_file_nofollow(path: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+}
+
+#[cfg(windows)]
+fn open_regular_file_nofollow(path: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_regular_file_nofollow(path: &Path) -> io::Result<fs::File> {
+    fs::File::open(path)
+}
+
+pub(crate) fn read_exact_size(reader: &mut impl Read, expected_size: u64, label: &str) -> io::Result<Vec<u8>> {
+    let capacity = usize::try_from(expected_size).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{label} is too large for this platform"),
+        )
+    })?;
+    let mut bytes = Vec::with_capacity(capacity);
+    reader.take(expected_size.saturating_add(1)).read_to_end(&mut bytes)?;
+    let actual_size = bytes.len() as u64;
+    if actual_size != expected_size {
+        return Err(unexpected_size(Path::new(label), actual_size, expected_size));
+    }
     Ok(bytes)
+}
+
+fn write_and_verify_temporary(
+    temporary: &mut NamedTempFile,
+    bytes: &[u8],
+    expected_sha256: &str,
+    label: &str,
+) -> io::Result<()> {
+    temporary.write_all(bytes)?;
+    temporary.flush()?;
+    temporary.as_file_mut().rewind()?;
+    let stored = read_exact_size(temporary.as_file_mut(), bytes.len() as u64, label)?;
+    verify_bytes(&stored, expected_sha256, label)
+}
+
+fn verify_artifact_bytes(bytes: &[u8], artifact: &SourceArtifact<'_>) -> io::Result<()> {
+    if bytes.len() as u64 != artifact.expected_size {
+        return Err(unexpected_size(
+            Path::new(artifact.name),
+            bytes.len() as u64,
+            artifact.expected_size,
+        ));
+    }
+    verify_bytes(bytes, artifact.sha256, artifact.name)
+}
+
+fn unexpected_size(path: &Path, actual: u64, expected: u64) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "unexpected size for {}: got {actual} bytes, expected exactly {expected}",
+            path.display()
+        ),
+    )
 }
 
 fn verify_bytes(bytes: &[u8], expected_sha256: &str, label: &str) -> io::Result<()> {
@@ -247,14 +402,6 @@ fn validate_path_component(value: &str, label: &str) -> io::Result<()> {
     ))
 }
 
-fn temporary_path(destination: &Path) -> PathBuf {
-    let file_name = destination
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("artifact");
-    destination.with_file_name(format!(".{file_name}.{}.partial", std::process::id()))
-}
-
 pub(crate) fn ensure_directory(path: &Path) -> io::Result<()> {
     if let Some(parent) = path
         .parent()
@@ -277,6 +424,48 @@ pub(crate) fn ensure_directory(path: &Path) -> io::Result<()> {
         },
         Err(error) => Err(error),
     }
+}
+
+pub(crate) fn ensure_private_cache_root(path: &Path, owner_reference: &Path) -> io::Result<()> {
+    ensure_directory(path)?;
+    verify_private_cache_root(path, owner_reference)
+}
+
+#[cfg(unix)]
+fn verify_private_cache_root(path: &Path, owner_reference: &Path) -> io::Result<()> {
+    let expected_owner = fs::metadata(owner_reference)?.uid();
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() || metadata.uid() != expected_owner {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "automatic cache root is not owned by the Cargo build user: {}",
+                path.display()
+            ),
+        ));
+    }
+
+    fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_DIRECTORY_MODE))?;
+    let secured = fs::symlink_metadata(path)?;
+    if secured.mode() & NON_OWNER_PERMISSION_MASK != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("automatic cache root is not private: {}", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn verify_private_cache_root(path: &Path, _owner_reference: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!("automatic cache root is not a regular directory: {}", path.display()),
+    ))
 }
 
 #[cfg(unix)]
