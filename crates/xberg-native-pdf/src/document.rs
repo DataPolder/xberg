@@ -932,6 +932,32 @@ fn trace_xref_parse_failure(error: &Error) {
     }
 }
 
+fn trace_recoverable_pdf_error(operation: &'static str, error: &Error) {
+    if let Some(error_offset) = error.telemetry_offset() {
+        tracing::warn!(
+            operation,
+            error_code = error.telemetry_code(),
+            error_offset,
+            "PDF operation degraded"
+        );
+    } else {
+        tracing::warn!(operation, error_code = error.telemetry_code(), "PDF operation degraded");
+    }
+}
+
+fn trace_fatal_pdf_error(operation: &'static str, error: &Error) {
+    if let Some(error_offset) = error.telemetry_offset() {
+        tracing::error!(
+            operation,
+            error_code = error.telemetry_code(),
+            error_offset,
+            "PDF operation failed"
+        );
+    } else {
+        tracing::error!(operation, error_code = error.telemetry_code(), "PDF operation failed");
+    }
+}
+
 impl PdfDocument {
     /// Open a PDF document from in-memory bytes.
     ///
@@ -1198,8 +1224,8 @@ impl PdfDocument {
             }
         }
 
-        if let Err(e) = document.ensure_encryption_initialized() {
-            tracing::warn!("Failed to initialize encryption: {}", e);
+        if let Err(error) = document.ensure_encryption_initialized() {
+            trace_recoverable_pdf_error("initialize_encryption", &error);
             // We continue anyway, as it might just be an unsupported security handler
             // and maybe we can still read parts of the file (or fail later) ~keep
         }
@@ -1312,8 +1338,8 @@ impl PdfDocument {
                 if let Object::Reference(obj_ref) = value {
                     match self.load_object(*obj_ref) {
                         Ok(resolved) => *value = resolved,
-                        Err(e) => {
-                            tracing::warn!("Failed to resolve indirect ref in /Encrypt dict: {}", e);
+                        Err(error) => {
+                            trace_recoverable_pdf_error("resolve_encrypt_reference", &error);
                         }
                     }
                 }
@@ -1335,9 +1361,9 @@ impl PdfDocument {
                     "PDF is encrypted and requires a password; call authenticate() before extracting text".to_string(),
                 );
             }
-            Err(e) => {
-                tracing::error!("Failed to initialize encryption: {}", e);
-                return Err(e);
+            Err(error) => {
+                trace_fatal_pdf_error("authenticate_empty_password", &error);
+                return Err(error);
             }
         }
 
@@ -3186,7 +3212,14 @@ impl PdfDocument {
                     }
                 }
 
-                tracing::warn!("Malformed object header at offset {}: {}", offset, full_header.trim());
+                tracing::warn!(
+                    operation = "load_uncompressed_object",
+                    error_code = "malformed_object_header",
+                    error_offset = offset,
+                    object_id = obj_ref.id,
+                    generation = obj_ref.generation,
+                    "PDF object recovery failed"
+                );
                 return Err(Error::ParseError {
                     offset: offset as usize,
                     reason: format!("Expected object header, found: {}", full_header.trim()),
@@ -3212,10 +3245,13 @@ impl PdfDocument {
             && scan_offset != offset
         {
             tracing::warn!(
-                "Header parse failed at xref offset {} (parts[0]={:?}); retrying at scan-reported offset {}",
-                offset,
-                parts[0],
-                scan_offset
+                operation = "load_uncompressed_object",
+                error_code = "invalid_object_header_number",
+                error_offset = offset,
+                recovered_offset = scan_offset,
+                object_id = obj_ref.id,
+                generation = obj_ref.generation,
+                "retrying PDF object load at scan-reported offset"
             );
             return self.load_uncompressed_object_impl(obj_ref, scan_offset, true);
         }
@@ -3378,12 +3414,8 @@ impl PdfDocument {
             "loading compressed object from object stream"
         );
 
-        if let Err(e) = self.ensure_encryption_initialized() {
-            tracing::warn!(
-                "Encryption init skipped for ObjStm {} load ({}); will parse without decryption",
-                stream_obj_num,
-                e
-            );
+        if let Err(error) = self.ensure_encryption_initialized() {
+            trace_recoverable_pdf_error("initialize_object_stream_encryption", &error);
         }
 
         let stream_ref = ObjectRef::new(stream_obj_num, 0);
@@ -19973,7 +20005,11 @@ pub fn parse_header<R: Read + Seek>(reader: &mut R, lenient: bool) -> Result<(u8
             if lenient {
                 // Some PDFs lack a %PDF- header entirely (e.g., start with a binary
                 // comment like %\xe2\xe3\xcf\xd3). Default to version 1.4. ~keep
-                tracing::warn!("No %PDF- header found; assuming version 1.4 in lenient mode");
+                tracing::warn!(
+                    operation = "parse_pdf_header",
+                    reason = "missing_header",
+                    "PDF header recovery defaulted to version 1.4"
+                );
                 reader.seek(SeekFrom::Start(0))?;
                 Ok((1, 4, 0))
             } else {
@@ -20003,8 +20039,9 @@ fn parse_version_from_header(header: &[u8; 8], lenient: bool) -> Result<(u8, u8)
     if header[6] != b'.' {
         if lenient {
             tracing::warn!(
-                "Malformed PDF version format (expected '.', found '{}'), defaulting to 1.4",
-                header[6] as char
+                operation = "parse_pdf_version",
+                reason = "invalid_version_separator",
+                "Malformed PDF version; defaulting to 1.4"
             );
             return Ok((1, 4));
         }
@@ -20020,9 +20057,9 @@ fn parse_version_from_header(header: &[u8; 8], lenient: bool) -> Result<(u8, u8)
     if !major.is_ascii_digit() || !minor.is_ascii_digit() {
         if lenient {
             tracing::warn!(
-                "Malformed PDF version '{}.{}' (non-digit characters), defaulting to 1.4",
-                major as char,
-                minor as char
+                operation = "parse_pdf_version",
+                reason = "non_numeric_version",
+                "Malformed PDF version; defaulting to 1.4"
             );
             return Ok((1, 4));
         }
@@ -20037,7 +20074,13 @@ fn parse_version_from_header(header: &[u8; 8], lenient: bool) -> Result<(u8, u8)
 
     if major > 2 || (major == 0 && minor == 0) {
         if lenient {
-            tracing::warn!("Unsupported PDF version {}.{}, defaulting to 1.4", major, minor);
+            tracing::warn!(
+                operation = "parse_pdf_version",
+                reason = "unsupported_version",
+                version_major = major,
+                version_minor = minor,
+                "Unsupported PDF version; defaulting to 1.4"
+            );
             return Ok((1, 4));
         }
         return Err(Error::UnsupportedVersion(format!("{}.{}", major, minor)));
@@ -23850,6 +23893,25 @@ mod tests {
     }
 
     #[test]
+    fn lenient_version_warning_has_stable_identity() {
+        let header = *b"%PDF-1X7";
+        let (result, events) = capture_events(|| parse_version_from_header(&header, true));
+
+        assert_eq!(result.unwrap(), (1, 4));
+        let warnings: Vec<_> = events.iter().filter(|event| event.level == Level::WARN).collect();
+        assert_eq!(warnings.len(), 1, "expected exactly one recovery warning: {events:#?}");
+        assert_eq!(warnings[0].target, format!("{}::document", crate::LOG_TARGET_ROOT));
+        assert_eq!(
+            warnings[0].fields.get("operation").map(String::as_str),
+            Some("parse_pdf_version")
+        );
+        assert_eq!(
+            warnings[0].fields.get("reason").map(String::as_str),
+            Some("invalid_version_separator")
+        );
+    }
+
+    #[test]
     fn test_parse_version_from_header_strict_non_digit() {
         let header = *b"%PDF-X.Y";
         let result = parse_version_from_header(&header, false);
@@ -25723,6 +25785,21 @@ mod tests {
 
         let (result, events) = capture_events(|| PdfDocument::from_bytes(pdf));
         assert!(result.is_ok(), "reconstruction should recover the malformed trailer");
+        let parse_failures: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                event.level == Level::WARN
+                    && event.target == format!("{}::document", crate::LOG_TARGET_ROOT)
+                    && event.fields.get("error_code").map(String::as_str) == Some("parse_error")
+                    && event.fields.get("message").map(String::as_str)
+                        == Some("regular xref parsing failed; attempting reconstruction")
+            })
+            .collect();
+        assert_eq!(
+            parse_failures.len(),
+            1,
+            "expected exactly one regular-xref recovery warning: {events:#?}"
+        );
         let captured = format!("{events:?}");
         let confidential_bytes = CONFIDENTIAL_MARKER
             .as_bytes()
@@ -25741,6 +25818,68 @@ mod tests {
                 .flat_map(|event| event.fields.values())
                 .all(|value| value.len() <= 256),
             "recovery telemetry emitted an unbounded field: {events:#?}"
+        );
+    }
+
+    #[test]
+    fn malformed_object_header_warning_does_not_expose_header_bytes() {
+        const CONFIDENTIAL_MARKER: &str = "CONFIDENTIAL_OBJECT_HEADER_182f13";
+        let mut pdf = build_minimal_pdf(b"");
+        let marker_offset = pdf.len();
+        pdf.extend_from_slice(CONFIDENTIAL_MARKER.as_bytes());
+        let document = PdfDocument::from_bytes(pdf).unwrap();
+
+        let (result, events) = capture_events(|| {
+            document.load_uncompressed_object_impl(ObjectRef::new(999, 0), marker_offset as u64, true)
+        });
+
+        assert!(result.is_err());
+        let warnings: Vec<_> = events.iter().filter(|event| event.level == Level::WARN).collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one malformed-header warning: {events:#?}"
+        );
+        assert_eq!(warnings[0].target, format!("{}::document", crate::LOG_TARGET_ROOT));
+        assert_eq!(
+            warnings[0].fields.get("operation").map(String::as_str),
+            Some("load_uncompressed_object")
+        );
+        assert_eq!(
+            warnings[0].fields.get("error_code").map(String::as_str),
+            Some("malformed_object_header")
+        );
+        assert!(
+            !format!("{events:?}").contains(CONFIDENTIAL_MARKER),
+            "object-header telemetry exposed attacker-controlled bytes: {events:#?}"
+        );
+    }
+
+    #[test]
+    fn encryption_recovery_warning_does_not_expose_parser_error_text() {
+        const CONFIDENTIAL_MARKER: &str = "CONFIDENTIAL_ENCRYPTION_ENTRY_43fb0d";
+        let error = Error::InvalidPdf(CONFIDENTIAL_MARKER.repeat(4096));
+
+        let (_, events) = capture_events(|| trace_recoverable_pdf_error("initialize_encryption", &error));
+
+        let warnings: Vec<_> = events.iter().filter(|event| event.level == Level::WARN).collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one encryption warning: {events:#?}"
+        );
+        assert_eq!(warnings[0].target, format!("{}::document", crate::LOG_TARGET_ROOT));
+        assert_eq!(
+            warnings[0].fields.get("operation").map(String::as_str),
+            Some("initialize_encryption")
+        );
+        assert_eq!(
+            warnings[0].fields.get("error_code").map(String::as_str),
+            Some("invalid_pdf")
+        );
+        assert!(
+            !format!("{events:?}").contains(CONFIDENTIAL_MARKER),
+            "encryption telemetry exposed attacker-controlled error text: {events:#?}"
         );
     }
 
