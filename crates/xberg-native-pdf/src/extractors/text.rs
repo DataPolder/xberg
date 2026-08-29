@@ -4870,7 +4870,7 @@ impl<'doc> TextExtractor<'doc> {
                         // that fired on the first Tj. Advance positioning so
                         // any later, OUTER-scope show-text lands correctly,
                         // but emit nothing. ~keep
-                        let w = self.advance_position_for_string(&text)?;
+                        let w = self.advance_position_for_string(&text, true)?;
                         if let Some(ref mut buffer) = self.tj_span_buffer {
                             buffer.accumulated_width += w;
                         }
@@ -4894,10 +4894,10 @@ impl<'doc> TextExtractor<'doc> {
                         } else {
                             // Character mode: show_text maps through font, but ActualText
                             // is already decoded. Fall back to show_text for positioning. ~keep
-                            self.show_text(actual_text.as_bytes())?;
+                            self.show_text(actual_text.as_bytes(), true)?;
                         }
                         // Advance position for the original text (to maintain layout) ~keep
-                        let w = self.advance_position_for_string(&text)?;
+                        let w = self.advance_position_for_string(&text, true)?;
                         if let Some(ref mut buffer) = self.tj_span_buffer {
                             buffer.accumulated_width += w;
                         }
@@ -4918,7 +4918,7 @@ impl<'doc> TextExtractor<'doc> {
 
                         self.append_and_advance(&text)?;
                     } else {
-                        self.show_text(&text)?;
+                        self.show_text(&text, true)?;
                     }
                 }
             }
@@ -4952,21 +4952,22 @@ impl<'doc> TextExtractor<'doc> {
                             buffer.unicode.push_str(&actual_text);
                             self.flush_tj_buffer(buffer)?;
                         } else {
-                            self.show_text(actual_text.as_bytes())?;
+                            self.show_text(actual_text.as_bytes(), true)?;
                         }
                     }
                     // First or subsequent: advance position for the
                     // entire TJ array so layout stays consistent. ~keep
-                    for element in array {
+                    for (index, element) in array.iter().enumerate() {
                         match element {
                             TextElement::String(s) => {
-                                let w = self.advance_position_for_string(&s)?;
+                                let repair_zero_widths = !Self::has_following_tj_displacement(&array, index);
+                                let w = self.advance_position_for_string(s, repair_zero_widths)?;
                                 if let Some(ref mut buffer) = self.tj_span_buffer {
                                     buffer.accumulated_width += w;
                                 }
                             }
                             TextElement::Offset(offset) => {
-                                self.advance_position_for_offset(offset)?;
+                                self.advance_position_for_offset(*offset)?;
                             }
                         }
                     }
@@ -4978,10 +4979,11 @@ impl<'doc> TextExtractor<'doc> {
                         // This creates one span per logical text unit instead of fragmenting ~keep
                         self.process_tj_array(&array)?;
                     } else {
-                        for element in array {
+                        for (index, element) in array.iter().enumerate() {
                             match element {
                                 TextElement::String(s) => {
-                                    self.show_text(&s)?;
+                                    let repair_zero_widths = !Self::has_following_tj_displacement(&array, index);
+                                    self.show_text(s, repair_zero_widths)?;
                                 }
                                 TextElement::Offset(offset) => {
                                     // Adjust text position by offset (in thousandths of em) ~keep
@@ -5004,7 +5006,7 @@ impl<'doc> TextExtractor<'doc> {
                                     // Fallback: static threshold if font unavailable or adaptive disabled.
                                     // ~keep
                                     let threshold = self.calculate_adaptive_tj_threshold();
-                                    if offset < threshold {
+                                    if *offset < threshold {
                                         let text_matrix = state.text_matrix;
                                         let ctm = state.ctm;
                                         let font_name = state.font_name.clone();
@@ -5104,7 +5106,7 @@ impl<'doc> TextExtractor<'doc> {
                     }
                     self.append_and_advance(&text)?;
                 } else {
-                    self.show_text(&text)?;
+                    self.show_text(&text, true)?;
                 }
             }
             Operator::DoubleQuote {
@@ -5136,7 +5138,7 @@ impl<'doc> TextExtractor<'doc> {
                     }
                     self.append_and_advance(&text)?;
                 } else {
-                    self.show_text(&text)?;
+                    self.show_text(&text, true)?;
                 }
             }
 
@@ -6551,6 +6553,10 @@ impl<'doc> TextExtractor<'doc> {
         }
     }
 
+    fn has_following_tj_displacement(array: &[TextElement], index: usize) -> bool {
+        matches!(array.get(index + 1), Some(TextElement::Offset(offset)) if *offset != 0.0)
+    }
+
     /// Process TJ array using tiebreaker mode (backward compatible).
     ///
     /// This is the legacy code path used when
@@ -6596,13 +6602,14 @@ impl<'doc> TextExtractor<'doc> {
                     if let Some(ref name) = font_name
                         && let Some(font) = self.fonts.get(name)
                     {
+                        let width_table = font.extraction_byte_widths(!Self::has_following_tj_displacement(array, idx));
                         for &byte in s.iter() {
                             // Normalize character code through encoding.
                             // This ensures word boundary detection works on actual characters,
                             // not raw byte codes from custom encodings ~keep
                             let char_code = font.get_encoded_char(byte).map(|ch| ch as u32).unwrap_or(byte as u32);
 
-                            let glyph_width = font.get_glyph_width(byte as u16);
+                            let glyph_width = width_table[byte as usize];
 
                             let is_ligature = Self::is_ligature_code(char_code);
 
@@ -6630,7 +6637,8 @@ impl<'doc> TextExtractor<'doc> {
                         }
                     }
 
-                    self.append_advance_buffer(&mut buffer, s)?;
+                    let repair_zero_widths = !Self::has_following_tj_displacement(array, idx);
+                    self.append_advance_buffer(&mut buffer, s, repair_zero_widths)?;
                 }
                 TextElement::Offset(offset) => {
                     // Track TJ offset for statistical analysis
@@ -7135,7 +7143,7 @@ impl<'doc> TextExtractor<'doc> {
     /// Advance text position for a string (used in TJ array processing).
     /// Advance the text matrix position by the width of a text string.
     /// Returns the computed width so callers can accumulate it.
-    fn advance_position_for_string(&mut self, text: &[u8]) -> Result<f32> {
+    fn advance_position_for_string(&mut self, text: &[u8], repair_zero_widths: bool) -> Result<f32> {
         let state = self.state_stack.current();
         let font_size = state.font_size;
         let horizontal_scaling = state.horizontal_scaling;
@@ -7160,7 +7168,7 @@ impl<'doc> TextExtractor<'doc> {
         let total_width = if let Some(font) = font {
             if font.subtype != "Type0" {
                 // Fast path: use precomputed 256-entry width table (simple fonts) ~keep
-                let width_table = font.get_byte_to_width_table();
+                let width_table = font.extraction_byte_widths(repair_zero_widths);
                 let mut w_sum = 0.0f32;
                 for &byte in text {
                     let mut w = width_table[byte as usize] * fs_factor * hs_factor;
@@ -7277,7 +7285,7 @@ impl<'doc> TextExtractor<'doc> {
                         && let Ok(decoded) = std::str::from_utf8(text)
                         && decoded.chars().any(|c| c as u32 > 0xFF)
                     {
-                        let width_table = font.get_byte_to_width_table();
+                        let width_table = font.extraction_byte_widths(true);
                         let mut w_sum = 0.0f32;
                         for &byte in text {
                             let mut w = width_table[byte as usize] * fs_factor * hs_factor;
@@ -7304,7 +7312,7 @@ impl<'doc> TextExtractor<'doc> {
                 }
 
                 let char_table = font.get_byte_to_char_table();
-                let width_table = font.get_byte_to_width_table();
+                let width_table = font.extraction_byte_widths(true);
                 let mut w_sum = 0.0f32;
                 for &byte in text {
                     let len_before = buffer.unicode.len();
@@ -7415,7 +7423,7 @@ impl<'doc> TextExtractor<'doc> {
     /// Combined Unicode decode + width + position advance for a local buffer.
     /// Same as append_and_advance but works on an explicit buffer parameter
     /// instead of self.tj_span_buffer. Used by TJ array processing.
-    fn append_advance_buffer(&mut self, buffer: &mut TjBuffer, text: &[u8]) -> Result<()> {
+    fn append_advance_buffer(&mut self, buffer: &mut TjBuffer, text: &[u8], repair_zero_widths: bool) -> Result<()> {
         let text = if text.len() > 32_767 { &text[..32_767] } else { text };
 
         let state = self.state_stack.current();
@@ -7461,7 +7469,7 @@ impl<'doc> TextExtractor<'doc> {
                         if let Ok(decoded) = std::str::from_utf8(text) {
                             let has_non_latin1 = decoded.chars().any(|c| c as u32 > 0xFF);
                             if has_non_latin1 {
-                                let width_table = font.get_byte_to_width_table();
+                                let width_table = font.extraction_byte_widths(repair_zero_widths);
                                 let mut w_sum = 0.0f32;
                                 for &byte in text {
                                     let mut w = width_table[byte as usize] * fs_factor * hs_factor;
@@ -7505,7 +7513,7 @@ impl<'doc> TextExtractor<'doc> {
                 }
 
                 let char_table = font.get_byte_to_char_table();
-                let width_table = font.get_byte_to_width_table();
+                let width_table = font.extraction_byte_widths(repair_zero_widths);
                 let mut w_sum = 0.0f32;
                 for &byte in text {
                     let len_before = buffer.unicode.len();
@@ -7935,7 +7943,7 @@ impl<'doc> TextExtractor<'doc> {
         Ok(())
     }
 
-    fn show_text(&mut self, text: &[u8]) -> Result<()> {
+    fn show_text(&mut self, text: &[u8], repair_zero_widths: bool) -> Result<()> {
         // PDF spec Section 7.3.4.2: implementation limit of 32,767 bytes per string. ~keep
         let text = if text.len() > 32_767 {
             tracing::warn!(
@@ -7958,6 +7966,10 @@ impl<'doc> TextExtractor<'doc> {
 
         let font = self.cached_current_font.as_deref();
 
+        let simple_widths = font
+            .filter(|font| font.subtype != "Type0")
+            .map(|font| font.extraction_byte_widths(repair_zero_widths));
+
         for (char_code, nbytes) in TextCharIter::new(text, font) {
             // Get current text matrix (may be updated by previous characters in this string) ~keep
             let state = self.state_stack.current();
@@ -7979,7 +7991,9 @@ impl<'doc> TextExtractor<'doc> {
             let effective_font_size =
                 font_size * (combined_char.d * combined_char.d + combined_char.b * combined_char.b).sqrt();
 
-            let glyph_width_font_units = if let Some(font) = font {
+            let glyph_width_font_units = if let Some(widths) = simple_widths.as_ref() {
+                widths[char_code as usize]
+            } else if let Some(font) = font {
                 font.get_glyph_width(char_code)
             } else {
                 500.0
@@ -13970,7 +13984,7 @@ mod tests {
         extractor.state_stack.current_mut().font_size = 12.0;
         extractor.state_stack.current_mut().horizontal_scaling = 100.0;
 
-        let width = extractor.advance_position_for_string(b"Hello").unwrap();
+        let width = extractor.advance_position_for_string(b"Hello", true).unwrap();
         assert!(width > 0.0, "Width should be positive even without font");
     }
 
@@ -13984,7 +13998,7 @@ mod tests {
         extractor.state_stack.current_mut().font_name = Some("F1".to_string());
         extractor.state_stack.current_mut().horizontal_scaling = 100.0;
 
-        let width = extractor.advance_position_for_string(b"Hi").unwrap();
+        let width = extractor.advance_position_for_string(b"Hi", true).unwrap();
         assert!(width > 0.0, "Width should be positive with font");
     }
 
@@ -13995,7 +14009,7 @@ mod tests {
         extractor.state_stack.current_mut().horizontal_scaling = 100.0;
         extractor.state_stack.current_mut().word_space = 5.0;
 
-        let width = extractor.advance_position_for_string(b"A B").unwrap();
+        let width = extractor.advance_position_for_string(b"A B", true).unwrap();
         assert!(width > 0.0);
     }
 

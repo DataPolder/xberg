@@ -11,6 +11,10 @@ use crate::fonts::TrueTypeCMap;
 use crate::fonts::cmap::LazyCMap;
 use crate::layout::text_block::FontWeight;
 use crate::object::Object;
+use skrifa::instance::{LocationRef, Size};
+use skrifa::metrics::{GlyphMetrics, Metrics};
+use skrifa::{FontRef, GlyphId, MetadataProvider};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -3697,30 +3701,107 @@ impl FontInfo {
     #[inline]
     pub fn get_byte_to_width_table(&self) -> &[f32; 256] {
         self.byte_to_width_table.get_or_init(|| {
-            let mut tbl = [self.default_width; 256];
-            if let Some(widths) = &self.widths {
-                if let Some(first_char) = self.first_char {
-                    for (idx, &w) in widths.iter().enumerate() {
-                        let code = first_char as usize + idx;
-                        if code < 256 {
-                            tbl[code] = w;
-                        }
-                    }
-                }
-            } else {
-                // Standard-14 fonts ship without /Widths arrays; per PDF
-                // spec (ISO 32000-1 §9.6.2.2) readers must use built-in
-                // metrics. get_standard_font_width returns Some(w) for
-                // Helvetica/Times/Courier variants and None otherwise,
-                // so non-standard fonts retain the default_width fallback. ~keep
-                for byte_code in 0..256u16 {
-                    if let Some(w) = self.get_standard_font_width(byte_code) {
-                        tbl[byte_code as usize] = w;
-                    }
-                }
-            }
+            let mut tbl = self.declared_byte_widths();
+            self.repair_zero_extraction_widths(&mut tbl);
             tbl
         })
+    }
+
+    fn declared_byte_widths(&self) -> [f32; 256] {
+        let mut table = [self.default_width; 256];
+        if let (Some(widths), Some(first_char)) = (&self.widths, self.first_char) {
+            for (index, &width) in widths.iter().enumerate() {
+                let code = first_char as usize + index;
+                if code < 256 {
+                    table[code] = width;
+                }
+            }
+        } else if self.widths.is_none() {
+            for byte_code in 0..256u16 {
+                if let Some(width) = self.get_standard_font_width(byte_code) {
+                    table[byte_code as usize] = width;
+                }
+            }
+        }
+        table
+    }
+
+    fn declared_zero_byte_codes(&self) -> Vec<u8> {
+        let Some(widths) = self.widths.as_ref() else {
+            return Vec::new();
+        };
+        let Some(first_char) = self.first_char else {
+            return Vec::new();
+        };
+        widths
+            .iter()
+            .enumerate()
+            .filter_map(|(index, width)| {
+                let code = first_char as usize + index;
+                (*width == 0.0 && code < 256).then_some(code as u8)
+            })
+            .collect()
+    }
+
+    fn extraction_fallback_width<'font>(
+        &self,
+        code: u8,
+        decoded: char,
+        font_ref: Option<&FontRef<'font>>,
+        embedded_metrics: Option<&(Metrics, GlyphMetrics<'font>)>,
+    ) -> Option<f32> {
+        let embedded_width = embedded_metrics.and_then(|(metrics, glyph_metrics)| {
+            let font = font_ref?;
+            let gid = self
+                .truetype_cmap()
+                .and_then(|cmap| cmap.code_to_gid(code as u16))
+                .map(GlyphId::from)
+                .or_else(|| font.charmap().map(decoded))?;
+            let advance = glyph_metrics.advance_width(gid)?;
+            (metrics.units_per_em > 0 && advance > 0.0).then_some(advance * 1000.0 / metrics.units_per_em as f32)
+        });
+        embedded_width
+            .or_else(|| self.get_standard_font_width(code as u16))
+            .filter(|width| width.is_finite() && *width > 0.0)
+    }
+
+    fn repair_zero_extraction_widths(&self, widths: &mut [f32; 256]) {
+        if self.subtype == "Type3" || self.subtype == "Type0" || self.wmode != 0 {
+            return;
+        }
+        let font_ref = self
+            .embedded_font_data
+            .as_deref()
+            .and_then(|data| FontRef::new(data).ok());
+        let embedded_metrics = font_ref.as_ref().map(|font| {
+            (
+                Metrics::new(font, Size::unscaled(), LocationRef::default()),
+                GlyphMetrics::new(font, Size::unscaled(), LocationRef::default()),
+            )
+        });
+        for code in self.declared_zero_byte_codes() {
+            let decoded = self.char_to_unicode(code as u32).and_then(|value| value.chars().next());
+            if decoded.is_some_and(|character| unicode_bidi::bidi_class(character) == unicode_bidi::BidiClass::NSM) {
+                continue;
+            }
+            let Some(width) = decoded.and_then(|character| {
+                self.extraction_fallback_width(code, character, font_ref.as_ref(), embedded_metrics.as_ref())
+            }) else {
+                continue;
+            };
+            widths[code as usize] = width;
+        }
+    }
+
+    /// Extraction-only widths for malformed simple fonts whose declared zero
+    /// conflicts with a positive embedded or Standard-14 advance. Rendering and
+    /// [`FontInfo::get_glyph_width`] retain the authored PDF width. ~keep
+    pub(crate) fn extraction_byte_widths(&self, repair_zero_widths: bool) -> Cow<'_, [f32; 256]> {
+        if repair_zero_widths {
+            Cow::Borrowed(self.get_byte_to_width_table())
+        } else {
+            Cow::Owned(self.declared_byte_widths())
+        }
     }
 
     /// Convert a character code to Unicode string.
