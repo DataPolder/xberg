@@ -134,6 +134,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed GCC 12+ WordPerfect builds by adding the standard header that declares `size_t` before
+  compiling the pinned libwpd source.
+- Fixed Ruby source-package installation by aligning the Gemfile and lockfile with the gemspec's
+  supported `rb_sys` range.
 - Fixed compressed image inputs with oversized declared dimensions exhausting memory during OCR,
   layout and QR detection, image classification, re-encoding, HEIF conversion, or structured-image
   rasterization; decoded allocations now obey `security_limits.max_content_size` and are rejected
@@ -274,6 +278,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Pinned downloaded Tesseract, Leptonica, and English tessdata inputs to immutable revisions with
+  verified sizes and SHA-256 digests, race-safe content-addressed caches, private build directories,
+  and bounded fail-closed archive extraction.
+- Structured extraction now resolves caller-provided JSON Schemas strictly offline and rejects
+  external HTTP and file references without performing I/O.
 - REST and MCP requests can no longer override LLM credentials, provider registrations, or other
   server-controlled settings.
 - Hardened ZIP accounting against overflow, impossible sizes, and compression-ratio bypasses.
