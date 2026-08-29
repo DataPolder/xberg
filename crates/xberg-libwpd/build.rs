@@ -27,8 +27,13 @@
 mod build_target_flags;
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+#[path = "build_wpd_patches.rs"]
+mod build_wpd_patches;
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod build_libwpd {
     use super::build_target_flags::msvc_only_flags;
+    use super::build_wpd_patches::patch_wpx_table_header;
     use flate2::read::GzDecoder;
     use sha2::{Digest, Sha256};
     use std::env;
@@ -229,6 +234,14 @@ mod build_libwpd {
         fs::write(&path, patched).unwrap_or_else(|e| panic!("writing {path:?}: {e}"));
     }
 
+    fn patch_wpd_table_header(wpd: &Path) {
+        let path = wpd.join("src/lib/WPXTable.h");
+        let source = fs::read_to_string(&path).unwrap_or_else(|error| panic!("reading {path:?}: {error}"));
+        let patched = patch_wpx_table_header(&source)
+            .unwrap_or_else(|error| panic!("patching direct cstddef include in {path:?}: {error}"));
+        fs::write(&path, patched).unwrap_or_else(|error| panic!("writing {path:?}: {error}"));
+    }
+
     pub fn build() {
         let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is set by cargo"));
 
@@ -244,6 +257,7 @@ mod build_libwpd {
             Some(LIBWPD_SHA256),
             &format!("libwpd-{LIBWPD_VERSION}"),
         );
+        patch_wpd_table_header(&wpd);
         patch_wpd_msvc_narrowing(&wpd);
         // Extracting `boost-subset.tar.gz` reproduces the `boost/boost/...`
         // layout `bcp` produces, so the include root is the extracted `boost`
