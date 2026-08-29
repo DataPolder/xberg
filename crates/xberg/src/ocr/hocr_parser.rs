@@ -95,18 +95,18 @@ pub(crate) fn parse_hocr_to_internal_document_with_page_offset(
 pub(crate) struct HocrParseResult {
     pub document: InternalDocument,
     pub dictionary_filtered_line_count: usize,
-    pub retained_word_confidence_stats: HocrConfidenceStats,
+    pub retained_word_confidence_stats: RetainedWordConfidenceStats,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HocrConfidenceStats {
+pub(crate) struct RetainedWordConfidenceStats {
     histogram: [usize; 101],
     count: usize,
     sum: u64,
     low_confidence_count: usize,
 }
 
-impl Default for HocrConfidenceStats {
+impl Default for RetainedWordConfidenceStats {
     fn default() -> Self {
         Self {
             histogram: [0; 101],
@@ -117,8 +117,8 @@ impl Default for HocrConfidenceStats {
     }
 }
 
-impl HocrConfidenceStats {
-    fn record(&mut self, confidence: f64) {
+impl RetainedWordConfidenceStats {
+    pub(crate) fn record(&mut self, confidence: f64) {
         if !confidence.is_finite() || !(0.0..=100.0).contains(&confidence) {
             return;
         }
@@ -188,7 +188,7 @@ pub(crate) fn parse_hocr_to_internal_document_with_page_offset_and_stats(
     let mut element_index: u32 = 0;
     let mut last_page: Option<u32> = None;
     let mut dictionary_filtered_line_count = 0usize;
-    let mut retained_word_confidence_stats = HocrConfidenceStats::default();
+    let mut retained_word_confidence_stats = RetainedWordConfidenceStats::default();
 
     let bytes = hocr_html.as_bytes();
     let mut pos = 0;
@@ -678,7 +678,7 @@ fn parse_paragraph(
     element_index: u32,
     par_tag: &str,
     dictionary_filter: Option<&DictionaryLineFilter<'_>>,
-    retained_word_confidence_stats: &mut HocrConfidenceStats,
+    retained_word_confidence_stats: &mut RetainedWordConfidenceStats,
 ) -> (Option<InternalElement>, usize, usize) {
     let bytes = html.as_bytes();
     let mut pos = start;

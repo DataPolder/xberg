@@ -14,7 +14,7 @@ use crate::ocr::cache::OcrCache;
 use crate::ocr::conversion::{TsvRow, iterator_word_to_element, tsv_row_to_element};
 use crate::ocr::error::OcrError;
 use crate::ocr::hocr_parser::{
-    DictionaryLineFilter, HocrConfidenceStats, parse_hocr_to_internal_document_with_page_offset_and_stats,
+    DictionaryLineFilter, RetainedWordConfidenceStats, parse_hocr_to_internal_document_with_page_offset_and_stats,
 };
 use crate::ocr::preprocessing::preprocess_pix;
 #[cfg(test)]
@@ -794,6 +794,7 @@ fn point_in_bbox(x: i32, y: i32, left: i32, top: i32, right: i32, bottom: i32) -
 /// (#192, #180).
 struct IteratorExtractionResult {
     elements: Vec<OcrElement>,
+    retained_text_confidence_stats: Option<RetainedWordConfidenceStats>,
     /// Words the Tesseract result iterator itself failed to extract
     /// (null pointer / invalid parameter / invalid UTF-8 per word), per
     /// `ResultIterator::extract_all_words` (#192).
@@ -928,10 +929,19 @@ fn insert_word_iterator_skipped_count_metadata(
     }
 }
 
-fn insert_hocr_word_confidence_metadata(
+fn insert_retained_word_confidence_metadata(
     metadata: &mut HashMap<String, serde_json::Value>,
-    stats: &HocrConfidenceStats,
+    stats: &RetainedWordConfidenceStats,
 ) {
+    for key in [
+        "word_count",
+        "low_conf_word_count",
+        "mean_text_conf",
+        "median_word_conf",
+        "p10_word_conf",
+    ] {
+        metadata.remove(key);
+    }
     metadata.insert(
         "word_count".to_string(),
         serde_json::Value::Number(stats.word_count().into()),
@@ -951,6 +961,25 @@ fn insert_hocr_word_confidence_metadata(
     }
 }
 
+fn retained_text_word_confidence_stats(
+    content: &str,
+    words: &[xberg_tesseract::WordData],
+) -> RetainedWordConfidenceStats {
+    let retained_tokens = content.split_whitespace().collect::<Vec<_>>();
+    let mut retained_index = 0usize;
+    let mut stats = RetainedWordConfidenceStats::default();
+    for word in words {
+        let cleaned = strip_control_characters(&word.text);
+        let word_tokens = cleaned.split_whitespace().collect::<Vec<_>>();
+        if word_tokens.is_empty() || !retained_tokens[retained_index..].starts_with(&word_tokens) {
+            continue;
+        }
+        stats.record(f64::from(word.confidence));
+        retained_index = retained_index.saturating_add(word_tokens.len());
+    }
+    stats
+}
+
 /// Extract OcrElements via Tesseract's iterator APIs with rich metadata.
 ///
 /// Uses ResultIterator for word-level text, bounding boxes, confidence, and font
@@ -960,9 +989,11 @@ fn extract_elements_via_iterator(
     api: &TesseractAPI,
     page_number: u32,
     min_confidence: f64,
+    retained_text: Option<&str>,
 ) -> Result<IteratorExtractionResult, OcrError> {
     let empty = || IteratorExtractionResult {
         elements: Vec::new(),
+        retained_text_confidence_stats: None,
         skipped_words: 0,
         non_text_block_word_count: 0,
         dict_invalid_word_ratio: None,
@@ -1030,6 +1061,8 @@ fn extract_elements_via_iterator(
     }
 
     let dict_invalid_word_ratio = dictionary_invalid_word_ratio(api, &word_extraction.words);
+    let retained_text_confidence_stats =
+        retained_text.map(|content| retained_text_word_confidence_stats(content, &word_extraction.words));
 
     let mut elements = Vec::new();
     let mut non_text_block_word_count = 0usize;
@@ -1068,6 +1101,7 @@ fn extract_elements_via_iterator(
 
     Ok(IteratorExtractionResult {
         elements,
+        retained_text_confidence_stats,
         skipped_words: word_extraction.skipped,
         non_text_block_word_count,
         dict_invalid_word_ratio,
@@ -1358,7 +1392,7 @@ pub(super) fn perform_ocr(
         format!("completed mean_text_conf={}", mean_text_conf)
     });
 
-    let word_confidence_stats = if config.output_format == "markdown" {
+    let word_confidence_stats = if matches!(config.output_format.as_str(), "markdown" | "text") {
         None
     } else {
         match api.all_word_confidences() {
@@ -1511,8 +1545,8 @@ pub(super) fn perform_ocr(
     }
 
     if let Some(stats) = retained_hocr_confidence_stats.as_ref() {
-        insert_hocr_word_confidence_metadata(&mut metadata, stats);
-    } else {
+        insert_retained_word_confidence_metadata(&mut metadata, stats);
+    } else if config.output_format != "text" {
         if mean_text_conf >= 0 {
             metadata.insert(
                 "mean_text_conf".to_string(),
@@ -1673,7 +1707,15 @@ pub(super) fn perform_ocr(
         }
     }
 
-    let iterator_extraction = extract_elements_via_iterator(&api, config.page_number, config.min_confidence);
+    let mut content = strip_control_characters(&raw_content).into_owned();
+    let retained_text = (config.output_format == "text").then_some(content.as_str());
+    let iterator_extraction =
+        extract_elements_via_iterator(&api, config.page_number, config.min_confidence, retained_text);
+    if let Ok(extraction) = &iterator_extraction
+        && let Some(stats) = extraction.retained_text_confidence_stats.as_ref()
+    {
+        insert_retained_word_confidence_metadata(&mut metadata, stats);
+    }
     match iterator_extraction {
         Ok(extraction) if !extraction.elements.is_empty() => {
             insert_word_iterator_skipped_count_metadata(&mut metadata, extraction.skipped_words);
@@ -1702,8 +1744,6 @@ pub(super) fn perform_ocr(
             }
         }
     }
-
-    let mut content = strip_control_characters(&raw_content).into_owned();
 
     let is_markdown_output = extraction_config
         .map(|c| c.output_format == crate::core::config::OutputFormat::Markdown)
@@ -2007,7 +2047,7 @@ mod tests {
         let result = parse_hocr_to_internal_document_with_page_offset_and_stats(hocr, Some(&filter), 1);
         let mut metadata = HashMap::new();
 
-        insert_hocr_word_confidence_metadata(&mut metadata, &result.retained_word_confidence_stats);
+        insert_retained_word_confidence_metadata(&mut metadata, &result.retained_word_confidence_stats);
 
         assert_eq!(flatten_hocr_elements_to_text(&result.document.elements), "CLEAR WORDS");
         assert_eq!(metadata.get("word_count"), Some(&serde_json::json!(2)));
@@ -2036,7 +2076,7 @@ mod tests {
         let result = parse_hocr_to_internal_document_with_page_offset_and_stats(hocr, Some(&filter), 1);
         let mut metadata = HashMap::new();
 
-        insert_hocr_word_confidence_metadata(&mut metadata, &result.retained_word_confidence_stats);
+        insert_retained_word_confidence_metadata(&mut metadata, &result.retained_word_confidence_stats);
 
         assert!(flatten_hocr_elements_to_text(&result.document.elements).is_empty());
         assert_eq!(metadata.get("word_count"), Some(&serde_json::json!(0)));
@@ -2045,6 +2085,67 @@ mod tests {
         assert!(!metadata.contains_key("median_word_conf"));
         assert!(!metadata.contains_key("p10_word_conf"));
         assert_eq!(metadata.len(), 2);
+    }
+
+    #[test]
+    fn should_publish_zero_text_confidence_words_when_every_iterator_word_is_filtered() {
+        let words = [xberg_tesseract::WordData {
+            text: "\0".to_string(),
+            left: 0,
+            top: 0,
+            right: 10,
+            bottom: 10,
+            confidence: 95.0,
+            font_attrs: None,
+            language: None,
+        }];
+        let stats = retained_text_word_confidence_stats("", &words);
+        let mut metadata = HashMap::from([
+            ("word_count".to_string(), serde_json::json!(1)),
+            ("low_conf_word_count".to_string(), serde_json::json!(0)),
+            ("mean_text_conf".to_string(), serde_json::json!(95)),
+            ("median_word_conf".to_string(), serde_json::json!(95)),
+            ("p10_word_conf".to_string(), serde_json::json!(95)),
+        ]);
+
+        insert_retained_word_confidence_metadata(&mut metadata, &stats);
+
+        assert_eq!(metadata.get("word_count"), Some(&serde_json::json!(0)));
+        assert_eq!(metadata.get("low_conf_word_count"), Some(&serde_json::json!(0)));
+        assert!(!metadata.contains_key("mean_text_conf"));
+        assert!(!metadata.contains_key("median_word_conf"));
+        assert!(!metadata.contains_key("p10_word_conf"));
+    }
+
+    #[test]
+    fn should_publish_only_partially_retained_text_word_confidences() {
+        let word = |text: &str, confidence: f32| xberg_tesseract::WordData {
+            text: text.to_string(),
+            left: 0,
+            top: 0,
+            right: 10,
+            bottom: 10,
+            confidence,
+            font_attrs: None,
+            language: None,
+        };
+        let words = [word("RETAINED", 20.0), word("\0", 95.0), word("WORDS", 90.0)];
+        let stats = retained_text_word_confidence_stats("RETAINED WORDS", &words);
+        let mut metadata = HashMap::from([
+            ("word_count".to_string(), serde_json::json!(3)),
+            ("low_conf_word_count".to_string(), serde_json::json!(1)),
+            ("mean_text_conf".to_string(), serde_json::json!(68)),
+            ("median_word_conf".to_string(), serde_json::json!(90)),
+            ("p10_word_conf".to_string(), serde_json::json!(20)),
+        ]);
+
+        insert_retained_word_confidence_metadata(&mut metadata, &stats);
+
+        assert_eq!(metadata.get("word_count"), Some(&serde_json::json!(2)));
+        assert_eq!(metadata.get("mean_text_conf"), Some(&serde_json::json!(55)));
+        assert_eq!(metadata.get("median_word_conf"), Some(&serde_json::json!(55)));
+        assert_eq!(metadata.get("p10_word_conf"), Some(&serde_json::json!(20)));
+        assert_eq!(metadata.get("low_conf_word_count"), Some(&serde_json::json!(1)));
     }
 
     /// Exact count: a known number of skipped words must produce exactly the
