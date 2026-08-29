@@ -21,6 +21,8 @@ use xberg::plugins::{OcrBackend, OcrBackendType, Plugin, register_ocr_backend, u
 const EXPECTED_TEXT: &str = "VISIBLE ANNOTATION TEXT";
 const SECOND_PAGE_TEXT: &str = "PAGE TWO ANNOTATION";
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const HEADER_TEXT: &str = "HEADER";
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 const TOTAL_TEXT: &str = "TOTAL";
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 const LONG_ANNOTATION_TEXT: &str = concat!(
@@ -915,7 +917,19 @@ async fn should_not_duplicate_annotation_line_inside_structured_ocr_element() {
     let document = &result.expect("embedded-line OCR case must succeed").results[0];
 
     assert_eq!(
-        document.content.lines().filter(|line| line.trim() == TOTAL_TEXT).count(),
+        document
+            .content
+            .lines()
+            .filter(|line| line.trim() == HEADER_TEXT)
+            .count(),
+        1
+    );
+    assert_eq!(
+        document
+            .content
+            .lines()
+            .filter(|line| line.trim() == TOTAL_TEXT)
+            .count(),
         1
     );
     assert_eq!(
@@ -926,6 +940,7 @@ async fn should_not_duplicate_annotation_line_inside_structured_ocr_element() {
             .flatten()
             .filter(|element| {
                 element.metadata.page_number == Some(1)
+                    && element.text.lines().any(|line| line.trim() == HEADER_TEXT)
                     && element.text.lines().any(|line| line.trim() == TOTAL_TEXT)
             })
             .count(),
