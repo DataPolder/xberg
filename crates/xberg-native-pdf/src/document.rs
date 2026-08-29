@@ -900,6 +900,29 @@ pub(crate) enum ActualTextAction {
     Suppress,
 }
 
+fn trace_open_error(error: &Error) {
+    if let Some(error_offset) = error.telemetry_offset() {
+        tracing::error!(error_code = error.telemetry_code(), error_offset, "PDF open failed");
+    } else {
+        tracing::error!(error_code = error.telemetry_code(), "PDF open failed");
+    }
+}
+
+fn trace_xref_parse_failure(error: &Error) {
+    if let Some(error_offset) = error.telemetry_offset() {
+        tracing::warn!(
+            error_code = error.telemetry_code(),
+            error_offset,
+            "regular xref parsing failed; attempting reconstruction"
+        );
+    } else {
+        tracing::warn!(
+            error_code = error.telemetry_code(),
+            "regular xref parsing failed; attempting reconstruction"
+        );
+    }
+}
+
 impl PdfDocument {
     /// Open a PDF document from in-memory bytes.
     ///
@@ -910,11 +933,17 @@ impl PdfDocument {
     /// # Errors
     ///
     /// Returns an error if the PDF data is invalid, unsupported, or cannot be parsed.
-    #[tracing::instrument(name = "pdf.from_bytes", skip_all, fields(bytes = data.len()), err)]
+    #[tracing::instrument(name = "pdf.from_bytes", skip_all, fields(bytes = data.len()))]
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
         let source_bytes = data.clone();
         let reader = PdfReader::Memory(BufReader::new(Cursor::new(data)));
-        let mut doc = Self::open_from_reader(reader)?;
+        let mut doc = match Self::open_from_reader(reader) {
+            Ok(document) => document,
+            Err(error) => {
+                trace_open_error(&error);
+                return Err(error);
+            }
+        };
         doc.source_bytes = source_bytes;
         Ok(doc)
     }
@@ -947,7 +976,7 @@ impl PdfDocument {
     /// # Ok::<(), xberg_native_pdf::error::Error>(())
     /// ```
     #[cfg(not(target_arch = "wasm32"))]
-    #[tracing::instrument(name = "pdf.open", skip_all, fields(path = %path.as_ref().display()), err)]
+    #[tracing::instrument(name = "pdf.open", skip_all, fields(path = %path.as_ref().display()))]
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         // Read once and route through `from_bytes` so the in-memory
         // `source_bytes` field is populated. Path-loaded documents that
@@ -958,7 +987,14 @@ impl PdfDocument {
         //
         // The doc comment on this function already promised "Reads the
         // entire file into memory"; this is making it true. ~keep
-        let data = std::fs::read(path.as_ref())?;
+        let data = match std::fs::read(path.as_ref()) {
+            Ok(data) => data,
+            Err(error) => {
+                let error = Error::Io(error);
+                trace_open_error(&error);
+                return Err(error);
+            }
+        };
         Self::from_bytes(data)
     }
 
@@ -996,7 +1032,7 @@ impl PdfDocument {
                 }
             }
             Err(e) => {
-                tracing::warn!("Regular xref parsing failed: {}, attempting reconstruction", e);
+                trace_xref_parse_failure(&e);
 
                 match Self::try_reconstruct_xref(&mut reader) {
                     Ok((reconstructed_xref, reconstructed_trailer, syn)) => {
@@ -1009,8 +1045,10 @@ impl PdfDocument {
                         tracing::warn!(
                             target: crate::LOG_TARGET_ROOT,
                             operation = "reconstruct_xref",
-                            primary_error = %e,
-                            reconstruction_error = %recon_err,
+                            primary_error_code = e.telemetry_code(),
+                            primary_error_offset = ?e.telemetry_offset(),
+                            reconstruction_error_code = recon_err.telemetry_code(),
+                            reconstruction_error_offset = ?recon_err.telemetry_offset(),
                             "xref reconstruction failed; propagating original parse error"
                         );
                         return Err(e);
@@ -25500,7 +25538,7 @@ mod tests {
             .filter(|event| {
                 event.level == Level::ERROR
                     && event.target == format!("{}::document", crate::LOG_TARGET_ROOT)
-                    && event.fields.contains_key("error")
+                    && event.fields.contains_key("error_code")
             })
             .collect();
         assert_eq!(failures.len(), 1, "expected one boundary error: {events:#?}");
@@ -25509,10 +25547,9 @@ mod tests {
             1,
             "fatal xref failure must emit exactly one ERROR: {events:#?}"
         );
-        let error = failures[0].fields.get("error").unwrap();
-        assert!(
-            error.contains("Trailer keyword not found"),
-            "wrong propagated error: {error}"
+        assert_eq!(
+            failures[0].fields.get("error_code").map(String::as_str),
+            Some("invalid_pdf")
         );
         let reconstruction = events.iter().find(|event| {
             event.level == Level::WARN
@@ -25520,8 +25557,44 @@ mod tests {
                 && event.fields.get("operation").map(String::as_str) == Some("reconstruct_xref")
         });
         let reconstruction = reconstruction.unwrap_or_else(|| panic!("missing reconstruction context: {events:#?}"));
-        assert!(reconstruction.fields.contains_key("primary_error"));
-        assert!(reconstruction.fields.contains_key("reconstruction_error"));
+        assert!(reconstruction.fields.contains_key("primary_error_code"));
+        assert!(reconstruction.fields.contains_key("reconstruction_error_code"));
+    }
+
+    #[test]
+    fn xref_recovery_tracing_does_not_expose_document_bytes() {
+        const CONFIDENTIAL_MARKER: &str = "CONFIDENTIAL_ENTERPRISE_PAYLOAD_7f40c6";
+        let confidential_content = CONFIDENTIAL_MARKER.repeat(4096);
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let object_offset = pdf.len();
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog >>\nendobj\n");
+        let xref_offset = pdf.len();
+        pdf.extend_from_slice(b"xref\n0 2\n0000000000 65535 f \n");
+        pdf.extend_from_slice(format!("{object_offset:010} 00000 n \n").as_bytes());
+        pdf.extend_from_slice(format!("trailer\n<< /Root ${confidential_content} >>\n").as_bytes());
+        pdf.extend_from_slice(format!("startxref\n{xref_offset}\n%%EOF\n").as_bytes());
+
+        let (result, events) = capture_events(|| PdfDocument::from_bytes(pdf));
+        assert!(result.is_ok(), "reconstruction should recover the malformed trailer");
+        let captured = format!("{events:?}");
+        let confidential_bytes = CONFIDENTIAL_MARKER
+            .as_bytes()
+            .iter()
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        assert!(
+            !captured.contains(CONFIDENTIAL_MARKER) && !captured.contains(&confidential_bytes),
+            "recovery telemetry exposed attacker-controlled document bytes: {captured}"
+        );
+        assert!(
+            events
+                .iter()
+                .flat_map(|event| event.fields.values())
+                .all(|value| value.len() <= 256),
+            "recovery telemetry emitted an unbounded field: {events:#?}"
+        );
     }
 
     #[test]
