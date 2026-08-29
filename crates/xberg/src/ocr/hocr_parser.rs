@@ -95,6 +95,85 @@ pub(crate) fn parse_hocr_to_internal_document_with_page_offset(
 pub(crate) struct HocrParseResult {
     pub document: InternalDocument,
     pub dictionary_filtered_line_count: usize,
+    pub retained_word_confidence_stats: HocrConfidenceStats,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct HocrConfidenceStats {
+    histogram: [usize; 101],
+    count: usize,
+    sum: u64,
+    low_confidence_count: usize,
+}
+
+impl Default for HocrConfidenceStats {
+    fn default() -> Self {
+        Self {
+            histogram: [0; 101],
+            count: 0,
+            sum: 0,
+            low_confidence_count: 0,
+        }
+    }
+}
+
+impl HocrConfidenceStats {
+    fn record(&mut self, confidence: f64) {
+        if !confidence.is_finite() || !(0.0..=100.0).contains(&confidence) {
+            return;
+        }
+        let confidence = confidence.round() as usize;
+        self.histogram[confidence] = self.histogram[confidence].saturating_add(1);
+        self.count = self.count.saturating_add(1);
+        self.sum = self.sum.saturating_add(confidence as u64);
+        if confidence < 50 {
+            self.low_confidence_count = self.low_confidence_count.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn word_count(&self) -> usize {
+        self.count
+    }
+
+    pub(crate) fn mean(&self) -> Option<u64> {
+        (self.count > 0).then(|| self.sum / self.count as u64)
+    }
+
+    pub(crate) fn median(&self) -> Option<usize> {
+        if self.count == 0 {
+            return None;
+        }
+        let upper = self.value_at_rank(self.count / 2)?;
+        if self.count.is_multiple_of(2) {
+            let lower = self.value_at_rank(self.count / 2 - 1)?;
+            Some((lower + upper) / 2)
+        } else {
+            Some(upper)
+        }
+    }
+
+    pub(crate) fn p10(&self) -> Option<usize> {
+        if self.count == 0 {
+            None
+        } else {
+            self.value_at_rank((self.count - 1) / 10)
+        }
+    }
+
+    pub(crate) fn low_confidence_word_count(&self) -> usize {
+        self.low_confidence_count
+    }
+
+    fn value_at_rank(&self, rank: usize) -> Option<usize> {
+        let mut cumulative = 0usize;
+        for (confidence, count) in self.histogram.iter().enumerate() {
+            cumulative = cumulative.saturating_add(*count);
+            if rank < cumulative {
+                return Some(confidence);
+            }
+        }
+        None
+    }
 }
 
 /// Parse hOCR and report how many physical lines dictionary filtering removed. ~keep
@@ -109,6 +188,7 @@ pub(crate) fn parse_hocr_to_internal_document_with_page_offset_and_stats(
     let mut element_index: u32 = 0;
     let mut last_page: Option<u32> = None;
     let mut dictionary_filtered_line_count = 0usize;
+    let mut retained_word_confidence_stats = HocrConfidenceStats::default();
 
     let bytes = hocr_html.as_bytes();
     let mut pos = 0;
@@ -172,6 +252,7 @@ pub(crate) fn parse_hocr_to_internal_document_with_page_offset_and_stats(
                 element_index,
                 &par_tag_name,
                 dictionary_filter,
+                &mut retained_word_confidence_stats,
             );
             pos = end_pos;
             dictionary_filtered_line_count = dictionary_filtered_line_count.saturating_add(filtered_lines);
@@ -198,6 +279,7 @@ pub(crate) fn parse_hocr_to_internal_document_with_page_offset_and_stats(
     HocrParseResult {
         document: doc,
         dictionary_filtered_line_count,
+        retained_word_confidence_stats,
     }
 }
 
@@ -596,6 +678,7 @@ fn parse_paragraph(
     element_index: u32,
     par_tag: &str,
     dictionary_filter: Option<&DictionaryLineFilter<'_>>,
+    retained_word_confidence_stats: &mut HocrConfidenceStats,
 ) -> (Option<InternalElement>, usize, usize) {
     let bytes = html.as_bytes();
     let mut pos = start;
@@ -736,6 +819,7 @@ fn parse_paragraph(
         if let Some(c) = word.confidence {
             conf_sum += c;
             conf_count += 1;
+            retained_word_confidence_stats.record(c);
         }
         if let Some(fs) = word.font_size {
             font_size_sum += fs;
@@ -2113,6 +2197,77 @@ mod tests {
 
             assert_eq!(result.dictionary_filtered_line_count, 2);
             assert_eq!(result.document.elements[0].text, "RIGHT ELEVATION\nLEFT ELEVATION");
+        }
+
+        #[test]
+        fn retained_confidence_stats_exclude_dictionary_filtered_lines() {
+            let hocr = r#"<div class="ocr_page" title="ppageno 0">
+                <p class="ocr_par">
+                    <span class="ocr_line">
+                        <span class="ocrx_word" title="bbox 10 10 100 40; x_wconf 20">CLEAR</span>
+                        <span class="ocrx_word" title="bbox 110 10 220 40; x_wconf 90">WORDS</span>
+                    </span>
+                    <span class="ocr_line">
+                        <span class="ocrx_word" title="bbox 10 50 100 80; x_wconf 0">OWATS</span>
+                        <span class="ocrx_word" title="bbox 110 50 220 80; x_wconf 0">DNDEVET</span>
+                    </span>
+                </p>
+            </div>"#;
+            let is_valid = |word: &str| Some(matches!(word, "CLEAR" | "WORDS"));
+            let filter = DictionaryLineFilter {
+                is_valid_word: &is_valid,
+                max_invalid_ratio: TEST_THRESHOLD,
+            };
+
+            let unfiltered = parse_hocr_to_internal_document_with_page_offset_and_stats(hocr, None, 1);
+            let unfiltered_stats = &unfiltered.retained_word_confidence_stats;
+            assert_eq!(unfiltered_stats.word_count(), 4);
+            assert_eq!(unfiltered_stats.mean(), Some(27));
+            assert_eq!(unfiltered_stats.median(), Some(10));
+            assert_eq!(unfiltered_stats.p10(), Some(0));
+            assert_eq!(unfiltered_stats.low_confidence_word_count(), 3);
+
+            let result = parse_hocr_to_internal_document_with_page_offset_and_stats(hocr, Some(&filter), 1);
+            let stats = &result.retained_word_confidence_stats;
+
+            assert_eq!(result.document.elements[0].text, "CLEAR WORDS");
+            assert_eq!(result.dictionary_filtered_line_count, 1);
+            assert_eq!(stats.word_count(), 2);
+            assert_eq!(stats.mean(), Some(55));
+            assert_eq!(stats.median(), Some(55));
+            assert_eq!(stats.p10(), Some(20));
+            assert_eq!(stats.low_confidence_word_count(), 1);
+        }
+
+        #[test]
+        fn rejected_all_words_produces_empty_stats() {
+            let hocr = r#"<div class="ocr_page" title="ppageno 0">
+                <p class="ocr_par">
+                    <span class="ocr_line">
+                        <span class="ocrx_word" title="bbox 10 10 100 40; x_wconf 10">OWATS</span>
+                        <span class="ocrx_word" title="bbox 110 10 220 40; x_wconf 90">DNDEVET</span>
+                    </span>
+                </p>
+            </div>"#;
+            let always_invalid = |_: &str| Some(false);
+            let filter = DictionaryLineFilter {
+                is_valid_word: &always_invalid,
+                max_invalid_ratio: TEST_THRESHOLD,
+            };
+
+            let unfiltered = parse_hocr_to_internal_document_with_page_offset_and_stats(hocr, None, 1);
+            assert_eq!(unfiltered.retained_word_confidence_stats.word_count(), 2);
+            assert_eq!(unfiltered.retained_word_confidence_stats.median(), Some(50));
+
+            let result = parse_hocr_to_internal_document_with_page_offset_and_stats(hocr, Some(&filter), 1);
+            let stats = &result.retained_word_confidence_stats;
+
+            assert!(result.document.elements.is_empty());
+            assert_eq!(stats.word_count(), 0);
+            assert_eq!(stats.mean(), None);
+            assert_eq!(stats.median(), None);
+            assert_eq!(stats.p10(), None);
+            assert_eq!(stats.low_confidence_word_count(), 0);
         }
 
         /// A line with only ONE dictionary-checkable word must never be scored, even when

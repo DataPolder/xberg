@@ -13,7 +13,9 @@ use crate::image::normalize_image_dpi_owned;
 use crate::ocr::cache::OcrCache;
 use crate::ocr::conversion::{TsvRow, iterator_word_to_element, tsv_row_to_element};
 use crate::ocr::error::OcrError;
-use crate::ocr::hocr_parser::{DictionaryLineFilter, parse_hocr_to_internal_document_with_page_offset_and_stats};
+use crate::ocr::hocr_parser::{
+    DictionaryLineFilter, HocrConfidenceStats, parse_hocr_to_internal_document_with_page_offset_and_stats,
+};
 use crate::ocr::preprocessing::preprocess_pix;
 #[cfg(test)]
 use crate::ocr::preprocessing::should_invert_for_polarity;
@@ -896,6 +898,29 @@ fn insert_word_iterator_skipped_count_metadata(
     }
 }
 
+fn insert_hocr_word_confidence_metadata(
+    metadata: &mut HashMap<String, serde_json::Value>,
+    stats: &HocrConfidenceStats,
+) {
+    metadata.insert(
+        "word_count".to_string(),
+        serde_json::Value::Number(stats.word_count().into()),
+    );
+    metadata.insert(
+        "low_conf_word_count".to_string(),
+        serde_json::Value::Number(stats.low_confidence_word_count().into()),
+    );
+    if let Some(mean) = stats.mean() {
+        metadata.insert("mean_text_conf".to_string(), serde_json::Value::Number(mean.into()));
+    }
+    if let Some(median) = stats.median() {
+        metadata.insert("median_word_conf".to_string(), serde_json::Value::Number(median.into()));
+    }
+    if let Some(p10) = stats.p10() {
+        metadata.insert("p10_word_conf".to_string(), serde_json::Value::Number(p10.into()));
+    }
+}
+
 /// Extract OcrElements via Tesseract's iterator APIs with rich metadata.
 ///
 /// Uses ResultIterator for word-level text, bounding boxes, confidence, and font
@@ -1303,32 +1328,36 @@ pub(super) fn perform_ocr(
         format!("completed mean_text_conf={}", mean_text_conf)
     });
 
-    let word_confidence_stats = match api.all_word_confidences() {
-        Ok(confidences) if !confidences.is_empty() => {
-            let word_count = confidences.len();
-            let low_conf_word_count = confidences.iter().filter(|&&c| c < 50).count();
+    let word_confidence_stats = if config.output_format == "markdown" {
+        None
+    } else {
+        match api.all_word_confidences() {
+            Ok(confidences) if !confidences.is_empty() => {
+                let word_count = confidences.len();
+                let low_conf_word_count = confidences.iter().filter(|&&c| c < 50).count();
 
-            let mut sorted = confidences.clone();
-            sorted.sort_unstable();
-            let median_word_conf = if word_count % 2 == 0 {
-                (sorted[word_count / 2 - 1] + sorted[word_count / 2]) / 2
-            } else {
-                sorted[word_count / 2]
-            };
+                let mut sorted = confidences.clone();
+                sorted.sort_unstable();
+                let median_word_conf = if word_count % 2 == 0 {
+                    (sorted[word_count / 2 - 1] + sorted[word_count / 2]) / 2
+                } else {
+                    sorted[word_count / 2]
+                };
 
-            let p10_idx = ((word_count as f64 - 1.0) * 0.1).floor() as usize;
-            let p10_word_conf = sorted[p10_idx.min(word_count - 1)];
+                let p10_idx = ((word_count as f64 - 1.0) * 0.1).floor() as usize;
+                let p10_word_conf = sorted[p10_idx.min(word_count - 1)];
 
-            Some((median_word_conf, p10_word_conf, word_count, low_conf_word_count))
+                Some((median_word_conf, p10_word_conf, word_count, low_conf_word_count))
+            }
+            Ok(_) => match api.mean_text_conf() {
+                Ok(mean_conf) => Some((mean_conf, mean_conf, 0usize, 0usize)),
+                Err(_) => None,
+            },
+            Err(_) => match api.mean_text_conf() {
+                Ok(mean_conf) => Some((mean_conf, mean_conf, 0usize, 0usize)),
+                Err(_) => None,
+            },
         }
-        Ok(_) => match api.mean_text_conf() {
-            Ok(mean_conf) => Some((mean_conf, mean_conf, 0usize, 0usize)),
-            Err(_) => None,
-        },
-        Err(_) => match api.mean_text_conf() {
-            Ok(mean_conf) => Some((mean_conf, mean_conf, 0usize, 0usize)),
-            Err(_) => None,
-        },
     };
 
     let tsv_data_for_tables = if config.enable_table_detection || config.output_format == "tsv" {
@@ -1342,6 +1371,7 @@ pub(super) fn perform_ocr(
 
     let mut hocr_document: Option<InternalDocument> = None;
     let mut dictionary_filtered_line_count = 0usize;
+    let mut retained_hocr_confidence_stats = None;
 
     let (raw_content, mime_type) = match config.output_format.as_str() {
         "text" => {
@@ -1376,6 +1406,7 @@ pub(super) fn perform_ocr(
             );
             dictionary_filtered_line_count = parse_result.dictionary_filtered_line_count;
             let content = flatten_hocr_elements_to_text(&parse_result.document.elements);
+            retained_hocr_confidence_stats = Some(parse_result.retained_word_confidence_stats);
             hocr_document = Some(parse_result.document);
 
             let mime_type = extraction_config
@@ -1449,30 +1480,34 @@ pub(super) fn perform_ocr(
         );
     }
 
-    if mean_text_conf >= 0 {
-        metadata.insert(
-            "mean_text_conf".to_string(),
-            serde_json::Value::Number(serde_json::Number::from(mean_text_conf)),
-        );
-    }
+    if let Some(stats) = retained_hocr_confidence_stats.as_ref() {
+        insert_hocr_word_confidence_metadata(&mut metadata, stats);
+    } else {
+        if mean_text_conf >= 0 {
+            metadata.insert(
+                "mean_text_conf".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(mean_text_conf)),
+            );
+        }
 
-    if let Some((median_conf, p10_conf, word_count, low_conf_count)) = word_confidence_stats {
-        metadata.insert(
-            "median_word_conf".to_string(),
-            serde_json::Value::Number(serde_json::Number::from(median_conf)),
-        );
-        metadata.insert(
-            "p10_word_conf".to_string(),
-            serde_json::Value::Number(serde_json::Number::from(p10_conf)),
-        );
-        metadata.insert(
-            "word_count".to_string(),
-            serde_json::Value::Number(serde_json::Number::from(word_count)),
-        );
-        metadata.insert(
-            "low_conf_word_count".to_string(),
-            serde_json::Value::Number(serde_json::Number::from(low_conf_count)),
-        );
+        if let Some((median_conf, p10_conf, word_count, low_conf_count)) = word_confidence_stats {
+            metadata.insert(
+                "median_word_conf".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(median_conf)),
+            );
+            metadata.insert(
+                "p10_word_conf".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(p10_conf)),
+            );
+            metadata.insert(
+                "word_count".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(word_count)),
+            );
+            metadata.insert(
+                "low_conf_word_count".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(low_conf_count)),
+            );
+        }
     }
 
     // No `script_name`/`script_confidence` metadata: the ONNX PP-LCNet
@@ -1915,8 +1950,72 @@ pub(super) fn process_image_files_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ocr::hocr_parser::HOCR_FONT_SIZE_ATTRIBUTE;
+    use crate::ocr::hocr_parser::{
+        HOCR_FONT_SIZE_ATTRIBUTE, parse_hocr_to_internal_document_with_page_offset_and_stats,
+    };
     use tempfile::tempdir;
+
+    #[test]
+    fn should_publish_only_retained_hocr_word_confidence_metadata() {
+        let hocr = r#"<div class="ocr_page" title="ppageno 0">
+            <p class="ocr_par">
+                <span class="ocr_line">
+                    <span class="ocrx_word" title="x_wconf 20">CLEAR</span>
+                    <span class="ocrx_word" title="x_wconf 90">WORDS</span>
+                </span>
+                <span class="ocr_line">
+                    <span class="ocrx_word" title="x_wconf 0">OWATS</span>
+                    <span class="ocrx_word" title="x_wconf 0">DNDEVET</span>
+                </span>
+            </p>
+        </div>"#;
+        let is_valid_word = |word: &str| Some(matches!(word, "CLEAR" | "WORDS"));
+        let filter = DictionaryLineFilter {
+            is_valid_word: &is_valid_word,
+            max_invalid_ratio: crate::ocr::hocr_parser::DEFAULT_DICT_INVALID_LINE_RATIO,
+        };
+        let result = parse_hocr_to_internal_document_with_page_offset_and_stats(hocr, Some(&filter), 1);
+        let mut metadata = HashMap::new();
+
+        insert_hocr_word_confidence_metadata(&mut metadata, &result.retained_word_confidence_stats);
+
+        assert_eq!(flatten_hocr_elements_to_text(&result.document.elements), "CLEAR WORDS");
+        assert_eq!(metadata.get("word_count"), Some(&serde_json::json!(2)));
+        assert_eq!(metadata.get("mean_text_conf"), Some(&serde_json::json!(55)));
+        assert_eq!(metadata.get("median_word_conf"), Some(&serde_json::json!(55)));
+        assert_eq!(metadata.get("p10_word_conf"), Some(&serde_json::json!(20)));
+        assert_eq!(metadata.get("low_conf_word_count"), Some(&serde_json::json!(1)));
+        assert_eq!(metadata.len(), 5);
+    }
+
+    #[test]
+    fn should_omit_hocr_confidence_quantiles_when_every_word_is_rejected() {
+        let hocr = r#"<div class="ocr_page" title="ppageno 0">
+            <p class="ocr_par">
+                <span class="ocr_line">
+                    <span class="ocrx_word" title="x_wconf 10">OWATS</span>
+                    <span class="ocrx_word" title="x_wconf 90">DNDEVET</span>
+                </span>
+            </p>
+        </div>"#;
+        let always_invalid = |_: &str| Some(false);
+        let filter = DictionaryLineFilter {
+            is_valid_word: &always_invalid,
+            max_invalid_ratio: crate::ocr::hocr_parser::DEFAULT_DICT_INVALID_LINE_RATIO,
+        };
+        let result = parse_hocr_to_internal_document_with_page_offset_and_stats(hocr, Some(&filter), 1);
+        let mut metadata = HashMap::new();
+
+        insert_hocr_word_confidence_metadata(&mut metadata, &result.retained_word_confidence_stats);
+
+        assert!(flatten_hocr_elements_to_text(&result.document.elements).is_empty());
+        assert_eq!(metadata.get("word_count"), Some(&serde_json::json!(0)));
+        assert_eq!(metadata.get("low_conf_word_count"), Some(&serde_json::json!(0)));
+        assert!(!metadata.contains_key("mean_text_conf"));
+        assert!(!metadata.contains_key("median_word_conf"));
+        assert!(!metadata.contains_key("p10_word_conf"));
+        assert_eq!(metadata.len(), 2);
+    }
 
     /// Exact count: a known number of skipped words must produce exactly the
     /// matching `word_iterator_skipped_count` value, not just a truthy presence

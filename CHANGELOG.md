@@ -134,6 +134,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed Markdown OCR metadata so word counts and confidence statistics describe only text retained
+  after dictionary filtering; fully filtered output now reports zero words and omits confidence
+  quantiles.
 - Fixed repeated bold PDF presenter labels and same-row legend keys being promoted to headings,
   which could invert document hierarchy and fragment retrieval chunks.
 - Fixed PDF OCR so fragmented, low-confidence, and dictionary-suspect non-empty text is retained
