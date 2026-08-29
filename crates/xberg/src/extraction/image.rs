@@ -702,7 +702,6 @@ mod tests {
         bytes
     }
 
-    #[cfg(feature = "ocr")]
     fn image_decode_limits(max_content_size: usize) -> crate::extractors::security::SecurityLimits {
         crate::extractors::security::SecurityLimits {
             max_content_size,

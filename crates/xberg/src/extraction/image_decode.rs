@@ -294,6 +294,11 @@ pub(crate) fn decode_standard_rgb8_with_additional_live_bytes_and_default_securi
     )
 }
 
+#[cfg(any(
+    feature = "qr-codes",
+    all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")),
+    test
+))]
 pub(crate) fn decode_standard_luma8_with_security_limits(
     bytes: &[u8],
     limits: &SecurityLimits,
@@ -312,6 +317,7 @@ pub(crate) fn decode_standard_luma8_with_security_limits(
         .map(image::DynamicImage::into_luma8)
 }
 
+#[cfg(feature = "qr-codes")]
 pub(crate) fn decode_standard_luma8_with_default_security_limits(bytes: &[u8]) -> Result<image::GrayImage> {
     decode_standard_luma8_with_security_limits(bytes, &SecurityLimits::default())
 }
