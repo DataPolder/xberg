@@ -448,6 +448,20 @@ fn validate_heic_decode_budget(
     })
 }
 
+#[cfg(feature = "heic")]
+fn validate_heic_encoded_input_budget(
+    encoded_source_bytes: usize,
+    source_format: &str,
+    limits: &SecurityLimits,
+) -> Result<(), EncodeWarning> {
+    ImageDecodeBudget::from_security_limits(limits)
+        .validate(1, 1, u64::try_from(encoded_source_bytes).unwrap_or(u64::MAX))
+        .map_err(|error| EncodeWarning::DecodeFailed {
+            source_format: source_format.to_string(),
+            message: error.to_string(),
+        })
+}
+
 /// Decode a HEIC/HEIF image via `xberg-libheif` into a [`DynamicImage`].
 ///
 /// The decoded output is always RGBA8 so that the subsequent encode step has a
@@ -456,6 +470,7 @@ fn validate_heic_decode_budget(
 fn decode_heic(data: &[u8], source_format: &str, limits: &SecurityLimits) -> Result<DynamicImage, EncodeWarning> {
     use xberg_libheif::{ColorSpace, HeifContext, LibHeif, RgbChroma};
 
+    validate_heic_encoded_input_budget(data.len(), source_format, limits)?;
     let context = HeifContext::read_from_bytes(data).map_err(|err| EncodeWarning::DecodeFailed {
         source_format: source_format.to_string(),
         message: format!("{err:?}"),

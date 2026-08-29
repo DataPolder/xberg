@@ -114,6 +114,8 @@ fn probe_standard_image(
     budget: ImageDecodeBudget,
     format: Option<ImageFormat>,
 ) -> Result<StandardImageProbe> {
+    let encoded_bytes = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    budget.validate(1, 1, encoded_bytes)?;
     let mut reader = match format {
         Some(format) => ImageReader::with_format(Cursor::new(bytes), format),
         None => ImageReader::new(Cursor::new(bytes))
@@ -480,6 +482,20 @@ mod tests {
     }
 
     #[test]
+    fn source_audit_recognizes_image_reader_open() {
+        let source = r#"
+            fn unchecked(path: &std::path::Path) {
+                let _ = image::ImageReader::open(path);
+            }
+        "#;
+
+        let calls = direct_decoder_calls(source);
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].path, "image::ImageReader::open");
+    }
+
+    #[test]
     fn source_audit_ignores_comments_and_string_literals() {
         let source = r#"
             fn messages() {
@@ -520,6 +536,12 @@ mod tests {
                 let _ = image::ImageReader::new(std::io::Cursor::new(bytes));
             }
         "#;
+        let moved_after_allocation = r#"
+            fn decode_standard_image(bytes: &[u8], limits: Limits) {
+                let _ = image::load_from_memory(bytes);
+                let _ = probe_standard_image(bytes, limits, None);
+            }
+        "#;
         let guarded = r#"
             fn decode_standard_image(bytes: &[u8], limits: Limits) {
                 let _ = probe_standard_image(bytes, limits, None);
@@ -529,6 +551,10 @@ mod tests {
 
         assert_eq!(decoder_audit_violations("extraction/image_decode.rs", removed).len(), 1);
         assert_eq!(decoder_audit_violations("extraction/image_decode.rs", moved).len(), 1);
+        assert_eq!(
+            decoder_audit_violations("extraction/image_decode.rs", moved_after_allocation).len(),
+            1
+        );
         assert!(decoder_audit_violations("extraction/image_decode.rs", guarded).is_empty());
     }
 
@@ -605,6 +631,7 @@ mod tests {
                 | "image::load_from_memory_with_format"
                 | "image::ImageReader::new"
                 | "image::ImageReader::with_format"
+                | "image::ImageReader::open"
                 | "hayro_jbig2::Image::new"
                 | "hayro_jpeg2000::Image::new"
                 | "tiff::decoder::Decoder::new"
@@ -643,6 +670,7 @@ mod tests {
         calls: Vec<DecoderCall>,
         current_guards: std::collections::BTreeSet<String>,
         heif_handles: std::collections::BTreeSet<String>,
+        decoder_handles: std::collections::BTreeSet<String>,
     }
 
     impl<'ast> syn::visit::Visit<'ast> for DecoderCallVisitor<'_> {
@@ -671,9 +699,6 @@ mod tests {
         }
 
         fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-            if self.current_function.is_some() {
-                self.current_guards.insert(format!("method::{}", call.method));
-            }
             let decodes_heif_handle = call.method == "decode"
                 && call.args.first().is_some_and(|argument| {
                     matches!(argument, syn::Expr::Reference(reference) if matches!(reference.expr.as_ref(), syn::Expr::Path(path) if path.path.get_ident().is_some_and(|ident| self.heif_handles.contains(&ident.to_string()))))
@@ -684,6 +709,18 @@ mod tests {
                     path: "xberg_libheif::LibHeif::decode".to_string(),
                     guards: self.current_guards.clone(),
                 });
+            }
+            let decodes_tracked_decoder = matches!(call.method.to_string().as_str(), "decode" | "read_image")
+                && matches!(call.receiver.as_ref(), syn::Expr::Path(path) if path.path.get_ident().is_some_and(|ident| self.decoder_handles.contains(&ident.to_string())));
+            if decodes_tracked_decoder && let Some(current) = &self.current_function {
+                self.calls.push(DecoderCall {
+                    function: current.clone(),
+                    path: format!("decoder::{}", call.method),
+                    guards: self.current_guards.clone(),
+                });
+            }
+            if self.current_function.is_some() {
+                self.current_guards.insert(format!("method::{}", call.method));
             }
             syn::visit::visit_expr_method_call(self, call);
         }
@@ -697,6 +734,14 @@ mod tests {
             {
                 self.heif_handles.insert(binding.ident.to_string());
             }
+            if let syn::Pat::Ident(binding) = &local.pat
+                && local
+                    .init
+                    .as_ref()
+                    .is_some_and(|init| expression_contains_direct_decoder(&init.expr, self.aliases))
+            {
+                self.decoder_handles.insert(binding.ident.to_string());
+            }
             syn::visit::visit_local(self, local);
         }
 
@@ -705,11 +750,11 @@ mod tests {
             let previous = self.current_function.replace(function_name.clone());
             let previous_guards = std::mem::take(&mut self.current_guards);
             let previous_handles = std::mem::take(&mut self.heif_handles);
-            let call_start = self.calls.len();
+            let previous_decoder_handles = std::mem::take(&mut self.decoder_handles);
             syn::visit::visit_block(self, &function.block);
-            self.finish_function_calls(call_start, &function_name);
             self.current_guards = previous_guards;
             self.heif_handles = previous_handles;
+            self.decoder_handles = previous_decoder_handles;
             self.current_function = previous;
         }
 
@@ -718,23 +763,34 @@ mod tests {
             let previous = self.current_function.replace(function_name.clone());
             let previous_guards = std::mem::take(&mut self.current_guards);
             let previous_handles = std::mem::take(&mut self.heif_handles);
-            let call_start = self.calls.len();
+            let previous_decoder_handles = std::mem::take(&mut self.decoder_handles);
             syn::visit::visit_block(self, &function.block);
-            self.finish_function_calls(call_start, &function_name);
             self.current_guards = previous_guards;
             self.heif_handles = previous_handles;
+            self.decoder_handles = previous_decoder_handles;
             self.current_function = previous;
         }
     }
 
-    impl DecoderCallVisitor<'_> {
-        fn finish_function_calls(&mut self, call_start: usize, function_name: &str) {
-            for call in &mut self.calls[call_start..] {
-                if call.function == function_name && call.path != "xberg_libheif::LibHeif::decode" {
-                    call.guards = self.current_guards.clone();
+    fn expression_contains_direct_decoder(expression: &syn::Expr, aliases: &UseAliases) -> bool {
+        struct DecoderFinder<'a> {
+            aliases: &'a UseAliases,
+            found: bool,
+        }
+        impl<'ast> syn::visit::Visit<'ast> for DecoderFinder<'_> {
+            fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+                if let syn::Expr::Path(function) = call.func.as_ref() {
+                    self.found |= resolved_paths(&function.path, self.aliases)
+                        .iter()
+                        .any(|path| is_direct_decoder_path(path));
                 }
+                syn::visit::visit_expr_call(self, call);
             }
         }
+        use syn::visit::Visit;
+        let mut finder = DecoderFinder { aliases, found: false };
+        finder.visit_expr(expression);
+        finder.found
     }
 
     fn expression_calls_method(expression: &syn::Expr, method: &str) -> bool {
@@ -768,6 +824,7 @@ mod tests {
             calls: Vec::new(),
             current_guards: std::collections::BTreeSet::new(),
             heif_handles: std::collections::BTreeSet::new(),
+            decoder_handles: std::collections::BTreeSet::new(),
         };
         visitor.visit_file(&syntax);
         visitor.calls
@@ -815,20 +872,42 @@ mod tests {
 
     fn approved_decoder_guard(relative: &str, function: &str, path: &str) -> Option<&'static str> {
         match (relative, function, path) {
-            ("extraction/image_decode.rs", "probe_standard_image", _) => Some("method::limits"),
+            ("extraction/image_decode.rs", "probe_standard_image", _) => Some("method::validate"),
             ("extraction/image_decode.rs", "decode_standard_image", _)
             | ("extraction/image_decode.rs", "decode_standard_rgb8", _)
             | ("extraction/image_decode.rs", "decode_standard_luma8_with_security_limits", _) => {
                 Some("probe_standard_image")
             }
             ("extraction/image_decode.rs", "standard_image_is_single_frame", _) => Some("header-only"),
-            ("extraction/image.rs", "decode_jp2_to_rgb_with_security_limits", _) => Some("method::validate"),
-            ("extraction/image.rs", "decode_jbig2_to_gray_with_security_limits", _) => Some("method::validate"),
+            ("extraction/image.rs", "decode_jp2_to_rgb_with_security_limits", "hayro_jpeg2000::Image::new")
+            | ("extraction/image.rs", "decode_jbig2_to_gray_with_security_limits", "hayro_jbig2::Image::new") => {
+                Some("validate_encoded_image_input")
+            }
+            ("extraction/image.rs", "decode_jp2_to_rgb_with_security_limits", "decoder::decode")
+            | ("extraction/image.rs", "decode_jbig2_to_gray_with_security_limits", "decoder::decode") => {
+                Some("method::validate")
+            }
             ("extraction/image.rs", "extract_image_metadata_with_security_limits", _) => Some("method::validate"),
             ("extraction/image.rs", "detect_tiff_frame_count", _) => Some("header-only"),
-            ("extraction/heif.rs", "decode_heic_to_png", _) => Some("validate_heif_decode_budget"),
-            ("core/image_encode.rs", "decode_heic", _) => Some("validate_heic_decode_budget"),
-            ("ocr/tesseract_wasm_backend.rs", "decode_wasm_ocr_image", _) => Some("method::limits"),
+            ("extraction/heif.rs", "decode_heic_to_png", "xberg_libheif::HeifContext::read_from_bytes") => {
+                Some("validate_heif_encoded_input_budget")
+            }
+            ("extraction/heif.rs", "decode_heic_to_png", "xberg_libheif::LibHeif::decode") => {
+                Some("validate_heif_decode_budget")
+            }
+            ("core/image_encode.rs", "decode_heic", "xberg_libheif::HeifContext::read_from_bytes") => {
+                Some("validate_heic_encoded_input_budget")
+            }
+            ("core/image_encode.rs", "decode_heic", "xberg_libheif::LibHeif::decode") => {
+                Some("validate_heic_decode_budget")
+            }
+            ("ocr/tesseract_wasm_backend.rs", "decode_wasm_ocr_image", "image::ImageReader::new") => {
+                Some("wasm_ocr_decode_limits")
+            }
+            ("ocr/tesseract_wasm_backend.rs", "decode_wasm_ocr_image", "image::ImageReader::with_format")
+            | ("ocr/tesseract_wasm_backend.rs", "decode_wasm_ocr_image", "decoder::decode") => {
+                Some("validate_wasm_ocr_dimensions")
+            }
             _ => None,
         }
     }

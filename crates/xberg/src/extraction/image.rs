@@ -39,6 +39,43 @@ fn jp2_peak_decoded_bytes(width: u32, height: u32, num_channels: u8, has_alpha: 
     }
 }
 
+#[cfg(feature = "ocr")]
+fn jp2_peak_live_bytes(
+    width: u32,
+    height: u32,
+    num_channels: u8,
+    has_alpha: bool,
+    encoded_bytes: usize,
+) -> Result<u64> {
+    jp2_peak_decoded_bytes(width, height, num_channels, has_alpha)?
+        .checked_add(u64::try_from(encoded_bytes).unwrap_or(u64::MAX))
+        .ok_or_else(|| image_dimension_error(width, height, u64::MAX, u64::MAX))
+}
+
+#[cfg(feature = "ocr")]
+fn jbig2_gray_peak_live_bytes(width: u32, height: u32, encoded_bytes: usize) -> Result<u64> {
+    decoded_byte_count(width, height, u64::from(image::ColorType::L8.bytes_per_pixel()))?
+        .checked_add(u64::try_from(encoded_bytes).unwrap_or(u64::MAX))
+        .ok_or_else(|| image_dimension_error(width, height, u64::MAX, u64::MAX))
+}
+
+#[cfg(feature = "ocr")]
+fn jbig2_rgb_peak_live_bytes(width: u32, height: u32, encoded_bytes: usize) -> Result<u64> {
+    let decoded_and_encoded = jbig2_gray_peak_live_bytes(width, height, encoded_bytes)?;
+    decoded_and_encoded
+        .checked_add(decoded_byte_count(
+            width,
+            height,
+            u64::from(image::ColorType::Rgb8.bytes_per_pixel()),
+        )?)
+        .ok_or_else(|| image_dimension_error(width, height, u64::MAX, u64::MAX))
+}
+
+#[cfg(feature = "ocr")]
+fn validate_encoded_image_input(bytes: &[u8], limits: &SecurityLimits) -> Result<()> {
+    ImageDecodeBudget::from_security_limits(limits).validate(1, 1, u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+}
+
 /// Check if bytes start with JPEG 2000 magic bytes.
 pub(crate) fn is_jp2(bytes: &[u8]) -> bool {
     bytes.len() >= JP2_MAGIC.len() && bytes[..JP2_MAGIC.len()] == *JP2_MAGIC
@@ -236,14 +273,15 @@ pub(crate) fn decode_jp2_to_rgb(bytes: &[u8]) -> Result<image::RgbImage> {
 fn decode_jp2_to_rgb_with_security_limits(bytes: &[u8], limits: &SecurityLimits) -> Result<image::RgbImage> {
     use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image as Jp2Image};
 
+    validate_encoded_image_input(bytes, limits)?;
     let jp2 = Jp2Image::new(bytes, &DecodeSettings::default())
         .map_err(|e| XbergError::parsing(format!("JP2 decode failed: {}", e)))?;
     let width = jp2.width();
     let height = jp2.height();
     let has_alpha = jp2.has_alpha();
     let num_channels = jp2.color_space().num_channels();
-    let peak_decoded_bytes = jp2_peak_decoded_bytes(width, height, num_channels, has_alpha)?;
-    ImageDecodeBudget::from_security_limits(limits).validate(width, height, peak_decoded_bytes)?;
+    let peak_live_bytes = jp2_peak_live_bytes(width, height, num_channels, has_alpha, bytes.len())?;
+    ImageDecodeBudget::from_security_limits(limits).validate(width, height, peak_live_bytes)?;
     // hayro-jpeg2000 0.4 threads a caller-owned `DecoderContext` through `decode` so the
     // sample buffers can be reused across images, and returns a borrowing `DecodedImage`
     // rather than the interleaved `Vec<u8>` 0.3 handed back. `data_u8` is that same
@@ -361,11 +399,13 @@ fn decode_jbig2_to_gray_with_security_limits(bytes: &[u8], limits: &SecurityLimi
         fn next_line(&mut self) {}
     }
 
+    validate_encoded_image_input(bytes, limits)?;
     let jbig2_image = Image::new(bytes).map_err(|e| XbergError::parsing(format!("JBIG2 decode failed: {e}")))?;
     let width = jbig2_image.width();
     let height = jbig2_image.height();
     let decoded_bytes = decoded_byte_count(width, height, u64::from(image::ColorType::L8.bytes_per_pixel()))?;
-    ImageDecodeBudget::from_security_limits(limits).validate(width, height, decoded_bytes)?;
+    let peak_live_bytes = jbig2_gray_peak_live_bytes(width, height, bytes.len())?;
+    ImageDecodeBudget::from_security_limits(limits).validate(width, height, peak_live_bytes)?;
 
     let max_pixels = usize::try_from(decoded_bytes)
         .map_err(|_| image_dimension_error(width, height, decoded_bytes, decoded_bytes))?;
@@ -416,11 +456,7 @@ pub(crate) fn decode_image_to_rgb8_with_security_limits(
         if is_jbig2(image_bytes) {
             let gray = decode_jbig2_to_gray_with_security_limits(image_bytes, limits)?;
             let (width, height) = gray.dimensions();
-            let gray_bytes = decoded_byte_count(width, height, u64::from(image::ColorType::L8.bytes_per_pixel()))?;
-            let rgb_bytes = decoded_byte_count(width, height, u64::from(image::ColorType::Rgb8.bytes_per_pixel()))?;
-            let peak_bytes = gray_bytes
-                .checked_add(rgb_bytes)
-                .ok_or_else(|| image_dimension_error(width, height, u64::MAX, u64::MAX))?;
+            let peak_bytes = jbig2_rgb_peak_live_bytes(width, height, image_bytes.len())?;
             ImageDecodeBudget::from_security_limits(limits).validate(width, height, peak_bytes)?;
             return Ok(image::DynamicImage::ImageLuma8(gray).into_rgb8());
         }
@@ -1045,6 +1081,38 @@ mod tests {
 #[cfg(all(test, feature = "ocr"))]
 mod jp2_decode_tests {
     use super::*;
+
+    #[test]
+    fn jp2_peak_counts_encoded_input_between_old_and_new_thresholds() {
+        let peak = jp2_peak_live_bytes(10, 10, 1, false, 100).expect("valid JP2 peak");
+        let limits = SecurityLimits {
+            max_content_size: 450,
+            ..Default::default()
+        };
+
+        let error = ImageDecodeBudget::from_security_limits(&limits)
+            .validate(10, 10, peak)
+            .expect_err("encoded JP2 bytes must remain live alongside gray-to-RGB conversion");
+
+        assert!(matches!(error, XbergError::Validation { .. }));
+    }
+
+    #[test]
+    fn jbig2_peaks_count_encoded_input_and_gray_to_rgb_conversion() {
+        let decode_peak = jbig2_gray_peak_live_bytes(10, 10, 100).expect("valid JBIG2 decode peak");
+        let conversion_peak = jbig2_rgb_peak_live_bytes(10, 10, 100).expect("valid JBIG2 RGB peak");
+
+        assert_eq!(decode_peak, 200);
+        assert_eq!(conversion_peak, 500);
+        let limits = SecurityLimits {
+            max_content_size: 450,
+            ..Default::default()
+        };
+        let error = ImageDecodeBudget::from_security_limits(&limits)
+            .validate(10, 10, conversion_peak)
+            .expect_err("encoded JBIG2, gray pixels, and RGB pixels must be live together");
+        assert!(matches!(error, XbergError::Validation { .. }));
+    }
 
     #[test]
     fn test_decode_jp2_to_rgb() {

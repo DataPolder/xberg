@@ -444,6 +444,52 @@ fn validate_layout_peak(
     validate_layout_batch_peak(&[image], security_limits)
 }
 
+fn layout_model_workspace_bytes() -> crate::Result<u64> {
+    crate::extraction::image_decode::decoded_byte_count(
+        LAYOUT_MODEL_MAX_INPUT_SIDE,
+        LAYOUT_MODEL_MAX_INPUT_SIDE,
+        LAYOUT_MODEL_FLOAT_RGB_BYTES_PER_PIXEL + LAYOUT_MODEL_RESIZED_RGB_BYTES_PER_PIXEL,
+    )
+}
+
+pub(crate) fn validate_layout_inference_peak(
+    width: u32,
+    height: u32,
+    current_live_bytes: u64,
+    inference_page_count: usize,
+    security_limits: &crate::extractors::security::SecurityLimits,
+) -> crate::Result<()> {
+    let workspace = layout_model_workspace_bytes()?
+        .checked_mul(u64::try_from(inference_page_count).unwrap_or(u64::MAX))
+        .ok_or_else(|| crate::extraction::image_decode::image_dimension_error(width, height, u64::MAX, u64::MAX))?;
+    crate::extraction::image_decode::validate_image_live_bytes(
+        width,
+        height,
+        current_live_bytes,
+        workspace,
+        security_limits,
+    )
+}
+
+pub(crate) fn layout_inference_batch_capacity(
+    width: u32,
+    height: u32,
+    current_live_bytes: u64,
+    candidate_count: usize,
+    security_limits: &crate::extractors::security::SecurityLimits,
+) -> crate::Result<usize> {
+    if candidate_count == 0 {
+        return Ok(0);
+    }
+    let maximum_live_bytes = u64::try_from(security_limits.max_content_size).unwrap_or(u64::MAX);
+    let available = maximum_live_bytes.saturating_sub(current_live_bytes);
+    let capacity = usize::try_from(available / layout_model_workspace_bytes()?).unwrap_or(usize::MAX);
+    if capacity == 0 {
+        validate_layout_inference_peak(width, height, current_live_bytes, 1, security_limits)?;
+    }
+    Ok(capacity.min(candidate_count).max(1))
+}
+
 pub(crate) fn validate_layout_batch_peak(
     images: &[&RgbImage],
     security_limits: &crate::extractors::security::SecurityLimits,
@@ -456,15 +502,31 @@ pub(crate) fn validate_layout_batch_peak(
             .checked_add(bytes)
             .ok_or_else(|| crate::extraction::image_decode::image_dimension_error(width, height, u64::MAX, u64::MAX))
     })?;
-    let per_image_workspace = crate::extraction::image_decode::decoded_byte_count(
-        LAYOUT_MODEL_MAX_INPUT_SIDE,
-        LAYOUT_MODEL_MAX_INPUT_SIDE,
-        LAYOUT_MODEL_FLOAT_RGB_BYTES_PER_PIXEL + LAYOUT_MODEL_RESIZED_RGB_BYTES_PER_PIXEL,
-    )?;
-    let workspace = per_image_workspace
-        .checked_mul(u64::try_from(images.len()).unwrap_or(u64::MAX))
-        .ok_or_else(|| crate::extraction::image_decode::image_dimension_error(width, height, u64::MAX, u64::MAX))?;
-    crate::extraction::image_decode::validate_image_live_bytes(width, height, current, workspace, security_limits)
+    validate_layout_inference_peak(width, height, current, images.len(), security_limits)
+}
+
+#[cfg(test)]
+mod layout_peak_tests {
+    use super::*;
+
+    #[test]
+    fn default_limits_split_eight_letter_pages_into_valid_subbatches() {
+        const PAGE_COUNT: usize = 8;
+        const PAGE_WIDTH: u32 = 1_275;
+        const PAGE_HEIGHT: u32 = 1_650;
+        let page_bytes = crate::extraction::image_decode::decoded_byte_count(PAGE_WIDTH, PAGE_HEIGHT, 3)
+            .expect("letter raster size");
+        let current_live_bytes = page_bytes.checked_mul(PAGE_COUNT as u64).expect("eight page rasters");
+        let limits = crate::extractors::security::SecurityLimits::default();
+
+        let capacity =
+            layout_inference_batch_capacity(PAGE_WIDTH, PAGE_HEIGHT, current_live_bytes, PAGE_COUNT, &limits)
+                .expect("default limits must support at least one inference page");
+
+        assert_eq!(capacity, 2);
+        validate_layout_inference_peak(PAGE_WIDTH, PAGE_HEIGHT, current_live_bytes, capacity, &limits)
+            .expect("the selected subbatch must fit default limits");
+    }
 }
 
 #[cfg(test)]

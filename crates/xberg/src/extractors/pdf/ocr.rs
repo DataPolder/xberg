@@ -1175,10 +1175,12 @@ mod png_encode_peak_tests {
             image::DynamicImage::ImageRgb8(image::RgbImage::new(10, 10)),
         ];
         let limits = crate::extractors::security::SecurityLimits {
-            max_content_size: 525_500,
+            max_content_size: 526_000,
             ..Default::default()
         };
 
+        validate_png_encode_batch_peak(images.iter(), false, &limits)
+            .expect("the same pages encoded sequentially must fit the between-threshold budget");
         let error = validate_png_encode_batch_peak(images.iter(), true, &limits)
             .expect_err("parallel page conversions must be budgeted together");
 

@@ -513,6 +513,7 @@ fn enters_inference_batch(page: &RenderedLayoutPage) -> bool {
 fn detect_layout_chunk(
     engine: &mut crate::layout::LayoutEngine,
     pages: &[RenderedLayoutPage],
+    retained_image_bytes: u64,
     security_limits: &crate::extractors::security::SecurityLimits,
 ) -> Result<Vec<Option<crate::layout::DetectionResult>>> {
     let rendered_positions: Vec<usize> = pages
@@ -524,19 +525,49 @@ fn detect_layout_chunk(
         return Ok((0..pages.len()).map(|_| None).collect());
     }
 
-    let images: Vec<&image::RgbImage> = rendered_positions
+    let all_chunk_images: Vec<&image::RgbImage> = rendered_positions
         .iter()
         .map(|&position| pages[position].image.as_ref().expect("filtered to rendered pages"))
         .collect();
-    crate::layout::engine::validate_layout_batch_peak(&images, security_limits)?;
-    let results = engine
-        .detect_batch(&images)
-        .map_err(|error| XbergError::Other(format!("layout runner: batch detection failed: {error}")))?;
-    validate_batch_cardinality(images.len(), results.len())?;
-
     let mut detections: Vec<Option<crate::layout::DetectionResult>> = (0..pages.len()).map(|_| None).collect();
-    for (&position, (detection, _timings)) in rendered_positions.iter().zip(results) {
-        detections[position] = Some(detection);
+    let (width, height) = all_chunk_images[0].dimensions();
+    let current_live_bytes =
+        pages
+            .iter()
+            .filter_map(|page| page.image.as_ref())
+            .try_fold(retained_image_bytes, |total, image| {
+                total
+                    .checked_add(u64::try_from(image.as_raw().len()).unwrap_or(u64::MAX))
+                    .ok_or_else(|| {
+                        crate::extraction::image_decode::image_dimension_error(width, height, u64::MAX, u64::MAX)
+                    })
+            })?;
+    let capacity = crate::layout::engine::layout_inference_batch_capacity(
+        width,
+        height,
+        current_live_bytes,
+        all_chunk_images.len(),
+        security_limits,
+    )?;
+    for position_chunk in rendered_positions.chunks(capacity) {
+        let images: Vec<&image::RgbImage> = position_chunk
+            .iter()
+            .map(|&position| pages[position].image.as_ref().expect("filtered to rendered pages"))
+            .collect();
+        crate::layout::engine::validate_layout_inference_peak(
+            width,
+            height,
+            current_live_bytes,
+            images.len(),
+            security_limits,
+        )?;
+        let results = engine
+            .detect_batch(&images)
+            .map_err(|error| XbergError::Other(format!("layout runner: batch detection failed: {error}")))?;
+        validate_batch_cardinality(images.len(), results.len())?;
+        for (&position, (detection, _timings)) in position_chunk.iter().zip(results) {
+            detections[position] = Some(detection);
+        }
     }
     Ok(detections)
 }
@@ -708,7 +739,19 @@ fn run_layout_for_pdf_pages_with_security_limits(
             "layout runner: detecting chunk"
         );
 
-        let detections = match detect_layout_chunk(&mut engine, &pages, security_limits) {
+        let retained_image_bytes = all_images.iter().try_fold(0_u64, |total, image| {
+            total
+                .checked_add(u64::try_from(image.as_raw().len()).unwrap_or(u64::MAX))
+                .ok_or_else(|| {
+                    crate::extraction::image_decode::image_dimension_error(
+                        image.width(),
+                        image.height(),
+                        u64::MAX,
+                        u64::MAX,
+                    )
+                })
+        })?;
+        let detections = match detect_layout_chunk(&mut engine, &pages, retained_image_bytes, security_limits) {
             Ok(detections) => detections,
             Err(error) => {
                 crate::layout::return_engine(engine);
