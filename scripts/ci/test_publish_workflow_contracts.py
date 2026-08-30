@@ -309,6 +309,12 @@ def test_swift_dry_run_checks_run_artifact_without_release_mutation() -> None:
         assert "needs.prepare.outputs.dry_run != 'true'" in step_block
 
 
+def test_swift_artifact_bundle_has_bounded_timeout() -> None:
+    block = job_block(WORKFLOW.read_text(), "swift-artifactbundle")
+
+    assert "timeout-minutes: 120" in block
+
+
 def test_glibc_ffi_jobs_build_lzma_statically() -> None:
     jobs_and_actions = {
         "go-ffi-libraries": "xberg-io/actions/build-go-ffi@v1",
