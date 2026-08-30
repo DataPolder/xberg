@@ -207,6 +207,13 @@ Build from source as part of this workspace. See [C (FFI) README](https://github
 brew install xberg-io/tap/xberg
 ```
 
+Windows users can install the same binary through [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add xberg https://github.com/xberg-io/scoop-bucket
+scoop install xberg
+```
+
 14 commands: `extract`, `batch`, `detect`, `formats`, `version`, `cache`, `tree-sitter`, `doctor`, `serve`, `mcp`, `api`, `embed`, `chunk`, and `completions`.
 
 See [CLI usage guide](https://docs.xberg.io/cli/usage/) for detailed documentation.
