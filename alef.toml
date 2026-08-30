@@ -2543,6 +2543,9 @@ vendor_mode = "registry"
 pkg_config = true
 cmake_config = true
 
+[crates.verify]
+ignore_ephemeral = ["test_apps/**", ".codex/skills/**", ".agents/skills/**", ".github/skills/**", ".claude/skills/**"]
+
 [crates.e2e]
 fixtures = "fixtures"
 output = "e2e"
