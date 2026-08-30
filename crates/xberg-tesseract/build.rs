@@ -24,8 +24,8 @@ mod source_cache;
 mod build_tesseract {
     use crate::source_archive::{ArchiveLimits, extract_source_archive};
     use crate::source_cache::{
-        PreparedSourceTree, SourceArtifact, canonicalize_trusted_build_root, copy_verified_artifact, ensure_directory,
-        ensure_private_cache_root, prepare_source_tree, prepare_verified_artifact, read_exact_size,
+        PreparedSourceTree, SourceArtifact, canonicalize_trusted_build_root, cmake_source_path, copy_verified_artifact,
+        ensure_directory, ensure_private_cache_root, prepare_source_tree, prepare_verified_artifact, read_exact_size,
     };
     use cmake::Config;
     use std::env;
@@ -560,7 +560,7 @@ mod build_tesseract {
 
         let leptonica_install_dir = out_dir.join("leptonica");
         let leptonica_link_name = build_static_library("leptonica", &leptonica_install_dir, || {
-            let mut leptonica_config = Config::new(&leptonica_dir);
+            let mut leptonica_config = Config::new(cmake_source_path(&leptonica_dir));
 
             let leptonica_src_dir = leptonica_dir.join("src");
             let environ_h_path = leptonica_src_dir.join("environ.h");
@@ -719,7 +719,7 @@ mod build_tesseract {
 
             std::fs::write(&cmakelists_path, cmakelists).expect("Failed to write CMakeLists.txt");
 
-            let mut tesseract_config = Config::new(&tesseract_dir);
+            let mut tesseract_config = Config::new(cmake_source_path(&tesseract_dir));
             if windows_target {
                 if mingw_target {
                     tesseract_config.generator("Unix Makefiles");
@@ -1577,7 +1577,7 @@ Installation instructions:
         let clang = wasi_sdk_dir.join("bin/clang");
         let clangxx = wasi_sdk_dir.join("bin/clang++");
 
-        let mut config = Config::new(src_dir);
+        let mut config = Config::new(cmake_source_path(src_dir));
 
         config.target("wasm32-wasi");
         if cfg!(target_os = "windows") {
