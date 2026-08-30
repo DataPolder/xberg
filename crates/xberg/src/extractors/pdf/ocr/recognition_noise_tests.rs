@@ -1,8 +1,5 @@
-use super::{
-    NativeTextStats, accept_or_reject_ocr_page, discard_ocr_elements_from_rejected_pages,
-    discard_rejected_ocr_page_payloads, is_dictionary_invalid_noise, is_ocr_recognition_noise, repair_ocr_list_markers,
-    retain_ocr_formulas_for_accepted_pages,
-};
+use super::pipeline::*;
+use super::scoring::*;
 use crate::core::config::OcrQualityThresholds;
 
 /// Verbatim from page 4 of a recorded municipal ordinance: Tesseract run over a scanned
@@ -390,7 +387,7 @@ fn should_score_prose_not_markdown_scaffolding() {
 
 #[test]
 fn should_read_mean_confidence_from_backend_metadata() {
-    use super::mean_text_conf_of;
+    use super::scoring::mean_text_conf_of;
     let mut m: ahash::AHashMap<std::borrow::Cow<'_, str>, serde_json::Value> = Default::default();
 
     assert_eq!(
@@ -498,7 +495,7 @@ fn should_preserve_surrounding_lines_and_trailing_newline() {
 
 #[test]
 fn should_map_confusable_letters_to_their_intended_digit() {
-    use super::confusable_digit_for_letter;
+    use super::scoring::confusable_digit_for_letter;
     assert_eq!(confusable_digit_for_letter('L'), Some('1'));
     assert_eq!(confusable_digit_for_letter('G'), Some('6'));
     assert_eq!(confusable_digit_for_letter('b'), Some('6'));
@@ -564,7 +561,7 @@ fn legibility_backend_still_rejects_a_page_below_the_floor() {
     // Tesseract's own scale must keep working exactly as before: `Legibility { scale_max:
     // 100.0 }` normalizes to the same fraction as the old unconditional `c < threshold`
     // check did, so this must not regress.
-    use super::confidence_gate_rejects;
+    use super::scoring::confidence_gate_rejects;
     let thresholds = OcrQualityThresholds::default();
     let semantics = crate::plugins::ConfidenceSemantics::Legibility { scale_max: 100.0 };
 
@@ -587,7 +584,7 @@ fn uncalibrated_backend_confidence_never_empties_a_document() {
     // discarded all 16 pages, emptying the document. An `Uncalibrated` backend's number
     // must never be able to do that: the gate must not apply at all, and a legible page
     // must survive on the text-shape heuristic instead.
-    use super::confidence_gate_rejects;
+    use super::scoring::confidence_gate_rejects;
     let thresholds = OcrQualityThresholds::default();
     let semantics = crate::plugins::ConfidenceSemantics::Uncalibrated;
 
@@ -613,7 +610,7 @@ fn confidence_gate_respects_scale_max_not_a_hardcoded_100() {
     // this must NOT be rejected. Comparing the raw value 8 directly against the
     // (100-scaled) threshold of 75 -- the old hardcoded-100 assumption -- would wrongly
     // reject it (8 < 75). Only normalizing by the backend's own `scale_max` gets this right.
-    use super::confidence_gate_rejects;
+    use super::scoring::confidence_gate_rejects;
     let thresholds = OcrQualityThresholds::default();
     assert_eq!(
         thresholds.min_ocr_mean_confidence, 75.0,
@@ -636,7 +633,7 @@ fn pipeline_blend_drops_mean_conf_term_for_non_legibility_stage() {
     // `extract_with_ocr` only ever reports `Some(mean_conf)` when its backend is
     // `Legibility`; for anything else it reports `None`. The blend must then fall back
     // to the text-shape score alone rather than averaging in an incomparable number.
-    use super::pipeline_stage_score;
+    use super::scoring::pipeline_stage_score;
     let text_score = 0.62;
 
     assert_eq!(

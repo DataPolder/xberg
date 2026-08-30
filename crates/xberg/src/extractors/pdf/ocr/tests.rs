@@ -6,7 +6,13 @@
 // file-module is therefore deliberate, not an oversight.
 #[allow(clippy::module_inception)]
 mod tests {
-    use super::super::*;
+    use super::super::document::*;
+    use super::super::pipeline::*;
+    use super::super::rendering::*;
+    use super::super::scoring::*;
+    use crate::core::config::ExtractionConfig;
+    use crate::core::config::OcrQualityThresholds;
+    use std::borrow::Cow;
 
     #[cfg(feature = "ocr")]
     fn t() -> OcrQualityThresholds {
