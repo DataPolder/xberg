@@ -9,6 +9,7 @@
 //! (the top-level mixed-OCR and per-page pipeline orchestrators). Items used across submodule
 //! boundaries are `pub(super)`; items already reachable from outside `ocr` keep their original
 //! visibility and are re-exported here so external call sites are unaffected by the split.
+//! Unit tests live in `tests.rs` and `recognition_noise_tests.rs`, not inline here.
 
 mod document;
 mod pipeline;
