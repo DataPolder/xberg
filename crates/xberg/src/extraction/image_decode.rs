@@ -174,7 +174,6 @@ fn probe_standard_image(
 }
 
 #[cfg(any(
-    test,
     all(feature = "liter-llm", not(target_arch = "wasm32")),
     feature = "candle-trocr",
     feature = "candle-paddleocr-vl",
@@ -192,7 +191,6 @@ pub(crate) fn probe_standard_image_with_security_limits(
 }
 
 #[cfg(any(
-    test,
     all(feature = "liter-llm", not(target_arch = "wasm32")),
     feature = "candle-trocr",
     feature = "candle-paddleocr-vl",
