@@ -560,7 +560,10 @@ mod build_tesseract {
 
         let leptonica_install_dir = out_dir.join("leptonica");
         let leptonica_link_name = build_static_library("leptonica", &leptonica_install_dir, || {
-            let mut leptonica_config = Config::new(cmake_source_path(&leptonica_dir));
+            let mut leptonica_config = Config::new(
+                cmake_source_path(&leptonica_dir)
+                    .expect("CMake source path must preserve Leptonica directory identity"),
+            );
 
             let leptonica_src_dir = leptonica_dir.join("src");
             let environ_h_path = leptonica_src_dir.join("environ.h");
@@ -719,7 +722,10 @@ mod build_tesseract {
 
             std::fs::write(&cmakelists_path, cmakelists).expect("Failed to write CMakeLists.txt");
 
-            let mut tesseract_config = Config::new(cmake_source_path(&tesseract_dir));
+            let mut tesseract_config = Config::new(
+                cmake_source_path(&tesseract_dir)
+                    .expect("CMake source path must preserve Tesseract directory identity"),
+            );
             if windows_target {
                 if mingw_target {
                     tesseract_config.generator("Unix Makefiles");
@@ -1428,7 +1434,9 @@ namespace this_thread {
         let sysroot = wasi_sdk_dir.join("share/wasi-sysroot");
         let clang = wasi_sdk_dir.join("bin/clang");
 
-        let mut config = Config::new(leptonica_src);
+        let mut config = Config::new(
+            cmake_source_path(leptonica_src).expect("CMake source path must preserve Leptonica directory identity"),
+        );
 
         config.target("wasm32-wasi");
         if cfg!(target_os = "windows") {
@@ -1577,7 +1585,9 @@ Installation instructions:
         let clang = wasi_sdk_dir.join("bin/clang");
         let clangxx = wasi_sdk_dir.join("bin/clang++");
 
-        let mut config = Config::new(cmake_source_path(src_dir));
+        let mut config = Config::new(
+            cmake_source_path(src_dir).expect("CMake source path must preserve Tesseract directory identity"),
+        );
 
         config.target("wasm32-wasi");
         if cfg!(target_os = "windows") {

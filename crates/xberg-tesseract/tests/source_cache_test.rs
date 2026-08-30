@@ -61,6 +61,23 @@ fn should_wire_every_pinned_build_input_through_verification() {
 }
 
 #[test]
+fn should_normalize_every_cmake_source_path() {
+    assert_eq!(BUILD_SCRIPT.matches("cmake_source_path(").count(), 4);
+    assert!(!BUILD_SCRIPT.contains("Config::new(leptonica_src)"));
+}
+
+#[cfg(windows)]
+#[test]
+fn should_preserve_source_identity_when_normalizing_for_cmake() {
+    let temp_dir = TestDir::new();
+    let canonical = fs::canonicalize(temp_dir.path()).expect("canonical source directory");
+
+    let normalized = source_cache::cmake_source_path(&canonical).expect("identity-preserving CMake source path");
+
+    assert!(same_file::is_same_file(canonical, normalized).expect("compare source directory identity"));
+}
+
+#[test]
 fn should_remove_windows_verbatim_drive_prefix_for_cmake() {
     let path = r"\\?\C:\cargo\target\third_party\tesseract";
 

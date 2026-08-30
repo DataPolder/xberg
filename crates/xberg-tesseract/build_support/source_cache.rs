@@ -95,14 +95,24 @@ pub(crate) fn windows_cmake_source_units(path: &[u16]) -> Vec<u16> {
 }
 
 #[cfg(windows)]
-pub(crate) fn cmake_source_path(path: &Path) -> PathBuf {
+pub(crate) fn cmake_source_path(path: &Path) -> io::Result<PathBuf> {
     let units = path.as_os_str().encode_wide().collect::<Vec<_>>();
-    PathBuf::from(OsString::from_wide(&windows_cmake_source_units(&units)))
+    let normalized = PathBuf::from(OsString::from_wide(&windows_cmake_source_units(&units)));
+    if same_file::is_same_file(path, &normalized)? {
+        return Ok(normalized);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "CMake source alias does not identify the canonical source: {}",
+            path.display()
+        ),
+    ))
 }
 
 #[cfg(all(not(windows), not(test)))]
-pub(crate) fn cmake_source_path(path: &Path) -> PathBuf {
-    path.to_path_buf()
+pub(crate) fn cmake_source_path(path: &Path) -> io::Result<PathBuf> {
+    Ok(path.to_path_buf())
 }
 
 pub(crate) fn prepare_verified_artifact(
