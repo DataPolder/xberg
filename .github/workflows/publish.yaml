@@ -2439,7 +2439,6 @@ jobs:
     needs: prepare
     if: ${{ needs.prepare.outputs.release_swift == 'true' }}
     runs-on: macos-15
-    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
         with:
