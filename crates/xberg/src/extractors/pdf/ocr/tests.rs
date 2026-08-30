@@ -6554,6 +6554,70 @@ Name: ___
         assert!(heuristically_restructured_ocr_pages(&pages, &[1000.0, 1000.0], &[], &config).is_some());
     }
 
+    /// Pins a content-loss defect surfaced during the Zencity hybrid-OCR A/B: the VLM
+    /// backend (`llm::vlm_ocr::VlmOcrBackend::process_image`) never populates
+    /// `ocr_internal_document` or `ocr_elements` -- it returns bare markdown `content`
+    /// plus `tables` parsed separately out of that same text via `extract_gfm_tables`,
+    /// with `bounding_box: None` on every table. The page's paragraphs are then built by
+    /// `ocr_text_to_paragraphs`, which puts the page text in `PdfParagraph.text` and
+    /// leaves `.lines` empty (there is no per-line geometry to carry).
+    ///
+    /// `segments_from_ocr_pages` -- this heuristic's only way to see page content --
+    /// harvests `SegmentData` exclusively from `paragraph.lines`, so it sees zero
+    /// segments for every such page regardless of how much prose `.text` actually
+    /// holds. `extract_document_structure_from_segments` therefore reconstructs zero
+    /// paragraphs. When no table exists either, the resulting document has no elements
+    /// at all, `!doc.elements.is_empty()` is false, and this function correctly returns
+    /// `None` so the caller's own text-based fallback assembly (which does read
+    /// `.text`) wins.
+    ///
+    /// But `assemble_internal_document` still emits a `Table` element for every
+    /// `tables` entry even when every page's paragraph list is empty. So the instant a
+    /// VLM page contains at least one GFM table, the reconstructed document is
+    /// non-empty -- it holds exactly the table elements -- and `Some(doc)` wins over
+    /// the caller's fallback, discarding every paragraph of prose the page actually
+    /// had. This must fail against that code: it asserts the prose surrounding the
+    /// table survives whenever this function accepts its own restructured document.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn heuristically_restructured_ocr_pages_preserves_prose_around_a_bare_text_table() {
+        let page_text = "Before the table, prose explains what follows.\n\n\
+                          | Col A | Col B |\n\
+                          | --- | --- |\n\
+                          | 1 | 2 |\n\n\
+                          After the table, more prose continues the document.";
+        let pages = vec![crate::pdf::structure::adapters::ocr_text_to_paragraphs(page_text)];
+        let table = ocr_table("| Col A | Col B |\n| --- | --- |\n| 1 | 2 |", 1);
+
+        let config = ExtractionConfig {
+            output_format: crate::core::config::OutputFormat::Markdown,
+            ..ExtractionConfig::default()
+        };
+
+        let result = heuristically_restructured_ocr_pages(&pages, &[1000.0], std::slice::from_ref(&table), &config);
+
+        // Whether the heuristic accepts or declines to restructure this page, the prose
+        // surrounding the table must never be discarded outright.
+        if let Some(doc) = result {
+            let rendered = doc
+                .elements
+                .iter()
+                .map(|element| element.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(
+                rendered.contains("Before the table"),
+                "prose before the table was dropped; elements: {:?}",
+                doc.elements.iter().map(|e| (&e.kind, &e.text)).collect::<Vec<_>>()
+            );
+            assert!(
+                rendered.contains("After the table"),
+                "prose after the table was dropped; elements: {:?}",
+                doc.elements.iter().map(|e| (&e.kind, &e.text)).collect::<Vec<_>>()
+            );
+        }
+    }
+
     /// Closes the gap this session's fix targets: before it,
     /// `heuristically_restructured_ocr_pages` had exactly one call site, inside
     /// `extract_with_ocr_for_page` -- but `extract_mixed_ocr_native`'s single-backend

@@ -1914,7 +1914,7 @@ pub(super) fn heuristically_restructured_ocr_pages(
     );
 
     match result {
-        Ok(doc) if !doc.elements.is_empty() => Some(doc),
+        Ok(doc) if !doc.elements.is_empty() && restructured_document_retains_prose(pages, &doc) => Some(doc),
         Ok(_) => None,
         Err(error) => {
             tracing::warn!(
@@ -1924,6 +1924,39 @@ pub(super) fn heuristically_restructured_ocr_pages(
             None
         }
     }
+}
+
+/// Whether `doc` -- built by `extract_document_structure_from_segments` from
+/// `segments_from_ocr_pages(pages)` -- actually kept the prose `pages` carried.
+///
+/// `segments_from_ocr_pages` harvests `SegmentData` only out of `PdfParagraph.lines`.
+/// A bare-text OCR backend with no per-line geometry (the VLM backend never populates
+/// `ocr_internal_document` or `ocr_elements` -- see
+/// `crate::llm::vlm_ocr::VlmOcrBackend::process_image`) builds its paragraphs via
+/// `ocr_text_to_paragraphs`, which carries the page's content in `.text` and leaves
+/// `.lines` empty. Every such page therefore contributes zero segments to this
+/// heuristic no matter how much prose it holds, so `extract_document_structure_from_segments`
+/// reconstructs zero paragraphs for it. `assemble_internal_document` still emits a
+/// `Table` element for every `tables` entry regardless, so a page with at least one
+/// table produced a non-empty `doc` -- passing the caller's bare
+/// `!doc.elements.is_empty()` gate -- even though every paragraph of prose the page
+/// held had vanished. Declining here sends the caller to its own `.text`-based
+/// fallback assembly instead, which never loses prose this way. ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn restructured_document_retains_prose(
+    pages: &[Vec<crate::pdf::structure::types::PdfParagraph>],
+    doc: &crate::types::internal::InternalDocument,
+) -> bool {
+    let had_prose = pages
+        .iter()
+        .flatten()
+        .any(|paragraph| !paragraph.text.trim().is_empty() || !paragraph.lines.is_empty());
+    if !had_prose {
+        return true;
+    }
+    doc.elements
+        .iter()
+        .any(|element| !matches!(element.kind, crate::types::internal::ElementKind::Table { .. }))
 }
 /// Split the single, document-wide [`crate::types::internal::InternalDocument`]
 /// [`heuristically_restructured_ocr_pages`] produced back into one per-page document per
