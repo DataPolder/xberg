@@ -9,34 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
-
-### Changed
-
-- **Breaking:** PDF backend configuration now uses `"native"` and `PdfBackend::Native` instead of
-  `"pdf_oxide"` and `PdfBackend::PdfOxide`. Update explicit configuration values; the default is
-  unchanged.
-- `security_limits.max_pages` now applies to presentations, Keynote, and multi-frame TIFF as well as
-  PDF (#1451).
-- `create_client_with_credential_provider` now returns `ManagedClient`, and an LLM concurrency limit
-  of zero is rejected.
-- DOCX, PPTX, and EPUB relationship paths are resolved relative to their package container, restoring
-  images referenced through valid parent-relative paths.
-
-### Fixed
-
-- Docker images build successfully again.
-- VLM concurrency limits no longer increase concurrent local OCR work or raster memory use (#1465).
-- Malformed PPTX image relationships now return an error instead of panicking.
-- Image paths are confined to their source directory, including bare filenames and symlinked paths.
-
-### Removed
-
-- **Breaking:** removed the unused public `BatchProcessor`, object-pooling APIs, and related batch
-  optimization modules.
-- **Breaking:** removed PDF writing, editing, building, and XFA conversion APIs from the native PDF
-  crate; read-only XFA analysis remains available.
-
 ## [1.1.0] - Unreleased
 
 ### Added
