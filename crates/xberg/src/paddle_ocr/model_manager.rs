@@ -10,9 +10,11 @@
 /// 2. Download on a cache miss unless Hugging Face offline mode is enabled.
 /// 3. Verify SHA-256 on every warm or cold resolution and repair corrupt entries.
 /// 4. Return the snapshot artifact path directly, without an Xberg-owned copy.
+#[cfg(paddle_ocr)]
 use std::fs;
+#[cfg(paddle_ocr)]
 use std::io::Read;
-#[cfg(test)]
+#[cfg(all(test, paddle_ocr))]
 use std::path::Path;
 use std::path::PathBuf;
 

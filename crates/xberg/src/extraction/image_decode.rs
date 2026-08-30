@@ -1,6 +1,18 @@
 use std::io::Cursor;
 
-use image::{ColorType, ImageDecoder, ImageFormat, ImageReader};
+#[cfg(any(
+    test,
+    feature = "ocr",
+    feature = "ocr-wasm",
+    feature = "ocr-pipeline",
+    feature = "qr-codes",
+    layout_detection,
+    auto_rotate,
+    sceptre_ocr,
+    feature = "sceptre-wasm"
+))]
+use image::ColorType;
+use image::{ImageDecoder, ImageFormat, ImageReader};
 
 use crate::error::{Result, XbergError};
 use crate::extractors::security::SecurityLimits;
@@ -94,6 +106,17 @@ struct StandardImageProbe {
     width: u32,
     height: u32,
     format: ImageFormat,
+    #[cfg(any(
+        test,
+        feature = "ocr",
+        feature = "ocr-wasm",
+        feature = "ocr-pipeline",
+        feature = "qr-codes",
+        layout_detection,
+        auto_rotate,
+        sceptre_ocr,
+        feature = "sceptre-wasm"
+    ))]
     color_type: ColorType,
     decoded_bytes: u64,
 }
@@ -134,11 +157,32 @@ fn probe_standard_image(
         width,
         height,
         format,
+        #[cfg(any(
+            test,
+            feature = "ocr",
+            feature = "ocr-wasm",
+            feature = "ocr-pipeline",
+            feature = "qr-codes",
+            layout_detection,
+            auto_rotate,
+            sceptre_ocr,
+            feature = "sceptre-wasm"
+        ))]
         color_type: decoder.color_type(),
         decoded_bytes,
     })
 }
 
+#[cfg(any(
+    test,
+    all(feature = "liter-llm", not(target_arch = "wasm32")),
+    feature = "candle-trocr",
+    feature = "candle-paddleocr-vl",
+    all(
+        not(target_arch = "wasm32"),
+        any(feature = "candle-glm-ocr", feature = "candle-deepseek-ocr")
+    )
+))]
 pub(crate) fn probe_standard_image_with_security_limits(
     bytes: &[u8],
     limits: &SecurityLimits,
@@ -147,6 +191,16 @@ pub(crate) fn probe_standard_image_with_security_limits(
     Ok((probe.width, probe.height, probe.format))
 }
 
+#[cfg(any(
+    test,
+    all(feature = "liter-llm", not(target_arch = "wasm32")),
+    feature = "candle-trocr",
+    feature = "candle-paddleocr-vl",
+    all(
+        not(target_arch = "wasm32"),
+        any(feature = "candle-glm-ocr", feature = "candle-deepseek-ocr")
+    )
+))]
 pub(crate) fn probe_standard_image_with_default_security_limits(
     bytes: &[u8],
 ) -> Result<(u32, u32, image::ImageFormat)> {
@@ -198,6 +252,7 @@ pub(crate) fn validate_image_live_bytes(
     ImageDecodeBudget::from_security_limits(limits).validate(width, height, peak_bytes)
 }
 
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 pub(crate) fn clone_dynamic_image_to_rgb8_with_security_limits(
     image: &image::DynamicImage,
     limits: &SecurityLimits,
@@ -225,6 +280,17 @@ fn decode_standard_image(
     reader.decode().map_err(map_image_decode_error)
 }
 
+#[cfg(any(
+    test,
+    feature = "ocr",
+    feature = "ocr-wasm",
+    feature = "ocr-pipeline",
+    feature = "qr-codes",
+    layout_detection,
+    auto_rotate,
+    sceptre_ocr,
+    feature = "sceptre-wasm"
+))]
 fn conversion_peak_bytes(
     probe: StandardImageProbe,
     target: ColorType,
@@ -249,6 +315,16 @@ fn conversion_peak_bytes(
         .ok_or_else(|| image_dimension_error(probe.width, probe.height, u64::MAX, u64::MAX))
 }
 
+#[cfg(any(
+    test,
+    feature = "ocr",
+    feature = "ocr-wasm",
+    feature = "ocr-pipeline",
+    layout_detection,
+    auto_rotate,
+    sceptre_ocr,
+    feature = "sceptre-wasm"
+))]
 fn decode_standard_rgb8(bytes: &[u8], limits: &SecurityLimits, additional_live_bytes: u64) -> Result<image::RgbImage> {
     let budget = ImageDecodeBudget::from_security_limits(limits);
     let probe = probe_standard_image(bytes, budget, None)?;
@@ -264,6 +340,16 @@ fn decode_standard_rgb8(bytes: &[u8], limits: &SecurityLimits, additional_live_b
         .map(image::DynamicImage::into_rgb8)
 }
 
+#[cfg(any(
+    test,
+    feature = "ocr",
+    feature = "ocr-wasm",
+    feature = "ocr-pipeline",
+    layout_detection,
+    auto_rotate,
+    sceptre_ocr,
+    feature = "sceptre-wasm"
+))]
 pub(crate) fn decode_standard_rgb8_with_security_limits(
     bytes: &[u8],
     limits: &SecurityLimits,
@@ -271,10 +357,17 @@ pub(crate) fn decode_standard_rgb8_with_security_limits(
     decode_standard_rgb8(bytes, limits, 0)
 }
 
+#[cfg(any(test, layout_detection, auto_rotate, sceptre_ocr, feature = "sceptre-wasm"))]
 pub(crate) fn decode_standard_rgb8_with_default_security_limits(bytes: &[u8]) -> Result<image::RgbImage> {
     decode_standard_rgb8_with_security_limits(bytes, &SecurityLimits::default())
 }
 
+#[cfg(any(
+    test,
+    feature = "ocr",
+    feature = "ocr-wasm",
+    all(feature = "pdf", any(feature = "ocr-pipeline", feature = "layout-detection"))
+))]
 pub(crate) fn decode_standard_rgb8_with_additional_live_bytes_and_security_limits(
     bytes: &[u8],
     limits: &SecurityLimits,
@@ -283,6 +376,7 @@ pub(crate) fn decode_standard_rgb8_with_additional_live_bytes_and_security_limit
     decode_standard_rgb8(bytes, limits, additional_live_bytes)
 }
 
+#[cfg(any(test, feature = "ocr", feature = "ocr-wasm"))]
 pub(crate) fn decode_standard_rgb8_with_additional_live_bytes_and_default_security_limits(
     bytes: &[u8],
     additional_live_bytes: u64,
@@ -322,6 +416,7 @@ pub(crate) fn decode_standard_luma8_with_default_security_limits(bytes: &[u8]) -
     decode_standard_luma8_with_security_limits(bytes, &SecurityLimits::default())
 }
 
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 pub(crate) fn standard_image_is_single_frame(bytes: &[u8], mime_type: &str) -> bool {
     let cursor = Cursor::new(bytes);
     match mime_type {

@@ -471,6 +471,7 @@ pub(crate) fn validate_layout_inference_peak(
     )
 }
 
+#[cfg(all(feature = "pdf", feature = "layout-detection"))]
 pub(crate) fn layout_inference_batch_capacity(
     width: u32,
     height: u32,
@@ -505,7 +506,7 @@ pub(crate) fn validate_layout_batch_peak(
     validate_layout_inference_peak(width, height, current, images.len(), security_limits)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "pdf", feature = "layout-detection"))]
 mod layout_peak_tests {
     use super::*;
 

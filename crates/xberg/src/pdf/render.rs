@@ -577,7 +577,7 @@ mod pixel_bbox_tests {
 /// crate asserted the old value was ever used for anything, so nothing
 /// relies on it. See `get_page_rotations`' test module for the pinning test.
 ///
-/// See [`get_page_rotations_from_bytes`] for callers that hold only the raw bytes.
+/// See `get_page_rotations_from_bytes` for callers that hold only the raw bytes.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
 pub(crate) fn get_page_rotations(doc: &xberg_native_pdf::PdfDocument, page_count: usize) -> Vec<u32> {
     (0..page_count)
@@ -604,7 +604,7 @@ pub(crate) fn get_page_rotations(doc: &xberg_native_pdf::PdfDocument, page_count
 ///
 /// Returns all-zero rotations if the document cannot be opened: this is a rendering hint,
 /// and a document that will not open fails for better reasons elsewhere.
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(crate) fn get_page_rotations_from_bytes(content: &[u8], page_count: usize) -> Vec<u32> {
     match xberg_native_pdf::PdfDocument::from_bytes(content.to_vec()) {
         Ok(doc) => get_page_rotations(&doc, page_count),
@@ -1231,6 +1231,7 @@ mod tests {
         assert_eq!((rotated.width(), rotated.height()), (150, 100));
     }
 
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline", feature = "layout-detection"))]
     #[test]
     fn rotated_png_rejects_request_limit_before_peak_allocation() {
         let image = image::RgbImage::from_pixel(2, 2, image::Rgb([255, 255, 255]));
