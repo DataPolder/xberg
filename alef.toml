@@ -2563,6 +2563,7 @@ languages = [
   "zig",
   "homebrew",
 ]
+fields_method_calls = ["results[0].metadata.format.excel", "metadata.format.excel"]
 fields_optional = [
   "results[0].metadata.format",
   "results[0].metadata.format.excel.sheet_count",
@@ -2760,6 +2761,7 @@ options_via = "from_json"
 
 [crates.e2e.calls.extract.overrides.python]
 options_type = "ExtractionConfig"
+options_via = "from_json"
 
 [crates.e2e.calls.extract.overrides.node]
 options_type = "ExtractionConfig"
