@@ -144,6 +144,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed structured extraction forcing every caller schema to JSON Schema Draft 2020-12; validation
+  now honors the schema's declared draft while keeping external reference resolution offline
+  ([#1539](https://github.com/xberg-io/xberg/issues/1539)).
 - Fixed Windows source and Ruby package builds failing on stable Rust while validating the
   identity of staged Tesseract source directories.
 - Fixed GCC 12+ WordPerfect builds by adding the standard header that declares `size_t` before
