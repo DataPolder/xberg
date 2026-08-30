@@ -15,6 +15,22 @@ mod tests;
 
 pub use cache::clear_processor_cache;
 pub use format::apply_output_format;
+#[cfg(any(
+    feature = "classification",
+    feature = "summarization",
+    feature = "translation",
+    feature = "captioning",
+    feature = "qr-codes",
+    feature = "ner",
+    feature = "redaction",
+    feature = "quality",
+    feature = "keywords-yake",
+    feature = "keywords-rake"
+))]
+pub(crate) use initialization::automatic_registration_allowed;
+pub(crate) use initialization::{
+    with_builtin_registration_recovery, with_post_processor_enabled, with_post_processor_suppressed,
+};
 
 use crate::Result;
 use crate::core::config::ExtractionConfig;
@@ -24,7 +40,7 @@ use crate::types::internal::InternalDocument;
 use execution::{execute_processor_stages, execute_validators};
 use features::{execute_chunking, execute_language_detection, execute_token_reduction};
 use initialization::{
-    builtin_registration_error, get_processors_from_cache, initialize_features, initialize_processor_cache,
+    builtin_registration_error, get_processors_from_cache, initialize_processor_cache_for_async_pipeline,
 };
 
 const CAPTIONING_PROCESSOR_NAME: &str = "captioning";
@@ -147,7 +163,7 @@ fn image_descriptions_changed(
             .any(|(retained, captioned)| retained.description != captioned.description)
 }
 
-/// Push a `ProcessingWarning` onto `doc` when the one-time built-in post-processor
+/// Push a `ProcessingWarning` onto `doc` when the latest built-in post-processor
 /// registration pass (#271) reported a failure. `registration_error` is
 /// `initialization::builtin_registration_error()`; `None` means every enabled
 /// built-in processor registered successfully (or registration has not run yet).
@@ -362,9 +378,8 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     let pp_config = config.postprocessor.as_ref();
     let postprocessing_enabled = pp_config.is_none_or(|processor_config| processor_config.enabled);
     let processor_stages = if postprocessing_enabled {
-        initialize_features();
+        initialize_processor_cache_for_async_pipeline().await?;
         push_builtin_registration_warning(&mut doc, builtin_registration_error());
-        initialize_processor_cache()?;
 
         let (early_processors, middle_processors, late_processors) = get_processors_from_cache()?;
         Some((early_processors, middle_processors, late_processors))
@@ -1332,9 +1347,7 @@ mod issue_213_chunk_offset_ordering_tests {
 /// Regression tests for #271: `builtin_registration_error()` used to be dead code —
 /// nothing surfaced it, so a user whose e.g. `summarization` processor failed to
 /// register got a clean `Ok` with no output and no explanation. These test the pure
-/// warning-construction helper directly (no global registry involved) rather than
-/// the real one-time `OnceLock` registration pass, which cannot be re-triggered or
-/// forced to fail from a test without mutating process-global state (#310).
+/// warning-construction helper directly so the test does not mutate process-global registry state.
 #[cfg(test)]
 mod issue_271_builtin_registration_warning_tests {
     use super::*;

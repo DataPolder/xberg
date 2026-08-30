@@ -7,6 +7,75 @@ use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
 use serial_test::serial;
 use std::borrow::Cow;
 
+#[cfg(feature = "summarization")]
+struct SummarizationLifecycleTestProcessor {
+    priority: i32,
+    fail_initialize: bool,
+    fail_shutdown: bool,
+    marker: Option<&'static str>,
+}
+
+#[cfg(feature = "summarization")]
+impl crate::plugins::Plugin for SummarizationLifecycleTestProcessor {
+    fn name(&self) -> &str {
+        "summarization"
+    }
+
+    fn version(&self) -> String {
+        "test".to_string()
+    }
+
+    fn initialize(&self) -> Result<()> {
+        if self.fail_initialize {
+            return Err(crate::XbergError::Other("test initialization failure".to_string()));
+        }
+        Ok(())
+    }
+
+    fn shutdown(&self) -> Result<()> {
+        if self.fail_shutdown {
+            return Err(crate::XbergError::Other("test shutdown failure".to_string()));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "summarization")]
+#[async_trait::async_trait]
+impl crate::plugins::PostProcessor for SummarizationLifecycleTestProcessor {
+    async fn process(&self, result: &mut crate::types::ExtractedDocument, _: &ExtractionConfig) -> Result<()> {
+        if let Some(marker) = self.marker {
+            result
+                .metadata
+                .additional
+                .insert(Cow::Borrowed("lifecycle_test"), serde_json::json!(marker));
+        }
+        Ok(())
+    }
+
+    fn processing_stage(&self) -> crate::plugins::ProcessingStage {
+        crate::plugins::ProcessingStage::Middle
+    }
+
+    fn priority(&self) -> i32 {
+        self.priority
+    }
+}
+
+#[cfg(feature = "summarization")]
+fn summarization_test_config() -> ExtractionConfig {
+    ExtractionConfig {
+        summarization: Some(crate::core::config::SummarizationConfig::default()),
+        ..Default::default()
+    }
+}
+
+#[cfg(feature = "summarization")]
+fn restore_builtin_summarization() {
+    crate::plugins::unregister_post_processor("summarization").unwrap();
+    crate::plugins::processor::builtin::summarization::register().unwrap();
+}
+
 /// Build an `InternalDocument` with a single paragraph element for pipeline tests.
 fn make_doc(content: &str, mime: &str) -> InternalDocument {
     let mut doc = InternalDocument::new("plain");
@@ -31,8 +100,6 @@ const POSTPROCESSOR_VALIDATION_MARKER: &str = "postprocessor_validation_test";
 const ORDER_VALIDATION_MARKER: &str = "order_validation_test";
 
 /// Ensure the quality processor is registered and cache is fresh.
-/// Needed because other tests may call `shutdown_all()` on the registry,
-/// and the `OnceLock` in `initialize_features` prevents re-registration.
 #[cfg(feature = "quality")]
 fn ensure_quality_processor() {
     let registry = crate::plugins::registry::get_post_processor_registry();
@@ -75,6 +142,221 @@ async fn test_pipeline_with_quality_processing() {
 
     let processed = run_pipeline(doc, &config).await.unwrap();
     assert!(processed.quality_score.is_some());
+}
+
+#[tokio::test]
+#[serial]
+#[cfg(all(feature = "quality", feature = "summarization"))]
+async fn builtin_processors_recover_after_public_registry_clear() {
+    initialization::initialize_features();
+    crate::plugins::clear_post_processors().unwrap();
+
+    let doc = make_doc(
+        "The first paragraph explains the problem. The second paragraph provides enough text for a summary.",
+        "text/plain",
+    );
+    let config = ExtractionConfig {
+        enable_quality_processing: true,
+        summarization: Some(crate::core::config::SummarizationConfig::default()),
+        ..Default::default()
+    };
+
+    let processed = run_pipeline(doc, &config).await.unwrap();
+    assert!(processed.quality_score.is_some());
+    assert!(processed.summary.is_some());
+
+    crate::plugins::unregister_post_processor("summarization").unwrap();
+    let doc = make_doc(
+        "The first paragraph explains the problem. The second paragraph provides enough text for a summary.",
+        "text/plain",
+    );
+    let processed = run_pipeline(doc, &config).await;
+    let restore_result = crate::plugins::processor::builtin::summarization::register();
+    restore_result.unwrap();
+    let processed = processed.unwrap();
+    assert!(processed.quality_score.is_some());
+    assert!(processed.summary.is_none());
+}
+
+#[tokio::test]
+#[serial]
+#[cfg(all(feature = "quality", feature = "summarization"))]
+async fn unregister_remains_effective_during_pending_builtin_recovery() {
+    crate::plugins::clear_post_processors().unwrap();
+    crate::plugins::unregister_post_processor("summarization").unwrap();
+
+    let config = ExtractionConfig {
+        enable_quality_processing: true,
+        summarization: Some(crate::core::config::SummarizationConfig::default()),
+        ..Default::default()
+    };
+    let processed = run_pipeline(
+        make_doc(
+            "Enough document content exists to produce an extractive summary.",
+            "text/plain",
+        ),
+        &config,
+    )
+    .await;
+    let restore_result = crate::plugins::processor::builtin::summarization::register();
+
+    restore_result.unwrap();
+    let processed = processed.unwrap();
+    assert!(processed.quality_score.is_some());
+    assert!(processed.summary.is_none());
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[serial]
+#[cfg(feature = "tokio-runtime")]
+async fn lifecycle_wait_keeps_async_runtime_schedulable() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    initialization::initialize_processor_cache().unwrap();
+    let (started_sender, started_receiver) = mpsc::channel();
+    let (release_sender, release_receiver) = mpsc::channel();
+    let update_thread = std::thread::spawn(move || {
+        with_post_processor_suppressed("async-runtime-test", || {
+            started_sender.send(()).unwrap();
+            release_receiver.recv().unwrap()
+        })
+    });
+    started_receiver.recv().unwrap();
+
+    let watchdog_sender = release_sender.clone();
+    let watchdog = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(200));
+        let _ = watchdog_sender.send("watchdog");
+    });
+    let release_from_async = async move {
+        tokio::task::yield_now().await;
+        let _ = release_sender.send("async");
+    };
+    let config = ExtractionConfig::default();
+    let (pipeline_result, ()) = tokio::join!(
+        run_pipeline(make_doc("test", "text/plain"), &config),
+        release_from_async
+    );
+
+    let release_source = update_thread.join().unwrap();
+    watchdog.join().unwrap();
+    pipeline_result.unwrap();
+    assert_eq!(release_source, "async");
+}
+
+#[tokio::test]
+#[serial]
+#[cfg(feature = "summarization")]
+async fn failed_explicit_builtin_registration_preserves_suppression() {
+    crate::plugins::clear_post_processors().unwrap();
+    crate::plugins::unregister_post_processor("summarization").unwrap();
+    let registration =
+        crate::plugins::register_post_processor(std::sync::Arc::new(SummarizationLifecycleTestProcessor {
+            priority: 90,
+            fail_initialize: true,
+            fail_shutdown: false,
+            marker: None,
+        }));
+
+    let processed = run_pipeline(
+        make_doc("Enough content exists to create a summary.", "text/plain"),
+        &summarization_test_config(),
+    )
+    .await;
+    restore_builtin_summarization();
+
+    assert!(registration.is_err());
+    assert!(processed.unwrap().summary.is_none());
+}
+
+#[tokio::test]
+#[serial]
+#[cfg(feature = "summarization")]
+async fn failed_builtin_replacement_triggers_automatic_recovery() {
+    crate::plugins::clear_post_processors().unwrap();
+    initialization::initialize_processor_cache().unwrap();
+    crate::plugins::register_post_processor(std::sync::Arc::new(SummarizationLifecycleTestProcessor {
+        priority: 90,
+        fail_initialize: false,
+        fail_shutdown: true,
+        marker: None,
+    }))
+    .unwrap();
+    let replacement =
+        crate::plugins::register_post_processor(std::sync::Arc::new(SummarizationLifecycleTestProcessor {
+            priority: 91,
+            fail_initialize: false,
+            fail_shutdown: false,
+            marker: None,
+        }));
+
+    let processed = run_pipeline(
+        make_doc("Enough content exists to create a summary.", "text/plain"),
+        &summarization_test_config(),
+    )
+    .await;
+    restore_builtin_summarization();
+
+    assert!(replacement.is_err());
+    assert!(processed.unwrap().summary.is_some());
+}
+
+#[tokio::test]
+#[serial]
+#[cfg(feature = "summarization")]
+async fn bootstrap_preserves_custom_processor_with_builtin_name() {
+    let custom: std::sync::Arc<dyn crate::plugins::PostProcessor> =
+        std::sync::Arc::new(SummarizationLifecycleTestProcessor {
+            priority: 97,
+            fail_initialize: false,
+            fail_shutdown: false,
+            marker: Some("custom-summarization"),
+        });
+    crate::plugins::clear_post_processors().unwrap();
+    crate::plugins::register_post_processor(std::sync::Arc::clone(&custom)).unwrap();
+
+    let processed = run_pipeline(make_doc("test", "text/plain"), &ExtractionConfig::default()).await;
+    let registered = crate::plugins::registry::get_post_processor_registry()
+        .read()
+        .get_for_stage(crate::plugins::ProcessingStage::Middle)
+        .into_iter()
+        .find(|processor| processor.name() == "summarization")
+        .unwrap();
+    let identity_preserved = std::sync::Arc::ptr_eq(&registered, &custom);
+    let priority = registered.priority();
+    restore_builtin_summarization();
+
+    let processed = processed.unwrap();
+    assert!(identity_preserved);
+    assert_eq!(priority, 97);
+    assert_eq!(processed.metadata.additional["lifecycle_test"], "custom-summarization");
+}
+
+#[test]
+#[serial]
+#[cfg(all(feature = "quality", feature = "summarization"))]
+fn concurrent_builtin_recovery_waits_for_complete_registration() {
+    const CALLER_COUNT: usize = 8;
+
+    crate::plugins::clear_post_processors().unwrap();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(CALLER_COUNT));
+    let callers = (0..CALLER_COUNT)
+        .map(|_| {
+            let barrier = std::sync::Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                initialization::initialize_features();
+                crate::plugins::registry::get_post_processor_registry().read().list()
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for caller in callers {
+        let processor_names = caller.join().unwrap();
+        assert!(processor_names.iter().any(|name| name == "quality-processing"));
+        assert!(processor_names.iter().any(|name| name == "summarization"));
+    }
 }
 
 #[tokio::test]
@@ -865,7 +1147,7 @@ async fn captioning_prepass_keeps_redaction_and_chunks_consistent() {
         }
     }
 
-    initialize_features();
+    initialization::initialize_features();
     crate::plugins::processor::builtin::redaction::register().unwrap();
     let registry = crate::plugins::registry::get_post_processor_registry();
     registry.write().register(Arc::new(StubCaptioningProcessor)).unwrap();
@@ -1038,7 +1320,7 @@ async fn captioning_prepass_preserves_full_code_intelligence_scratch_payload() {
         }
     }
 
-    initialize_features();
+    initialization::initialize_features();
     let registry = crate::plugins::registry::get_post_processor_registry();
     registry.write().register(Arc::new(NoopCaptioningProcessor)).unwrap();
     clear_processor_cache().unwrap();

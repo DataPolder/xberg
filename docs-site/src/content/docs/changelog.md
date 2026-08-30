@@ -146,6 +146,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed URL extraction reporting internally converted HTML pages as `text/markdown`; results now
+  retain a validated, canonical source MIME type.
+- Fixed `clear_post_processors` stopping at the first failed shutdown hook and permanently removing
+  enabled built-ins; it now attempts every shutdown, returns the first error, and restores built-ins
+  before the next post-processed extraction while custom processors remain cleared.
 - Fixed VLM concurrency limits increasing concurrent local OCR work and raster memory use (#1465).
 - Fixed structured extraction forcing every caller schema to JSON Schema Draft 2020-12; validation
   now honors the schema's declared draft while keeping external reference resolution offline

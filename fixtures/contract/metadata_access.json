@@ -47,7 +47,7 @@
     {
       "type": "equals",
       "field": "results[0].mime_type",
-      "value": "text/markdown"
+      "value": "text/html"
     },
     {
       "type": "equals",

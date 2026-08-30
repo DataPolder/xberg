@@ -2437,12 +2437,12 @@ upgrade = "cd packages/zig && zig build --fetch"
 [crates.test.python]
 precondition = "command -v uv >/dev/null 2>&1"
 before = "bash scripts/e2e/build-mock-server.sh && cd e2e/python && uv sync --reinstall-package xberg"
-e2e = "cd e2e/python && for dir in docx html json pdf text xlsx images; do test -e $dir || ln -s ../../test_documents/$dir $dir; done && uv run --no-sync python -m pytest tests/ -q"
+e2e = "cd e2e/python && uv run --no-sync python -m pytest tests/ -q"
 
 [crates.test.node]
 precondition = "command -v pnpm >/dev/null 2>&1"
 before = "bash scripts/e2e/build-mock-server.sh && cd crates/xberg-node && pnpm install && CARGO_BUILD_JOBS=1 pnpm exec napi build --output-dir . --release --platform && cd ../../e2e/node && pnpm install --frozen-lockfile=false"
-e2e = "cd e2e/node && for dir in docx html json pdf text xlsx images; do test -e $dir || ln -s ../../test_documents/$dir $dir; done && pnpm test"
+e2e = "cd e2e/node && pnpm test"
 
 [crates.test.go]
 precondition = "command -v go >/dev/null 2>&1"
@@ -2765,6 +2765,7 @@ options_via = "from_json"
 [crates.e2e.calls.extract.overrides.python]
 options_type = "ExtractionConfig"
 options_via = "from_json"
+from_json_module = "xberg._xberg"
 
 [crates.e2e.calls.extract.overrides.node]
 options_type = "ExtractionConfig"
@@ -2802,6 +2803,8 @@ enum_fields = { outputFormat = "OutputFormat" }
 
 [crates.e2e.calls.extract_batch.overrides.python]
 options_type = "ExtractionConfig"
+options_via = "from_json"
+from_json_module = "xberg._xberg"
 
 [crates.e2e.calls.extract_batch.overrides.php]
 function = "extractBatch"

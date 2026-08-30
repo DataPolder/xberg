@@ -11,9 +11,8 @@ use std::sync::LazyLock;
 
 /// Cached post-processors for each stage to reduce lock contention.
 ///
-/// This cache is populated once during the first pipeline run and reused
-/// for all subsequent extractions, eliminating 3 of 4 registry lock acquisitions
-/// per extraction.
+/// This cache is populated on first use and rebuilt whenever the registry generation changes,
+/// eliminating repeated registry lock acquisitions while preserving plugin lifecycle updates.
 pub(super) struct ProcessorCache {
     pub(super) early: Arc<Vec<Arc<dyn PostProcessor>>>,
     pub(super) middle: Arc<Vec<Arc<dyn PostProcessor>>>,
