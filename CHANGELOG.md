@@ -134,6 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed Windows source and Ruby package builds failing on stable Rust while validating the
+  identity of staged Tesseract source directories.
 - Fixed GCC 12+ WordPerfect builds by adding the standard header that declares `size_t` before
   compiling the pinned libwpd source.
 - Fixed Ruby source-package installation by aligning the Gemfile and lockfile with the gemspec's

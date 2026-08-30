@@ -453,6 +453,26 @@ fn should_reject_symlinked_source_root_without_removing_target() {
     );
 }
 
+#[test]
+fn should_reject_staging_directory_recreated_after_extraction() {
+    let temp_dir = TestDir::new();
+    let archive = prepare_verified_artifact(temp_dir.path(), &source_artifact(), || Ok(ARCHIVE_BYTES.to_vec()))
+        .expect("prepare verified archive");
+    let third_party_dir = temp_dir.path().join("third-party");
+
+    let error = prepare_source_tree(&third_party_dir, "tesseract", &archive, |_, staging_dir| {
+        let original_staging_dir = staging_dir.with_extension("replaced");
+        fs::rename(staging_dir, &original_staging_dir)?;
+        fs::create_dir(staging_dir)?;
+        fs::write(staging_dir.join("CMakeLists.txt"), "replacement build")?;
+        Ok(())
+    })
+    .expect_err("recreated staging directory must fail closed");
+
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(!third_party_dir.join("tesseract").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn should_reject_staging_directory_replaced_after_extraction() {

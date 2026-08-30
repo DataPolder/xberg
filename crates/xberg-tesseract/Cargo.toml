@@ -16,6 +16,9 @@ build = "build.rs"
 links = "xberg_tesseract"
 exclude = ["tessdata/*", "third_party/*"]
 
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+same-file.workspace = true
+
 [package.metadata.docs.rs]
 features = ["docs-only"]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -59,6 +62,7 @@ reqwest = { workspace = true, default-features = false, features = ["blocking", 
 # Use native-tls on Windows to avoid aws-lc-sys CMake build issues with MinGW
 [target.'cfg(target_os = "windows")'.build-dependencies]
 reqwest = { workspace = true, default-features = false, features = ["blocking", "native-tls"], optional = true }
+same-file.workspace = true
 
 [dev-dependencies]
 image = { workspace = true, features = ["png"] }

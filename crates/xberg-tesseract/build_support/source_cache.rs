@@ -8,7 +8,14 @@ use tempfile::{Builder, NamedTempFile};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
 #[cfg(windows)]
-use std::os::windows::fs::{MetadataExt as WindowsMetadataExt, OpenOptionsExt};
+use std::os::windows::fs::OpenOptionsExt;
+
+#[cfg(unix)]
+type DirectoryIdentity = fs::Metadata;
+#[cfg(windows)]
+type DirectoryIdentity = same_file::Handle;
+#[cfg(not(any(unix, windows)))]
+type DirectoryIdentity = fs::Metadata;
 
 const SOURCE_ROOT_MARKER: &str = "CMakeLists.txt";
 const SHA256_HEX_LENGTH: usize = 64;
@@ -124,7 +131,7 @@ pub(crate) fn prepare_source_tree(
         .prefix(&format!(".{source_name}."))
         .tempdir_in(third_party_dir)?;
     let staging_dir = staging.path();
-    let staging_identity = fs::symlink_metadata(staging_dir)?;
+    let staging_identity = capture_directory_identity(staging_dir)?;
     extract(&archive.bytes, staging_dir)?;
     verify_same_directory(staging_dir, &staging_identity)?;
 
@@ -153,7 +160,26 @@ pub(crate) fn prepare_source_tree(
 }
 
 #[cfg(unix)]
-fn verify_same_directory(path: &Path, expected: &fs::Metadata) -> io::Result<()> {
+fn capture_directory_identity(path: &Path) -> io::Result<DirectoryIdentity> {
+    fs::symlink_metadata(path)
+}
+
+#[cfg(windows)]
+fn capture_directory_identity(path: &Path) -> io::Result<DirectoryIdentity> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+        return same_file::Handle::from_path(path);
+    }
+    Err(replaced_directory_error(path))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn capture_directory_identity(path: &Path) -> io::Result<DirectoryIdentity> {
+    fs::symlink_metadata(path)
+}
+
+#[cfg(unix)]
+fn verify_same_directory(path: &Path, expected: &DirectoryIdentity) -> io::Result<()> {
     let current = fs::symlink_metadata(path)?;
     if current.file_type().is_dir()
         && !current.file_type().is_symlink()
@@ -166,20 +192,19 @@ fn verify_same_directory(path: &Path, expected: &fs::Metadata) -> io::Result<()>
 }
 
 #[cfg(windows)]
-fn verify_same_directory(path: &Path, expected: &fs::Metadata) -> io::Result<()> {
+fn verify_same_directory(path: &Path, expected: &DirectoryIdentity) -> io::Result<()> {
     let current = fs::symlink_metadata(path)?;
-    if current.file_type().is_dir()
-        && !current.file_type().is_symlink()
-        && current.volume_serial_number() == expected.volume_serial_number()
-        && current.file_index() == expected.file_index()
-    {
-        return Ok(());
+    if current.file_type().is_dir() && !current.file_type().is_symlink() {
+        let current_identity = same_file::Handle::from_path(path)?;
+        if current_identity.eq(expected) {
+            return Ok(());
+        }
     }
     Err(replaced_directory_error(path))
 }
 
 #[cfg(not(any(unix, windows)))]
-fn verify_same_directory(path: &Path, _expected: &fs::Metadata) -> io::Result<()> {
+fn verify_same_directory(path: &Path, _expected: &DirectoryIdentity) -> io::Result<()> {
     let current = fs::symlink_metadata(path)?;
     if current.file_type().is_dir() && !current.file_type().is_symlink() {
         return Ok(());
