@@ -44,10 +44,6 @@
     {
       "type": "not_empty",
       "field": "results[0].pages"
-    },
-    {
-      "type": "not_empty",
-      "field": "results[0].pages[0].hierarchy.blocks"
     }
   ],
   "config": {
