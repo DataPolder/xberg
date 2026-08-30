@@ -364,9 +364,9 @@ Common use cases — see [Quick start guide](https://docs.xberg.io/getting-start
 <details>
 <summary><strong>Full feature list</strong></summary>
 
-### Supported File Formats (106 formats · 140 file extensions · 53 MIME aliases)
+### Supported File Formats (106 formats · 140 file extensions · 56 MIME aliases)
 
-106 formats across 140 unique file extensions, with 53 compatibility MIME aliases, intelligent format detection, and comprehensive metadata extraction.
+106 formats across 140 unique file extensions, with 56 compatibility MIME aliases, intelligent format detection, and comprehensive metadata extraction.
 
 #### Office Documents
 
@@ -404,7 +404,7 @@ Common use cases — see [Quick start guide](https://docs.xberg.io/getting-start
 |----------|---------|----------|
 | **Markup** | `.html`, `.htm`, `.xhtml`, `.xht`, `.xml`, `.kml`, `.svg` | DOM parsing, metadata (Open Graph, Twitter Card), link extraction |
 | **Structured Data** | `.json`, `.geojson`, `.jsonl`, `.ndjson`, `.yaml`, `.yml`, `.toml`, `.csv`, `.tsv` | Schema detection, nested structures, validation |
-| **Text & Markdown** | `.txt`, `.adoc`, `.asciidoc`, `.vtt`, `.md`, `.markdown`, `.commonmark`, `.qmd`, `.rmd`, `.djot`, `.dj`, `.mdx`, `.doctags`, `.rst`, `.org`, `.rtf` | AsciiDoc, CommonMark, Quarto, R Markdown, Djot, MDX, DocTags, reStructuredText, Org Mode |
+| **Text & Markdown** | `.txt`, `.adoc`, `.asciidoc`, `.vtt`, `.md`, `.markdown`, `.commonmark`, `.qmd`, `.rmd`, `.djot`, `.dj`, `.mdx`, `.doctags`, `.rst`, `.org`, `.rtf` | AsciiDoc, CommonMark, MyST Markdown, Quarto, R Markdown, Djot, MDX, DocTags, reStructuredText, Org Mode |
 
 #### Email & Archives
 
@@ -418,7 +418,8 @@ Common use cases — see [Quick start guide](https://docs.xberg.io/getting-start
 | Category | Formats | Features |
 |----------|---------|----------|
 | **Citations** | `.bib`, `.ris`, `.nbib`, `.enw` | Structured parsing: RIS, PubMed/MEDLINE, EndNote XML, BibTeX/BibLaTeX |
-| **Scientific** | `.tex`, `.latex`, `.typ`, `.typst`, `.jats`, `.nxml`, `.ipynb` | LaTeX, Typst, Jupyter notebooks, PubMed JATS |
+| **Scientific** | `.tex`, `.latex`, `.typ`, `.typst`, `.jats`, `.nxml` | LaTeX, Typst, PubMed JATS |
+| **Text notebooks** | `.ipynb`, `.md`, `.py`, `.R`, `.jl` | Jupyter, MyST-NB, Jupytext percent/light, saved outputs, cell visibility tags |
 | **Publishing** | `.fb2`, `.docbook`, `.dbk`, `.docbook4`, `.docbook5`, `.opml` | FictionBook, DocBook XML, OPML outlines |
 
 ### Code Intelligence (371 Languages)

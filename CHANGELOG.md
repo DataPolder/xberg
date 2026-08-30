@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added structural extraction for MyST Markdown syntax and MyST text notebooks, including saved
+  inline `{eval}` values in Jupyter markdown cells
+  ([#1538](https://github.com/xberg-io/xberg/issues/1538)).
+- Added extraction of Jupytext percent- and light-format notebook scripts, including
+  `text/x-python`, `text/x-r-source`, and `text/x-julia` MIME aliases
+  ([#1538](https://github.com/xberg-io/xberg/issues/1538)).
 - Added bounded, cancellable SQLite and GeoPackage table extraction with schema-based GeoPackage
   detection, `.sqlite3` and `.gpkx` filename support, and defensive handling for untrusted
   databases (#1510).
@@ -62,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking (Rust source):** `ExtractionConfig` adds `apply_notebook_cell_tags`. Notebook
+  extraction now honors MyST and Jupyter Book remove/hide cell tags by default; set the field to
+  `false` to retain all saved cell content
+  ([#1538](https://github.com/xberg-io/xberg/issues/1538)).
 - **Breaking (Rust source):** `OcrQualityThresholds` adds `discard_suspected_ocr_noise`; exhaustive
   struct literals must set the field or use `..Default::default()`.
 - **Breaking:** configuration deserialization now rejects unknown fields in nested Xberg
