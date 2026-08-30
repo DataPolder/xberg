@@ -1,5 +1,5 @@
 [workspace]
-alef_version = "0.77.0"
+alef_version = "0.79.2"
 languages = [
   "python",
   "node",
@@ -2450,9 +2450,9 @@ before = "cargo build --release -p xberg-ffi && mkdir -p packages/go/include && 
 e2e = "cd e2e/go && go test ./... -count=1"
 
 [crates.test.ruby]
-precondition = "command -v bundle >/dev/null 2>&1"
-before = "export PATH=\"$HOME/.rbenv/shims:$HOME/.asdf/shims:$PATH\" && cd packages/ruby && ruby -S bundle install && ruby -S bundle exec rake compile && cd ../../e2e/ruby && ruby -S bundle install"
-e2e = "export PATH=\"$HOME/.rbenv/shims:$HOME/.asdf/shims:$PATH\" && cd e2e/ruby && ruby -S bundle exec rspec"
+precondition = "export PATH=\"$HOME/.rbenv/shims:$HOME/.asdf/shims:$PATH\" && command -v ruby >/dev/null 2>&1 && BUNDLE_PATH=vendor/bundle ruby -S bundle --version >/dev/null 2>&1"
+before = "export PATH=\"$HOME/.rbenv/shims:$HOME/.asdf/shims:$PATH\" && cd packages/ruby && BUNDLE_PATH=vendor/bundle ruby -S bundle install && BUNDLE_PATH=vendor/bundle ruby -S bundle exec ruby -S rake compile && cd ../../e2e/ruby && BUNDLE_PATH=vendor/bundle ruby -S bundle install"
+e2e = "export PATH=\"$HOME/.rbenv/shims:$HOME/.asdf/shims:$PATH\" && cd e2e/ruby && BUNDLE_PATH=vendor/bundle ruby -S bundle exec ruby -S rspec"
 
 [crates.test.php]
 precondition = "command -v composer >/dev/null 2>&1"

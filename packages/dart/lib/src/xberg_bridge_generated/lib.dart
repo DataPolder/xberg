@@ -8,6 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'lib.freezed.dart';
 
+// These functions are ignored because they are not marked as `pub`: `try_convert_annotation_kind_from_core`, `try_convert_asset_category_from_core`, `try_convert_auth_config_from_core`, `try_convert_block_type_from_core`, `try_convert_boundary_reason_from_core`, `try_convert_browser_backend_from_core`, `try_convert_browser_mode_from_core`, `try_convert_browser_wait_from_core`, `try_convert_call_mode_from_core`, `try_convert_candle_device_preference_from_core`, `try_convert_candle_trocr_variant_from_core`, `try_convert_chunk_sizing_from_core`, `try_convert_chunk_type_from_core`, `try_convert_chunker_type_from_core`, `try_convert_chunking_reason_from_core`, `try_convert_code_content_mode_from_core`, `try_convert_code_data_node_kind_from_core`, `try_convert_confidence_semantics_from_core`, `try_convert_content_filter_kind_from_core`, `try_convert_content_layer_from_core`, `try_convert_crawl_strategy_kind_from_core`, `try_convert_credential_provider_config_from_core`, `try_convert_diff_line_from_core`, `try_convert_document_content_encoding_from_core`, `try_convert_element_type_from_core`, `try_convert_embedding_model_type_from_core`, `try_convert_embeddings_embedding_backend_from_core`, `try_convert_entity_category_from_core`, `try_convert_execution_provider_type_from_core`, `try_convert_extract_input_kind_from_core`, `try_convert_extraction_method_from_core`, `try_convert_form_field_type_from_core`, `try_convert_format_metadata_from_core`, `try_convert_formula_model_from_core`, `try_convert_glm_ocr_layout_mode_from_core`, `try_convert_glm_ocr_task_kind_from_core`, `try_convert_host_matcher_from_core`, `try_convert_html_theme_from_core`, `try_convert_image_kind_from_core`, `try_convert_image_output_format_from_core`, `try_convert_image_type_from_core`, `try_convert_inline_type_from_core`, `try_convert_jupyter_cell_rendering_from_core`, `try_convert_keyword_algorithm_from_core`, `try_convert_late_interaction_model_type_from_core`, `try_convert_layout_class_from_core`, `try_convert_layout_strategy_from_core`, `try_convert_link_type_from_core`, `try_convert_merge_mode_from_core`, `try_convert_mime_detection_policy_from_core`, `try_convert_ner_backend_kind_from_core`, `try_convert_no_chunking_reason_from_core`, `try_convert_node_content_from_core`, `try_convert_ocr_backend_type_from_core`, `try_convert_ocr_bounding_geometry_from_core`, `try_convert_ocr_element_level_from_core`, `try_convert_ocr_strategy_from_core`, `try_convert_output_format_from_core`, `try_convert_paddle_inference_backend_from_core`, `try_convert_paddle_language_from_core`, `try_convert_paddle_ocr_vl_task_kind_from_core`, `try_convert_page_orientation_handling_from_core`, `try_convert_page_unit_type_from_core`, `try_convert_pdf_annotation_type_from_core`, `try_convert_pdf_backend_from_core`, `try_convert_pii_category_from_core`, `try_convert_preset_category_from_core`, `try_convert_probe_status_from_core`, `try_convert_processing_stage_from_core`, `try_convert_psm_mode_from_core`, `try_convert_redaction_strategy_from_core`, `try_convert_reduction_level_from_core`, `try_convert_region_kind_from_core`, `try_convert_relationship_kind_from_core`, `try_convert_reranker_head_from_core`, `try_convert_reranker_model_type_from_core`, `try_convert_result_format_from_core`, `try_convert_revision_anchor_from_core`, `try_convert_revision_kind_from_core`, `try_convert_schema_compliance_from_core`, `try_convert_sparse_embedding_model_type_from_core`, `try_convert_structured_data_type_from_core`, `try_convert_summary_strategy_from_core`, `try_convert_table_chunking_mode_from_core`, `try_convert_table_model_from_core`, `try_convert_table_overlap_preference_from_core`, `try_convert_text_direction_from_core`, `try_convert_tier_strategy_from_core`, `try_convert_uri_kind_from_core`, `try_convert_url_extraction_mode_from_core`, `try_convert_vlm_fallback_policy_from_core`, `try_convert_whisper_model_from_core`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ChunkClassificationEnrichmentConfig`, `DocumentExtractorDartCallbacks`, `EmbeddingBackendDartCallbacks`, `OcrBackendDartCallbacks`, `PostProcessorDartCallbacks`, `RendererDartCallbacks`, `RerankerBackendDartCallbacks`, `TokenizerBackendDartCallbacks`, `ValidatorDartCallbacks`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `backend_type`, `can_handle`, `confidence_semantics`, `count_tokens`, `dimensions`, `embed`, `emits_structured_markdown`, `estimated_duration_ms`, `extract`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `initialize`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `name`, `page_orientation_handling`, `priority`, `priority`, `priority`, `process_document`, `process_image_file`, `process_image`, `process`, `processing_stage`, `render_result`, `rerank`, `should_process`, `should_validate`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `shutdown`, `supported_languages`, `supported_mime_types`, `supports_document_processing`, `supports_language`, `supports_table_detection`, `validate`, `version`, `version`, `version`, `version`, `version`, `version`, `version`, `version`
 
@@ -1022,6 +1023,330 @@ Future<ConversionOptions> createConversionOptionsFromJson({
 Future<PreprocessingOptions> createPreprocessingOptionsFromJson({
   required String json,
 }) => RustLib.instance.api.crateCreatePreprocessingOptionsFromJson(json: json);
+
+Future<ExecutionProviderType> createExecutionProviderTypeFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateExecutionProviderTypeFromJson(json: json);
+
+Future<MimeDetectionPolicy> createMimeDetectionPolicyFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateMimeDetectionPolicyFromJson(json: json);
+
+Future<ImageOutputFormat> createImageOutputFormatFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateImageOutputFormatFromJson(json: json);
+
+Future<ExtractInputKind> createExtractInputKindFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateExtractInputKindFromJson(json: json);
+
+Future<UrlExtractionMode> createUrlExtractionModeFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateUrlExtractionModeFromJson(json: json);
+
+Future<OutputFormat> createOutputFormatFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateOutputFormatFromJson(json: json);
+
+Future<JupyterCellRendering> createJupyterCellRenderingFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateJupyterCellRenderingFromJson(json: json);
+
+Future<HtmlTheme> createHtmlThemeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateHtmlThemeFromJson(json: json);
+
+Future<LateInteractionModelType> createLateInteractionModelTypeFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateLateInteractionModelTypeFromJson(
+  json: json,
+);
+
+Future<FormulaModel> createFormulaModelFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateFormulaModelFromJson(json: json);
+
+Future<TableModel> createTableModelFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateTableModelFromJson(json: json);
+
+Future<TableOverlapPreference> createTableOverlapPreferenceFromJson({
+  required String json,
+}) =>
+    RustLib.instance.api.crateCreateTableOverlapPreferenceFromJson(json: json);
+
+Future<LayoutStrategy> createLayoutStrategyFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateLayoutStrategyFromJson(json: json);
+
+Future<CredentialProviderConfig> createCredentialProviderConfigFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateCredentialProviderConfigFromJson(
+  json: json,
+);
+
+Future<CallMode> createCallModeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateCallModeFromJson(json: json);
+
+Future<MergeMode> createMergeModeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateMergeModeFromJson(json: json);
+
+Future<NerBackendKind> createNerBackendKindFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateNerBackendKindFromJson(json: json);
+
+Future<VlmFallbackPolicy> createVlmFallbackPolicyFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateVlmFallbackPolicyFromJson(json: json);
+
+Future<OcrStrategy> createOcrStrategyFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateOcrStrategyFromJson(json: json);
+
+Future<PdfBackend> createPdfBackendFromJson({required String json}) =>
+    RustLib.instance.api.crateCreatePdfBackendFromJson(json: json);
+
+Future<TableChunkingMode> createTableChunkingModeFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateTableChunkingModeFromJson(json: json);
+
+Future<ChunkerType> createChunkerTypeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateChunkerTypeFromJson(json: json);
+
+Future<ChunkSizing> createChunkSizingFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateChunkSizingFromJson(json: json);
+
+Future<EmbeddingModelType> createEmbeddingModelTypeFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateEmbeddingModelTypeFromJson(json: json);
+
+Future<RerankerHead> createRerankerHeadFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateRerankerHeadFromJson(json: json);
+
+Future<RerankerModelType> createRerankerModelTypeFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateRerankerModelTypeFromJson(json: json);
+
+Future<SparseEmbeddingModelType> createSparseEmbeddingModelTypeFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateSparseEmbeddingModelTypeFromJson(
+  json: json,
+);
+
+Future<WhisperModel> createWhisperModelFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateWhisperModelFromJson(json: json);
+
+Future<CodeContentMode> createCodeContentModeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateCodeContentModeFromJson(json: json);
+
+Future<OcrBackendType> createOcrBackendTypeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateOcrBackendTypeFromJson(json: json);
+
+Future<ConfidenceSemantics> createConfidenceSemanticsFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateConfidenceSemanticsFromJson(json: json);
+
+Future<PageOrientationHandling> createPageOrientationHandlingFromJson({
+  required String json,
+}) =>
+    RustLib.instance.api.crateCreatePageOrientationHandlingFromJson(json: json);
+
+Future<ProcessingStage> createProcessingStageFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateProcessingStageFromJson(json: json);
+
+Future<ReductionLevel> createReductionLevelFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateReductionLevelFromJson(json: json);
+
+Future<PdfAnnotationType> createPdfAnnotationTypeFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreatePdfAnnotationTypeFromJson(json: json);
+
+Future<BlockType> createBlockTypeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateBlockTypeFromJson(json: json);
+
+Future<InlineType> createInlineTypeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateInlineTypeFromJson(json: json);
+
+Future<RelationshipKind> createRelationshipKindFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateRelationshipKindFromJson(json: json);
+
+Future<ContentLayer> createContentLayerFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateContentLayerFromJson(json: json);
+
+Future<NodeContent> createNodeContentFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateNodeContentFromJson(json: json);
+
+Future<AnnotationKind> createAnnotationKindFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateAnnotationKindFromJson(json: json);
+
+Future<EntityCategory> createEntityCategoryFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateEntityCategoryFromJson(json: json);
+
+Future<ExtractionMethod> createExtractionMethodFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateExtractionMethodFromJson(json: json);
+
+Future<ChunkType> createChunkTypeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateChunkTypeFromJson(json: json);
+
+Future<ImageKind> createImageKindFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateImageKindFromJson(json: json);
+
+Future<ResultFormat> createResultFormatFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateResultFormatFromJson(json: json);
+
+Future<ElementType> createElementTypeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateElementTypeFromJson(json: json);
+
+Future<FormFieldType> createFormFieldTypeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateFormFieldTypeFromJson(json: json);
+
+Future<FormatMetadata> createFormatMetadataFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateFormatMetadataFromJson(json: json);
+
+Future<CodeDataNodeKind> createCodeDataNodeKindFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateCodeDataNodeKindFromJson(json: json);
+
+Future<TextDirection> createTextDirectionFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateTextDirectionFromJson(json: json);
+
+Future<LinkType> createLinkTypeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateLinkTypeFromJson(json: json);
+
+Future<ImageType> createImageTypeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateImageTypeFromJson(json: json);
+
+Future<StructuredDataType> createStructuredDataTypeFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateStructuredDataTypeFromJson(json: json);
+
+Future<OcrBoundingGeometry> createOcrBoundingGeometryFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateOcrBoundingGeometryFromJson(json: json);
+
+Future<OcrElementLevel> createOcrElementLevelFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateOcrElementLevelFromJson(json: json);
+
+Future<PageUnitType> createPageUnitTypeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreatePageUnitTypeFromJson(json: json);
+
+Future<RedactionStrategy> createRedactionStrategyFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateRedactionStrategyFromJson(json: json);
+
+Future<PiiCategory> createPiiCategoryFromJson({required String json}) =>
+    RustLib.instance.api.crateCreatePiiCategoryFromJson(json: json);
+
+Future<RegionKind> createRegionKindFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateRegionKindFromJson(json: json);
+
+Future<DiffLine> createDiffLineFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateDiffLineFromJson(json: json);
+
+Future<RevisionKind> createRevisionKindFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateRevisionKindFromJson(json: json);
+
+Future<RevisionAnchor> createRevisionAnchorFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateRevisionAnchorFromJson(json: json);
+
+Future<SummaryStrategy> createSummaryStrategyFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateSummaryStrategyFromJson(json: json);
+
+Future<UriKind> createUriKindFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateUriKindFromJson(json: json);
+
+Future<EmbeddingsEmbeddingBackend> createEmbeddingsEmbeddingBackendFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateEmbeddingsEmbeddingBackendFromJson(
+  json: json,
+);
+
+Future<KeywordAlgorithm> createKeywordAlgorithmFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateKeywordAlgorithmFromJson(json: json);
+
+Future<SchemaCompliance> createSchemaComplianceFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateSchemaComplianceFromJson(json: json);
+
+Future<NoChunkingReason> createNoChunkingReasonFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateNoChunkingReasonFromJson(json: json);
+
+Future<ChunkingReason> createChunkingReasonFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateChunkingReasonFromJson(json: json);
+
+Future<BoundaryReason> createBoundaryReasonFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateBoundaryReasonFromJson(json: json);
+
+Future<PresetCategory> createPresetCategoryFromJson({required String json}) =>
+    RustLib.instance.api.crateCreatePresetCategoryFromJson(json: json);
+
+Future<PSMMode> createPsmModeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreatePsmModeFromJson(json: json);
+
+Future<ProbeStatus> createProbeStatusFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateProbeStatusFromJson(json: json);
+
+Future<PaddleInferenceBackend> createPaddleInferenceBackendFromJson({
+  required String json,
+}) =>
+    RustLib.instance.api.crateCreatePaddleInferenceBackendFromJson(json: json);
+
+Future<PaddleLanguage> createPaddleLanguageFromJson({required String json}) =>
+    RustLib.instance.api.crateCreatePaddleLanguageFromJson(json: json);
+
+Future<CandleDevicePreference> createCandleDevicePreferenceFromJson({
+  required String json,
+}) =>
+    RustLib.instance.api.crateCreateCandleDevicePreferenceFromJson(json: json);
+
+Future<CandleTrocrVariant> createCandleTrocrVariantFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateCandleTrocrVariantFromJson(json: json);
+
+Future<PaddleOcrVlTaskKind> createPaddleOcrVlTaskKindFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreatePaddleOcrVlTaskKindFromJson(json: json);
+
+Future<GlmOcrTaskKind> createGlmOcrTaskKindFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateGlmOcrTaskKindFromJson(json: json);
+
+Future<GlmOcrLayoutMode> createGlmOcrLayoutModeFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateGlmOcrLayoutModeFromJson(json: json);
+
+Future<LayoutClass> createLayoutClassFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateLayoutClassFromJson(json: json);
+
+Future<BrowserMode> createBrowserModeFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateBrowserModeFromJson(json: json);
+
+Future<BrowserWait> createBrowserWaitFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateBrowserWaitFromJson(json: json);
+
+Future<BrowserBackend> createBrowserBackendFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateBrowserBackendFromJson(json: json);
+
+Future<DocumentContentEncoding> createDocumentContentEncodingFromJson({
+  required String json,
+}) =>
+    RustLib.instance.api.crateCreateDocumentContentEncodingFromJson(json: json);
+
+Future<CrawlStrategyKind> createCrawlStrategyKindFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateCrawlStrategyKindFromJson(json: json);
+
+Future<ContentFilterKind> createContentFilterKindFromJson({
+  required String json,
+}) => RustLib.instance.api.crateCreateContentFilterKindFromJson(json: json);
+
+Future<AuthConfig> createAuthConfigFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateAuthConfigFromJson(json: json);
+
+Future<AssetCategory> createAssetCategoryFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateAssetCategoryFromJson(json: json);
+
+Future<HostMatcher> createHostMatcherFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateHostMatcherFromJson(json: json);
+
+Future<TierStrategy> createTierStrategyFromJson({required String json}) =>
+    RustLib.instance.api.crateCreateTierStrategyFromJson(json: json);
 
 /// Construct a `OcrBackendDartImpl` from Dart callback closures.
 /// FRB synthesises a Dart-callable function type for each closure parameter,
