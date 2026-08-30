@@ -2352,6 +2352,47 @@ pub(super) fn meaningful_word_density_per_1000_chars(text: &str, thresholds: &Oc
     }
     Some(stats.meaningful_words as f64 / stats.non_whitespace as f64 * 1000.0)
 }
+/// Minimum share of a text's non-whitespace characters that must fall in a CJK ideographic
+/// or kana block before `split_whitespace` token counts are treated as unreliable for it (see
+/// [`is_non_space_delimited_script`]).
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const MIN_CJK_CHAR_RATIO_FOR_SCRIPT_ABSTAIN: f64 = 0.3;
+/// True for Chinese Han ideographs and Japanese kana -- scripts that do not delimit words
+/// with whitespace. Deliberately excludes Hangul: modern Korean orthography is
+/// space-delimited, so a Hangul page does not share the failure mode this guards against. ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn is_cjk_ideographic_or_kana(ch: char) -> bool {
+    matches!(ch as u32,
+        0x3400..=0x4DBF   // CJK Unified Ideographs Extension A
+        | 0x4E00..=0x9FFF // CJK Unified Ideographs
+        | 0xF900..=0xFAFF // CJK Compatibility Ideographs
+        | 0x3040..=0x309F // Hiragana
+        | 0x30A0..=0x30FF // Katakana
+    )
+}
+/// True when `text` is dense enough in CJK ideographs/kana that `meaningful_word_density_per_1000_chars`'s
+/// `split_whitespace` tokenization is not a meaningful word-count proxy for it: a whole
+/// correct, dense paragraph in these scripts carries no internal spaces, so an OCR line break
+/// is the only token boundary -- one line of genuinely dense, correct text collapses to a
+/// single token while `non_whitespace` still counts every character, cratering density
+/// independent of quality. This is a false-negative direction distinct from the ratio's
+/// intended use (rejecting genuinely sparse/garbled Latin-script OCR output) that a
+/// space-delimited-word assumption cannot see (F46 CJK false-negative). ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn is_non_space_delimited_script(text: &str) -> bool {
+    let mut non_whitespace = 0usize;
+    let mut cjk = 0usize;
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            continue;
+        }
+        non_whitespace += 1;
+        if is_cjk_ideographic_or_kana(ch) {
+            cjk += 1;
+        }
+    }
+    non_whitespace > 0 && (cjk as f64 / non_whitespace as f64) >= MIN_CJK_CHAR_RATIO_FOR_SCRIPT_ABSTAIN
+}
 /// Whether a non-empty `PreferLastNonEmpty` candidate is a materially worse replacement for a
 /// non-empty incumbent, per [`MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS`] (F46).
 ///
@@ -2366,6 +2407,13 @@ pub(super) fn candidate_is_materially_degraded(
     incumbent_text: &str,
     thresholds: &OcrQualityThresholds,
 ) -> bool {
+    // Word-count density cannot judge either side of this comparison when either text is
+    // predominantly CJK: abstain entirely rather than let the space-delimited-word
+    // assumption misjudge a script it was never built for (see
+    // `is_non_space_delimited_script`). ~keep
+    if is_non_space_delimited_script(incumbent_text) || is_non_space_delimited_script(candidate_text) {
+        return false;
+    }
     // An incumbent too short to judge has nothing established to protect, so the later stage's
     // override still wins -- same outcome as an incumbent measurably below the floor. ~keep
     let Some(incumbent_density) = meaningful_word_density_per_1000_chars(incumbent_text, thresholds) else {

@@ -2240,6 +2240,58 @@ mod tests {
         ));
     }
 
+    /// F46's density guard tokenizes on `split_whitespace`, which is a false premise for
+    /// scripts that do not delimit words with spaces. A genuinely correct, dense CJK page
+    /// (OCR line breaks are the only whitespace present; each line is one token no matter
+    /// how many ideographs it holds) collapses to a handful of tokens while `non_whitespace`
+    /// still counts every character, so density craters even though the text is dense and
+    /// correct. The guard must not treat that as a materially degraded replacement.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn a_correct_dense_cjk_candidate_is_not_treated_as_degraded() {
+        use crate::core::config::OcrPipelineSelection;
+
+        let thresholds = OcrQualityThresholds::default();
+        let incumbent = "This document describes the quarterly financial results for the \
+                          corporation including revenue growth expenses and forecasts for the \
+                          next fiscal year across every operating region";
+        assert!(
+            meaningful_word_density_per_1000_chars(incumbent, &thresholds)
+                .expect("fixture must carry enough tokens to judge")
+                >= MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS,
+            "test fixture must actually be dense enough to be worth protecting"
+        );
+
+        // Twelve lines of genuine, grammatical Mandarin describing the same quarterly
+        // report as `incumbent`. Each line is a single whitespace-delimited token, so the
+        // space-counting metric sees only 12 "words" against 343 characters.
+        let cjk_candidate = "这是一份重要的季度财务报告文件，详细说明了公司本季度的整体经营状况\n\
+                              报告详细说明了公司本季度的收入情况，也介绍了各项运营费用的支出记录\n\
+                              此外还包含对下一财政年度的详细预测，以及未来发展方向的整体规划\n\
+                              公司的营业利润呈现稳步上升的趋势，显示出良好的盈利能力和增长潜力\n\
+                              现金流量状况良好并且负债水平保持稳定，财务结构整体健康稳健\n\
+                              管理层认为这种增长趋势将持续到明年，并计划继续扩大市场份额\n\
+                              许多分析师都看好公司未来的市场前景，纷纷上调了目标股价\n\
+                              公司计划在新兴市场加大投资的力度，以寻求新的增长动力\n\
+                              预计明年的销售额将会实现两位数增长，超过行业平均增长水平\n\
+                              董事会已经批准了新的资本支出计划，用于扩建生产设施\n\
+                              全体员工都对公司的发展充满信心，齐心协力迎接新的挑战\n\
+                              公司将继续秉持稳健经营的原则，为股东创造长期价值";
+
+        assert!(
+            !candidate_is_materially_degraded(cjk_candidate, incumbent, &thresholds),
+            "a correct, dense CJK transcription must not be flagged as a degraded replacement"
+        );
+        assert!(should_replace_best_effort_result(
+            OcrPipelineSelection::PreferLastNonEmpty,
+            Some(0.9),
+            Some(incumbent),
+            cjk_candidate,
+            0.5,
+            &thresholds
+        ));
+    }
+
     #[cfg(feature = "ocr")]
     #[test]
     fn test_quality_score_markdown_not_penalized() {
