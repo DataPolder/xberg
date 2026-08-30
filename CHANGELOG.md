@@ -138,6 +138,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiling the pinned libwpd source.
 - Fixed Ruby source-package installation by aligning the Gemfile and lockfile with the gemspec's
   supported `rb_sys` range.
+- Fixed generated Ruby development commands so Bundler and its tools use the active Ruby
+  interpreter, avoiding native-extension ABI conflicts on systems with multiple Ruby versions.
+- Fixed generated Python optional constructor arguments so Pyrefly receives precise keyword types
+  without unused helper declarations.
+- Fixed generated Dart tests for nested tagged unions, nullable payloads, and Flutter Rust Bridge
+  tuple accessors; added e2e analyzer coverage and refreshed the Dart lock file to the generated
+  Flutter Rust Bridge version.
 - Fixed compressed image inputs with oversized declared dimensions exhausting memory during OCR,
   layout and QR detection, image classification, re-encoding, HEIF conversion, or structured-image
   rasterization; decoded allocations now obey `security_limits.max_content_size` and are rejected
