@@ -5893,6 +5893,64 @@ fn cgroup_headroom() -> Option<usize> {
     let usage = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.usage_in_bytes").ok()?;
     parse_cgroup_v1(&limit, &usage)
 }
+/// Minimum meaningful-word density (per 1,000 non-whitespace characters) a
+/// [`OcrPipelineSelection::PreferLastNonEmpty`] candidate must clear -- when the incumbent it
+/// would replace already clears it -- for the override to be accepted (F46).
+///
+/// Provenance: measured on a 25-document sample where the VLM stage of a `vlm_fallback`
+/// pipeline was taken unconditionally whenever non-empty. Scored by absolute dictionary-valid
+/// word count, unconditional acceptance gained +877 valid words over tesseract-only, but a
+/// "keep whichever result is better" oracle would have gained +1,071 -- 3 of 25 documents were
+/// actively damaged by the VLM stage. A *dictionary-based* valid-word-density floor of ~60
+/// words per 1,000 characters recovered +1,027 of that +1,071.
+///
+/// This constant applies that floor to [`NativeTextStats::meaningful_words`] instead: a
+/// dictionary lookup is unavailable to this pure, backend-free decision point, and
+/// `meaningful_words` (alphanumeric tokens of at least
+/// [`OcrQualityThresholds::min_meaningful_word_len`] characters) is the existing dictionary-free
+/// stand-in the codebase already computes for quality scoring. It is a looser signal than a real
+/// dictionary check -- a 4+ character garbled token still counts -- so this reuses F46's measured
+/// value as a starting operating point rather than a reproduction of that measurement; it has not
+/// been separately calibrated against the `meaningful_words` metric.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+const MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS: f64 = 60.0;
+
+/// Meaningful-word density of `text`, per 1,000 non-whitespace characters.
+///
+/// Shared scale for comparing a `PreferLastNonEmpty` candidate against the incumbent it would
+/// replace (see [`MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS`]). Empty (post-whitespace-strip)
+/// text has zero density rather than a division-by-zero `NaN`.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn meaningful_word_density_per_1000_chars(text: &str, thresholds: &OcrQualityThresholds) -> f64 {
+    let stats = NativeTextStats::compute(text, thresholds);
+    if stats.non_whitespace == 0 {
+        return 0.0;
+    }
+    stats.meaningful_words as f64 / stats.non_whitespace as f64 * 1000.0
+}
+
+/// Whether a non-empty `PreferLastNonEmpty` candidate is a materially worse replacement for a
+/// non-empty incumbent, per [`MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS`] (F46).
+///
+/// One-sided by construction: this only ever *blocks* a replacement, and only when the
+/// incumbent was itself dense enough to be worth protecting. An incumbent that was already
+/// below the floor has nothing worth protecting, so the later stage's non-empty override still
+/// wins by default -- preserving #1341's intent that a later stage's result is a deliberate
+/// override, not noise, and must not be pinned to a correctness-blind score comparison.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn candidate_is_materially_degraded(
+    candidate_text: &str,
+    incumbent_text: &str,
+    thresholds: &OcrQualityThresholds,
+) -> bool {
+    let incumbent_density = meaningful_word_density_per_1000_chars(incumbent_text, thresholds);
+    if incumbent_density < MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS {
+        return false;
+    }
+    let candidate_density = meaningful_word_density_per_1000_chars(candidate_text, thresholds);
+    candidate_density < MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS
+}
+
 /// Decide whether a pipeline stage's result should replace the current best-effort
 /// candidate, given the pipeline's [`OcrPipelineSelection`](crate::core::config::OcrPipelineSelection) policy.
 ///
@@ -5907,13 +5965,20 @@ fn cgroup_headroom() -> Option<usize> {
 /// - [`OcrPipelineSelection::PreferLastNonEmpty`]: replace whenever `candidate_text` is
 ///   non-empty, regardless of score, since a later stage in a fallback pipeline only ran
 ///   because the earlier stage(s) were judged inadequate. An empty candidate never
-///   replaces an existing best, so a destroyed page still keeps the earlier text.
+///   replaces an existing best, so a destroyed page still keeps the earlier text. The one
+///   exception (F46) is a one-sided quality guard: a non-empty candidate that is materially
+///   worse than a non-empty, already-dense incumbent (see
+///   [`candidate_is_materially_degraded`]) does not replace it either. The later stage still
+///   wins whenever it is not a clear regression -- this does not resurrect `HighestScore`'s
+///   symmetric best-score comparison.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn should_replace_best_effort_result(
     selection: crate::core::config::OcrPipelineSelection,
     best_score: Option<f64>,
+    best_text: Option<&str>,
     candidate_text: &str,
     candidate_score: f64,
+    thresholds: &OcrQualityThresholds,
 ) -> bool {
     use crate::core::config::OcrPipelineSelection;
 
@@ -5922,7 +5987,15 @@ fn should_replace_best_effort_result(
             Some(best) => candidate_score > best,
             None => true,
         },
-        OcrPipelineSelection::PreferLastNonEmpty => !candidate_text.trim().is_empty() || best_score.is_none(),
+        OcrPipelineSelection::PreferLastNonEmpty => {
+            if candidate_text.trim().is_empty() {
+                return best_score.is_none();
+            }
+            match best_text.map(str::trim).filter(|text| !text.is_empty()) {
+                Some(incumbent_text) => !candidate_is_materially_degraded(candidate_text, incumbent_text, thresholds),
+                None => true,
+            }
+        }
     }
 }
 
@@ -6408,9 +6481,19 @@ async fn run_ocr_pipeline_for_page(
                 // otherwise pin selection to an inadequate primary (e.g. merged-word
                 // tesseract text scoring above a correct VLM transcription), discarding the
                 // very fallback the pipeline ran (#1341). An empty fallback never
-                // overwrites, so the earlier text is still kept in that case.
+                // overwrites, so the earlier text is still kept in that case -- nor does a
+                // non-empty one that is a materially worse replacement for an already-dense
+                // incumbent (F46).
                 let best_score = best_result.as_ref().map(|(_, best_score, ..)| *best_score);
-                if should_replace_best_effort_result(selection, best_score, &text, score) {
+                let best_text = best_result.as_ref().map(|(text, ..)| text.as_str());
+                if should_replace_best_effort_result(
+                    selection,
+                    best_score,
+                    best_text,
+                    &text,
+                    score,
+                    &pipeline.quality_thresholds,
+                ) {
                     best_result = Some((
                         text,
                         score,
@@ -8852,32 +8935,42 @@ mod tests {
     fn test_should_replace_best_effort_result_highest_score_keeps_max() {
         use crate::core::config::OcrPipelineSelection;
 
+        let thresholds = OcrQualityThresholds::default();
+
         // No current best: always replace.
         assert!(should_replace_best_effort_result(
             OcrPipelineSelection::HighestScore,
             None,
+            None,
             "some text",
-            0.1
+            0.1,
+            &thresholds
         ));
         // Strictly higher score replaces.
         assert!(should_replace_best_effort_result(
             OcrPipelineSelection::HighestScore,
             Some(0.4),
+            Some("prior text"),
             "better text",
-            0.5
+            0.5,
+            &thresholds
         ));
         // Equal or lower score does not replace.
         assert!(!should_replace_best_effort_result(
             OcrPipelineSelection::HighestScore,
             Some(0.5),
+            Some("prior text"),
             "equal text",
-            0.5
+            0.5,
+            &thresholds
         ));
         assert!(!should_replace_best_effort_result(
             OcrPipelineSelection::HighestScore,
             Some(0.9),
+            Some("prior text"),
             "worse text",
-            0.2
+            0.2,
+            &thresholds
         ));
     }
 
@@ -8886,15 +8979,22 @@ mod tests {
     fn test_should_replace_best_effort_result_prefer_last_non_empty_overrides_lower_score() {
         use crate::core::config::OcrPipelineSelection;
 
+        let thresholds = OcrQualityThresholds::default();
+
         // A later, non-empty, lower-scoring stage still replaces a higher-scoring
         // earlier stage under `PreferLastNonEmpty` (#1341: a correct-but-lower-score
         // VLM transcription must win over a higher-scoring but garbled classical
-        // result).
+        // result). The incumbent is a merged-word artifact -- a single long token,
+        // so its meaningful-word density is low despite the (unrealistically) high
+        // score -- so the F46 guard has nothing dense worth protecting and does not
+        // block the override.
         assert!(should_replace_best_effort_result(
             OcrPipelineSelection::PreferLastNonEmpty,
             Some(0.9),
-            "correct vlm transcription",
-            0.3
+            Some("mergedwordsallsquashedtogetherintooneunreadabletoken"),
+            "correct vlm transcription of this document page",
+            0.3,
+            &thresholds
         ));
     }
 
@@ -8903,20 +9003,108 @@ mod tests {
     fn test_should_replace_best_effort_result_prefer_last_non_empty_keeps_prior_on_empty_candidate() {
         use crate::core::config::OcrPipelineSelection;
 
+        let thresholds = OcrQualityThresholds::default();
+
         // An empty later-stage result (e.g. a VLM that declined a destroyed page)
         // never overwrites an existing non-empty best.
         assert!(!should_replace_best_effort_result(
             OcrPipelineSelection::PreferLastNonEmpty,
             Some(0.4),
+            Some("prior page content"),
             "   ",
-            0.0
+            0.0,
+            &thresholds
         ));
         // But an empty candidate still becomes the best when there is no prior best.
         assert!(should_replace_best_effort_result(
             OcrPipelineSelection::PreferLastNonEmpty,
             None,
+            None,
             "",
-            0.0
+            0.0,
+            &thresholds
+        ));
+    }
+
+    /// F46: a `PreferLastNonEmpty` candidate that is materially worse than a dense
+    /// incumbent must not replace it, even though the policy otherwise always
+    /// prefers the later, non-empty stage.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn test_should_replace_best_effort_result_prefer_last_non_empty_rejects_degraded_candidate() {
+        use crate::core::config::OcrPipelineSelection;
+
+        let thresholds = OcrQualityThresholds::default();
+        // Dense, real-word incumbent: well above the density floor.
+        let incumbent = "This document describes the quarterly financial results for the \
+                          corporation including revenue growth expenses and forecasts for the \
+                          next fiscal year across every operating region";
+        assert!(
+            meaningful_word_density_per_1000_chars(incumbent, &thresholds)
+                >= MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS,
+            "test fixture must actually be dense enough to be worth protecting"
+        );
+        // Damaged candidate: non-empty, but recognition noise -- short garbled tokens
+        // with no words at or above `min_meaningful_word_len`.
+        let candidate = "xk 9z pq 1a bb cc dd ee ff gg hh ii jj kk ll mm nn oo";
+        assert!(
+            meaningful_word_density_per_1000_chars(candidate, &thresholds)
+                < MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS,
+            "test fixture must actually be degraded"
+        );
+
+        assert!(!should_replace_best_effort_result(
+            OcrPipelineSelection::PreferLastNonEmpty,
+            Some(0.9),
+            Some(incumbent),
+            candidate,
+            0.95, // even a higher raw score does not override the density guard
+            &thresholds
+        ));
+    }
+
+    /// F46's guard is one-sided: an incumbent that was never dense in the first place
+    /// has nothing worth protecting, so the later non-empty stage still wins by
+    /// default even when its own density also falls under the floor.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn test_should_replace_best_effort_result_prefer_last_non_empty_low_density_incumbent_still_replaced() {
+        use crate::core::config::OcrPipelineSelection;
+
+        let thresholds = OcrQualityThresholds::default();
+        let sparse_incumbent = "xk 9z pq 1a bb cc dd ee ff gg";
+        let also_sparse_candidate = "zz 8y qw 2b cc dd ee ff gg hh";
+        assert!(
+            meaningful_word_density_per_1000_chars(sparse_incumbent, &thresholds)
+                < MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS
+        );
+
+        assert!(should_replace_best_effort_result(
+            OcrPipelineSelection::PreferLastNonEmpty,
+            Some(0.4),
+            Some(sparse_incumbent),
+            also_sparse_candidate,
+            0.1,
+            &thresholds
+        ));
+    }
+
+    /// F46's guard must not engage when there is no incumbent text to compare against
+    /// (the first stage to produce anything becomes the best-effort result).
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn test_should_replace_best_effort_result_prefer_last_non_empty_no_incumbent_always_replaces() {
+        use crate::core::config::OcrPipelineSelection;
+
+        let thresholds = OcrQualityThresholds::default();
+        let candidate = "xk 9z pq 1a bb cc dd ee ff gg"; // low density, but there is nothing to protect
+        assert!(should_replace_best_effort_result(
+            OcrPipelineSelection::PreferLastNonEmpty,
+            None,
+            None,
+            candidate,
+            0.05,
+            &thresholds
         ));
     }
 
