@@ -21,6 +21,10 @@ use std::sync::Arc;
 /// # Arguments
 ///
 /// * `processor` - The post-processor to register
+///
+/// # Errors
+///
+/// ~keep Returns a retryable in-use error when an extraction is executing a processor snapshot.
 #[cfg_attr(alef, alef(skip))]
 pub fn register_post_processor(processor: Arc<dyn PostProcessor>) -> crate::Result<()> {
     use crate::plugins::registry::get_post_processor_registry;
@@ -56,6 +60,7 @@ pub(crate) fn register_post_processor_if_absent(processor: Arc<dyn PostProcessor
 ///
 /// ~keep Automatic built-in recovery keeps this name suppressed until it is explicitly registered
 /// again or [`clear_post_processors`] resets the complete registry.
+/// Returns a retryable in-use error when an extraction is executing a processor snapshot. ~keep
 #[cfg_attr(alef, alef(skip))]
 pub fn unregister_post_processor(name: &str) -> crate::Result<()> {
     use crate::plugins::registry::get_post_processor_registry;
@@ -68,6 +73,7 @@ pub fn unregister_post_processor(name: &str) -> crate::Result<()> {
 /// ~keep The next post-processed extraction restores enabled built-in processors before it snapshots
 /// the processor cache. Custom processors remain removed. Use [`unregister_post_processor`] when
 /// one named processor should remain absent while the rest of the registry stays intact.
+/// Returns a retryable in-use error when an extraction is executing a processor snapshot. ~keep
 pub fn clear_post_processors() -> crate::Result<()> {
     use crate::plugins::registry::get_post_processor_registry;
 

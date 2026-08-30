@@ -15,6 +15,50 @@ struct SummarizationLifecycleTestProcessor {
     marker: Option<&'static str>,
 }
 
+#[cfg(feature = "tokio-runtime")]
+struct HandoffRaceProcessor {
+    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    executed_after_shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    mutation_error: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
+}
+
+#[cfg(feature = "tokio-runtime")]
+impl crate::plugins::Plugin for HandoffRaceProcessor {
+    fn name(&self) -> &str {
+        "handoff-race"
+    }
+
+    fn version(&self) -> String {
+        "test".to_string()
+    }
+
+    fn shutdown(&self) -> Result<()> {
+        self.shutdown.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+#[cfg(feature = "tokio-runtime")]
+#[async_trait::async_trait]
+impl crate::plugins::PostProcessor for HandoffRaceProcessor {
+    async fn process(&self, _: &mut crate::types::ExtractedDocument, _: &ExtractionConfig) -> Result<()> {
+        if let Some(error_slot) = &self.mutation_error {
+            let error = crate::plugins::unregister_post_processor("handoff-race")
+                .expect_err("lifecycle mutation during processing must be rejected");
+            *error_slot.lock().unwrap() = Some(error.to_string());
+        }
+        if self.shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+            self.executed_after_shutdown
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        Ok(())
+    }
+
+    fn processing_stage(&self) -> crate::plugins::ProcessingStage {
+        crate::plugins::ProcessingStage::Early
+    }
+}
+
 #[cfg(feature = "summarization")]
 impl crate::plugins::Plugin for SummarizationLifecycleTestProcessor {
     fn name(&self) -> &str {
@@ -219,7 +263,7 @@ async fn lifecycle_wait_keeps_async_runtime_schedulable() {
     let update_thread = std::thread::spawn(move || {
         with_post_processor_suppressed("async-runtime-test", || {
             started_sender.send(()).unwrap();
-            release_receiver.recv().unwrap()
+            Ok::<_, crate::XbergError>(release_receiver.recv().unwrap())
         })
     });
     started_receiver.recv().unwrap();
@@ -239,10 +283,146 @@ async fn lifecycle_wait_keeps_async_runtime_schedulable() {
         release_from_async
     );
 
-    let release_source = update_thread.join().unwrap();
+    let release_source = update_thread.join().unwrap().unwrap();
     watchdog.join().unwrap();
     pipeline_result.unwrap();
     assert_eq!(release_source, "async");
+}
+
+#[test]
+#[serial]
+#[cfg(feature = "tokio-runtime")]
+fn processor_handoff_rejects_a_snapshot_after_concurrent_shutdown() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, mpsc};
+
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let executed_after_shutdown = Arc::new(AtomicBool::new(false));
+    crate::plugins::register_post_processor(Arc::new(HandoffRaceProcessor {
+        shutdown: Arc::clone(&shutdown),
+        executed_after_shutdown: Arc::clone(&executed_after_shutdown),
+        mutation_error: None,
+    }))
+    .unwrap();
+    initialization::initialize_processor_cache().unwrap();
+
+    let (snapshot_sender, snapshot_receiver) = mpsc::channel();
+    let (resume_sender, resume_receiver) = mpsc::channel();
+    let pipeline_thread = std::thread::spawn(move || {
+        initialization::test_support::set_before_processor_snapshot_hook(Box::new(move || {
+            snapshot_sender.send(()).unwrap();
+            resume_receiver.recv().unwrap();
+        }));
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(run_pipeline(
+                make_doc("test", "text/plain"),
+                &ExtractionConfig::default(),
+            ))
+    });
+    snapshot_receiver.recv().unwrap();
+    crate::plugins::unregister_post_processor("handoff-race").unwrap();
+    assert!(shutdown.load(Ordering::SeqCst));
+    resume_sender.send(()).unwrap();
+    pipeline_thread.join().unwrap().unwrap();
+
+    assert!(!executed_after_shutdown.load(Ordering::SeqCst));
+}
+
+#[test]
+#[serial]
+#[cfg(feature = "tokio-runtime")]
+fn processor_handoff_lease_rejects_shutdown_until_pipeline_finishes() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, mpsc};
+
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let executed_after_shutdown = Arc::new(AtomicBool::new(false));
+    crate::plugins::register_post_processor(Arc::new(HandoffRaceProcessor {
+        shutdown: Arc::clone(&shutdown),
+        executed_after_shutdown: Arc::clone(&executed_after_shutdown),
+        mutation_error: None,
+    }))
+    .unwrap();
+    initialization::initialize_processor_cache().unwrap();
+
+    let (handoff_sender, handoff_receiver) = mpsc::channel();
+    let (pipeline_resume_sender, pipeline_resume_receiver) = mpsc::channel();
+    let pipeline_thread = std::thread::spawn(move || {
+        initialization::test_support::set_after_processor_snapshot_validated_hook(Box::new(move || {
+            handoff_sender.send(()).unwrap();
+            pipeline_resume_receiver.recv().unwrap();
+        }));
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(run_pipeline(
+                make_doc("test", "text/plain"),
+                &ExtractionConfig::default(),
+            ))
+    });
+    handoff_receiver.recv().unwrap();
+
+    let (mutation_sender, mutation_receiver) = mpsc::channel();
+    let unregister_thread = std::thread::spawn(move || {
+        initialization::test_support::set_after_registration_update_began_hook(Box::new(move || {
+            mutation_sender.send(()).unwrap();
+        }));
+        crate::plugins::unregister_post_processor("handoff-race")
+    });
+    mutation_receiver.recv().unwrap();
+    assert!(!shutdown.load(Ordering::SeqCst));
+    pipeline_resume_sender.send(()).unwrap();
+    pipeline_thread.join().unwrap().unwrap();
+    let concurrent_unregister = unregister_thread.join().unwrap();
+    crate::plugins::unregister_post_processor("handoff-race").unwrap();
+
+    assert!(concurrent_unregister.is_err());
+    assert!(shutdown.load(Ordering::SeqCst));
+    assert!(!executed_after_shutdown.load(Ordering::SeqCst));
+}
+
+#[test]
+#[serial]
+#[cfg(feature = "tokio-runtime")]
+fn reentrant_lifecycle_mutation_returns_in_use_error_without_deadlock() {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex, mpsc};
+    use std::time::Duration;
+
+    let mutation_error = Arc::new(Mutex::new(None));
+    let thread_error = Arc::clone(&mutation_error);
+    let (result_sender, result_receiver) = mpsc::channel();
+    let pipeline_thread = std::thread::spawn(move || {
+        crate::plugins::register_post_processor(Arc::new(HandoffRaceProcessor {
+            shutdown: Arc::new(AtomicBool::new(false)),
+            executed_after_shutdown: Arc::new(AtomicBool::new(false)),
+            mutation_error: Some(thread_error),
+        }))
+        .unwrap();
+        let pipeline_result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(run_pipeline(
+                make_doc("test", "text/plain"),
+                &ExtractionConfig::default(),
+            ));
+        result_sender.send(pipeline_result).unwrap();
+    });
+
+    let pipeline_result = result_receiver
+        .recv_timeout(Duration::from_millis(250))
+        .expect("reentrant lifecycle mutation must not deadlock the pipeline");
+    pipeline_thread.join().unwrap();
+    crate::plugins::unregister_post_processor("handoff-race").unwrap();
+
+    pipeline_result.unwrap();
+    let error = mutation_error.lock().unwrap().clone().unwrap();
+    assert!(error.contains("in use by an active extraction"));
 }
 
 #[tokio::test]

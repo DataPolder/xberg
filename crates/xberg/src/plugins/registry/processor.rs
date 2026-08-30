@@ -215,7 +215,10 @@ impl PostProcessorRegistry {
         for name in names {
             if let Err(error) = self.remove(&name) {
                 if first_error.is_none() {
-                    first_error = Some(error);
+                    first_error = Some(crate::XbergError::Plugin {
+                        plugin_name: name.clone(),
+                        message: format!("shutdown failed: {error}"),
+                    });
                 } else {
                     tracing::warn!(
                         processor = %name,
@@ -477,9 +480,11 @@ mod tests {
                 .unwrap();
         }
 
-        assert!(registry.shutdown_all().is_err());
+        let error = registry.shutdown_all().expect_err("shutdown failures must be returned");
         assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
         assert!(registry.list().is_empty());
+        assert!(error.to_string().starts_with("Plugin error in 'failing-"));
+        assert!(error.to_string().contains("shutdown failed:"));
     }
 
     #[test]

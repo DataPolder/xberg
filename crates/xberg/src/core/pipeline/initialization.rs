@@ -5,7 +5,7 @@
 
 use crate::Result;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{LazyLock, Mutex, RwLock};
 
 use super::cache::{PROCESSOR_CACHE, ProcessorCache};
@@ -20,6 +20,9 @@ static BUILTIN_REGISTRATION_REQUIRED: AtomicBool = AtomicBool::new(true);
 /// even epoch, so public clear cannot expose its intentionally empty intermediate registry.
 static BUILTIN_REGISTRATION_EPOCH: AtomicU64 = AtomicU64::new(0);
 static BUILTIN_REGISTRATION_LOCK: Mutex<()> = Mutex::new(());
+/// ~keep A validated snapshot holds a lease through processor execution; lifecycle mutations
+/// fail as retryable while a lease is active, so shutdown never overlaps processing or blocks an async worker.
+static ACTIVE_PROCESSOR_SNAPSHOTS: AtomicUsize = AtomicUsize::new(0);
 static AUTOMATIC_REGISTRATION_SUPPRESSIONS: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
@@ -34,6 +37,14 @@ std::thread_local! {
     static AFTER_FEATURE_INITIALIZATION_HOOK: std::cell::RefCell<Option<InitializationHook>> =
         std::cell::RefCell::new(None);
     static REGISTRATION_RETRY_HOOK: std::cell::RefCell<Option<InitializationRetryHook>> =
+        std::cell::RefCell::new(None);
+    static BEFORE_PROCESSOR_SNAPSHOT_HOOK: std::cell::RefCell<Option<InitializationHook>> =
+        std::cell::RefCell::new(None);
+    static BEFORE_BLOCKING_CACHE_INITIALIZATION_HOOK: std::cell::RefCell<Option<InitializationHook>> =
+        std::cell::RefCell::new(None);
+    static AFTER_PROCESSOR_SNAPSHOT_VALIDATED_HOOK: std::cell::RefCell<Option<InitializationHook>> =
+        std::cell::RefCell::new(None);
+    static AFTER_REGISTRATION_UPDATE_BEGAN_HOOK: std::cell::RefCell<Option<InitializationHook>> =
         std::cell::RefCell::new(None);
 }
 
@@ -52,17 +63,38 @@ const AUTOMATIC_POST_PROCESSOR_NAMES: &[&str] = &[
 ];
 
 struct RegistrationUpdate;
+struct ProcessorSnapshotLease;
+
+pub(super) struct ProcessorSnapshot {
+    pub(super) early: std::sync::Arc<Vec<std::sync::Arc<dyn crate::plugins::PostProcessor>>>,
+    pub(super) middle: std::sync::Arc<Vec<std::sync::Arc<dyn crate::plugins::PostProcessor>>>,
+    pub(super) late: std::sync::Arc<Vec<std::sync::Arc<dyn crate::plugins::PostProcessor>>>,
+    _lease: ProcessorSnapshotLease,
+}
 
 impl RegistrationUpdate {
     fn begin() -> Self {
-        BUILTIN_REGISTRATION_EPOCH.fetch_add(1, Ordering::AcqRel);
+        BUILTIN_REGISTRATION_EPOCH.fetch_add(1, Ordering::SeqCst);
         Self
     }
 }
 
 impl Drop for RegistrationUpdate {
     fn drop(&mut self) {
-        BUILTIN_REGISTRATION_EPOCH.fetch_add(1, Ordering::Release);
+        BUILTIN_REGISTRATION_EPOCH.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+impl ProcessorSnapshotLease {
+    fn acquire() -> Self {
+        ACTIVE_PROCESSOR_SNAPSHOTS.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for ProcessorSnapshotLease {
+    fn drop(&mut self) {
+        ACTIVE_PROCESSOR_SNAPSHOTS.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -76,11 +108,19 @@ fn wait_for_registration_update() {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 }
 
-fn with_registration_update<T>(update: impl FnOnce() -> T) -> T {
+fn with_registration_update<T>(update: impl FnOnce() -> Result<T>) -> Result<T> {
     let _registration_guard = BUILTIN_REGISTRATION_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let _registration_update = RegistrationUpdate::begin();
+    #[cfg(test)]
+    run_after_registration_update_began_hook();
+    if ACTIVE_PROCESSOR_SNAPSHOTS.load(Ordering::SeqCst) != 0 {
+        return Err(crate::XbergError::Other(
+            "post-processor registry is in use by an active extraction; retry the lifecycle mutation after extraction completes"
+                .to_string(),
+        ));
+    }
     update()
 }
 
@@ -109,10 +149,42 @@ fn run_registration_retry_hook() {
     });
 }
 
+#[cfg(test)]
+fn run_before_processor_snapshot_hook() {
+    let hook = BEFORE_PROCESSOR_SNAPSHOT_HOOK.with(|slot| slot.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+#[cfg(test)]
+fn run_before_blocking_cache_initialization_hook() {
+    let hook = BEFORE_BLOCKING_CACHE_INITIALIZATION_HOOK.with(|slot| slot.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+#[cfg(test)]
+fn run_after_processor_snapshot_validated_hook() {
+    let hook = AFTER_PROCESSOR_SNAPSHOT_VALIDATED_HOOK.with(|slot| slot.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+#[cfg(test)]
+fn run_after_registration_update_began_hook() {
+    let hook = AFTER_REGISTRATION_UPDATE_BEGAN_HOOK.with(|slot| slot.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
 /// ~keep A public registry clear deliberately removes custom and built-in processors, while a
 /// named unregister must remain effective. Clear and recovery share the registration mutex and
 /// epoch so concurrent cache snapshots reject the intentionally empty intermediate registry.
-pub(crate) fn with_builtin_registration_recovery<T>(clear: impl FnOnce() -> T) -> T {
+pub(crate) fn with_builtin_registration_recovery<T>(clear: impl FnOnce() -> Result<T>) -> Result<T> {
     with_registration_update(|| {
         AUTOMATIC_REGISTRATION_SUPPRESSIONS
             .lock()
@@ -123,7 +195,7 @@ pub(crate) fn with_builtin_registration_recovery<T>(clear: impl FnOnce() -> T) -
     })
 }
 
-pub(crate) fn with_post_processor_suppressed<T>(name: &str, remove: impl FnOnce() -> T) -> T {
+pub(crate) fn with_post_processor_suppressed<T>(name: &str, remove: impl FnOnce() -> Result<T>) -> Result<T> {
     with_registration_update(|| {
         if AUTOMATIC_POST_PROCESSOR_NAMES.contains(&name) {
             AUTOMATIC_REGISTRATION_SUPPRESSIONS
@@ -210,6 +282,11 @@ pub(crate) fn builtin_registration_error() -> Option<String> {
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::FORCED_BUILTIN_REGISTRATION_ERROR;
+    #[cfg(feature = "tokio-runtime")]
+    use super::{
+        AFTER_PROCESSOR_SNAPSHOT_VALIDATED_HOOK, AFTER_REGISTRATION_UPDATE_BEGAN_HOOK, BEFORE_PROCESSOR_SNAPSHOT_HOOK,
+        InitializationHook,
+    };
 
     /// Set (or clear, with `None`) the recorded registration error. The static is
     /// process-global, so callers must restore it (typically to `None`) when done.
@@ -218,6 +295,26 @@ pub(crate) mod test_support {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *slot = value;
+    }
+
+    #[cfg(feature = "tokio-runtime")]
+    pub(crate) fn set_before_processor_snapshot_hook(hook: InitializationHook) {
+        BEFORE_PROCESSOR_SNAPSHOT_HOOK.with(|slot| *slot.borrow_mut() = Some(hook));
+    }
+
+    #[cfg(all(feature = "tokio-runtime", feature = "quality", feature = "summarization"))]
+    pub(crate) fn set_before_blocking_cache_initialization_hook(hook: Option<InitializationHook>) {
+        super::BEFORE_BLOCKING_CACHE_INITIALIZATION_HOOK.with(|slot| *slot.borrow_mut() = hook);
+    }
+
+    #[cfg(feature = "tokio-runtime")]
+    pub(crate) fn set_after_processor_snapshot_validated_hook(hook: InitializationHook) {
+        AFTER_PROCESSOR_SNAPSHOT_VALIDATED_HOOK.with(|slot| *slot.borrow_mut() = Some(hook));
+    }
+
+    #[cfg(feature = "tokio-runtime")]
+    pub(crate) fn set_after_registration_update_began_hook(hook: InitializationHook) {
+        AFTER_REGISTRATION_UPDATE_BEGAN_HOOK.with(|slot| *slot.borrow_mut() = Some(hook));
     }
 }
 
@@ -307,7 +404,7 @@ pub(super) fn initialize_processor_cache() -> Result<()> {
         initialize_features();
         #[cfg(test)]
         run_after_feature_initialization_hook();
-        let registration_epoch = BUILTIN_REGISTRATION_EPOCH.load(Ordering::Acquire);
+        let registration_epoch = BUILTIN_REGISTRATION_EPOCH.load(Ordering::SeqCst);
         if !registration_update_in_progress(registration_epoch) && try_initialize_processor_cache(registration_epoch)? {
             return Ok(());
         }
@@ -318,26 +415,46 @@ pub(super) fn initialize_processor_cache() -> Result<()> {
 }
 
 #[cfg(feature = "tokio-runtime")]
-pub(super) async fn initialize_processor_cache_for_async_pipeline() -> Result<()> {
+pub(super) async fn initialize_processor_cache_for_async_pipeline() -> Result<ProcessorSnapshot> {
+    if let Some(stages) = try_get_processor_snapshot(true) {
+        return Ok(stages);
+    }
+    #[cfg(test)]
+    run_before_blocking_cache_initialization_hook();
     let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-        return initialize_processor_cache();
+        return initialize_processor_stages();
     };
     runtime
-        .spawn_blocking(initialize_processor_cache)
+        .spawn_blocking(initialize_processor_stages)
         .await
         .map_err(|error| crate::XbergError::Other(format!("processor cache task failed to join: {error}")))?
 }
 
 #[cfg(not(feature = "tokio-runtime"))]
-pub(super) async fn initialize_processor_cache_for_async_pipeline() -> Result<()> {
-    initialize_processor_cache()
+pub(super) async fn initialize_processor_cache_for_async_pipeline() -> Result<ProcessorSnapshot> {
+    if let Some(stages) = try_get_processor_snapshot(true) {
+        return Ok(stages);
+    }
+    #[cfg(test)]
+    run_before_blocking_cache_initialization_hook();
+    initialize_processor_stages()
+}
+
+fn initialize_processor_stages() -> Result<ProcessorSnapshot> {
+    loop {
+        initialize_processor_cache()?;
+        if let Some(stages) = try_get_processor_snapshot(false) {
+            return Ok(stages);
+        }
+        wait_for_registration_update();
+    }
 }
 
 fn try_initialize_processor_cache(registration_epoch: u64) -> Result<bool> {
     let current_generation = crate::plugins::registry::get_post_processor_registry()
         .read()
         .generation();
-    if BUILTIN_REGISTRATION_EPOCH.load(Ordering::Acquire) != registration_epoch {
+    if BUILTIN_REGISTRATION_EPOCH.load(Ordering::SeqCst) != registration_epoch {
         return Ok(false);
     }
 
@@ -347,26 +464,61 @@ fn try_initialize_processor_cache(registration_epoch: u64) -> Result<bool> {
         .is_some_and(|cache| cache.generation != current_generation);
 
     if cache_lock.is_none() || is_stale {
-        let candidate = ProcessorCache::new()?;
-        if BUILTIN_REGISTRATION_EPOCH.load(Ordering::Acquire) != registration_epoch {
+        let candidate = ProcessorCache::new(registration_epoch)?;
+        if BUILTIN_REGISTRATION_EPOCH.load(Ordering::SeqCst) != registration_epoch {
             return Ok(false);
         }
         *cache_lock = Some(candidate);
+    } else if let Some(cache) = cache_lock.as_mut() {
+        cache.registration_epoch = registration_epoch;
     }
-    Ok(BUILTIN_REGISTRATION_EPOCH.load(Ordering::Acquire) == registration_epoch)
+    Ok(BUILTIN_REGISTRATION_EPOCH.load(Ordering::SeqCst) == registration_epoch)
+}
+
+fn try_get_processor_snapshot(require_complete_registration: bool) -> Option<ProcessorSnapshot> {
+    if require_complete_registration && BUILTIN_REGISTRATION_REQUIRED.load(Ordering::Acquire) {
+        return None;
+    }
+    let registration_epoch = BUILTIN_REGISTRATION_EPOCH.load(Ordering::SeqCst);
+    if registration_update_in_progress(registration_epoch) {
+        return None;
+    }
+    #[cfg(test)]
+    run_before_processor_snapshot_hook();
+    let lease = ProcessorSnapshotLease::acquire();
+    let stages = PROCESSOR_CACHE
+        .try_read()?
+        .as_ref()
+        .and_then(|cache| (cache.registration_epoch == registration_epoch).then(|| cached_processor_stages(cache)))?;
+    if BUILTIN_REGISTRATION_EPOCH.load(Ordering::SeqCst) != registration_epoch {
+        return None;
+    }
+    #[cfg(test)]
+    run_after_processor_snapshot_validated_hook();
+    Some(ProcessorSnapshot {
+        early: stages.0,
+        middle: stages.1,
+        late: stages.2,
+        _lease: lease,
+    })
+}
+
+fn cached_processor_stages(cache: &ProcessorCache) -> ProcessorStages {
+    (
+        std::sync::Arc::clone(&cache.early),
+        std::sync::Arc::clone(&cache.middle),
+        std::sync::Arc::clone(&cache.late),
+    )
 }
 
 /// Get processors from the cache, organized by stage.
+#[cfg(test)]
 pub(super) fn get_processors_from_cache() -> Result<ProcessorStages> {
     let cache_lock = PROCESSOR_CACHE.read();
     let cache = cache_lock
         .as_ref()
         .ok_or_else(|| crate::XbergError::Other("Processor cache not initialized".to_string()))?;
-    Ok((
-        std::sync::Arc::clone(&cache.early),
-        std::sync::Arc::clone(&cache.middle),
-        std::sync::Arc::clone(&cache.late),
-    ))
+    Ok(cached_processor_stages(cache))
 }
 
 #[cfg(test)]
@@ -463,7 +615,8 @@ mod tests {
             with_post_processor_suppressed("unregistered-test-processor", || {
                 update_started_sender.send(()).unwrap();
                 update_release_receiver.recv().unwrap();
-            });
+                Ok::<(), crate::XbergError>(())
+            })
         });
         update_started_receiver.recv().unwrap();
         resume_sender.send(()).unwrap();
@@ -472,8 +625,39 @@ mod tests {
         assert_eq!(retry_count.load(Ordering::Relaxed), 1);
 
         update_release_sender.send(()).unwrap();
-        update_thread.join().unwrap();
+        update_thread.join().unwrap().unwrap();
         initialize_thread.join().unwrap().unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[serial_test::serial]
+    #[cfg(all(feature = "tokio-runtime", feature = "quality", feature = "summarization"))]
+    async fn stable_cache_handoff_skips_blocking_initialization() {
+        use crate::plugins::registry::test_support::PostProcessorRegistryGuard;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let _guard = PostProcessorRegistryGuard::acquire();
+        initialize_processor_cache().unwrap();
+        let blocking_initializations = Arc::new(AtomicUsize::new(0));
+        let hook_count = Arc::clone(&blocking_initializations);
+        test_support::set_before_blocking_cache_initialization_hook(Some(Box::new(move || {
+            hook_count.fetch_add(1, Ordering::SeqCst);
+        })));
+
+        let snapshot = initialize_processor_cache_for_async_pipeline().await.unwrap();
+        test_support::set_before_blocking_cache_initialization_hook(None);
+        let names = snapshot
+            .early
+            .iter()
+            .chain(snapshot.middle.iter())
+            .chain(snapshot.late.iter())
+            .map(|processor| processor.name())
+            .collect::<Vec<_>>();
+
+        assert_eq!(blocking_initializations.load(Ordering::SeqCst), 0);
+        assert!(names.contains(&"quality-processing"));
+        assert!(names.contains(&"summarization"));
     }
 
     #[test]

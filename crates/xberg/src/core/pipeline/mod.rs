@@ -39,9 +39,7 @@ use crate::types::internal::InternalDocument;
 
 use execution::{execute_processor_stages, execute_validators};
 use features::{execute_chunking, execute_language_detection, execute_token_reduction};
-use initialization::{
-    builtin_registration_error, get_processors_from_cache, initialize_processor_cache_for_async_pipeline,
-};
+use initialization::{builtin_registration_error, initialize_processor_cache_for_async_pipeline};
 
 const CAPTIONING_PROCESSOR_NAME: &str = "captioning";
 const BUILTIN_REGISTRATION_SOURCE: &str = "builtin_registration";
@@ -378,20 +376,18 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     let pp_config = config.postprocessor.as_ref();
     let postprocessing_enabled = pp_config.is_none_or(|processor_config| processor_config.enabled);
     let processor_stages = if postprocessing_enabled {
-        initialize_processor_cache_for_async_pipeline().await?;
+        let processor_stages = initialize_processor_cache_for_async_pipeline().await?;
         push_builtin_registration_warning(&mut doc, builtin_registration_error());
-
-        let (early_processors, middle_processors, late_processors) = get_processors_from_cache()?;
-        Some((early_processors, middle_processors, late_processors))
+        Some(processor_stages)
     } else {
         None
     };
 
     let include_structure = config.include_document_structure;
     let mut captioning_carry_over = CaptioningCarryOver::default();
-    if let Some((_, middle_processors, _)) = &processor_stages {
+    if let Some(snapshot) = &processor_stages {
         captioning_carry_over =
-            run_captioning_prepass(&mut doc, config, include_structure, &pp_config, middle_processors).await?;
+            run_captioning_prepass(&mut doc, config, include_structure, &pp_config, &snapshot.middle).await?;
     }
 
     // Computed once, up front, from `doc` (independent of the later derivation and
@@ -473,14 +469,14 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
         apply_data_base64_pass(&mut result, image_cfg);
     }
 
-    if let Some((early_processors, _, _)) = &processor_stages {
+    if let Some(snapshot) = &processor_stages {
         execute_processor_stages(
             &mut result,
             config,
             &pp_config,
             &[(
                 crate::plugins::ProcessingStage::Early,
-                std::sync::Arc::clone(early_processors),
+                std::sync::Arc::clone(&snapshot.early),
             )],
         )
         .await?;
@@ -500,11 +496,11 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
     // offsets as final.
     execute_chunking(&mut result, config, chunker_heading_source.as_deref())?;
 
-    if let Some((_, middle_processors, late_processors)) = &processor_stages {
+    if let Some(snapshot) = &processor_stages {
         let middle_processors = if config.captioning.is_some() {
-            processors_without_captioning(middle_processors)
+            processors_without_captioning(&snapshot.middle)
         } else {
-            std::sync::Arc::clone(middle_processors)
+            std::sync::Arc::clone(&snapshot.middle)
         };
         execute_processor_stages(
             &mut result,
@@ -514,12 +510,13 @@ pub async fn run_pipeline(mut doc: InternalDocument, config: &ExtractionConfig) 
                 (crate::plugins::ProcessingStage::Middle, middle_processors),
                 (
                     crate::plugins::ProcessingStage::Late,
-                    std::sync::Arc::clone(late_processors),
+                    std::sync::Arc::clone(&snapshot.late),
                 ),
             ],
         )
         .await?;
     }
+    drop(processor_stages);
 
     execute_token_reduction(&mut result, config)?;
     execute_validators(&result, config).await?;
