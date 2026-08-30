@@ -2066,6 +2066,7 @@ mod tests {
                           next fiscal year across every operating region";
         assert!(
             meaningful_word_density_per_1000_chars(incumbent, &thresholds)
+                .expect("fixture must carry enough tokens to judge")
                 >= MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS,
             "test fixture must actually be dense enough to be worth protecting"
         );
@@ -2074,6 +2075,7 @@ mod tests {
         let candidate = "xk 9z pq 1a bb cc dd ee ff gg hh ii jj kk ll mm nn oo";
         assert!(
             meaningful_word_density_per_1000_chars(candidate, &thresholds)
+                .expect("fixture must carry enough tokens to judge")
                 < MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS,
             "test fixture must actually be degraded"
         );
@@ -2101,6 +2103,7 @@ mod tests {
         let also_sparse_candidate = "zz 8y qw 2b cc dd ee ff gg hh";
         assert!(
             meaningful_word_density_per_1000_chars(sparse_incumbent, &thresholds)
+                .expect("fixture must carry enough tokens to judge")
                 < MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS
         );
 
@@ -2110,6 +2113,110 @@ mod tests {
             Some(sparse_incumbent),
             also_sparse_candidate,
             0.1,
+            &thresholds
+        ));
+    }
+
+    /// A VLM stage that emits Markdown must be judged on its prose, not on its scaffolding.
+    /// The density guard scores the same normalized input as `compute_quality_score`; scoring
+    /// raw text instead let a runaway table-separator row (a known LLM repetition-loop failure)
+    /// inflate the non-whitespace denominator while the meaningful-word count stayed flat,
+    /// vetoing a candidate whose actual content was fine.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn a_markdown_candidates_table_scaffolding_does_not_count_against_its_density() {
+        use crate::core::config::OcrPipelineSelection;
+
+        let thresholds = OcrQualityThresholds::default();
+        let incumbent = "This document describes the quarterly financial results for the \
+                          corporation including revenue growth expenses and forecasts for the \
+                          next fiscal year across every operating region";
+        let separator = format!("|{}|", "-".repeat(4000));
+        let candidate = format!(
+            "This report contains detailed regional revenue growth analysis across every operating department.\n{separator}\n"
+        );
+
+        let raw_stats = NativeTextStats::compute(&candidate, &thresholds);
+        assert!(
+            raw_stats.meaningful_words as f64 / raw_stats.non_whitespace as f64 * 1000.0
+                < MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS,
+            "fixture must be one that an un-normalized density would wrongly reject"
+        );
+        assert!(
+            meaningful_word_density_per_1000_chars(&candidate, &thresholds)
+                .expect("fixture must carry enough tokens to judge")
+                >= MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS,
+            "normalized density must see through the separator row"
+        );
+
+        assert!(should_replace_best_effort_result(
+            OcrPipelineSelection::PreferLastNonEmpty,
+            Some(0.9),
+            Some(incumbent),
+            &candidate,
+            0.5,
+            &thresholds
+        ));
+    }
+
+    /// Density is a ratio and so is blind to amount: a bare `"Page 12"` header scores far above
+    /// the floor. An incumbent that short is not established content worth protecting, matching
+    /// the token-floor convention `NativeTextStats::compute` already applies to its own ratios.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn a_too_short_incumbent_is_not_treated_as_dense_enough_to_protect() {
+        use crate::core::config::OcrPipelineSelection;
+
+        let thresholds = OcrQualityThresholds::default();
+        let stub_incumbent = "Page 12";
+        let stats = NativeTextStats::compute(stub_incumbent, &thresholds);
+        assert!(
+            stats.meaningful_words as f64 / stats.non_whitespace as f64 * 1000.0
+                >= MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS,
+            "fixture must be one a raw ratio would wrongly call dense"
+        );
+        assert_eq!(
+            meaningful_word_density_per_1000_chars(stub_incumbent, &thresholds),
+            None,
+            "too few tokens to judge"
+        );
+
+        let candidate = "This document describes the quarterly financial results for the \
+                          corporation including revenue growth expenses and forecasts";
+        assert!(should_replace_best_effort_result(
+            OcrPipelineSelection::PreferLastNonEmpty,
+            Some(0.9),
+            Some(stub_incumbent),
+            candidate,
+            0.1,
+            &thresholds
+        ));
+    }
+
+    /// The mirror case: an unjudgeably short candidate is not evidence of a better result, so a
+    /// dense incumbent is kept rather than traded for a stub that a raw ratio would score high.
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn a_too_short_candidate_does_not_replace_a_dense_incumbent() {
+        use crate::core::config::OcrPipelineSelection;
+
+        let thresholds = OcrQualityThresholds::default();
+        let incumbent = "This document describes the quarterly financial results for the \
+                          corporation including revenue growth expenses and forecasts for the \
+                          next fiscal year across every operating region";
+        let stub_candidate = "Page 12";
+        assert_eq!(
+            meaningful_word_density_per_1000_chars(stub_candidate, &thresholds),
+            None,
+            "too few tokens to judge"
+        );
+
+        assert!(!should_replace_best_effort_result(
+            OcrPipelineSelection::PreferLastNonEmpty,
+            Some(0.4),
+            Some(incumbent),
+            stub_candidate,
+            0.95,
             &thresholds
         ));
     }

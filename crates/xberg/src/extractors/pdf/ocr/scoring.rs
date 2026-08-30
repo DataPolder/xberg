@@ -823,6 +823,25 @@ pub(super) fn accept_or_reject_ocr_page(
         (content, false)
     }
 }
+/// The text that quality scoring actually judges: the prose content with Markdown scaffolding
+/// stripped (#1341), falling back to the raw trimmed text when normalization leaves nothing
+/// (e.g. a table-only fragment).
+///
+/// Shared so [`compute_quality_score`] and the F46 density guard cannot disagree about what
+/// counts as content. Judging normalized text in one and raw text in the other let a runaway
+/// table-separator row inflate the density denominator while the meaningful-word count stayed
+/// flat, vetoing a good VLM candidate -- #1341's Markdown-penalizes-VLM bias reintroduced
+/// through an un-normalized side door. ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+pub(super) fn scoring_input(trimmed: &str) -> std::borrow::Cow<'_, str> {
+    let normalized = normalize_markdown_for_scoring(trimmed);
+    if normalized.trim().is_empty() {
+        std::borrow::Cow::Borrowed(trimmed)
+    } else {
+        std::borrow::Cow::Owned(normalized)
+    }
+}
+
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(crate) fn compute_quality_score(text: &str, thresholds: &OcrQualityThresholds) -> f64 {
     let trimmed = text.trim();
@@ -830,16 +849,8 @@ pub(crate) fn compute_quality_score(text: &str, thresholds: &OcrQualityThreshold
         return 0.0;
     }
 
-    // Score the prose content, not the Markdown scaffolding (#1341). Fall back to the
-    // raw text if normalization leaves nothing (e.g. a table-only fragment).
-    let normalized = normalize_markdown_for_scoring(trimmed);
-    let scoring_input = if normalized.trim().is_empty() {
-        trimmed
-    } else {
-        normalized.as_str()
-    };
-
-    let stats = NativeTextStats::compute(scoring_input, thresholds);
+    let input = scoring_input(trimmed);
+    let stats = NativeTextStats::compute(&input, thresholds);
 
     let alnum_score = stats.alnum_ratio.min(1.0);
     let fragmentation_score = 1.0 - stats.fragmented_word_ratio.min(1.0);

@@ -2319,18 +2319,38 @@ pub(super) fn cgroup_headroom() -> Option<usize> {
 /// been separately calibrated against the `meaningful_words` metric.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(super) const MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS: f64 = 60.0;
-/// Meaningful-word density of `text`, per 1,000 non-whitespace characters.
+/// Minimum whitespace-delimited token count before meaningful-word density is treated as a
+/// judgement rather than noise.
+///
+/// Mirrors the sibling convention in [`NativeTextStats::compute`], where `fragmented_word_ratio`
+/// and `consecutive_repeat_ratio` both abstain below a token floor: the question is "is there
+/// enough on this page to judge at all". Density is a ratio, so it is blind to amount -- a bare
+/// `"Page 12"` header scores ~167 per 1,000 and would otherwise read as a dense page worth
+/// protecting, and a single extra or missing token swings a short page's density by tens of
+/// points. ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+pub(super) const MIN_TOKENS_FOR_DENSITY_JUDGEMENT: usize = 10;
+/// Meaningful-word density of `text`, per 1,000 non-whitespace characters, or `None` when the
+/// text is too short to judge (see [`MIN_TOKENS_FOR_DENSITY_JUDGEMENT`]).
 ///
 /// Shared scale for comparing a `PreferLastNonEmpty` candidate against the incumbent it would
-/// replace (see [`MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS`]). Empty (post-whitespace-strip)
-/// text has zero density rather than a division-by-zero `NaN`.
+/// replace (see [`MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS`]). Scores the same normalized
+/// input as [`compute_quality_score`](super::scoring::compute_quality_score) via
+/// [`scoring_input`](super::scoring::scoring_input), so Markdown scaffolding cannot inflate the
+/// denominator. Empty (post-whitespace-strip) text yields `None` rather than a
+/// division-by-zero `NaN`.
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-pub(super) fn meaningful_word_density_per_1000_chars(text: &str, thresholds: &OcrQualityThresholds) -> f64 {
-    let stats = NativeTextStats::compute(text, thresholds);
-    if stats.non_whitespace == 0 {
-        return 0.0;
+pub(super) fn meaningful_word_density_per_1000_chars(text: &str, thresholds: &OcrQualityThresholds) -> Option<f64> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
     }
-    stats.meaningful_words as f64 / stats.non_whitespace as f64 * 1000.0
+    let input = super::scoring::scoring_input(trimmed);
+    let stats = NativeTextStats::compute(&input, thresholds);
+    if stats.non_whitespace == 0 || stats.word_count < MIN_TOKENS_FOR_DENSITY_JUDGEMENT {
+        return None;
+    }
+    Some(stats.meaningful_words as f64 / stats.non_whitespace as f64 * 1000.0)
 }
 /// Whether a non-empty `PreferLastNonEmpty` candidate is a materially worse replacement for a
 /// non-empty incumbent, per [`MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS`] (F46).
@@ -2346,11 +2366,20 @@ pub(super) fn candidate_is_materially_degraded(
     incumbent_text: &str,
     thresholds: &OcrQualityThresholds,
 ) -> bool {
-    let incumbent_density = meaningful_word_density_per_1000_chars(incumbent_text, thresholds);
+    // An incumbent too short to judge has nothing established to protect, so the later stage's
+    // override still wins -- same outcome as an incumbent measurably below the floor. ~keep
+    let Some(incumbent_density) = meaningful_word_density_per_1000_chars(incumbent_text, thresholds) else {
+        return false;
+    };
     if incumbent_density < MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS {
         return false;
     }
-    let candidate_density = meaningful_word_density_per_1000_chars(candidate_text, thresholds);
+    // The incumbent is established dense text. A candidate too short to judge is not evidence
+    // of a better result, and density alone cannot see that it is a fragment: `"Page 12"` scores
+    // far above the floor. Keep the incumbent rather than trade it for an unjudgeable stub. ~keep
+    let Some(candidate_density) = meaningful_word_density_per_1000_chars(candidate_text, thresholds) else {
+        return true;
+    };
     candidate_density < MIN_VLM_OVERRIDE_WORD_DENSITY_PER_1000_CHARS
 }
 /// Decide whether a pipeline stage's result should replace the current best-effort
