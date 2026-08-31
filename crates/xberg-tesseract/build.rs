@@ -26,6 +26,7 @@ mod build_tesseract {
     use crate::source_cache::{
         PreparedSourceTree, SourceArtifact, canonicalize_trusted_build_root, cmake_source_path, copy_verified_artifact,
         ensure_directory, ensure_private_cache_root, prepare_source_tree, prepare_verified_artifact, read_exact_size,
+        tool_argument_path,
     };
     use cmake::Config;
     use std::env;
@@ -808,13 +809,16 @@ mod build_tesseract {
             .file("src/shim.cpp")
             .cpp(true)
             .std("c++17")
-            .include(tesseract_install_dir.join("include"))
+            .include(tool_argument_path(&tesseract_install_dir.join("include")))
             .compile("xberg_shim");
 
-        println!("cargo:rustc-link-search=native={}", leptonica_lib_dir.display());
         println!(
             "cargo:rustc-link-search=native={}",
-            tesseract_install_dir.join("lib").display()
+            tool_argument_path(&leptonica_lib_dir).display()
+        );
+        println!(
+            "cargo:rustc-link-search=native={}",
+            tool_argument_path(&tesseract_install_dir.join("lib")).display()
         );
 
         #[cfg(feature = "dynamic-linking")]
@@ -1077,6 +1081,17 @@ mod build_tesseract {
         )))
     }
 
+    /// Render a path for a CMake `-D<variable>=<value>` argument.
+    ///
+    /// On Windows the build root is canonicalized, which yields an extended-length `\\?\` path.
+    /// CMake cannot consume that form, so the verbatim prefix is stripped before the separators
+    /// are converted. See `source_cache::windows_cmake_argument_path`.
+    #[cfg(windows)]
+    fn normalize_cmake_path(path: &Path) -> String {
+        crate::source_cache::windows_cmake_argument_path(&path.to_string_lossy())
+    }
+
+    #[cfg(not(windows))]
     fn normalize_cmake_path(path: &Path) -> String {
         path.to_string_lossy().replace('\\', "/")
     }
@@ -1536,8 +1551,14 @@ Installation instructions:
         let leptonica_lib_dir = leptonica_install_dir.join("lib");
         let tesseract_lib_dir = tesseract_install_dir.join("lib");
 
-        println!("cargo:rustc-link-search=native={}", leptonica_lib_dir.display());
-        println!("cargo:rustc-link-search=native={}", tesseract_lib_dir.display());
+        println!(
+            "cargo:rustc-link-search=native={}",
+            tool_argument_path(&leptonica_lib_dir).display()
+        );
+        println!(
+            "cargo:rustc-link-search=native={}",
+            tool_argument_path(&tesseract_lib_dir).display()
+        );
 
         println!("cargo:rustc-link-lib=static=tesseract");
         println!("cargo:rustc-link-lib=static=leptonica");
@@ -1811,7 +1832,7 @@ Installation instructions:
         };
 
         for dir in candidate_lib_dirs.iter().filter(|d| d.exists()) {
-            println!("cargo:rustc-link-search=native={}", dir.display());
+            println!("cargo:rustc-link-search=native={}", tool_argument_path(dir).display());
         }
 
         link_name_to_use

@@ -10450,15 +10450,6 @@ uintptr_t xberg_excel_sheet_col_count(XBERGAlefHandle handle);
 uintptr_t xberg_excel_sheet_cell_count(XBERGAlefHandle handle);
 
 /**
- * Get the `table_cells` field from a `ExcelSheet`.
- * A non-null returned pointer is owned by the caller.
- * It must be freed with `xberg_free_string`.
- * # Safety
- * Pointer must be a valid handle returned by this library.
- */
-char *xberg_excel_sheet_table_cells(XBERGAlefHandle handle);
-
-/**
  * Create a `ExcelWorkbook` from a JSON string. Returns null on failure.
  * # Safety
  * JSON string must be valid UTF-8 and null-terminated.
@@ -17580,24 +17571,6 @@ XBERGAlefHandle xberg_ocr_config_vlm_config(XBERGAlefHandle handle);
 char *xberg_ocr_config_vlm_prompt(XBERGAlefHandle handle);
 
 /**
- * Get the `acceleration` field from a `OcrConfig`.
- * A non-null returned handle is owned by the caller.
- * It must be freed with `xberg_acceleration_config_free`.
- * # Safety
- * Pointer must be a valid handle returned by this library.
- */
-XBERGAlefHandle xberg_ocr_config_acceleration(XBERGAlefHandle handle);
-
-/**
- * Get the `tessdata_bytes` field from a `OcrConfig`.
- * A non-null returned pointer is owned by the caller.
- * It must be freed with `xberg_free_string`.
- * # Safety
- * Pointer must be a valid handle returned by this library.
- */
-char *xberg_ocr_config_tessdata_bytes(XBERGAlefHandle handle);
-
-/**
  * Get the `tessdata_path` field from a `OcrConfig`.
  * A non-null returned pointer is owned by the caller.
  * It must be freed with `xberg_free_string`.
@@ -20516,24 +20489,6 @@ char *xberg_post_processor_config_enabled_processors(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 char *xberg_post_processor_config_disabled_processors(XBERGAlefHandle handle);
-
-/**
- * Get the `enabled_set` field from a `PostProcessorConfig`.
- * A non-null returned pointer is owned by the caller.
- * It must be freed with `xberg_free_string`.
- * # Safety
- * Pointer must be a valid handle returned by this library.
- */
-char *xberg_post_processor_config_enabled_set(XBERGAlefHandle handle);
-
-/**
- * Get the `disabled_set` field from a `PostProcessorConfig`.
- * A non-null returned pointer is owned by the caller.
- * It must be freed with `xberg_free_string`.
- * # Safety
- * Pointer must be a valid handle returned by this library.
- */
-char *xberg_post_processor_config_disabled_set(XBERGAlefHandle handle);
 
 /**
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
