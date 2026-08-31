@@ -316,6 +316,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Bounded DOCX image and iWork archive member reads by the member's declared uncompressed size
+  instead of trusting that declaration. A crafted document could forge a small declared size in the
+  ZIP central directory while carrying a deflate stream that inflated to multiple gigabytes,
+  exhausting memory during DOCX image extraction (`images.extract_images`) or `.pages`/`.numbers`/
+  `.key` extraction. Reported by Syed Anas Mohiuddin
+  ([GHSA-85w9-wqcq-x48r](https://github.com/xberg-io/xberg/security/advisories/GHSA-85w9-wqcq-x48r)).
 - Pinned downloaded Tesseract, Leptonica, and English tessdata inputs to immutable revisions with
   verified sizes and SHA-256 digests, race-safe content-addressed caches, private build directories,
   and bounded fail-closed archive extraction.
