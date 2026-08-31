@@ -40,8 +40,8 @@ use super::rendering::{
 };
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 use super::scoring::{
-    NativeTextStats, accept_or_reject_ocr_page, compute_quality_score, mean_text_conf_of, pipeline_stage_score,
-    repair_ocr_list_markers,
+    NativeTextStats, OcrPageNoiseVerdict, accept_or_reject_ocr_page, compute_quality_score, mean_text_conf_of,
+    pipeline_stage_score, repair_ocr_list_markers,
 };
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -823,7 +823,7 @@ pub(crate) async fn extract_mixed_ocr_native(
             let confidence = page_mean_confidence.get(page_number).copied();
             let dictionary_ratio = page_dictionary_invalid_word_ratio.get(page_number).copied();
             tracing::debug!(page = *page_number, ?confidence, "OCR page mean confidence");
-            let (assessed_text, _) = accept_or_reject_ocr_page(
+            let acceptance = accept_or_reject_ocr_page(
                 (*page_number as usize).saturating_sub(1),
                 std::mem::take(text),
                 &ocr_output_thresholds,
@@ -832,7 +832,7 @@ pub(crate) async fn extract_mixed_ocr_native(
                 confidence_semantics,
                 confidence,
             );
-            *text = assessed_text;
+            *text = acceptance.content;
         }
     }
 
@@ -1007,6 +1007,7 @@ pub(crate) async fn extract_with_ocr(
         formulas,
         _raw_page_paragraphs,
         preprocessing,
+        _recognition_noise_verdicts,
     ) = Box::pin(extract_with_ocr_for_page(
         content,
         images,
@@ -1097,6 +1098,7 @@ pub(super) async fn extract_with_ocr_for_page(
     Vec<crate::types::Formula>,
     Vec<Vec<crate::pdf::structure::types::PdfParagraph>>,
     ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata>,
+    Vec<OcrPageNoiseVerdict>,
 )> {
     use crate::plugins::registry::get_ocr_backend_registry;
     use image::ImageEncoder;
@@ -1210,6 +1212,8 @@ pub(super) async fn extract_with_ocr_for_page(
             // cluster over here.
             Vec::new(),
             preprocessing,
+            // Same reasoning: this route never calls `accept_or_reject_ocr_page` per page.
+            Vec::new(),
         ));
     }
     let capture_rasters = config.images.as_ref().is_some_and(|c| c.include_page_rasters);
@@ -1318,6 +1322,10 @@ pub(super) async fn extract_with_ocr_for_page(
     // nothing instead of contributing invented words. See `is_ocr_recognition_noise`.
     let ocr_output_thresholds = base_ocr_config.quality_thresholds.clone().unwrap_or_default();
     let mut recognition_noise_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
+    // Numeric evidence behind each fired `recognition_noise_warnings` entry, so a caller
+    // above the accept/reject decision can observe the signal without recomputing stats
+    // (see `OcrPageNoiseVerdict`). Populated exactly when a warning above is pushed. ~keep
+    let mut recognition_noise_verdicts: Vec<OcrPageNoiseVerdict> = Vec::new();
 
     #[cfg(feature = "layout-detection")]
     let mut tatr_model = if layout_detections.is_some() {
@@ -1880,7 +1888,7 @@ pub(super) async fn extract_with_ocr_for_page(
                 let page_content = margin_filtered_content.unwrap_or(ocr_result.content);
                 #[cfg(not(feature = "pdf"))]
                 let page_content = ocr_result.content;
-                let (page_text, page_rejected) = accept_or_reject_ocr_page(
+                let acceptance = accept_or_reject_ocr_page(
                     document_page_idx,
                     page_content,
                     &ocr_output_thresholds,
@@ -1889,8 +1897,11 @@ pub(super) async fn extract_with_ocr_for_page(
                     backend_confidence_semantics,
                     confidence,
                 );
-                page_texts[page_idx] = page_text;
-                rejected_pages[page_idx] = page_rejected;
+                page_texts[page_idx] = acceptance.content;
+                rejected_pages[page_idx] = acceptance.discarded;
+                if let Some(verdict) = acceptance.verdict {
+                    recognition_noise_verdicts.push(verdict);
+                }
                 continue;
             }
 
@@ -1953,7 +1964,7 @@ pub(super) async fn extract_with_ocr_for_page(
             let page_content = margin_filtered_content.unwrap_or(ocr_result.content);
             #[cfg(not(feature = "pdf"))]
             let page_content = ocr_result.content;
-            let (page_text, page_rejected) = accept_or_reject_ocr_page(
+            let acceptance = accept_or_reject_ocr_page(
                 document_page_idx,
                 page_content,
                 &ocr_output_thresholds,
@@ -1962,8 +1973,11 @@ pub(super) async fn extract_with_ocr_for_page(
                 backend_confidence_semantics,
                 confidence,
             );
-            page_texts[page_idx] = page_text;
-            rejected_pages[page_idx] = page_rejected;
+            page_texts[page_idx] = acceptance.content;
+            rejected_pages[page_idx] = acceptance.discarded;
+            if let Some(verdict) = acceptance.verdict {
+                recognition_noise_verdicts.push(verdict);
+            }
         }
     }
 
@@ -2149,6 +2163,7 @@ pub(super) async fn extract_with_ocr_for_page(
         accumulated_formulas,
         raw_page_paragraphs,
         preprocessing_by_page,
+        recognition_noise_verdicts,
     ))
 }
 /// Build an [`crate::types::ExtractedImage`] for a full-page OCR raster.
@@ -2906,6 +2921,7 @@ pub(super) async fn run_ocr_pipeline_for_page(
                 stage_formulas,
                 stage_raw_paragraphs,
                 stage_preprocessing,
+                stage_recognition_noise_verdicts,
             )) => {
                 let text_score = compute_quality_score(&text, &pipeline.quality_thresholds);
                 let score = pipeline_stage_score(text_score, mean_conf);
@@ -2918,6 +2934,25 @@ pub(super) async fn run_ocr_pipeline_for_page(
                     threshold = pipeline.quality_thresholds.pipeline_min_quality,
                     "Pipeline: backend produced result"
                 );
+
+                // Plumbed to the accept decision for observability only (see
+                // `OcrPageNoiseVerdict`) -- the accept/reject outcome below must not change
+                // until a threshold is calibrated against real corpus data. ~keep
+                for verdict in &stage_recognition_noise_verdicts {
+                    tracing::debug!(
+                        backend = %stage.backend,
+                        page = verdict.page_index + 1,
+                        fragmented_word_ratio = verdict.fragmented_word_ratio,
+                        word_count = verdict.word_count,
+                        mean_confidence = verdict.mean_confidence,
+                        low_confidence = verdict.low_confidence,
+                        fragmented_noise = verdict.fragmented_noise,
+                        dictionary_noise = verdict.dictionary_noise,
+                        dict_invalid_word_ratio = verdict.dict_invalid_word_ratio,
+                        discarded = verdict.discarded,
+                        "Pipeline: OCR recognition-noise verdict in scope at accept decision"
+                    );
+                }
 
                 accumulated_usage.extend(stage_llm_usage);
 

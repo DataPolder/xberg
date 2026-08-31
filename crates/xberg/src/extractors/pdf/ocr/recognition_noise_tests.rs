@@ -27,7 +27,7 @@ fn should_retain_suspected_fragmented_noise_with_warning_by_default() {
     let thresholds = OcrQualityThresholds::default();
     let mut warnings = Vec::new();
 
-    let (text, rejected) = accept_or_reject_ocr_page(
+    let acceptance = accept_or_reject_ocr_page(
         3,
         PLAT_DRAWING_NOISE.to_string(),
         &thresholds,
@@ -36,10 +36,24 @@ fn should_retain_suspected_fragmented_noise_with_warning_by_default() {
         crate::plugins::ConfidenceSemantics::Uncalibrated,
         None,
     );
-    assert!(!rejected, "diagnostic-only mode must retain suspected OCR noise");
-    assert_eq!(text, PLAT_DRAWING_NOISE, "recognized content must remain verbatim");
+    assert!(
+        !acceptance.discarded,
+        "diagnostic-only mode must retain suspected OCR noise"
+    );
+    assert_eq!(
+        acceptance.content, PLAT_DRAWING_NOISE,
+        "recognized content must remain verbatim"
+    );
     assert_eq!(warnings.len(), 1, "the recognition-noise signal must remain visible");
     assert!(warnings[0].message.contains("retained"));
+    let verdict = acceptance
+        .verdict
+        .expect("a fired warning must carry its numeric verdict");
+    assert!(verdict.fragmented_noise, "the plat fixture fires on fragmentation");
+    assert!(
+        !verdict.discarded,
+        "diagnostic-only mode must report a non-destructive verdict"
+    );
 }
 
 #[test]
@@ -49,7 +63,7 @@ fn should_preserve_legacy_destructive_filtering_when_opted_in() {
         ..Default::default()
     };
     let mut warnings = Vec::new();
-    let (text, rejected) = accept_or_reject_ocr_page(
+    let acceptance = accept_or_reject_ocr_page(
         3,
         PLAT_DRAWING_NOISE.to_string(),
         &thresholds,
@@ -58,17 +72,27 @@ fn should_preserve_legacy_destructive_filtering_when_opted_in() {
         crate::plugins::ConfidenceSemantics::Uncalibrated,
         None,
     );
-    assert!(rejected, "opt-in must preserve the legacy destructive verdict");
-    assert!(text.is_empty(), "opt-in must discard suspected OCR noise");
+    assert!(
+        acceptance.discarded,
+        "opt-in must preserve the legacy destructive verdict"
+    );
+    assert!(acceptance.content.is_empty(), "opt-in must discard suspected OCR noise");
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].message.contains("discarded"));
+    let verdict = acceptance
+        .verdict
+        .expect("a fired warning must carry its numeric verdict");
+    assert!(
+        verdict.discarded,
+        "the verdict must reflect the destructive outcome too"
+    );
 }
 
 #[test]
 fn should_leave_blank_pages_blank_without_a_false_warning() {
     let thresholds = OcrQualityThresholds::default();
     let mut warnings = Vec::new();
-    let (blank, blank_rejected) = accept_or_reject_ocr_page(
+    let acceptance = accept_or_reject_ocr_page(
         1,
         String::new(),
         &thresholds,
@@ -77,12 +101,13 @@ fn should_leave_blank_pages_blank_without_a_false_warning() {
         crate::plugins::ConfidenceSemantics::Uncalibrated,
         None,
     );
-    assert!(!blank_rejected, "an empty page is blank, not rejected");
-    assert!(blank.is_empty());
+    assert!(!acceptance.discarded, "an empty page is blank, not rejected");
+    assert!(acceptance.content.is_empty());
     assert!(
         warnings.is_empty(),
         "blank pages must not be reported as recognition noise"
     );
+    assert!(acceptance.verdict.is_none(), "a blank page must carry no verdict");
 }
 
 #[test]
@@ -92,7 +117,7 @@ fn should_not_discard_blank_page_with_calibrated_low_confidence() {
         ..Default::default()
     };
     let mut warnings = Vec::new();
-    let (blank, rejected) = accept_or_reject_ocr_page(
+    let acceptance = accept_or_reject_ocr_page(
         1,
         String::new(),
         &thresholds,
@@ -102,9 +127,13 @@ fn should_not_discard_blank_page_with_calibrated_low_confidence() {
         Some(0.0),
     );
 
-    assert!(blank.is_empty());
-    assert!(!rejected, "blank OCR output must not carry a destructive verdict");
+    assert!(acceptance.content.is_empty());
+    assert!(
+        !acceptance.discarded,
+        "blank OCR output must not carry a destructive verdict"
+    );
     assert!(warnings.is_empty(), "missing text is not recognition noise");
+    assert!(acceptance.verdict.is_none(), "a blank page must carry no verdict");
 }
 
 #[test]
@@ -793,7 +822,7 @@ fn should_retain_dictionary_suspect_content_with_warning_by_default() {
     );
 
     let mut warnings = Vec::new();
-    let (text, rejected) = accept_or_reject_ocr_page(
+    let acceptance = accept_or_reject_ocr_page(
         0,
         ORDINANCE_PROSE.to_string(),
         &configured,
@@ -803,20 +832,29 @@ fn should_retain_dictionary_suspect_content_with_warning_by_default() {
         None,
     );
     assert!(
-        !rejected,
+        !acceptance.discarded,
         "diagnostic-only mode must not discard dictionary-suspect text"
     );
-    assert_eq!(text, ORDINANCE_PROSE);
+    assert_eq!(acceptance.content, ORDINANCE_PROSE);
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].message.contains("dictionary-invalid"));
     assert!(warnings[0].message.contains("retained"));
+    let verdict = acceptance
+        .verdict
+        .expect("a fired warning must carry its numeric verdict");
+    assert!(verdict.dictionary_noise, "the dictionary signal is what fired here");
+    assert!(
+        !verdict.fragmented_noise,
+        "the fixture must not also fire on fragmentation"
+    );
+    assert_eq!(verdict.dict_invalid_word_ratio, Some(0.9));
 }
 
 #[test]
 fn should_retain_low_confidence_content_with_warning_by_default() {
     let thresholds = OcrQualityThresholds::default();
     let mut warnings = Vec::new();
-    let (text, rejected) = accept_or_reject_ocr_page(
+    let acceptance = accept_or_reject_ocr_page(
         0,
         ORDINANCE_PROSE.to_string(),
         &thresholds,
@@ -825,11 +863,19 @@ fn should_retain_low_confidence_content_with_warning_by_default() {
         crate::plugins::ConfidenceSemantics::Legibility { scale_max: 100.0 },
         Some(18.0),
     );
-    assert!(!rejected, "diagnostic-only mode must not discard low-confidence text");
-    assert_eq!(text, ORDINANCE_PROSE);
+    assert!(
+        !acceptance.discarded,
+        "diagnostic-only mode must not discard low-confidence text"
+    );
+    assert_eq!(acceptance.content, ORDINANCE_PROSE);
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].message.contains("mean confidence"));
     assert!(warnings[0].message.contains("retained"));
+    let verdict = acceptance
+        .verdict
+        .expect("a fired warning must carry its numeric verdict");
+    assert!(verdict.low_confidence, "the confidence signal is what fired here");
+    assert_eq!(verdict.mean_confidence, Some(18.0), "the raw, un-normalized confidence");
 }
 
 /// A `dict_invalid_word_ratio` of `None` on the same fixture, same threshold, must NOT
@@ -842,7 +888,7 @@ fn should_not_reject_via_dictionary_signal_when_ratio_is_absent() {
         ..Default::default()
     };
     let mut warnings = Vec::new();
-    let (text, rejected) = accept_or_reject_ocr_page(
+    let acceptance = accept_or_reject_ocr_page(
         0,
         ORDINANCE_PROSE.to_string(),
         &configured,
@@ -851,7 +897,14 @@ fn should_not_reject_via_dictionary_signal_when_ratio_is_absent() {
         crate::plugins::ConfidenceSemantics::Uncalibrated,
         None,
     );
-    assert!(!rejected, "an absent ratio must never itself trigger rejection");
-    assert_eq!(text, ORDINANCE_PROSE);
+    assert!(
+        !acceptance.discarded,
+        "an absent ratio must never itself trigger rejection"
+    );
+    assert_eq!(acceptance.content, ORDINANCE_PROSE);
     assert!(warnings.is_empty());
+    assert!(
+        acceptance.verdict.is_none(),
+        "no signal fired, so there must be no verdict"
+    );
 }

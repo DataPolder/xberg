@@ -3685,6 +3685,120 @@ Buffers:           50000 kB
         }
     }
 
+    /// The recognition-noise verdict computed inside `accept_or_reject_ocr_page` used to be
+    /// discarded one frame before `run_ocr_pipeline_for_page`'s accept/reject decision --
+    /// `extract_with_ocr_for_page` returned only a warning string, never the numbers that
+    /// justified it. This proves the numeric verdict now survives the whole call: a page whose
+    /// fragmented-word ratio crosses `max_ocr_output_fragmented_word_ratio` surfaces
+    /// `fragmented_noise: true` and the exact ratio in the function's return, with the other
+    /// two independent signals (`low_confidence`, `dictionary_noise`) correctly reported as
+    /// not having fired.
+    #[cfg(feature = "ocr")]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn extract_with_ocr_for_page_surfaces_recognition_noise_verdict() {
+        use crate::core::config::{OcrConfig, OcrQualityThresholds};
+        use crate::plugins::{ConfidenceSemantics, OcrBackend, OcrBackendType, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::Arc;
+
+        const BACKEND_NAME: &str = "fragmented-noise-verdict-test-backend";
+        // 30 single-letter tokens: every scorable word is <=2 chars, so `fragmented_word_ratio`
+        // is exactly 1.0 -- well past the default 0.35 threshold -- and `word_count` (30)
+        // clears the default `min_words_for_ocr_output_check` (20). ~keep
+        const FRAGMENTED_CONTENT: &str = "A B C D E F G H I J K L M N O P Q R S T U V W X Y Z A B C D";
+
+        struct FragmentedNoiseBackend;
+
+        #[async_trait::async_trait]
+        impl OcrBackend for FragmentedNoiseBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                Ok(ExtractedDocument {
+                    content: FRAGMENTED_CONTENT.to_string(),
+                    ..Default::default()
+                })
+            }
+            fn confidence_semantics(&self) -> ConfidenceSemantics {
+                ConfidenceSemantics::Uncalibrated
+            }
+        }
+
+        impl Plugin for FragmentedNoiseBackend {
+            fn name(&self) -> &str {
+                BACKEND_NAME
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        crate::plugins::register_ocr_backend(Arc::new(FragmentedNoiseBackend)).unwrap();
+
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                backend: BACKEND_NAME.to_string(),
+                quality_thresholds: Some(OcrQualityThresholds::default()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let images = [image::DynamicImage::new_rgb8(100, 100)];
+        let result = extract_with_ocr_for_page(
+            None,
+            Some(&images),
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            None,
+            0,
+            false,
+            None,
+            0,
+        )
+        .await
+        .unwrap();
+
+        crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
+
+        let verdicts = result.11;
+        assert_eq!(
+            verdicts.len(),
+            1,
+            "exactly one page ran OCR and should have produced one verdict: {verdicts:?}"
+        );
+        let verdict = &verdicts[0];
+        assert!(
+            verdict.fragmented_noise,
+            "fragmented-word ratio must have crossed the threshold: {verdict:?}"
+        );
+        assert_eq!(
+            verdict.fragmented_word_ratio, 1.0,
+            "every scorable word is <=2 chars, so the ratio must be exactly 1.0"
+        );
+        assert_eq!(verdict.word_count, 30);
+        assert!(
+            !verdict.low_confidence,
+            "backend reports no calibrated confidence, so this signal must not fire"
+        );
+        assert!(
+            !verdict.dictionary_noise,
+            "backend reports no dictionary-invalid ratio, so this signal must not fire"
+        );
+    }
+
     /// #1444: `run_ocr_pipeline` has no OCR execution loop of its own -- every stage is
     /// delegated to `extract_with_ocr`, which already carries the force_ocr image-XObject
     /// fallback (#1355, lines ~2593-2630). This proves that delegation actually threads
