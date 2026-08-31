@@ -304,6 +304,10 @@ pub enum Operator {
     },
     /// Stroke path (S)
     Stroke,
+    /// Close current subpath and stroke it (s) — ISO 32000-1 §8.5.3.2 defines
+    /// `s` as exactly `h S`. It needs its own variant because `build_operator`
+    /// returns a single operator and cannot emit the `h` separately.
+    CloseStroke,
     /// Fill path (f)
     Fill,
     /// Fill path (even-odd) (f*)
