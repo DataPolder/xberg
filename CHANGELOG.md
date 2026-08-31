@@ -134,6 +134,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed hybrid PDF OCR dropping surrounding prose when a table-bearing bare-text page was
+  restructured alongside geometry-backed pages.
+- Fixed automatic PDF OCR fallback reporting an empty success when OCR failed and no native text
+  remained; recoverable failures still return available native text with a warning.
+- Fixed degraded VLM fallback output replacing denser OCR text, while abstaining from the density
+  comparison for short text and non-space-delimited CJK or kana content.
 - Fixed Windows source and Ruby package builds failing on stable Rust while validating the
   identity of staged Tesseract source directories.
 - Fixed GCC 12+ WordPerfect builds by adding the standard header that declares `size_t` before
