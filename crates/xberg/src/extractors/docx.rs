@@ -1118,8 +1118,19 @@ impl InternalDocumentExtractor for DocxExtractor {
                 && let Ok(mut file) = archive.by_name(&zip_path)
                 && file.size() <= crate::extraction::docx::MAX_IMAGE_FILE_SIZE
             {
-                let mut data = Vec::with_capacity(file.size() as usize);
-                if std::io::Read::read_to_end(&mut file, &mut data).is_ok() {
+                // `file.size()` is the ZIP central directory's *declared* uncompressed size,
+                // which the archive's author chooses freely; the `zip` crate puts no `Take` on
+                // the decompressed side, so a member forging a small declared size while
+                // carrying a large deflate stream inflates without bound here. Bound the read
+                // by the declared size (already checked against `MAX_IMAGE_FILE_SIZE` above)
+                // and drop any member that yields more bytes than it declared.
+                // GHSA-85w9-wqcq-x48r. ~keep
+                let declared_size = file.size();
+                let mut data = Vec::with_capacity(usize::try_from(declared_size).unwrap_or(0));
+                let mut bounded = std::io::Read::take(&mut file, declared_size.saturating_add(1));
+                if std::io::Read::read_to_end(&mut bounded, &mut data).is_ok()
+                    && u64::try_from(data.len()).unwrap_or(u64::MAX) <= declared_size
+                {
                     image_data = Some(data);
                 }
             }
@@ -4041,6 +4052,151 @@ mod tests {
             result.is_ok(),
             "a normal document must extract under the default archive entry limit: {:?}",
             result.err()
+        );
+    }
+
+    /// A DOCX body with a single inline drawing whose blip embeds `rId5`, used by the
+    /// forged-declared-size tests below.
+    const FORGED_MEDIA_DOCUMENT_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p><w:r>
+      <w:drawing><wp:inline>
+        <wp:extent cx="914400" cy="914400"/>
+        <wp:docPr id="1" name="Picture 1" descr="Bomb"/>
+        <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+          <pic:pic><pic:blipFill><a:blip r:embed="rId5"/></pic:blipFill></pic:pic>
+        </a:graphicData></a:graphic>
+      </wp:inline></w:drawing>
+    </w:r></w:p>
+  </w:body>
+</w:document>"#;
+
+    const FORGED_MEDIA_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/bomb.png"/>
+</Relationships>"#;
+
+    /// Build a DOCX whose `word/media/bomb.png` member holds `payload` bytes.
+    fn build_docx_with_media(payload: &str) -> Vec<u8> {
+        build_test_docx_with_files(
+            FORGED_MEDIA_DOCUMENT_XML,
+            &[
+                ("word/_rels/document.xml.rels", FORGED_MEDIA_RELS_XML),
+                ("word/media/bomb.png", payload),
+            ],
+        )
+    }
+
+    /// Rewrite `word/media/bomb.png`'s *declared* uncompressed size -- in both the local file
+    /// header and the central directory -- to `forged_size`, leaving the deflate stream and the
+    /// CRC untouched. The member therefore reads back cleanly and only its size claim is a lie,
+    /// which is precisely the shape `validate_archive_security` and `ZipBombValidator` cannot
+    /// see: both read declared sizes out of the central directory and never decompress.
+    fn forge_declared_media_size(mut data: Vec<u8>, forged_size: u32) -> Vec<u8> {
+        let member: &[u8] = b"word/media/bomb.png";
+        let mut patched = 0usize;
+        let mut i = 0usize;
+        while i + 46 <= data.len() {
+            if data[i..i + 4] == *b"PK\x01\x02" {
+                let name_len = u16::from_le_bytes([data[i + 28], data[i + 29]]) as usize;
+                if i + 46 + name_len <= data.len() && data[i + 46..i + 46 + name_len] == *member {
+                    let local_offset =
+                        u32::from_le_bytes([data[i + 42], data[i + 43], data[i + 44], data[i + 45]]) as usize;
+                    assert!(
+                        local_offset + 26 <= data.len() && data[local_offset..local_offset + 4] == *b"PK\x03\x04",
+                        "central directory entry must point at a local file header"
+                    );
+                    data[i + 24..i + 28].copy_from_slice(&forged_size.to_le_bytes());
+                    data[local_offset + 22..local_offset + 26].copy_from_slice(&forged_size.to_le_bytes());
+                    patched += 1;
+                }
+            }
+            i += 1;
+        }
+        assert_eq!(
+            patched, 1,
+            "exactly one central-directory record for the media member must be patched"
+        );
+        data
+    }
+
+    fn image_extraction_config() -> ExtractionConfig {
+        ExtractionConfig {
+            images: Some(crate::core::config::ImageExtractionConfig {
+                extract_images: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// GHSA-85w9-wqcq-x48r: the image-extraction loop bounded the *declared* uncompressed size
+    /// (`file.size() <= MAX_IMAGE_FILE_SIZE`) and then called `read_to_end` with no `Take`, so a
+    /// member forging a small declared size while carrying a large deflate stream inflated
+    /// without bound into `image_data`. Here the member declares 64 bytes and delivers 2 MiB;
+    /// the extraction must not retain a buffer larger than the member claimed.
+    ///
+    /// Neutralisation that must break this test: restore
+    /// `Read::read_to_end(&mut file, &mut data)` in place of the `Read::take` bound in
+    /// `extract_content`'s image loop.
+    #[tokio::test]
+    async fn test_docx_image_read_is_bounded_by_declared_member_size() {
+        const FORGED_SIZE: u32 = 64;
+        let payload = "A".repeat(2 * 1024 * 1024);
+        let data = forge_declared_media_size(build_docx_with_media(&payload), FORGED_SIZE);
+
+        let extractor = DocxExtractor::new();
+        let internal_doc = extractor
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &image_extraction_config(),
+            )
+            .await
+            .expect("a forged declared size must be contained, not turned into an extraction failure");
+
+        let oversized: Vec<usize> = internal_doc
+            .images
+            .iter()
+            .map(|image| image.data.len())
+            .filter(|len| *len > FORGED_SIZE as usize)
+            .collect();
+        assert!(
+            oversized.is_empty(),
+            "a member declaring {} bytes must not yield a larger buffer, got lengths {:?}",
+            FORGED_SIZE,
+            oversized
+        );
+    }
+
+    /// Positive control for the bound above: a bound that dropped every image would also pass a
+    /// test that only checks "nothing oversized". An honestly-declared member must still be
+    /// read back in full, byte for byte.
+    #[tokio::test]
+    async fn test_docx_image_with_honest_declared_size_is_read_in_full() {
+        let payload = "PNGPAYLOAD".repeat(64);
+        let data = build_docx_with_media(&payload);
+
+        let extractor = DocxExtractor::new();
+        let internal_doc = extractor
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &image_extraction_config(),
+            )
+            .await
+            .expect("an ordinary media member must extract");
+
+        assert_eq!(internal_doc.images.len(), 1, "the single drawing must yield one image");
+        assert_eq!(
+            internal_doc.images[0].data.as_ref(),
+            payload.as_bytes(),
+            "an honestly-declared media member must be read back in full"
         );
     }
 
