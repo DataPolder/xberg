@@ -6668,7 +6668,7 @@ Name: ___
         assert!(heuristically_restructured_ocr_pages(&pages, &[1000.0, 1000.0], &[], &config).is_some());
     }
 
-    /// Pins a content-loss defect surfaced during the Zencity hybrid-OCR A/B: the VLM
+    /// Pins a content-loss defect surfaced while A/B-testing hybrid OCR on scanned documents: the VLM
     /// backend (`llm::vlm_ocr::VlmOcrBackend::process_image`) never populates
     /// `ocr_internal_document` or `ocr_elements` -- it returns bare markdown `content`
     /// plus `tables` parsed separately out of that same text via `extract_gfm_tables`,
