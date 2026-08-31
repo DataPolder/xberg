@@ -6710,8 +6710,19 @@ Name: ___
 
         let result = heuristically_restructured_ocr_pages(&pages, &[1000.0], std::slice::from_ref(&table), &config);
 
-        // Whether the heuristic accepts or declines to restructure this page, the prose
-        // surrounding the table must never be discarded outright.
+        // The fix makes this return None so the caller's `.text` fallback wins, and BEFORE the
+        // fix it returned Some(doc) holding only the Table. Asserting only inside `if let Some`
+        // therefore passes vacuously post-fix and tests nothing, so pin the outcome first: a
+        // prose-free reconstruction must be rejected outright. ~keep
+        assert!(
+            result.is_none(),
+            "a reconstruction holding only a table must be rejected so the caller's text fallback \
+             is used; got: {:?}",
+            result.as_ref().map(|d| d.elements.iter().map(|e| (&e.kind, &e.text)).collect::<Vec<_>>())
+        );
+
+        // Retained so that if the heuristic is ever changed to return a document here, that
+        // document is still held to preserving the prose around the table. ~keep
         if let Some(doc) = result {
             let rendered = doc
                 .elements
