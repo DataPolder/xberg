@@ -1941,12 +1941,21 @@ pub(super) fn heuristically_restructured_ocr_pages(
 /// table produced a non-empty `doc` -- passing the caller's bare
 /// `!doc.elements.is_empty()` gate -- even though every paragraph of prose the page
 /// held had vanished. Declining here sends the caller to its own `.text`-based
-/// fallback assembly instead, which never loses prose this way. ~keep
+/// fallback assembly instead, which never loses prose this way. The refusal is per input
+/// paragraph rather than document-wide: a geometry-backed page retaining its prose must not
+/// hide a separate bare-text page that contributed no segments. ~keep
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn restructured_document_retains_prose(
     pages: &[Vec<crate::pdf::structure::types::PdfParagraph>],
     doc: &crate::types::internal::InternalDocument,
 ) -> bool {
+    if pages
+        .iter()
+        .flatten()
+        .any(|paragraph| !paragraph.text.trim().is_empty() && paragraph.lines.is_empty())
+    {
+        return false;
+    }
     let had_prose = pages
         .iter()
         .flatten()
@@ -1954,9 +1963,9 @@ fn restructured_document_retains_prose(
     if !had_prose {
         return true;
     }
-    doc.elements
-        .iter()
-        .any(|element| !matches!(element.kind, crate::types::internal::ElementKind::Table { .. }))
+    doc.elements.iter().any(|element| {
+        !element.text.trim().is_empty() && !matches!(element.kind, crate::types::internal::ElementKind::Table { .. })
+    })
 }
 /// Split the single, document-wide [`crate::types::internal::InternalDocument`]
 /// [`heuristically_restructured_ocr_pages`] produced back into one per-page document per

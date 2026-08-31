@@ -6718,7 +6718,9 @@ Name: ___
             result.is_none(),
             "a reconstruction holding only a table must be rejected so the caller's text fallback \
              is used; got: {:?}",
-            result.as_ref().map(|d| d.elements.iter().map(|e| (&e.kind, &e.text)).collect::<Vec<_>>())
+            result
+                .as_ref()
+                .map(|d| d.elements.iter().map(|e| (&e.kind, &e.text)).collect::<Vec<_>>())
         );
 
         // Retained so that if the heuristic is ever changed to return a document here, that
@@ -6741,6 +6743,46 @@ Name: ___
                 doc.elements.iter().map(|e| (&e.kind, &e.text)).collect::<Vec<_>>()
             );
         }
+    }
+
+    /// A document-wide "some prose survived" check is insufficient for hybrid OCR: a
+    /// geometry-backed page can contribute a valid heading or paragraph while a separate
+    /// bare-text page contributes no segments at all. A table on that bare-text page still
+    /// makes the combined reconstruction non-empty, so accepting it would silently discard
+    /// only the second page's prose. The heuristic must decline the combined reconstruction
+    /// and let the caller's per-page text fallback preserve both pages. ~keep
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn heuristically_restructured_ocr_pages_rejects_mixed_document_when_one_page_loses_prose() {
+        let structured_page = heading_and_list_ocr_pages().remove(0);
+        let bare_page_text = "Second-page prose before the table.\n\n\
+                              | Col A | Col B |\n\
+                              | --- | --- |\n\
+                              | 1 | 2 |\n\n\
+                              Second-page prose after the table.";
+        let bare_page = crate::pdf::structure::adapters::ocr_text_to_paragraphs(bare_page_text);
+        let pages = vec![structured_page, bare_page];
+        let table = ocr_table("| Col A | Col B |\n| --- | --- |\n| 1 | 2 |", 2);
+        let config = ExtractionConfig {
+            output_format: crate::core::config::OutputFormat::Markdown,
+            ..ExtractionConfig::default()
+        };
+
+        let result =
+            heuristically_restructured_ocr_pages(&pages, &[1000.0, 1000.0], std::slice::from_ref(&table), &config);
+
+        assert!(
+            result.is_none(),
+            "a reconstruction that loses one page's prose must be rejected even when another \
+             page contributed structured prose; got: {:?}",
+            result.as_ref().map(|document| {
+                document
+                    .elements
+                    .iter()
+                    .map(|element| (element.page, &element.kind, &element.text))
+                    .collect::<Vec<_>>()
+            })
+        );
     }
 
     /// Closes the gap this session's fix targets: before it,
