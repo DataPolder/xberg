@@ -70,6 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Per-page OCR recognition-noise detail (fragmented-word ratio, word count, mean confidence) now
+  reaches the page accept/reject decision and is emitted at `DEBUG` instead of being discarded one
+  frame earlier. No threshold is gated on it yet; the blended stage score alone cannot discriminate
+  noise pages.
 - **Breaking (Rust source):** `ExtractionConfig` adds `apply_notebook_cell_tags`. Notebook
   extraction now honors MyST and Jupyter Book remove/hide cell tags by default; set the field to
   `false` to retain all saved cell content
