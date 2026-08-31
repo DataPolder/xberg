@@ -185,6 +185,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a processing warning by default instead of silently emptying pages. Set
   `ocr.quality_thresholds.discard_suspected_ocr_noise = true` (or the equivalent pipeline quality
   threshold) to opt into the previous destructive filtering behavior.
+- Fixed hybrid PDF OCR dropping surrounding prose when a table-bearing bare-text page was
+  restructured alongside geometry-backed pages.
+- Fixed automatic PDF OCR fallback reporting an empty success when OCR failed and no native text
+  remained; recoverable failures still return available native text with a warning.
+- Fixed degraded VLM fallback output replacing denser OCR text, while abstaining from the density
+  comparison for short text and non-space-delimited CJK or kana content.
 - Fixed runtime crashes in system-linked Tesseract OCR builds by linking the required native exception-safety
   shim.
 - Fixed `xberg batch` so mixed-success runs emit every successful document and every attributed
