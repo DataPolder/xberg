@@ -2576,6 +2576,12 @@ fn build_path_operator(name: &str, operands: &[Object]) -> Option<Operator> {
             Operator::Rectangle { x, y, width, height }
         }
         "S" => Operator::Stroke,
+        // ISO 32000-1 §8.5.3.2: `s` closes the current subpath and strokes it,
+        // exactly equivalent to `h S`. Without this arm it falls through to
+        // `Operator::Other`, which every consumer ignores — the stroke is never
+        // painted *and* the path is never cleared, so the next fill paints the
+        // abandoned geometry.
+        "s" => Operator::CloseStroke,
         "f" | "F" => Operator::Fill,
         // ~keep
         "f*" => Operator::FillEvenOdd,
@@ -5416,6 +5422,23 @@ mod tests {
         let ops = parse_content_stream(stream).unwrap();
         assert_eq!(ops.len(), 1);
         assert!(matches!(ops[0], Operator::CloseFillStroke));
+    }
+
+    /// `s` (close subpath + stroke) must reach the consumers as its own
+    /// painting operator. It used to fall through to `Operator::Other`, where
+    /// every consumer ignored it: the stroke was never painted and the current
+    /// path was never cleared, so the next fill painted the abandoned geometry.
+    #[test]
+    fn test_parse_close_stroke() {
+        let ops = parse_content_stream(b"10 10 m 90 90 l s").unwrap();
+        assert_eq!(ops.len(), 3);
+        assert!(matches!(ops[2], Operator::CloseStroke));
+
+        // The byte-level path parser decomposes it into `h` + `S`; both routes
+        // must agree that something paints and the path ends there.
+        let fast = parse_content_stream_paths_only(b"10 10 m 90 90 l s").unwrap();
+        assert!(matches!(fast[fast.len() - 2], Operator::ClosePath));
+        assert!(matches!(fast[fast.len() - 1], Operator::Stroke));
     }
 
     #[test]
