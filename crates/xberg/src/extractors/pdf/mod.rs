@@ -3121,7 +3121,7 @@ mod tests {
         );
     }
 
-    #[cfg(all(feature = "pdf", feature = "ocr", feature = "chunking"))]
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
     fn mixed_native_and_scanned_pdf() -> Vec<u8> {
         use lopdf::content::{Content, Operation};
         use lopdf::{Document, Object, Stream, dictionary};
@@ -3722,6 +3722,60 @@ mod tests {
         RegisteredOcrBackendGuard { name }
     }
 
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    struct FailingPdfOcrBackend {
+        name: &'static str,
+        message: &'static str,
+    }
+
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    impl crate::plugins::Plugin for FailingPdfOcrBackend {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn version(&self) -> String {
+            "1.0.0".to_string()
+        }
+
+        fn initialize(&self) -> crate::Result<()> {
+            Ok(())
+        }
+
+        fn shutdown(&self) -> crate::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[async_trait::async_trait]
+    impl crate::plugins::OcrBackend for FailingPdfOcrBackend {
+        fn backend_type(&self) -> crate::plugins::OcrBackendType {
+            crate::plugins::OcrBackendType::Custom
+        }
+
+        fn supports_language(&self, _lang: &str) -> bool {
+            true
+        }
+
+        async fn process_image(
+            &self,
+            _image_bytes: &[u8],
+            _config: &crate::core::config::OcrConfig,
+        ) -> crate::Result<crate::types::ExtractedDocument> {
+            Err(crate::XbergError::Plugin {
+                message: self.message.to_string(),
+                plugin_name: self.name.to_string(),
+            })
+        }
+    }
+
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    fn register_failing_ocr_backend(name: &'static str, message: &'static str) -> RegisteredOcrBackendGuard {
+        crate::plugins::register_ocr_backend(std::sync::Arc::new(FailingPdfOcrBackend { name, message })).unwrap();
+        RegisteredOcrBackendGuard { name }
+    }
+
     #[test]
     fn test_pdf_extractor_plugin_interface() {
         let extractor = PdfExtractor::new();
@@ -3759,6 +3813,98 @@ mod tests {
             !failed_ocr_fallback_is_total_loss("  x  "),
             "a single meaningful character is not a total loss"
         );
+    }
+
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[tokio::test]
+    #[serial]
+    async fn automatic_ocr_failure_with_no_native_text_returns_an_error() {
+        const BACKEND_NAME: &str = "pdf-total-loss-ocr-failure";
+        const FAILURE: &str = "deliberate total-loss OCR failure";
+        let _backend = register_failing_ocr_backend(BACKEND_NAME, FAILURE);
+        let content = crate::pdf::render::build_minimal_pdf_with_mediabox(612.0, 792.0);
+        let config = ExtractionConfig {
+            use_cache: false,
+            ocr: Some(crate::core::config::OcrConfig {
+                backend: BACKEND_NAME.to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let error = PdfExtractor::new()
+            .extract_content(&content, "application/pdf", &config)
+            .await
+            .expect_err("a failed automatic OCR fallback with no native text must not report success");
+
+        match error {
+            crate::XbergError::Plugin { plugin_name, message } => {
+                assert_eq!(plugin_name, "ocr");
+                assert!(
+                    message.contains(FAILURE),
+                    "the backend failure must propagate, got: {message}"
+                );
+            }
+            other => panic!("the typed OCR failure must propagate, got: {other}"),
+        }
+    }
+
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[tokio::test]
+    #[serial]
+    async fn automatic_ocr_failure_with_native_text_returns_native_content_and_warning() {
+        use crate::core::config::{OcrConfig, PageConfig};
+
+        const BACKEND_NAME: &str = "pdf-native-fallback-ocr-failure";
+        const FAILURE: &str = "deliberate recoverable OCR failure";
+        const NATIVE_TEXT: &str = "Issue 1281 native text remains on page one";
+        let _backend = register_failing_ocr_backend(BACKEND_NAME, FAILURE);
+        let config = ExtractionConfig {
+            use_cache: false,
+            ocr: Some(OcrConfig {
+                backend: BACKEND_NAME.to_string(),
+                ..Default::default()
+            }),
+            pages: Some(PageConfig {
+                extract_pages: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let internal = PdfExtractor::new()
+            .extract_content(&mixed_native_and_scanned_pdf(), "application/pdf", &config)
+            .await
+            .expect("native text must remain available when targeted OCR fails");
+
+        assert!(
+            internal.content().contains(NATIVE_TEXT),
+            "the native page text must survive: {}",
+            internal.content()
+        );
+        let warnings = internal
+            .processing_warnings
+            .iter()
+            .filter(|warning| warning.source == "ocr")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one OCR fallback warning: {warnings:?}"
+        );
+        assert!(
+            warnings[0].message.contains(FAILURE),
+            "warning must retain the backend failure context: {:?}",
+            warnings[0]
+        );
+
+        let result = crate::extraction::derive::derive_extraction_result(
+            internal,
+            true,
+            crate::core::config::OutputFormat::Plain,
+        );
+        assert_eq!(extraction_method(&result), Some(ExtractionMethod::Native));
+        assert!(!result.metadata.ocr_used);
     }
 
     #[test]
