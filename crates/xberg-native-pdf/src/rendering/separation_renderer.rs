@@ -1550,7 +1550,7 @@ fn execute_separation_operators(
                 current_path.close();
             }
 
-            Operator::Stroke => {
+            Operator::Stroke | Operator::CloseStroke => {
                 apply_separation_clip(
                     &mut pending_clip,
                     &mut clip_stack,
@@ -1559,6 +1559,10 @@ fn execute_separation_operators(
                     base_transform,
                     &gs_stack,
                 );
+                // `s` is `h S` — close before the stroke is taken.
+                if matches!(op, Operator::CloseStroke) {
+                    current_path.close();
+                }
                 if let Some(path) = current_path.finish() {
                     let gs = gs_stack.current();
                     let empty = SeparationColorState::new();
