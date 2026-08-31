@@ -178,6 +178,27 @@ fn enforce_page_limit(content: &[u8], config: &ExtractionConfig) -> Result<()> {
     )?)
 }
 
+/// Whether a failed OCR fallback has left nothing at all to return.
+///
+/// The automatic fallback exists to replace native text that scored below the OCR trigger, so on
+/// failure, returning that native text with a warning is right whenever there is some. When there
+/// is none, "success with empty content" is indistinguishable from a legitimately empty PDF: the
+/// caller cannot tell that OCR was required and produced nothing, because `quality_score` is
+/// documented as not a completeness signal and `ProcessingWarning` is free text.
+///
+/// `run_ocr_pipeline_for_page` already builds a typed error for exactly this case, and its comment
+/// states the intent — "Degrading a per-page failure to a warning must not turn a wholesale OCR
+/// failure into a silently empty document". That guarantee was defeated one frame up, in the
+/// automatic-fallback arms of `extract_core_native`. The `force_ocr` path never had the bug: it
+/// propagates the identical error with `?`.
+///
+/// Whitespace-only counts as nothing: a document yielding `"\n\n  "` is as total a loss as `""`.
+/// ~keep
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn failed_ocr_fallback_is_total_loss(native_text: &str) -> bool {
+    native_text.trim().is_empty()
+}
+
 /// Page count via `xberg_native_pdf`. `None` when it cannot open or count the document,
 /// in which case the caller falls back to [`lopdf_page_count`].
 #[cfg(feature = "pdf")]
@@ -2020,6 +2041,9 @@ impl PdfExtractor {
                                     error = %e,
                                     "OCR fallback failed; using native text extraction result"
                                 );
+                                if failed_ocr_fallback_is_total_loss(&native_text) {
+                                    return Err(e);
+                                }
                                 ocr_fallback_warnings.push(crate::types::ProcessingWarning {
                                     source: std::borrow::Cow::Borrowed("ocr"),
                                     message: std::borrow::Cow::Owned(format!(
@@ -2064,6 +2088,9 @@ impl PdfExtractor {
                                     failing_pages = ?pages,
                                     "Targeted OCR fallback failed; using native text extraction result"
                                 );
+                                if failed_ocr_fallback_is_total_loss(&native_text) {
+                                    return Err(e);
+                                }
                                 ocr_fallback_warnings.push(crate::types::ProcessingWarning {
                                     source: std::borrow::Cow::Borrowed("ocr"),
                                     message: std::borrow::Cow::Owned(format!(
@@ -2081,6 +2108,15 @@ impl PdfExtractor {
                             failing_pages = ?pages,
                             "Targeted OCR requested but no page boundaries available; using native text"
                         );
+                        if failed_ocr_fallback_is_total_loss(&native_text) {
+                            return Err(crate::XbergError::Plugin {
+                                message: format!(
+                                    "Targeted OCR was required for pages {pages:?} but no page boundaries \
+                                     were available, and no native text could be recovered"
+                                ),
+                                plugin_name: "ocr".to_string(),
+                            });
+                        }
                         ocr_fallback_warnings.push(crate::types::ProcessingWarning {
                             source: std::borrow::Cow::Borrowed("ocr"),
                             message: std::borrow::Cow::Owned(format!(
@@ -3692,6 +3728,37 @@ mod tests {
         assert_eq!(extractor.name(), "pdf-extractor");
         assert!(extractor.initialize().is_ok());
         assert!(extractor.shutdown().is_ok());
+    }
+
+    /// The condition under which a failed automatic OCR fallback must propagate instead of
+    /// returning an empty success. Observed on a real scanned document whose pages exceeded
+    /// `security_limits.max_content_size`: extraction returned `ok`, empty content,
+    /// `extraction_method: native`, `ocr_used: false`, `quality_score: 0.0`, and the caller had
+    /// no way to distinguish that from a genuinely empty PDF. ~keep
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn a_failed_ocr_fallback_with_no_native_text_is_a_total_loss() {
+        assert!(
+            failed_ocr_fallback_is_total_loss(""),
+            "no native text at all is a total loss"
+        );
+        assert!(
+            failed_ocr_fallback_is_total_loss("\n\n  \t "),
+            "whitespace-only native text is as total a loss as none: it carries no content"
+        );
+    }
+
+    #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+    #[test]
+    fn a_failed_ocr_fallback_with_native_text_still_returns_that_text() {
+        assert!(
+            !failed_ocr_fallback_is_total_loss("Ordinance No. 2024-17"),
+            "native text below the OCR trigger is still worth returning with a warning"
+        );
+        assert!(
+            !failed_ocr_fallback_is_total_loss("  x  "),
+            "a single meaningful character is not a total loss"
+        );
     }
 
     #[test]
