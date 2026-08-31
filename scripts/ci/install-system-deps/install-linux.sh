@@ -94,7 +94,12 @@ echo "::endgroup::"
 
 echo "::group::Building libheif from source (Noble ships 1.17.6, libheif-sys needs >=1.21)"
 
-LIBHEIF_VERSION="${LIBHEIF_VERSION:-1.23.0}"
+# Pinned to the oldest libheif a supported distro ships (Debian 13 trixie: 1.19.8), not the
+# newest release: binaries built here link libheif dynamically and must load against the
+# host's copy. Building against newer headers would emit references to symbols and struct
+# layouts (heif_security_limits grew in 1.20) that a 1.19 runtime does not provide.
+# Must stay in step with the `v1_*` feature on `xberg-libheif` in crates/xberg/Cargo.toml.
+LIBHEIF_VERSION="${LIBHEIF_VERSION:-1.19.8}"
 LIBHEIF_PREFIX="${LIBHEIF_PREFIX:-/usr/local}"
 
 echo "Removing apt's libheif to prevent shadowing..."

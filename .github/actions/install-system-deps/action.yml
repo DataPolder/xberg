@@ -68,9 +68,9 @@ runs:
           /tmp/libheif-cache/usr/local/lib/pkgconfig/libheif.pc
           /tmp/libheif-cache/usr/local/include/libheif/
           /tmp/libheif-cache/usr/local/share/libheif/
-        key: libheif-linux-${{ runner.arch }}-v1.23.0-cache-v3
+        key: libheif-linux-${{ runner.arch }}-v1.19.8-cache-v4
         restore-keys: |
-          libheif-linux-${{ runner.arch }}-v1.23.0-cache-v3
+          libheif-linux-${{ runner.arch }}-v1.19.8-cache-v4
 
     - name: Restore cached libheif to /usr/local (Linux)
       if: runner.os == 'Linux' && steps.cache-libheif-linux.outputs.cache-hit == 'true'
