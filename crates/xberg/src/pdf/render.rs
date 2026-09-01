@@ -44,8 +44,10 @@ static ENGINE_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 ///
 /// `xberg_native_pdf`'s rasterizer can silently drop a glyph — no font resolves for
 /// the current run (`text_rasterizer.rs`: "No font found for '{}'..."),
-/// parsing an embedded font fails (`page_renderer.rs`: "Failed to parse font
-/// '{}'..."), the CJK predefined-CIDFont substitution face is unavailable, or
+/// parsing an embedded font fails (`page_renderer.rs`'s `load_resources` logs the
+/// sanitized static message "rendering text with fallback font data", carrying the
+/// actual diagnosis in structured tracing fields instead), the CJK predefined-CIDFont
+/// substitution face is unavailable, or
 /// direct CID/CFF glyph-outline rendering errors mid-run. In every one of
 /// those cases `xberg_native_pdf` still returns `Ok(RenderedImage { .. })` — the
 /// page just has a gap where the glyph should be, with the text-space cursor

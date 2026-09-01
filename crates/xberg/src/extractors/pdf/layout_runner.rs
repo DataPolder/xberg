@@ -1671,8 +1671,10 @@ mod tests {
     /// than shared) because `run_layout_for_pdf_pages_async` is private to
     /// this crate and unreachable from that external integration test.
     /// `xberg_native_pdf`'s `PageRenderer::load_resources` requires every `/Font`
-    /// resource to resolve to a dictionary and logs `Failed to parse font ...`
-    /// then drops the glyph rather than failing the page.
+    /// resource to resolve to a dictionary and logs a sanitized static warning
+    /// ("rendering text with fallback font data", with the diagnosis carried in
+    /// structured tracing fields rather than the message -- see `page_renderer.rs`'s
+    /// `load_resources`) then drops the glyph rather than failing the page.
     #[cfg(feature = "tokio-runtime")]
     fn malformed_font_layout_fixture() -> Vec<u8> {
         use lopdf::{Document, Object, Stream, dictionary};
@@ -1788,8 +1790,9 @@ mod tests {
             warning.message
         );
         assert!(
-            warning.message.contains("Failed to parse font"),
-            "warning must carry xberg_native_pdf's own diagnosis of the cause, got: {}",
+            warning.message.contains("rendering text with fallback font data"),
+            "warning must carry xberg_native_pdf's sanitized static message; the actual \
+             diagnosis now lives in structured tracing fields, not the message, got: {}",
             warning.message
         );
 

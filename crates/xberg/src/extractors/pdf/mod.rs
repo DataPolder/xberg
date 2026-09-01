@@ -4205,7 +4205,7 @@ mod tests {
 
     #[tokio::test]
     #[cfg(feature = "pdf")]
-    async fn test_pdf_batch_mode_validates_page_config_disabled() {
+    async fn test_pdf_batch_mode_derives_pages_with_page_config_absent() {
         let extractor = PdfExtractor::new();
         let config = ExtractionConfig::default();
 
@@ -4226,8 +4226,10 @@ mod tests {
                 crate::core::config::OutputFormat::Plain,
             );
             assert!(
-                extraction_result.pages.is_none(),
-                "Pages should not be extracted when pages config is None"
+                extraction_result.pages.is_some(),
+                "Pages should always be derived: the default config leaves annotation extraction \
+                 off, which forces per-page tracking for the annotation fallback regardless of an \
+                 explicit pages config"
             );
         }
     }
@@ -4795,7 +4797,25 @@ mod tests {
     async fn test_mixed_pdf_ocr_survives_full_postprocessing() {
         use crate::core::config::{ChunkingConfig, OcrConfig, PageConfig};
 
-        const OCR_TEXT: &str = "Issue 1281 authoritative OCR replacement on page one.";
+        // Must recover at least MIN_OCR_NATIVE_ALNUM_RETENTION_RATIO (0.5) of page one's 1897
+        // alphanumeric characters, or `accepted_ocr_page_replacements` vetoes the replacement as
+        // destructive (`ocr/scoring.rs`, guard added by 10680fca4e6) and the page silently stays
+        // native. This text carries 1151, a ratio of 0.61. A short marker string cannot exercise
+        // this test's subject at all -- it is rejected before any substitution happens. ~keep
+        const OCR_TEXT: &str = "Issue 1281 authoritative OCR replacement on page one. The Evolution of the Word \
+            Processor. The concept of the word processor predates modern computers and has evolved through several \
+            technological milestones. Pre-Digital Era, nineteenth to early twentieth century. The origins of word \
+            processing can be traced back to the invention of the typewriter in the mid nineteenth century. Patented \
+            in 1868 by Christopher Latham Sholes, the typewriter revolutionized written communication. It enabled \
+            people to produce legible, professional documents far more efficiently than handwriting ever allowed. \
+            During this period the term word processing did not yet exist, but the typewriter laid the groundwork. \
+            Later advances such as carbon paper for duplicates and the electric typewriter introduced by IBM in 1935 \
+            improved speed. Together these refinements steadily increased the convenience and reliability of everyday \
+            document creation. Mechanical composition gave way to electronic storage as magnetic media made revision \
+            practical for the first time. Dedicated word processing machines briefly dominated offices before general \
+            purpose computers absorbed the role. By the late twentieth century the printed page had become an artifact \
+            of software rather than of mechanism. That transition is the through line connecting every milestone \
+            described on the remainder of this page.";
         const RETAINED_PAGE_TWO_MARKER: &str = "Other notable software from this era included WordPerfect";
         let _backend = register_mock_ocr_backend("pdf-extraction-method-mixed", OCR_TEXT);
         let extractor = PdfExtractor::new();
@@ -4847,19 +4867,19 @@ mod tests {
             true,
             crate::core::config::OutputFormat::Markdown,
         );
-        let boundaries = derived
-            .metadata
-            .pages
-            .as_ref()
-            .and_then(|pages| pages.boundaries.as_ref())
-            .expect("mixed OCR metadata must expose remapped boundaries");
+        // Substitution happens inside `extract_content`, not in `run_pipeline`, so the OCR text is
+        // already in place here; the assertions after `run_pipeline` cover the later stages
+        // (chunking, document structure) rather than the substitution itself. The old form of this
+        // check sliced `derived.content` with `metadata.pages.boundaries`, which index the raw
+        // concatenated text and not the rendered string -- see `core::pipeline::features`. ~keep
+        let derived_pages = derived.pages.as_ref().expect("derived extraction must expose pages");
         assert!(
-            derived.content[boundaries[0].byte_start..boundaries[0].byte_end].contains(OCR_TEXT),
-            "page-one metadata boundary must point into the OCR replacement"
+            derived_pages[0].content.contains(OCR_TEXT),
+            "page one must carry the accepted OCR replacement"
         );
         assert!(
-            derived.content[boundaries[1].byte_start..boundaries[1].byte_end].contains(RETAINED_PAGE_TWO_MARKER),
-            "page-two metadata boundary must point into retained native text"
+            derived_pages[1].content.contains(RETAINED_PAGE_TWO_MARKER),
+            "page-two derived content must retain native text"
         );
         assert_occurs_once(&derived.content, OCR_TEXT, "derived plain content");
         assert_occurs_once(

@@ -488,6 +488,12 @@ mod tests {
         assert!(extractor_names.contains(&"csv-extractor".to_string()));
         assert!(extractor_names.contains(&"doctags-extractor".to_string()));
 
+        #[cfg(feature = "sqlite")]
+        {
+            expected_count += 1;
+            assert!(extractor_names.contains(&"sqlite-extractor".to_string()));
+        }
+
         #[cfg(any(feature = "ocr", feature = "ocr-wasm", feature = "ocr-pipeline"))]
         {
             expected_count += 1;
