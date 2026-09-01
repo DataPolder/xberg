@@ -6581,6 +6581,15 @@ impl<'doc> TextExtractor<'doc> {
     /// - process_tj_array_tiebreaker(): WordBoundaryMode::Tiebreaker (default)
     /// - process_tj_array_primary(): WordBoundaryMode::Primary
     fn process_tj_array(&mut self, array: &[TextElement]) -> Result<()> {
+        // A bare `Tj` immediately before this array leaves `self.tj_span_buffer` open: `Tj`
+        // buffers into that field, while `TJ` runs through its own local buffer below and never
+        // reads or clears it. Every other run-closing boundary -- Td, TD, T*, a non-continuing
+        // Tm, BMC/BDC, ' and ", ET -- already flushes it first; TJ was the sole omission. Left
+        // open, the buffer keeps the origin captured at its first `Tj`, so a later `Tj` appends
+        // onto it and the eventual flush emits the combined run at that stale x. The
+        // reading-order sort then splices it in beside whatever sits near that stale position,
+        // scrambling the line (GH#1544). ~keep
+        self.flush_tj_span_buffer()?;
         match self.word_boundary_mode {
             WordBoundaryMode::Tiebreaker => self.process_tj_array_tiebreaker(array),
             WordBoundaryMode::Primary => self.process_tj_array_primary(array),
@@ -9678,6 +9687,38 @@ mod tests {
             text.contains("Hello") && text.contains("World"),
             "Should extract both words, got: {}",
             text
+        );
+    }
+
+    /// GH#1544: a bare `Tj` buffers into `self.tj_span_buffer`, while `TJ` runs through its own
+    /// local buffer and used to leave that field open. A later `Tj` then appended onto the stale
+    /// buffer, and the eventual flush emitted the combined run at the FIRST `Tj`'s origin -- the
+    /// reading-order sort then spliced it in beside whatever sat near that stale x.
+    ///
+    /// Distinct alphabets make the ordering unambiguous: `AA` `BBBBBB` `CC` `DDDDDD` must stay in
+    /// stream order, and `AA`/`CC` must never fuse into `AACC` across the intervening array.
+    ///
+    /// Neutralisation that must break this test: remove the `flush_tj_span_buffer()` call at the
+    /// top of `process_tj_array`.
+    #[test]
+    fn test_bare_tj_run_is_flushed_before_a_following_tj_array() {
+        let mut extractor = TextExtractor::new();
+        extractor.merging_config = SpanMergingConfig::legacy();
+        extractor.add_font("F1".to_string(), create_test_font());
+
+        let stream = b"BT /F1 12 Tf 100 700 Td (AA) Tj [(B)(B)(B)(B)(B)(B)] TJ (CC) Tj 50 0 Td [(D)(D)(D)(D)(D)(D)] TJ ET";
+        let spans = extractor.extract_text_spans(stream).unwrap();
+        let text: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("");
+
+        assert!(
+            !text.contains("AACC"),
+            "the (CC) run was appended onto the stale (AA) buffer across the intervening TJ array, got: {text:?}"
+        );
+        let b_index = text.find("BBBBBB").unwrap_or_else(|| panic!("BBBBBB run missing, got: {text:?}"));
+        let c_index = text.find("CC").unwrap_or_else(|| panic!("CC run missing, got: {text:?}"));
+        assert!(
+            c_index > b_index,
+            "(CC) was drawn after the TJ array between it and the preceding Tj, so it must not sort ahead of it, got: {text:?}"
         );
     }
 
