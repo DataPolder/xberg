@@ -4224,7 +4224,14 @@ jobs:
       matrix:
         include:
           - { os: macos-latest, bottle_tag: arm64_sonoma, install_brew: false }
-          - { os: macos-15-intel, bottle_tag: sequoia, install_brew: false }
+          # ~keep The Intel macOS `sequoia` bottle is deliberately absent, not forgotten.
+          # From 2026-09-01 Homebrew serves no `openssl@3` bottle for x86_64 macOS after
+          # Apple dropped Intel in macOS 27, so this leg cannot build and no change here
+          # can fix it. Unlike some sibling repos, a failed bottle leg does NOT revert this
+          # release to a draft -- `publish-homebrew-bottles` tolerates a failed matrix by
+          # design and `release-finalize` does not gate on it -- so what the entry actually
+          # costs is a permanently red job and a bottle that never appears. Intel macOS
+          # falls back to a source build, which is the same outcome the entry produced.
           - { os: ubuntu-latest, bottle_tag: x86_64_linux, install_brew: true }
           - { os: ubuntu-24.04-arm, bottle_tag: arm64_linux, install_brew: true }
     steps:
