@@ -125,11 +125,11 @@ fn restore_builtin_summarization() {
 /// Carries `retry_while_registry_in_use`'s own cfg: without it the constants outlive the only
 /// function that reads them on any feature set that compiles it out, and `-D warnings` turns
 /// that into a hard error on the narrow no-ORT legs while every wide-feature leg stays green. ~keep
-#[cfg(all(feature = "quality", feature = "summarization"))]
+#[cfg(any(all(feature = "quality", feature = "summarization"), feature = "tokio-runtime"))]
 const REGISTRY_MUTATION_ATTEMPTS: usize = 100;
 
 /// Delay between attempts, long enough for a concurrent extraction to drop its snapshot lease.
-#[cfg(all(feature = "quality", feature = "summarization"))]
+#[cfg(any(all(feature = "quality", feature = "summarization"), feature = "tokio-runtime"))]
 const REGISTRY_MUTATION_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
 
 /// Retry a post-processor lifecycle mutation while the registry reports it is in use.
@@ -139,7 +139,7 @@ const REGISTRY_MUTATION_RETRY_DELAY: std::time::Duration = std::time::Duration::
 /// `.unwrap()`ing it asserts an exclusivity this binary cannot provide. `#[serial]` only orders a
 /// test against the crate's other `#[serial]` tests, while dozens of non-serial tests here run
 /// real extractions and hold that lease. Honour the contract instead of racing it. ~keep
-#[cfg(all(feature = "quality", feature = "summarization"))]
+#[cfg(any(all(feature = "quality", feature = "summarization"), feature = "tokio-runtime"))]
 fn retry_while_registry_in_use<T>(mut mutation: impl FnMut() -> crate::Result<T>) -> T {
     for _ in 0..REGISTRY_MUTATION_ATTEMPTS {
         match mutation() {
@@ -430,12 +430,19 @@ fn reentrant_lifecycle_mutation_returns_in_use_error_without_deadlock() {
     let thread_error = Arc::clone(&mutation_error);
     let (result_sender, result_receiver) = mpsc::channel();
     let pipeline_thread = std::thread::spawn(move || {
-        crate::plugins::register_post_processor(Arc::new(HandoffRaceProcessor {
-            shutdown: Arc::new(AtomicBool::new(false)),
-            executed_after_shutdown: Arc::new(AtomicBool::new(false)),
-            mutation_error: Some(thread_error),
-        }))
-        .unwrap();
+        // Setup, not the behaviour under test: this registration races the lease held by every
+        // non-serial extraction test, and the contract for that failure is to retry. Unwrapping
+        // it here panics the spawned thread, which drops the sender and surfaces as the
+        // `recv_timeout` "must not deadlock" failure below -- masking a retryable setup error as
+        // a deadlock. The assertion that matters is on `mutation_error`, captured mid-pipeline
+        // and left untouched by this. ~keep
+        retry_while_registry_in_use(|| {
+            crate::plugins::register_post_processor(Arc::new(HandoffRaceProcessor {
+                shutdown: Arc::new(AtomicBool::new(false)),
+                executed_after_shutdown: Arc::new(AtomicBool::new(false)),
+                mutation_error: Some(Arc::clone(&thread_error)),
+            }))
+        });
         let pipeline_result = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -451,7 +458,7 @@ fn reentrant_lifecycle_mutation_returns_in_use_error_without_deadlock() {
         .recv_timeout(Duration::from_millis(250))
         .expect("reentrant lifecycle mutation must not deadlock the pipeline");
     pipeline_thread.join().unwrap();
-    crate::plugins::unregister_post_processor("handoff-race").unwrap();
+    retry_while_registry_in_use(|| crate::plugins::unregister_post_processor("handoff-race"));
 
     pipeline_result.unwrap();
     let error = mutation_error.lock().unwrap().clone().unwrap();
