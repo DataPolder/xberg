@@ -2,7 +2,8 @@
 
 use super::NativeDocument;
 use super::span_geometry::{
-    has_same_rotation, is_horizontal_ltr, is_ltr_writing_mode, upright_advance_extent, upright_cross_extent,
+    has_same_rotation, is_horizontal_ltr, is_ltr_writing_mode, is_unrotated, upright_advance_extent,
+    upright_cross_extent,
 };
 use crate::core::config::{ExtractionConfig, PageConfig};
 use crate::pdf::error::{PdfError, Result};
@@ -1333,13 +1334,54 @@ pub(crate) fn baseline_is_inside_page_margins(
     baseline_y >= bottom_cutoff && baseline_y <= top_cutoff
 }
 
+/// `(low, high)` of a span's extent along **page** y, honouring its rotation.
+///
+/// A span's `bbox.width`/`bbox.height` are flattened onto the run's own axis
+/// (see `span_geometry`), so for a rotated run the page-y extent is driven by
+/// the advance (`width`), not the font height: a 90-degree run advances along
+/// page-y. The `span_geometry` helpers work in the span's *upright* frame,
+/// where the cross axis maps to page-x for such a run, so they are the wrong
+/// tool for a page-space margin test. ~keep
+fn span_page_y_extent(span: &xberg_native_pdf::layout::TextSpan) -> (f32, f32) {
+    let (sin, cos) = span.rotation_degrees.to_radians().sin_cos();
+    let origin = span.bbox.y;
+    let advance = span.bbox.width * sin;
+    let cross = span.bbox.height * cos;
+    let corners = [origin, origin + advance, origin + cross, origin + advance + cross];
+    corners.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), corner| {
+        (low.min(*corner), high.max(*corner))
+    })
+}
+
+/// Whether a span escapes the header/footer furniture bands.
+///
+/// Unrotated spans keep the original single-baseline test byte-for-byte: their
+/// origin y is representative of a shallow horizontal line of text. A rotated
+/// run's origin is not — a side stamp anchored in the footer band can extend
+/// most of the way up the page, and testing only its origin deleted the whole
+/// run as furniture (`rotated_text_repair.rs`). Its midpoint is the equivalent
+/// representative interior point, so a stamp genuinely confined to the band is
+/// still dropped. ~keep
+fn span_is_inside_page_margins(
+    span: &xberg_native_pdf::layout::TextSpan,
+    page_bottom: f32,
+    page_top: f32,
+    margins: PageMarginFractions,
+) -> bool {
+    if is_unrotated(span) {
+        return baseline_is_inside_page_margins(span.bbox.y, page_bottom, page_top, margins);
+    }
+    let (low, high) = span_page_y_extent(span);
+    baseline_is_inside_page_margins((low + high) / 2.0, page_bottom, page_top, margins)
+}
+
 fn retain_spans_inside_page_margins(
     spans: &mut Vec<xberg_native_pdf::layout::TextSpan>,
     page_bottom: f32,
     page_top: f32,
     margins: PageMarginFractions,
 ) {
-    spans.retain(|span| baseline_is_inside_page_margins(span.bbox.y, page_bottom, page_top, margins));
+    spans.retain(|span| span_is_inside_page_margins(span, page_bottom, page_top, margins));
 }
 
 /// Extract text from one page with column-aware ordering and guarded repairs.
@@ -1470,6 +1512,29 @@ mod tests {
         assert_eq!(
             spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
             ["top boundary", "body", "bottom boundary"]
+        );
+    }
+
+    /// A 90-degree side stamp anchored in the footer band must survive: its
+    /// origin sits inside the band, but a rotated run advances along page-y, so
+    /// the stamp reaches far into the body. Testing only `bbox.y` deleted the
+    /// whole run (`rotated_text_repair.rs`'s side-stamp assertion). The second
+    /// span is the control: rotated too, but genuinely confined to the band, so
+    /// the filter must still drop it. ~keep
+    #[test]
+    fn should_keep_a_rotated_side_stamp_that_reaches_out_of_the_footer_band() {
+        let mut stamp = span_with_width("side stamp", 60.0, 18.0, 112.0, 11.0, 9.0);
+        stamp.rotation_degrees = 90.0;
+        let mut confined = span_with_width("rotated footer", 300.0, 18.0, 12.0, 11.0, 9.0);
+        confined.rotation_degrees = 90.0;
+
+        let mut spans = vec![stamp, confined];
+        retain_spans_inside_page_margins(&mut spans, 0.0, 792.0, PageMarginFractions::default());
+
+        assert_eq!(
+            spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
+            ["side stamp"],
+            "a rotated run reaching into the body must survive while one confined to the band is dropped"
         );
     }
 
@@ -2483,6 +2548,435 @@ mod tests {
         assert_eq!(
             spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>(),
             original.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+    }
+
+    /// GH#1545 diagnostic (NOT a regression guard — both possible outcomes
+    /// below are informative, and this test is designed to make either one
+    /// visible rather than to encode which is "correct").
+    ///
+    /// Two mechanically distinct explanations were proposed for why a table
+    /// beside a prose column is emitted in raw full-width Y order instead of
+    /// table-then-prose:
+    ///
+    /// (A) `detect_split_x` returns a confident but wrong compromise value
+    ///     (a median over bimodal per-line gap evidence), which is then used
+    ///     by `emit_band_order`/`reorder_band_columns` to weld spans from two
+    ///     different table panels together across the wrong x.
+    /// (B) every existing reorder gate correctly declines: the table side of
+    ///     any split partitions into short label/value cells that
+    ///     `xberg_native_pdf::layout::classify_region` reads as
+    ///     `RegionClass::Table` or `RegionClass::Form`, `is_reorderable_column`
+    ///     rejects it, `reorder_band_columns` returns `None` for every band,
+    ///     `emit_band_order` returns `None`, and `reorder_dense_two_column_page`
+    ///     returns `false` — leaving the page in raw top-to-bottom order
+    ///     because nothing in this pipeline represents "table beside prose".
+    ///
+    /// Geometry is transcribed verbatim, one span per `<word>`, from
+    /// `pdftotext -bbox`'s output on page 1 of the GH#1545 repro PDF (see
+    /// `scratchpad/bugs/1545/{repro.pdf,out.xml}`): `x = xMin`,
+    /// `width = xMax - xMin`, `height = yMax - yMin`. `pdftotext -bbox` is
+    /// top-left-origin/y-down; this crate's `Rect`/`TextSpan::bbox` is
+    /// bottom-left-origin/y-up (see `group_into_lines`'s descending-`y`
+    /// top-to-bottom sort, and every `y` in the `dense_two_column_*` fixtures
+    /// above decreasing top-to-bottom on the page), so `y = PAGE_HEIGHT -
+    /// yMin`. No position is invented and no word's measured gap is
+    /// pre-merged into a wider span — if `xberg_native_pdf`'s own glyph-to-
+    /// span coalescing fuses adjacent words in production, that fusion
+    /// happens upstream of this function's input and is out of scope here.
+    #[test]
+    #[expect(clippy::too_many_lines, reason = "one span literal per pdftotext word, transcribed verbatim for fidelity")]
+    #[expect(clippy::print_stderr, reason = "diagnostic test reports its A/B outcome via eprintln for GH#1545 triage")]
+    fn gh1545_diagnostic_reports_split_and_reorder_outcome() {
+        const PAGE_WIDTH: f32 = 595.0;
+        // The table's rightmost measured value column ends at x=285.622; the
+        // prose column starts at x=303.600. 295.0 is the midpoint of that
+        // real gutter — the split a correct "table beside prose" reorder
+        // would have to use, independent of whatever `detect_split_x` finds. ~keep
+        const IDEAL_TABLE_PROSE_SPLIT_X: f32 = 295.0;
+
+        #[rustfmt::skip]
+        let mut spans = vec![
+            span_with_width("Table", 47.700, 735.026, 17.507, 6.475, 6.475),
+            span_with_width("1", 67.153, 735.026, 3.892, 6.475, 6.475),
+            span_with_width("Sample", 72.991, 735.026, 23.730, 6.475, 6.475),
+            span_with_width("characteristics", 98.667, 735.026, 44.730, 6.475, 6.475),
+            span_with_width("of", 145.343, 735.026, 5.838, 6.475, 6.475),
+            span_with_width("the", 153.127, 735.026, 9.730, 6.475, 6.475),
+            span_with_width("Northfield", 164.803, 735.026, 29.953, 6.475, 6.475),
+            span_with_width("and", 196.702, 735.026, 11.676, 6.475, 6.475),
+            span_with_width("Eastgate", 210.324, 735.026, 27.629, 6.475, 6.475),
+            span_with_width("cohorts.", 239.899, 735.026, 24.899, 6.475, 6.475),
+            span_with_width("Sex", 47.700, 718.926, 12.061, 6.475, 6.475),
+            span_with_width("Female", 47.700, 710.876, 23.338, 6.475, 6.475),
+            span_with_width("Male", 47.700, 702.826, 15.169, 6.475, 6.475),
+            span_with_width("Age", 47.700, 694.776, 12.453, 6.475, 6.475),
+            span_with_width("18-24", 62.099, 694.776, 17.899, 6.475, 6.475),
+            span_with_width("25-34", 47.700, 686.726, 17.899, 6.475, 6.475),
+            span_with_width("35-44", 47.700, 678.676, 17.899, 6.475, 6.475),
+            span_with_width("45-54", 47.700, 670.626, 17.899, 6.475, 6.475),
+            span_with_width("55-64", 47.700, 662.576, 17.899, 6.475, 6.475),
+            span_with_width("Ethnicity", 47.700, 654.526, 26.453, 6.475, 6.475),
+            span_with_width("Group", 47.700, 646.476, 19.453, 6.475, 6.475),
+            span_with_width("one", 69.099, 646.476, 11.676, 6.475, 6.475),
+            span_with_width("Group", 47.700, 638.426, 19.453, 6.475, 6.475),
+            span_with_width("two", 69.099, 638.426, 10.892, 6.475, 6.475),
+            span_with_width("Group", 47.700, 630.376, 19.453, 6.475, 6.475),
+            span_with_width("three", 69.099, 630.376, 15.953, 6.475, 6.475),
+            span_with_width("Group", 47.700, 622.326, 19.453, 6.475, 6.475),
+            span_with_width("four", 69.099, 622.326, 12.061, 6.475, 6.475),
+            span_with_width("Group", 47.700, 614.276, 19.453, 6.475, 6.475),
+            span_with_width("five", 69.099, 614.276, 10.892, 6.475, 6.475),
+            span_with_width("Living", 47.700, 606.226, 18.284, 6.475, 6.475),
+            span_with_width("location", 67.930, 606.226, 24.122, 6.475, 6.475),
+            span_with_width("City", 47.700, 598.176, 12.054, 6.475, 6.475),
+            span_with_width("Suburb", 47.700, 590.126, 22.568, 6.475, 6.475),
+            span_with_width("Town", 47.700, 582.076, 17.115, 6.475, 6.475),
+            span_with_width("Rural", 47.700, 574.026, 16.723, 6.475, 6.475),
+            span_with_width("Highest", 47.700, 565.976, 23.730, 6.475, 6.475),
+            span_with_width("education", 73.376, 565.976, 30.352, 6.475, 6.475),
+            span_with_width("No", 47.700, 557.926, 8.946, 6.475, 6.475),
+            span_with_width("qualifications", 58.592, 557.926, 40.460, 6.475, 6.475),
+            span_with_width("Secondary", 47.700, 549.876, 33.460, 6.475, 6.475),
+            span_with_width("school", 83.106, 549.876, 20.230, 6.475, 6.475),
+            span_with_width("Diploma", 47.700, 541.826, 25.669, 6.475, 6.475),
+            span_with_width("Undergraduate", 47.700, 533.776, 46.690, 6.475, 6.475),
+            span_with_width("degree", 96.336, 533.776, 21.791, 6.475, 6.475),
+            span_with_width("Postgraduate", 47.700, 525.726, 41.636, 6.475, 6.475),
+            span_with_width("degree", 91.282, 525.726, 21.791, 6.475, 6.475),
+            span_with_width("Employment", 47.700, 517.676, 38.899, 6.475, 6.475),
+            span_with_width("status", 88.545, 517.676, 18.676, 6.475, 6.475),
+            span_with_width("Full-time", 47.700, 509.626, 26.831, 6.475, 6.475),
+            span_with_width("employed", 76.477, 509.626, 30.345, 6.475, 6.475),
+            span_with_width("Part-time", 47.700, 501.576, 28.392, 6.475, 6.475),
+            span_with_width("employed", 78.038, 501.576, 30.345, 6.475, 6.475),
+            span_with_width("Retired", 47.700, 493.526, 22.561, 6.475, 6.475),
+            span_with_width("Not", 47.700, 485.476, 10.892, 6.475, 6.475),
+            span_with_width("employed", 60.538, 485.476, 30.345, 6.475, 6.475),
+            span_with_width("%", 148.100, 718.926, 6.223, 6.475, 6.475),
+            span_with_width("Sex", 165.000, 718.926, 12.061, 6.475, 6.475),
+            span_with_width("51.5", 148.100, 710.876, 13.622, 6.475, 6.475),
+            span_with_width("Female", 165.000, 710.876, 23.338, 6.475, 6.475),
+            span_with_width("48.2", 148.100, 702.826, 13.622, 6.475, 6.475),
+            span_with_width("Male", 165.000, 702.826, 15.169, 6.475, 6.475),
+            span_with_width("11.1", 148.100, 694.776, 13.622, 6.475, 6.475),
+            span_with_width("Age", 165.000, 694.776, 12.453, 6.475, 6.475),
+            span_with_width("18-24", 179.399, 694.776, 17.899, 6.475, 6.475),
+            span_with_width("19.2", 148.100, 686.726, 13.622, 6.475, 6.475),
+            span_with_width("25-34", 165.000, 686.726, 17.899, 6.475, 6.475),
+            span_with_width("20.6", 148.100, 678.676, 13.622, 6.475, 6.475),
+            span_with_width("35-44", 165.000, 678.676, 17.899, 6.475, 6.475),
+            span_with_width("15.9", 148.100, 670.626, 13.622, 6.475, 6.475),
+            span_with_width("45-54", 165.000, 670.626, 17.899, 6.475, 6.475),
+            span_with_width("21.0", 148.100, 662.576, 13.622, 6.475, 6.475),
+            span_with_width("55-64", 165.000, 662.576, 17.899, 6.475, 6.475),
+            span_with_width("%", 272.000, 718.926, 6.223, 6.475, 6.475),
+            span_with_width("51.7", 272.000, 710.876, 13.622, 6.475, 6.475),
+            span_with_width("48.3", 272.000, 702.826, 13.622, 6.475, 6.475),
+            span_with_width("12.1", 272.000, 694.776, 13.622, 6.475, 6.475),
+            span_with_width("18.8", 272.000, 686.726, 13.622, 6.475, 6.475),
+            span_with_width("17.4", 272.000, 678.676, 13.622, 6.475, 6.475),
+            span_with_width("20.2", 272.000, 670.626, 13.622, 6.475, 6.475),
+            span_with_width("17.2", 272.000, 662.576, 13.622, 6.475, 6.475),
+            span_with_width("17.3", 148.100, 646.476, 13.622, 6.475, 6.475),
+            span_with_width("Group", 165.000, 646.476, 19.453, 6.475, 6.475),
+            span_with_width("one", 186.399, 646.476, 11.676, 6.475, 6.475),
+            span_with_width("1.9", 148.100, 638.426, 9.730, 6.475, 6.475),
+            span_with_width("Group", 165.000, 638.426, 19.453, 6.475, 6.475),
+            span_with_width("two", 186.399, 638.426, 10.892, 6.475, 6.475),
+            span_with_width("0.3", 148.100, 630.376, 9.730, 6.475, 6.475),
+            span_with_width("Group", 165.000, 630.376, 19.453, 6.475, 6.475),
+            span_with_width("three", 186.399, 630.376, 15.953, 6.475, 6.475),
+            span_with_width("0.4", 148.100, 622.326, 9.730, 6.475, 6.475),
+            span_with_width("Group", 165.000, 622.326, 19.453, 6.475, 6.475),
+            span_with_width("four", 186.399, 622.326, 12.061, 6.475, 6.475),
+            span_with_width("3.2", 148.100, 614.276, 9.730, 6.475, 6.475),
+            span_with_width("Group", 165.000, 614.276, 19.453, 6.475, 6.475),
+            span_with_width("five", 186.399, 614.276, 10.892, 6.475, 6.475),
+            span_with_width("14.2", 272.000, 646.476, 13.622, 6.475, 6.475),
+            span_with_width("2.4", 272.000, 638.426, 9.730, 6.475, 6.475),
+            span_with_width("0.6", 272.000, 630.376, 9.730, 6.475, 6.475),
+            span_with_width("1.1", 272.000, 622.326, 9.730, 6.475, 6.475),
+            span_with_width("2.8", 272.000, 614.276, 9.730, 6.475, 6.475),
+            span_with_width("24.5", 148.100, 598.176, 13.622, 6.475, 6.475),
+            span_with_width("City", 165.000, 598.176, 12.054, 6.475, 6.475),
+            span_with_width("18.1", 148.100, 590.126, 13.622, 6.475, 6.475),
+            span_with_width("Suburb", 165.000, 590.126, 22.568, 6.475, 6.475),
+            span_with_width("26.8", 148.100, 582.076, 13.622, 6.475, 6.475),
+            span_with_width("Town", 165.000, 582.076, 17.115, 6.475, 6.475),
+            span_with_width("28.8", 148.100, 574.026, 13.622, 6.475, 6.475),
+            span_with_width("Rural", 165.000, 574.026, 16.723, 6.475, 6.475),
+            span_with_width("26.1", 272.000, 598.176, 13.622, 6.475, 6.475),
+            span_with_width("19.4", 272.000, 590.126, 13.622, 6.475, 6.475),
+            span_with_width("24.9", 272.000, 582.076, 13.622, 6.475, 6.475),
+            span_with_width("29.6", 272.000, 574.026, 13.622, 6.475, 6.475),
+            span_with_width("1.2", 148.100, 557.926, 9.730, 6.475, 6.475),
+            span_with_width("No", 165.000, 557.926, 8.946, 6.475, 6.475),
+            span_with_width("qualifications", 175.892, 557.926, 40.460, 6.475, 6.475),
+            span_with_width("6.4", 148.100, 549.876, 9.730, 6.475, 6.475),
+            span_with_width("Secondary", 165.000, 549.876, 33.460, 6.475, 6.475),
+            span_with_width("school", 200.406, 549.876, 20.230, 6.475, 6.475),
+            span_with_width("22.5", 148.100, 541.826, 13.622, 6.475, 6.475),
+            span_with_width("Diploma", 165.000, 541.826, 25.669, 6.475, 6.475),
+            span_with_width("19.8", 148.100, 533.776, 13.622, 6.475, 6.475),
+            span_with_width("Undergraduate", 165.000, 533.776, 46.690, 6.475, 6.475),
+            span_with_width("degree", 213.636, 533.776, 21.791, 6.475, 6.475),
+            span_with_width("27.9", 148.100, 525.726, 13.622, 6.475, 6.475),
+            span_with_width("Postgraduate", 165.000, 525.726, 41.636, 6.475, 6.475),
+            span_with_width("degree", 208.582, 525.726, 21.791, 6.475, 6.475),
+            span_with_width("1.8", 272.000, 557.926, 9.730, 6.475, 6.475),
+            span_with_width("7.1", 272.000, 549.876, 9.730, 6.475, 6.475),
+            span_with_width("21.8", 272.000, 541.826, 13.622, 6.475, 6.475),
+            span_with_width("20.4", 272.000, 533.776, 13.622, 6.475, 6.475),
+            span_with_width("26.3", 272.000, 525.726, 13.622, 6.475, 6.475),
+            span_with_width("43.3", 148.100, 509.626, 13.622, 6.475, 6.475),
+            span_with_width("Full-time", 165.000, 509.626, 26.831, 6.475, 6.475),
+            span_with_width("employed", 193.777, 509.626, 30.345, 6.475, 6.475),
+            span_with_width("15.7", 148.100, 501.576, 13.622, 6.475, 6.475),
+            span_with_width("Part-time", 165.000, 501.576, 28.392, 6.475, 6.475),
+            span_with_width("employed", 195.338, 501.576, 30.345, 6.475, 6.475),
+            span_with_width("15.0", 148.100, 493.526, 13.622, 6.475, 6.475),
+            span_with_width("Retired", 165.000, 493.526, 22.561, 6.475, 6.475),
+            span_with_width("8.4", 148.100, 485.476, 9.730, 6.475, 6.475),
+            span_with_width("Not", 165.000, 485.476, 10.892, 6.475, 6.475),
+            span_with_width("employed", 177.838, 485.476, 30.345, 6.475, 6.475),
+            span_with_width("41.9", 272.000, 509.626, 13.622, 6.475, 6.475),
+            span_with_width("16.4", 272.000, 501.576, 13.622, 6.475, 6.475),
+            span_with_width("14.6", 272.000, 493.526, 13.622, 6.475, 6.475),
+            span_with_width("9.2", 272.000, 485.476, 9.730, 6.475, 6.475),
+            span_with_width("Participants", 303.600, 736.103, 44.404, 7.862, 7.862),
+            span_with_width("in", 350.367, 736.103, 6.613, 7.862, 7.862),
+            span_with_width("the", 359.343, 736.103, 11.815, 7.862, 7.862),
+            span_with_width("Northfield", 373.521, 736.103, 36.371, 7.862, 7.862),
+            span_with_width("cohort", 412.255, 736.103, 23.622, 7.862, 7.862),
+            span_with_width("who", 438.240, 736.103, 15.589, 7.862, 7.862),
+            span_with_width("reported", 456.192, 736.103, 31.654, 7.862, 7.862),
+            span_with_width("low", 490.209, 736.103, 12.750, 7.862, 7.862),
+            span_with_width("confidence", 303.600, 725.653, 41.106, 7.863, 7.863),
+            span_with_width("in", 347.069, 725.653, 6.613, 7.863, 7.863),
+            span_with_width("the", 356.045, 725.653, 11.815, 7.863, 7.863),
+            span_with_width("programme", 370.223, 725.653, 43.452, 7.863, 7.863),
+            span_with_width("were,", 416.038, 725.653, 20.782, 7.863, 7.863),
+            span_with_width("compared", 439.183, 725.653, 37.791, 7.863, 7.863),
+            span_with_width("with", 479.337, 725.653, 15.113, 7.863, 7.863),
+            span_with_width("those", 496.813, 725.653, 20.791, 7.863, 7.863),
+            span_with_width("who", 303.600, 715.203, 15.589, 7.863, 7.863),
+            span_with_width("reported", 321.552, 715.203, 31.654, 7.863, 7.863),
+            span_with_width("high", 355.569, 715.203, 16.065, 7.863, 7.863),
+            span_with_width("confidence,", 373.997, 715.203, 43.469, 7.863, 7.863),
+            span_with_width("more", 419.829, 715.203, 19.363, 7.863, 7.863),
+            span_with_width("likely", 441.555, 715.203, 18.887, 7.863, 7.863),
+            span_with_width("to", 462.805, 715.203, 7.089, 7.863, 7.863),
+            span_with_width("be", 472.257, 715.203, 9.452, 7.863, 7.863),
+            span_with_width("aged", 484.072, 715.203, 18.904, 7.863, 7.863),
+            span_with_width("35", 505.339, 715.203, 9.452, 7.863, 7.863),
+            span_with_width("to", 303.600, 704.753, 7.089, 7.862, 7.862),
+            span_with_width("44", 313.052, 704.753, 9.452, 7.862, 7.862),
+            span_with_width("years,", 324.867, 704.753, 23.145, 7.862, 7.862),
+            span_with_width("to", 350.375, 704.753, 7.089, 7.862, 7.862),
+            span_with_width("live", 359.827, 704.753, 12.750, 7.862, 7.862),
+            span_with_width("in", 374.940, 704.753, 6.613, 7.862, 7.862),
+            span_with_width("a", 383.916, 704.753, 4.726, 7.862, 7.862),
+            span_with_width("city,", 391.005, 704.753, 15.113, 7.862, 7.862),
+            span_with_width("to", 408.481, 704.753, 7.089, 7.862, 7.862),
+            span_with_width("hold", 417.933, 704.753, 16.065, 7.862, 7.862),
+            span_with_width("no", 436.361, 704.753, 9.452, 7.862, 7.862),
+            span_with_width("post-school", 448.176, 704.753, 43.461, 7.862, 7.862),
+            span_with_width("qualification,", 303.600, 694.303, 47.243, 7.863, 7.863),
+            span_with_width("and", 353.206, 694.303, 14.178, 7.863, 7.863),
+            span_with_width("to", 369.747, 694.303, 7.089, 7.863, 7.863),
+            span_with_width("report", 379.199, 694.303, 22.202, 7.863, 7.863),
+            span_with_width("that", 403.764, 694.303, 14.178, 7.863, 7.863),
+            span_with_width("they", 420.305, 694.303, 16.065, 7.863, 7.863),
+            span_with_width("had", 438.733, 694.303, 14.178, 7.863, 7.863),
+            span_with_width("not", 455.274, 694.303, 11.815, 7.863, 7.863),
+            span_with_width("voted", 469.452, 694.303, 20.791, 7.863, 7.863),
+            span_with_width("at", 492.606, 694.303, 7.089, 7.863, 7.863),
+            span_with_width("the", 303.600, 683.853, 11.815, 7.863, 7.863),
+            span_with_width("most", 317.778, 683.853, 18.419, 7.863, 7.863),
+            span_with_width("recent", 338.560, 683.853, 23.622, 7.863, 7.863),
+            span_with_width("municipal", 364.545, 683.853, 35.895, 7.863, 7.863),
+            span_with_width("election.", 402.803, 683.853, 31.654, 7.863, 7.863),
+            span_with_width("The", 436.820, 683.853, 14.646, 7.863, 7.863),
+            span_with_width("same", 453.829, 683.853, 20.782, 7.863, 7.863),
+            span_with_width("pattern", 476.974, 683.853, 26.461, 7.863, 7.863),
+            span_with_width("was", 505.798, 683.853, 15.113, 7.863, 7.863),
+            span_with_width("not", 303.600, 673.403, 11.815, 7.862, 7.862),
+            span_with_width("observed", 317.778, 673.403, 34.960, 7.862, 7.862),
+            span_with_width("in", 355.101, 673.403, 6.613, 7.862, 7.862),
+            span_with_width("the", 364.077, 673.403, 11.815, 7.862, 7.862),
+            span_with_width("Eastgate", 378.255, 673.403, 33.550, 7.862, 7.862),
+            span_with_width("cohort,", 414.168, 673.403, 25.984, 7.862, 7.862),
+            span_with_width("where", 442.515, 673.403, 23.146, 7.862, 7.862),
+            span_with_width("the", 468.024, 673.403, 11.815, 7.862, 7.862),
+            span_with_width("strongest", 482.202, 673.403, 34.961, 7.862, 7.862),
+            span_with_width("association", 303.600, 662.953, 42.517, 7.863, 7.863),
+            span_with_width("was", 348.480, 662.953, 15.113, 7.863, 7.863),
+            span_with_width("with", 365.956, 662.953, 15.113, 7.863, 7.863),
+            span_with_width("employment", 383.432, 662.953, 46.291, 7.863, 7.863),
+            span_with_width("status", 432.086, 662.953, 22.678, 7.863, 7.863),
+            span_with_width("rather", 457.127, 662.953, 22.202, 7.863, 7.863),
+            span_with_width("than", 481.692, 662.953, 16.541, 7.863, 7.863),
+            span_with_width("with", 500.596, 662.953, 15.113, 7.863, 7.863),
+            span_with_width("age", 303.600, 652.503, 14.178, 7.862, 7.862),
+            span_with_width("or", 320.141, 652.503, 7.556, 7.862, 7.862),
+            span_with_width("education.", 330.060, 652.503, 39.219, 7.862, 7.862),
+            span_with_width("Full", 371.642, 652.503, 13.694, 7.862, 7.862),
+            span_with_width("model", 387.699, 652.503, 23.145, 7.862, 7.862),
+            span_with_width("output", 413.207, 652.503, 23.630, 7.862, 7.862),
+            span_with_width("for", 439.200, 652.503, 9.920, 7.862, 7.862),
+            span_with_width("both", 451.483, 652.503, 16.541, 7.862, 7.862),
+            span_with_width("cohorts", 470.387, 652.503, 27.872, 7.862, 7.862),
+            span_with_width("is", 500.622, 652.503, 6.137, 7.862, 7.862),
+            span_with_width("given", 303.600, 642.053, 20.315, 7.863, 7.863),
+            span_with_width("in", 326.278, 642.053, 6.613, 7.863, 7.863),
+            span_with_width("Tables", 335.254, 642.053, 25.508, 7.863, 7.863),
+            span_with_width("2", 363.125, 642.053, 4.726, 7.863, 7.863),
+            span_with_width("and", 370.214, 642.053, 14.178, 7.863, 7.863),
+            span_with_width("3.", 386.755, 642.053, 7.089, 7.863, 7.863),
+            span_with_width("Percentages", 396.207, 642.053, 47.719, 7.863, 7.863),
+            span_with_width("in", 446.289, 642.053, 6.613, 7.863, 7.863),
+            span_with_width("Table", 455.265, 642.053, 21.259, 7.863, 7.863),
+            span_with_width("1", 478.887, 642.053, 4.726, 7.863, 7.863),
+            span_with_width("are", 485.976, 642.053, 12.283, 7.863, 7.863),
+            span_with_width("column", 303.600, 631.603, 27.395, 7.863, 7.863),
+            span_with_width("percentages", 333.358, 631.603, 46.776, 7.863, 7.863),
+            span_with_width("and", 382.497, 631.603, 14.178, 7.863, 7.863),
+            span_with_width("may", 399.038, 631.603, 16.056, 7.863, 7.863),
+            span_with_width("not", 417.457, 631.603, 11.815, 7.863, 7.863),
+            span_with_width("sum", 431.635, 631.603, 16.057, 7.863, 7.863),
+            span_with_width("to", 450.055, 631.603, 7.089, 7.863, 7.863),
+            span_with_width("one", 459.507, 631.603, 14.178, 7.863, 7.863),
+            span_with_width("hundred", 476.048, 631.603, 31.187, 7.863, 7.863),
+            span_with_width("where", 509.598, 631.603, 23.146, 7.863, 7.863),
+            span_with_width("a", 303.600, 621.153, 4.726, 7.862, 7.862),
+            span_with_width("category", 310.689, 621.153, 32.597, 7.862, 7.862),
+            span_with_width("was", 345.649, 621.153, 15.113, 7.862, 7.862),
+            span_with_width("left", 363.125, 621.153, 11.339, 7.862, 7.862),
+            span_with_width("blank", 376.827, 621.153, 20.315, 7.862, 7.862),
+            span_with_width("by", 399.505, 621.153, 8.976, 7.862, 7.862),
+            span_with_width("the", 410.844, 621.153, 11.815, 7.862, 7.862),
+            span_with_width("respondent.", 425.022, 621.153, 44.889, 7.862, 7.862),
+            span_with_width("Weighting", 472.274, 621.153, 37.791, 7.862, 7.862),
+            span_with_width("was", 303.600, 610.703, 15.113, 7.863, 7.863),
+            span_with_width("applied", 321.076, 610.703, 27.404, 7.863, 7.863),
+            span_with_width("to", 350.843, 610.703, 7.089, 7.863, 7.863),
+            span_with_width("the", 360.295, 610.703, 11.815, 7.863, 7.863),
+            span_with_width("age", 374.473, 610.703, 14.178, 7.863, 7.863),
+            span_with_width("and", 391.014, 610.703, 14.178, 7.863, 7.863),
+            span_with_width("sex", 407.555, 610.703, 13.226, 7.863, 7.863),
+            span_with_width("margins", 423.144, 610.703, 30.226, 7.863, 7.863),
+            span_with_width("of", 455.733, 610.703, 7.089, 7.863, 7.863),
+            span_with_width("each", 465.185, 610.703, 18.428, 7.863, 7.863),
+            span_with_width("cohort", 485.976, 610.703, 23.622, 7.863, 7.863),
+            span_with_width("separately,", 303.600, 600.253, 41.573, 7.862, 7.862),
+            span_with_width("using", 347.536, 600.253, 20.315, 7.862, 7.862),
+            span_with_width("the", 370.214, 600.253, 11.815, 7.862, 7.862),
+            span_with_width("published", 384.392, 600.253, 36.380, 7.862, 7.862),
+            span_with_width("municipal", 423.135, 600.253, 35.896, 7.862, 7.862),
+            span_with_width("register", 461.394, 600.253, 28.339, 7.862, 7.862),
+            span_with_width("as", 492.096, 600.253, 8.976, 7.862, 7.862),
+            span_with_width("the", 303.600, 589.803, 11.815, 7.863, 7.863),
+            span_with_width("reference", 317.778, 589.803, 35.904, 7.863, 7.863),
+            span_with_width("distribution", 356.045, 589.803, 41.097, 7.863, 7.863),
+            span_with_width("for", 399.505, 589.803, 9.920, 7.863, 7.863),
+            span_with_width("both.", 411.788, 589.803, 18.904, 7.863, 7.863),
+            span_with_width("Respondents", 433.055, 589.803, 50.082, 7.863, 7.863),
+            span_with_width("who", 485.500, 589.803, 15.589, 7.863, 7.863),
+            span_with_width("completed", 303.600, 579.353, 39.210, 7.863, 7.863),
+            span_with_width("fewer", 345.173, 579.353, 20.783, 7.863, 7.863),
+            span_with_width("than", 368.319, 579.353, 16.541, 7.863, 7.863),
+            span_with_width("half", 387.223, 579.353, 13.702, 7.863, 7.863),
+            span_with_width("of", 403.288, 579.353, 7.089, 7.863, 7.863),
+            span_with_width("the", 412.740, 579.353, 11.815, 7.863, 7.863),
+            span_with_width("items", 426.918, 579.353, 20.306, 7.863, 7.863),
+            span_with_width("were", 449.587, 579.353, 18.420, 7.863, 7.863),
+            span_with_width("excluded", 470.370, 579.353, 34.017, 7.863, 7.863),
+            span_with_width("before", 303.600, 568.903, 24.097, 7.863, 7.863),
+            span_with_width("weighting,", 330.060, 568.903, 38.267, 7.863, 7.863),
+            span_with_width("which", 370.690, 568.903, 21.726, 7.863, 7.863),
+            span_with_width("removed", 394.779, 568.903, 33.065, 7.863, 7.863),
+            span_with_width("a", 430.207, 568.903, 4.726, 7.863, 7.863),
+            span_with_width("small", 437.296, 568.903, 19.831, 7.863, 7.863),
+            span_with_width("number", 459.490, 568.903, 28.815, 7.863, 7.863),
+            span_with_width("of", 490.668, 568.903, 7.089, 7.863, 7.863),
+            span_with_width("cases", 500.120, 568.903, 22.202, 7.863, 7.863),
+            span_with_width("from", 303.600, 558.453, 17.000, 7.862, 7.862),
+            span_with_width("each", 322.963, 558.453, 18.428, 7.862, 7.862),
+            span_with_width("cohort", 343.754, 558.453, 23.621, 7.862, 7.862),
+            span_with_width("and", 369.738, 558.453, 14.178, 7.862, 7.862),
+            span_with_width("did", 386.279, 558.453, 11.339, 7.862, 7.862),
+            span_with_width("not", 399.981, 558.453, 11.815, 7.862, 7.862),
+            span_with_width("change", 414.159, 558.453, 27.880, 7.862, 7.862),
+            span_with_width("the", 444.402, 558.453, 11.815, 7.862, 7.862),
+            span_with_width("direction", 458.580, 558.453, 32.122, 7.862, 7.862),
+            span_with_width("of", 493.065, 558.453, 7.089, 7.862, 7.862),
+            span_with_width("any", 502.517, 558.453, 13.702, 7.862, 7.862),
+            span_with_width("reported", 303.600, 548.003, 31.654, 7.863, 7.863),
+            span_with_width("association.", 337.617, 548.003, 44.880, 7.863, 7.863),
+            span_with_width("The", 384.860, 548.003, 14.645, 7.863, 7.863),
+            span_with_width("analysis", 401.868, 548.003, 30.702, 7.863, 7.863),
+            span_with_width("was", 434.933, 548.003, 15.113, 7.863, 7.863),
+            span_with_width("pre-registered.", 452.409, 548.003, 55.267, 7.863, 7.863),
+        ];
+
+        let original = spans.iter().map(|span| span.text.clone()).collect::<Vec<_>>();
+
+        let order = spans_sorted_top_to_bottom(&spans);
+        let lines = group_into_lines(&spans, &order);
+        let split_x = detect_split_x(&spans, &lines, PAGE_WIDTH);
+        eprintln!("gh1545: detect_split_x = {split_x:?}");
+        if let Some(detected) = split_x {
+            let snapped = snap_split_left_of_hanging_labels(&spans, &lines, PAGE_WIDTH, detected);
+            eprintln!("gh1545: snap_split_left_of_hanging_labels = {snapped}");
+        }
+
+        // Directly probe outcome (B) independent of whatever split_x was
+        // detected: partition every band at the geometrically ideal
+        // table/prose gutter and ask classify_region what it thinks of each
+        // side. If both sides are ever accepted here, the gate is not the
+        // blocker and (A) must be the explanation; if the table side is
+        // rejected even under this ideal split, (B) holds regardless of what
+        // detect_split_x returns. ~keep
+        let furniture_width = PAGE_WIDTH * FULL_WIDTH_FURNITURE_FRACTION;
+        let ideal_bands = build_bands(&spans, &lines, furniture_width, IDEAL_TABLE_PROSE_SPLIT_X);
+        for band in &ideal_bands {
+            let Band::Content(indices) = band else { continue };
+            let (left, right): (Vec<usize>, Vec<usize>) = indices
+                .iter()
+                .copied()
+                .partition(|&index| spans[index].bbox.x < IDEAL_TABLE_PROSE_SPLIT_X);
+            if left.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE || right.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE {
+                eprintln!(
+                    "gh1545: ideal-split band of {} spans has too few per side (left={}, right={}) to classify",
+                    indices.len(),
+                    left.len(),
+                    right.len()
+                );
+                continue;
+            }
+            let left_class = xberg_native_pdf::layout::classify_region(&spans, &left);
+            let right_class = xberg_native_pdf::layout::classify_region(&spans, &right);
+            eprintln!(
+                "gh1545: ideal-split band left={left_class:?} (reorderable={}) right={right_class:?} (reorderable={})",
+                left_class.is_reorderable_column(),
+                right_class.is_reorderable_column()
+            );
+        }
+
+        let reordered = reorder_dense_two_column_page(&mut spans, PAGE_WIDTH);
+        let changed = spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>() != original;
+        eprintln!("gh1545: reorder_dense_two_column_page returned {reordered}, span order changed = {changed}");
+
+        // Deliberately permissive: this asserts internal consistency (a
+        // reported reorder must actually have moved spans, and vice versa),
+        // not which of (A)/(B) is true. Read the eprintln! output above —
+        // "detect_split_x" near 148-165 with a reorder that welded panel A
+        // into panel B confirms (A); every ideal-split band logging a
+        // non-reorderable left class, and reordered == false, confirms (B). ~keep
+        assert_eq!(
+            reordered, changed,
+            "reorder_dense_two_column_page's return value must agree with whether spans actually moved"
         );
     }
 }

@@ -972,9 +972,43 @@ fn apply_page_content_format(
 
     let pages = pages?;
 
+    // Container markers (`ListStart`/`ListEnd`, quotes, groups) are never page-tagged:
+    // `InternalDocumentBuilder::push_list`/`end_list` pass `page: None` even when every element
+    // they wrap is tagged. Filtering strictly on `elem.page.is_some()` therefore dropped them
+    // from a page's subset, and `build_comrak_ast` then saw each `ListItem` with no open list
+    // parent and wrapped it in a fresh single-item list -- rendering a nested list as flat,
+    // blank-line-separated bullets in `pages[N].content` (GH#1503 made this reachable by tagging
+    // every element with a page). A start inherits the page of the next tagged element it opens
+    // before; an end inherits the page of the last tagged element it closes after. ~keep
+    let mut next_tagged_page: Vec<Option<u32>> = vec![None; doc.elements.len()];
+    let mut seen: Option<u32> = None;
+    for (idx, elem) in doc.elements.iter().enumerate().rev() {
+        if elem.page.is_some() {
+            seen = elem.page;
+        }
+        next_tagged_page[idx] = seen;
+    }
+    let mut prev_tagged_page: Vec<Option<u32>> = vec![None; doc.elements.len()];
+    seen = None;
+    for (idx, elem) in doc.elements.iter().enumerate() {
+        prev_tagged_page[idx] = seen;
+        if elem.page.is_some() {
+            seen = elem.page;
+        }
+    }
+
     let mut elements_by_page: std::collections::BTreeMap<u32, Vec<usize>> = std::collections::BTreeMap::new();
     for (idx, elem) in doc.elements.iter().enumerate() {
-        if let Some(page_num) = elem.page {
+        let page_num = elem.page.or_else(|| {
+            if elem.kind.is_container_start() {
+                next_tagged_page[idx]
+            } else if elem.kind.is_container_end() {
+                prev_tagged_page[idx]
+            } else {
+                None
+            }
+        });
+        if let Some(page_num) = page_num {
             elements_by_page.entry(page_num).or_default().push(idx);
         }
     }
