@@ -1101,6 +1101,13 @@ impl InternalDocumentExtractor for DocxExtractor {
 
         let extract_image_data = config.needs_image_data();
         let mut extracted_images = Vec::with_capacity(drawings.len());
+        // `to_markdown` writes one `![{alt}](image)` per drawing that references
+        // an image, in document order, and the link target is that same literal
+        // for every one of them. A placeholder therefore cannot be found by a
+        // per-image search string; the only thing that tells two of them apart
+        // is their order. Walk them in step with the drawings that produce them,
+        // never searching behind a placeholder already claimed.
+        let mut placeholder_cursor = 0usize;
         for (idx, drawing) in drawings.iter().enumerate() {
             let description = drawing_alt_text(drawing);
             let source_path = drawing.image_ref.as_ref().and_then(|rid| image_rels.get(rid)).cloned();
@@ -1159,12 +1166,28 @@ impl InternalDocumentExtractor for DocxExtractor {
             };
 
             let page_number = {
-                let placeholder = format!("![](image_{})", idx);
-                let placeholder_with_desc = description.as_ref().map(|d| format!("![{}](image_{})", d, idx));
-
-                let byte_pos = text
-                    .find(&placeholder)
-                    .or_else(|| placeholder_with_desc.as_deref().and_then(|p| text.find(p)));
+                // Only a drawing that references an image emits a placeholder,
+                // and the alt text comes from `doc_properties.description`
+                // alone — `drawing_alt_text`'s fallback to the shape *name* is
+                // not what was written, so it must not be searched for.
+                let byte_pos = if drawing.image_ref.is_some() {
+                    let alt = drawing
+                        .doc_properties
+                        .as_ref()
+                        .and_then(|dp| dp.description.as_deref())
+                        .unwrap_or("");
+                    let placeholder = format!("![{}](image)", alt);
+                    match text[placeholder_cursor..].find(&placeholder) {
+                        Some(offset) => {
+                            let pos = placeholder_cursor + offset;
+                            placeholder_cursor = pos + placeholder.len();
+                            Some(pos)
+                        }
+                        None => None,
+                    }
+                } else {
+                    None
+                };
 
                 if let Some(pos) = byte_pos {
                     if let Some(ref ps) = page_structure
@@ -1781,6 +1804,85 @@ mod tests {
             formatted.contains("![A test image](media/image1.png)"),
             "Markdown should contain image placeholder. Content: {}",
             formatted
+        );
+    }
+
+    /// Every DOCX image reported page 1, however many pages the document had and
+    /// wherever the image sat on them.
+    ///
+    /// `to_markdown` writes one `![{alt}](image)` per drawing that references an
+    /// image, and the link target is that same literal for all of them. The
+    /// image-to-page association searched for `![](image_{idx})` /
+    /// `![{alt}](image_{idx})` instead — a string that is never written — so the
+    /// lookup could not match even once and every image fell to the `Some(1)`
+    /// default. The placeholders are only distinguishable by their order, so
+    /// they are walked in step with the drawings that emit them.
+    #[tokio::test]
+    async fn docx_image_page_follows_its_placeholder_across_a_page_break() {
+        fn drawing(descr: &str) -> String {
+            format!(
+                r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                     xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                     xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+                     xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
+                     xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+              <w:r>
+                <w:drawing>
+                  <wp:inline>
+                    <wp:extent cx="914400" cy="457200"/>
+                    <wp:docPr id="1" name="Picture 1" descr="{descr}"/>
+                    <a:graphic>
+                      <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                        <pic:pic>
+                          <pic:blipFill>
+                            <a:blip r:embed="rId5"/>
+                          </pic:blipFill>
+                        </pic:pic>
+                      </a:graphicData>
+                    </a:graphic>
+                  </wp:inline>
+                </w:drawing>
+              </w:r>
+            </w:p>"#
+            )
+        }
+
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>"#;
+
+        // Two pictures, three pages, one picture on each of pages 1 and 3.
+        let document_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    {first}
+    <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+    <w:p><w:r><w:t>Text that belongs to the second page.</w:t></w:r></w:p>
+    <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+    {second}
+  </w:body>
+</w:document>"#,
+            first = drawing("First picture"),
+            second = drawing("Second picture"),
+        );
+
+        let data = build_test_docx_with_parts(&document_xml, None, None, None, None, None, Some(rels_xml));
+        let internal_doc = DocxExtractor::new()
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &image_extraction_config(),
+            )
+            .await
+            .expect("Extraction failed");
+
+        let pages: Vec<Option<u32>> = internal_doc.images.iter().map(|i| i.page_number).collect();
+        assert_eq!(
+            pages,
+            vec![Some(1), Some(3)],
+            "each image must take the page of its own placeholder, not the page-1 default"
         );
     }
 
