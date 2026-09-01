@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added diagram recovery from flat OpenDocument drawings (`.fodg`), including content-based
+  detection of the `application/vnd.oasis.opendocument.graphics-flat-xml` MIME type. Connectors
+  name their endpoints outright, so the recovered graph is exact rather than inferred from
+  geometry (#1545 corpus fixture).
 - Added structural extraction for MyST Markdown syntax and MyST text notebooks, including saved
   inline `{eval}` values in Jupyter markdown cells
   ([#1538](https://github.com/xberg-io/xberg/issues/1538)).
@@ -68,6 +72,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking (Rust source):** `validate_mime_type` no longer accepts any value with an `image/`
+  prefix. It now parses the MIME type and requires exact membership in the supported-format
+  registry, so unregistered vendor image subtypes such as `image/x-custom-format` are rejected as
+  `UnsupportedFormat` instead of validating (#1511).
 - Per-page OCR recognition-noise detail (fragmented-word ratio, word count, mean confidence) now
   reaches the page accept/reject decision and is emitted at `DEBUG` instead of being discarded one
   frame earlier. No threshold is gated on it yet; the blended stage score alone cannot discriminate
@@ -149,6 +157,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed PDF text coming back scrambled when a short `Tj` run sat between two `TJ` arrays: the run
+  was emitted at an earlier run's stale position and sorted into the wrong place, so
+  `within a period ... after conclusion` extracted as `wincthin a period ... after co lusion`.
+  Every text-showing boundary operator closed the pending run except `TJ`
+  ([#1544](https://github.com/xberg-io/xberg/issues/1544)).
+- Fixed every image in a DOCX reporting `page_number` 1 regardless of the page it sits on. The page
+  was resolved by searching rendered Markdown for a per-image placeholder that is never written --
+  every drawing renders to the same link target -- so the lookup always missed. Page numbers now
+  come from the parsed element order ([#1546](https://github.com/xberg-io/xberg/issues/1546)).
+- Fixed an author's hyphen being deleted when it fell at a line break, so `price-` + `determining`
+  joined as `pricedetermining`. A hyphen written mid-line elsewhere in the same document is now
+  treated as evidence that the compound is real and its hyphen is kept. Compounds that appear only
+  broken, with no such occurrence anywhere in the document, are still joined without the hyphen
+  ([#1543](https://github.com/xberg-io/xberg/issues/1543)).
+- Fixed OCR backends registered through `register_ocr_backend` being rejected before extraction
+  started: configuration validation checked the backend name against the built-in list only, which
+  made every custom plugin OCR backend unusable once validation was wired into `extract` and
+  `extract_batch`.
 - Fixed the native C FFI library shipping without eleven features the crate advertises, so the
   Java, Go, C#, Swift, Zig, and C bindings had no summarization, translation, analysis, HEIC,
   captioning, ML redaction, or static-embedding support. The desktop dependency hand-maintained a

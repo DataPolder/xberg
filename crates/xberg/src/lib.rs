@@ -27,7 +27,7 @@
 //!
 //! - Fast parallel processing with async/await
 //! - Priority-based extractor selection
-//! - Comprehensive MIME type detection (140 file extensions)
+//! - Comprehensive MIME type detection (141 file extensions)
 //! - Configurable caching and quality processing
 //! - Cross-language plugin support (Python, Node.js planned)
 
