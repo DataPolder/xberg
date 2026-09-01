@@ -1132,7 +1132,22 @@ jobs:
           - { os: macos-15, label: macos-arm64 }
           - os: windows-latest
             label: windows-x86_64
-            ruby_cargo_args: --no-default-features --features pdf,markdown-footnotes,url-ingestion
+            # svg, keywords-yake and keywords-rake are here to keep the binding's
+            # feature set in step with the core's, not because the Windows gem needs
+            # anything extra. The generated conversions gate their match arms on
+            # xberg-rb's OWN features (`#[cfg(feature = "keywords-yake")]`) while the
+            # variants they match come from the core, and on this leg alone the two are
+            # separate switches: `--no-default-features` turns the binding's off, while
+            # the Windows target dep in packages/ruby/ext/xberg_rb/native/Cargo.toml
+            # asks the core for `windows-gnu-target`, a bundle that contains both
+            # `keywords` (= yake + rake) and `svg`. The core keeps the variants, the
+            # binding loses the arms, and `From<KeywordAlgorithm>` stops being
+            # exhaustive -- 827 E0004 errors, none of them visible on the Linux/macOS
+            # legs, whose target dep names those three features explicitly so both
+            # switches happen to agree. Each is a pure forward (`svg = ["xberg/svg"]`)
+            # to a core feature the bundle already enabled, so this restores the arms
+            # without changing what the core compiles. ~keep
+            ruby_cargo_args: --no-default-features --features pdf,markdown-footnotes,url-ingestion,svg,keywords-yake,keywords-rake
     steps:
       - uses: actions/checkout@v7
         with:
