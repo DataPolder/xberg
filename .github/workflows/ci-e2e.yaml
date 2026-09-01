@@ -194,11 +194,10 @@ jobs:
             runs-on: ubuntu-latest
             target: x86_64-unknown-linux-gnu
           - lang: dart
-            # freezed ^4.0.1 (packages/dart/pubspec.yaml) requires SDK >=3.12.0,
-            # so pub version-solving fails outright on 3.11 with "Because xberg
-            # depends on freezed >=4.0.0-dev.1 which requires SDK version
-            # >=3.12.0". ~keep
-            dart-version: "3.12"
+            # packages/dart's freezed ^4.0.1 resolves to freezed >=4.0.0, which
+            # needs SDK >=3.13.0; pub version-solving fails before any test runs
+            # otherwise. The floor moves with whichever freezed pub picks. ~keep
+            dart-version: "3.13"
             runs-on: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
           - lang: kotlin-android
