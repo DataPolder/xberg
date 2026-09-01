@@ -132,7 +132,7 @@ mod alef_json_str_opt {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct AccelerationConfig {
     /// Execution provider to use for ONNX inference.
@@ -146,6 +146,14 @@ pub struct AccelerationConfig {
 impl Default for AccelerationConfig {
     fn default() -> Self {
         <xberg::AccelerationConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for AccelerationConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::AccelerationConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -254,7 +262,7 @@ impl ArchiveMetadata {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct Attributes {
     /// Element ID (#identifier)
@@ -271,6 +279,14 @@ pub struct Attributes {
 impl Default for Attributes {
     fn default() -> Self {
         <xberg::Attributes as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for Attributes {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::Attributes as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -387,7 +403,7 @@ impl BBox {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct BedrockConfig {
     /// AWS region (e.g. `"us-east-1"`).
@@ -410,6 +426,14 @@ pub struct BedrockConfig {
 impl Default for BedrockConfig {
     fn default() -> Self {
         <xberg::BedrockConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for BedrockConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::BedrockConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -441,7 +465,7 @@ impl BedrockConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct BibtexMetadata {
     /// Number of entries in the bibliography.
@@ -464,6 +488,14 @@ pub struct BibtexMetadata {
 impl Default for BibtexMetadata {
     fn default() -> Self {
         <xberg::BibtexMetadata as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for BibtexMetadata {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::BibtexMetadata as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -535,7 +567,7 @@ impl BoundingBox {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct BrowserConfig {
     /// When to use the headless browser fallback.
@@ -593,6 +625,14 @@ pub struct BrowserConfig {
 impl Default for BrowserConfig {
     fn default() -> Self {
         <crawlberg::BrowserConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for BrowserConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <crawlberg::BrowserConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -766,7 +806,7 @@ impl CellChange {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct Chunk {
     /// The text content of this chunk.
@@ -810,6 +850,14 @@ pub struct Chunk {
     /// Metadata about this chunk's position and properties.
     #[pyo3(get)]
     pub metadata: ChunkMetadata,
+}
+impl<'de> serde::Deserialize<'de> for Chunk {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::Chunk as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -996,7 +1044,7 @@ impl ChunkInfo {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct ChunkMetadata {
     /// Byte offset where this chunk starts in the original text (UTF-8 valid boundary).
@@ -1076,6 +1124,14 @@ pub struct ChunkMetadata {
     /// definitions. Empty when chunk classification was not configured.
     #[pyo3(get)]
     pub classifications: Vec<ClassificationLabel>,
+}
+impl<'de> serde::Deserialize<'de> for ChunkMetadata {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::ChunkMetadata as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -1300,7 +1356,7 @@ impl Citation {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct CitationMetadata {
     /// Total number of citation records in the file.
@@ -1326,6 +1382,14 @@ pub struct CitationMetadata {
 impl Default for CitationMetadata {
     fn default() -> Self {
         <xberg::CitationMetadata as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for CitationMetadata {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::CitationMetadata as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -1474,7 +1538,7 @@ impl CodeDataAttribute {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct CodeDataNode {
     /// Whether this node is a key/value pair, XML element, or sequence item.
@@ -1501,6 +1565,14 @@ pub struct CodeDataNode {
     /// Exclusive end byte offset of this node in the original source.
     #[pyo3(get)]
     pub byte_end: usize,
+}
+impl<'de> serde::Deserialize<'de> for CodeDataNode {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::CodeDataNode as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -1535,7 +1607,7 @@ impl CodeDataNode {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct CodeMetadata {
     /// Structural code chunks (function/class/module boundaries).
@@ -1550,6 +1622,14 @@ pub struct CodeMetadata {
 impl Default for CodeMetadata {
     fn default() -> Self {
         <xberg::CodeMetadata as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for CodeMetadata {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::CodeMetadata as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -1569,7 +1649,7 @@ impl CodeMetadata {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct ConcurrencyConfig {
     /// Maximum number of threads for all internal thread pools.
@@ -1590,6 +1670,14 @@ impl Default for ConcurrencyConfig {
         <xberg::ConcurrencyConfig as Default>::default().into()
     }
 }
+impl<'de> serde::Deserialize<'de> for ConcurrencyConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::ConcurrencyConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
 
 #[pymethods]
 impl ConcurrencyConfig {
@@ -1607,7 +1695,7 @@ impl ConcurrencyConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct ContentConfig {
     /// Output format: `"markdown"` (default), `"plain"`, `"djot"`.
@@ -1670,6 +1758,14 @@ impl Default for ContentConfig {
         <crawlberg::ContentConfig as Default>::default().into()
     }
 }
+impl<'de> serde::Deserialize<'de> for ContentConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <crawlberg::ContentConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
 
 #[pymethods]
 impl ContentConfig {
@@ -1713,7 +1809,7 @@ impl ContentConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct ContentFilterConfig {
     /// Include running headers in extraction output.
@@ -1779,6 +1875,14 @@ pub struct ContentFilterConfig {
 impl Default for ContentFilterConfig {
     fn default() -> Self {
         <xberg::ContentFilterConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for ContentFilterConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::ContentFilterConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -2588,7 +2692,7 @@ impl CrawlConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct CsvConfig {
     /// Field delimiter, as a single-character string (e.g. `","`, `";"`,
@@ -2614,6 +2718,14 @@ pub struct CsvConfig {
 impl Default for CsvConfig {
     fn default() -> Self {
         <xberg::CsvConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for CsvConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::CsvConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -2717,7 +2829,7 @@ impl DbfFieldInfo {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct DbfMetadata {
     /// Total number of data records in the DBF file.
@@ -2734,6 +2846,14 @@ pub struct DbfMetadata {
 impl Default for DbfMetadata {
     fn default() -> Self {
         <xberg::DbfMetadata as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for DbfMetadata {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::DbfMetadata as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -2757,7 +2877,7 @@ impl DbfMetadata {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct DeepseekOcrBackendOptions {
     /// Local DeepSeek-OCR model directory. The backend requires this option.
@@ -2774,6 +2894,14 @@ pub struct DeepseekOcrBackendOptions {
 impl Default for DeepseekOcrBackendOptions {
     fn default() -> Self {
         <xberg::candle_ocr::DeepseekOcrBackendOptions as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for DeepseekOcrBackendOptions {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::candle_ocr::DeepseekOcrBackendOptions as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -3840,7 +3968,7 @@ impl DocxMetadata {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct Element {
     /// Deterministic element identifier. Empty only when deserializing legacy payloads
@@ -3856,6 +3984,14 @@ pub struct Element {
     /// Metadata about the element
     #[pyo3(get)]
     pub metadata: ElementMetadata,
+}
+impl<'de> serde::Deserialize<'de> for Element {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::Element as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -3981,7 +4117,7 @@ impl EmailAttachment {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct EmailConfig {
     /// Windows codepage number to use when an MSG file contains no codepage property.
@@ -4009,6 +4145,14 @@ pub struct EmailConfig {
 impl Default for EmailConfig {
     fn default() -> Self {
         <xberg::EmailConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for EmailConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::EmailConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -4291,7 +4435,7 @@ impl EmbeddedFile {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct EmbeddingConfig {
     /// The embedding model to use (defaults to "gte-modernbert-base" preset if not specified)
@@ -4357,6 +4501,14 @@ pub struct EmbeddingConfig {
 impl Default for EmbeddingConfig {
     fn default() -> Self {
         <xberg::EmbeddingConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for EmbeddingConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::EmbeddingConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -4566,7 +4718,7 @@ impl ExcelMetadata {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 #[allow(clippy::similar_names)]
 pub struct ExcelSheet {
@@ -4590,6 +4742,14 @@ pub struct ExcelSheet {
     /// undefined for empty sheets.
     #[pyo3(get)]
     pub table_cells: Option<Vec<Vec<String>>>,
+}
+impl<'de> serde::Deserialize<'de> for ExcelSheet {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::ExcelSheet as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -6384,7 +6544,7 @@ impl ExtractionSummary {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct FictionBookMetadata {
     /// Genre tags as declared in the FB2 `<genre>` elements.
@@ -6401,6 +6561,14 @@ pub struct FictionBookMetadata {
 impl Default for FictionBookMetadata {
     fn default() -> Self {
         <xberg::FictionBookMetadata as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for FictionBookMetadata {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::FictionBookMetadata as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -6703,7 +6871,7 @@ impl FootnoteAnchor {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct FootnoteConfig {
     /// Whether to parse the structured citation block (default: true).
@@ -6717,6 +6885,14 @@ pub struct FootnoteConfig {
 impl Default for FootnoteConfig {
     fn default() -> Self {
         <xberg::FootnoteConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for FootnoteConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::FootnoteConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -6784,7 +6960,7 @@ impl FootnoteDefinition {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct FormattedBlock {
     /// Type of block element
@@ -6808,6 +6984,14 @@ pub struct FormattedBlock {
     /// Nested blocks for containers (blockquotes, list items, divs)
     #[pyo3(get)]
     pub children: Vec<FormattedBlock>,
+}
+impl<'de> serde::Deserialize<'de> for FormattedBlock {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::FormattedBlock as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -6842,7 +7026,7 @@ impl FormattedBlock {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct Formula {
     /// LaTeX source of the formula, without surrounding `$$` delimiters.
@@ -6867,6 +7051,14 @@ pub struct Formula {
     #[pyo3(get)]
     pub page: Option<u32>,
 }
+impl<'de> serde::Deserialize<'de> for Formula {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::Formula as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
 
 #[pymethods]
 impl Formula {
@@ -6884,7 +7076,7 @@ impl Formula {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct GeoJsonExtractionConfig {
     /// Include every coordinate in rendered content and `flattened_fields` metadata.
@@ -6899,6 +7091,14 @@ pub struct GeoJsonExtractionConfig {
 impl Default for GeoJsonExtractionConfig {
     fn default() -> Self {
         <xberg::GeoJsonExtractionConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for GeoJsonExtractionConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::GeoJsonExtractionConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -6920,7 +7120,7 @@ impl GeoJsonExtractionConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct GlmOcrBackendOptions {
     /// Optional recognition task; the backend constructor's task is used when absent.
@@ -6943,6 +7143,14 @@ pub struct GlmOcrBackendOptions {
 impl Default for GlmOcrBackendOptions {
     fn default() -> Self {
         <xberg::candle_ocr::GlmOcrBackendOptions as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for GlmOcrBackendOptions {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::candle_ocr::GlmOcrBackendOptions as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -6974,7 +7182,7 @@ impl GlmOcrBackendOptions {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 #[allow(clippy::similar_names)]
 pub struct GridCell {
@@ -6999,6 +7207,14 @@ pub struct GridCell {
     /// Bounding box for this cell (if available).
     #[pyo3(get)]
     pub bbox: Option<BoundingBox>,
+}
+impl<'de> serde::Deserialize<'de> for GridCell {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::GridCell as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -7374,7 +7590,7 @@ impl HierarchicalBoundingBox {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct HierarchyConfig {
     /// Enable hierarchy extraction
@@ -7394,6 +7610,14 @@ pub struct HierarchyConfig {
 impl Default for HierarchyConfig {
     fn default() -> Self {
         <xberg::HierarchyConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for HierarchyConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::HierarchyConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -7424,7 +7648,7 @@ impl HierarchyConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct HtmlMetadata {
     /// Document title from `<title>` tag
@@ -7482,6 +7706,14 @@ impl Default for HtmlMetadata {
         <xberg::HtmlMetadata as Default>::default().into()
     }
 }
+impl<'de> serde::Deserialize<'de> for HtmlMetadata {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::HtmlMetadata as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
 
 #[pymethods]
 impl HtmlMetadata {
@@ -7531,7 +7763,7 @@ impl HtmlMetadata {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct HtmlOutputConfig {
     /// Inline CSS string injected into the output after the theme stylesheet.
@@ -7563,6 +7795,14 @@ pub struct HtmlOutputConfig {
 impl Default for HtmlOutputConfig {
     fn default() -> Self {
         <xberg::HtmlOutputConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for HtmlOutputConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::HtmlOutputConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -7926,7 +8166,7 @@ impl ImageMetadataType {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct ImagePreprocessingConfig {
     /// Target DPI for the image (300 is standard, 600 for small text).
@@ -7957,6 +8197,14 @@ pub struct ImagePreprocessingConfig {
 impl Default for ImagePreprocessingConfig {
     fn default() -> Self {
         <xberg::ImagePreprocessingConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for ImagePreprocessingConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::ImagePreprocessingConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -8125,7 +8373,7 @@ impl InlineElement {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct JatsMetadata {
     /// Copyright statement from the article's `<permissions>` element.
@@ -8145,6 +8393,14 @@ pub struct JatsMetadata {
 impl Default for JatsMetadata {
     fn default() -> Self {
         <xberg::JatsMetadata as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for JatsMetadata {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::JatsMetadata as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -8381,7 +8637,7 @@ impl LanguageConfidence {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct LanguageDetectionConfig {
     /// Enable language detection
@@ -8398,6 +8654,14 @@ pub struct LanguageDetectionConfig {
 impl Default for LanguageDetectionConfig {
     fn default() -> Self {
         <xberg::LanguageDetectionConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for LanguageDetectionConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::LanguageDetectionConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -8428,7 +8692,7 @@ impl LanguageDetectionConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct LateInteractionConfig {
     /// The late-interaction model to use (defaults to the "gte-moderncolbert" preset).
@@ -8476,6 +8740,14 @@ pub struct LateInteractionConfig {
 impl Default for LateInteractionConfig {
     fn default() -> Self {
         <xberg::LateInteractionConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for LateInteractionConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::LateInteractionConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -8644,7 +8916,7 @@ impl LayoutDetection {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct LayoutDetectionConfig {
     /// Which pages the layout model runs on.
@@ -8702,6 +8974,14 @@ pub struct LayoutDetectionConfig {
 impl Default for LayoutDetectionConfig {
     fn default() -> Self {
         <xberg::LayoutDetectionConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for LayoutDetectionConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::LayoutDetectionConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -8843,7 +9123,7 @@ impl LinkMetadata {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct LlmBudgetConfig {
     /// Global spend limit in USD.
@@ -8860,6 +9140,14 @@ pub struct LlmBudgetConfig {
 impl Default for LlmBudgetConfig {
     fn default() -> Self {
         <xberg::LlmBudgetConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for LlmBudgetConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::LlmBudgetConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -8887,7 +9175,7 @@ impl LlmBudgetConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct LlmCacheConfig {
     /// Maximum number of cached entries.
@@ -8907,6 +9195,14 @@ pub struct LlmCacheConfig {
 impl Default for LlmCacheConfig {
     fn default() -> Self {
         <xberg::LlmCacheConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for LlmCacheConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::LlmCacheConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -8936,7 +9232,7 @@ impl LlmCacheConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct LlmConfig {
     /// Provider/model string using liter-llm routing format.
@@ -9165,6 +9461,14 @@ impl Default for LlmConfig {
         <xberg::LlmConfig as Default>::default().into()
     }
 }
+impl<'de> serde::Deserialize<'de> for LlmConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::LlmConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
 
 #[pymethods]
 impl LlmConfig {
@@ -9308,7 +9612,7 @@ impl LlmConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct LlmProviderConfig {
     /// Provider name, used to key model prefix matching.
@@ -9328,6 +9632,14 @@ pub struct LlmProviderConfig {
 impl Default for LlmProviderConfig {
     fn default() -> Self {
         <xberg::LlmProviderConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for LlmProviderConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::LlmProviderConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -9352,7 +9664,7 @@ impl LlmProviderConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 #[allow(clippy::similar_names)]
 pub struct LlmRateLimitConfig {
@@ -9370,6 +9682,14 @@ pub struct LlmRateLimitConfig {
 impl Default for LlmRateLimitConfig {
     fn default() -> Self {
         <xberg::LlmRateLimitConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for LlmRateLimitConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::LlmRateLimitConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -9582,7 +9902,7 @@ impl MetaSchema {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 #[allow(clippy::similar_names)]
 pub struct Metadata {
@@ -9674,6 +9994,14 @@ pub struct Metadata {
 impl Default for Metadata {
     fn default() -> Self {
         <xberg::Metadata as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for Metadata {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::Metadata as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -10063,7 +10391,7 @@ impl NgramRange {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct OcrConfidence {
     /// Detection confidence: how confident the OCR engine is that text exists here.
@@ -10082,6 +10410,14 @@ pub struct OcrConfidence {
 impl Default for OcrConfidence {
     fn default() -> Self {
         <xberg::OcrConfidence as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for OcrConfidence {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::OcrConfidence as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -10322,7 +10658,7 @@ impl OcrConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct OcrElement {
     /// The recognized text content.
@@ -10357,6 +10693,14 @@ pub struct OcrElement {
 impl Default for OcrElement {
     fn default() -> Self {
         <xberg::OcrElement as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for OcrElement {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::OcrElement as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -10394,7 +10738,7 @@ impl OcrElement {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct OcrElementConfig {
     /// Whether to include OCR elements in the extraction result.
@@ -10423,6 +10767,14 @@ pub struct OcrElementConfig {
 impl Default for OcrElementConfig {
     fn default() -> Self {
         <xberg::OcrElementConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for OcrElementConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::OcrElementConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -10707,7 +11059,7 @@ impl OcrPoint {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct OcrQualityThresholds {
     /// Minimum total non-whitespace characters to consider text substantive.
@@ -10855,6 +11207,14 @@ impl Default for OcrQualityThresholds {
         <xberg::OcrQualityThresholds as Default>::default().into()
     }
 }
+impl<'de> serde::Deserialize<'de> for OcrQualityThresholds {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::OcrQualityThresholds as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
 
 #[pymethods]
 impl OcrQualityThresholds {
@@ -10959,7 +11319,7 @@ impl OcrRotation {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct OcrTable {
     /// Table cells as a 2D vector (rows × columns)
@@ -10974,6 +11334,14 @@ pub struct OcrTable {
     /// Bounding box of the table in pixel coordinates (from OCR word positions).
     #[pyo3(get)]
     pub bounding_box: Option<OcrTableBoundingBox>,
+}
+impl<'de> serde::Deserialize<'de> for OcrTable {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::OcrTable as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -11067,7 +11435,7 @@ impl OrientationResult {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct PaddleOcrConfig {
     /// Language code (e.g., "en", "ch", "jpn", "kor", "deu", "fra")
@@ -11165,6 +11533,14 @@ pub struct PaddleOcrConfig {
 impl Default for PaddleOcrConfig {
     fn default() -> Self {
         <xberg::PaddleOcrConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for PaddleOcrConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::PaddleOcrConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -11665,7 +12041,7 @@ impl PaddleOcrConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct PaddleOcrVlBackendOptions {
     /// Optional per-call recognition task; the backend constructor's task is used when absent.
@@ -11691,6 +12067,14 @@ pub struct PaddleOcrVlBackendOptions {
 impl Default for PaddleOcrVlBackendOptions {
     fn default() -> Self {
         <xberg::candle_ocr::PaddleOcrVlBackendOptions as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for PaddleOcrVlBackendOptions {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::candle_ocr::PaddleOcrVlBackendOptions as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -11826,7 +12210,7 @@ impl PageClassificationConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct PageConfig {
     /// Extract pages as separate array (ExtractedDocument.pages)
@@ -11844,6 +12228,14 @@ pub struct PageConfig {
 impl Default for PageConfig {
     fn default() -> Self {
         <xberg::PageConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for PageConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::PageConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -11874,7 +12266,7 @@ impl PageConfig {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct PageContent {
     /// Page number (1-indexed)
@@ -11936,6 +12328,14 @@ pub struct PageContent {
     /// formats and for sheets with an empty name.
     #[pyo3(get)]
     pub sheet_name: Option<String>,
+}
+impl<'de> serde::Deserialize<'de> for PageContent {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::PageContent as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -12011,7 +12411,7 @@ impl PageDimensions {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct PageHierarchy {
     /// Number of hierarchy blocks on this page
@@ -12020,6 +12420,14 @@ pub struct PageHierarchy {
     /// Hierarchical blocks with heading levels
     #[pyo3(get)]
     pub blocks: Vec<HierarchicalBlock>,
+}
+impl<'de> serde::Deserialize<'de> for PageHierarchy {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::PageHierarchy as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -12038,7 +12446,7 @@ impl PageHierarchy {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct PageInfo {
     /// Page number (1-indexed)
@@ -12078,6 +12486,14 @@ pub struct PageInfo {
     /// Only populated for PDFs; `None` for other document types.
     #[pyo3(get)]
     pub has_vector_graphics: bool,
+}
+impl<'de> serde::Deserialize<'de> for PageInfo {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::PageInfo as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -12324,7 +12740,7 @@ impl PatternMatch {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct PdfAnnotation {
     /// The type of annotation.
@@ -12365,6 +12781,14 @@ pub struct PdfAnnotation {
     #[pyo3(get)]
     pub marked_text: Option<String>,
 }
+impl<'de> serde::Deserialize<'de> for PdfAnnotation {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::PdfAnnotation as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
 
 #[pymethods]
 impl PdfAnnotation {
@@ -12404,7 +12828,7 @@ impl PdfAnnotation {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct PdfConfig {
     /// Extract images from PDF
@@ -12503,6 +12927,14 @@ impl Default for PdfConfig {
         <xberg::PdfConfig as Default>::default().into()
     }
 }
+impl<'de> serde::Deserialize<'de> for PdfConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::PdfConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
 
 #[pymethods]
 impl PdfConfig {
@@ -12594,7 +13026,7 @@ impl PdfConfig {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 #[allow(clippy::similar_names)]
 pub struct PdfFormField {
@@ -12630,6 +13062,14 @@ pub struct PdfFormField {
     /// Tooltip / alternate field description, if present.
     #[pyo3(get)]
     pub tooltip: Option<String>,
+}
+impl<'de> serde::Deserialize<'de> for PdfFormField {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::PdfFormField as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -12795,7 +13235,7 @@ impl PixelDimensions {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct PostProcessorConfig {
     /// Enable post-processors
@@ -12818,6 +13258,14 @@ pub struct PostProcessorConfig {
 impl Default for PostProcessorConfig {
     fn default() -> Self {
         <xberg::PostProcessorConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for PostProcessorConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::PostProcessorConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -13098,7 +13546,7 @@ impl PptxMetadata {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct PreprocessingOptions {
     /// Enable HTML preprocessing globally
@@ -13118,6 +13566,14 @@ pub struct PreprocessingOptions {
 impl Default for PreprocessingOptions {
     fn default() -> Self {
         <html_to_markdown_rs::PreprocessingOptions as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for PreprocessingOptions {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <html_to_markdown_rs::PreprocessingOptions as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -13175,7 +13631,7 @@ impl PresentationHyperlink {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct Preset {
     /// Stable, URL-safe preset identifier (lowercase snake_case).
@@ -13225,6 +13681,14 @@ pub struct Preset {
     /// Used as a cache-invalidation token by the worker pipeline.
     #[pyo3(get)]
     pub fingerprint: String,
+}
+impl<'de> serde::Deserialize<'de> for Preset {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::Preset as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -13806,7 +14270,7 @@ impl RedactionFinding {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct RedactionPattern {
     /// Custom category label surfaced in `RedactionFinding.category`.
@@ -13818,6 +14282,14 @@ pub struct RedactionPattern {
     /// When `true`, match case-sensitively; otherwise prepend `(?i)` to the regex.
     #[pyo3(get)]
     pub case_sensitive: bool,
+}
+impl<'de> serde::Deserialize<'de> for RedactionPattern {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::RedactionPattern as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -13877,7 +14349,7 @@ impl RedactionReport {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct RedactionTerm {
     /// Custom category label surfaced in `RedactionFinding.category`.
@@ -13889,6 +14361,14 @@ pub struct RedactionTerm {
     /// When `true`, match the value as-is; otherwise match ASCII-case-insensitively.
     #[pyo3(get)]
     pub case_sensitive: bool,
+}
+impl<'de> serde::Deserialize<'de> for RedactionTerm {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::RedactionTerm as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
@@ -14028,7 +14508,7 @@ impl RerankedDocument {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct RerankerConfig {
     /// The reranker model to use (defaults to "balanced" preset if not specified).
@@ -14079,6 +14559,14 @@ pub struct RerankerConfig {
 impl Default for RerankerConfig {
     fn default() -> Self {
         <xberg::RerankerConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for RerankerConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::RerankerConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -14190,7 +14678,7 @@ impl ResolvedPreset {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct RevisionDelta {
     /// Line-level content changes for this revision.
@@ -14207,6 +14695,14 @@ pub struct RevisionDelta {
 impl Default for RevisionDelta {
     fn default() -> Self {
         <xberg::RevisionDelta as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for RevisionDelta {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::RevisionDelta as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -14230,7 +14726,7 @@ impl RevisionDelta {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct SecurityLimits {
     /// Maximum uncompressed size for archives (500 MB)
@@ -14300,6 +14796,14 @@ impl Default for SecurityLimits {
         <xberg::SecurityLimits as Default>::default().into()
     }
 }
+impl<'de> serde::Deserialize<'de> for SecurityLimits {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::SecurityLimits as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
 
 #[pymethods]
 impl SecurityLimits {
@@ -14346,7 +14850,7 @@ impl SecurityLimits {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 #[allow(clippy::similar_names)]
 pub struct ServerConfig {
@@ -14374,6 +14878,14 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         <xberg::ServerConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for ServerConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::ServerConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -14578,7 +15090,7 @@ impl SparseEmbedding {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct SparseEmbeddingConfig {
     /// The sparse-embedding model to use (defaults to the "opensearch-v3-distill" preset).
@@ -14619,6 +15131,14 @@ pub struct SparseEmbeddingConfig {
 impl Default for SparseEmbeddingConfig {
     fn default() -> Self {
         <xberg::SparseEmbeddingConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for SparseEmbeddingConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::SparseEmbeddingConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -14714,7 +15234,7 @@ impl SparseEmbeddingPreset {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct SsrfPolicy {
     /// If true, reject URLs that resolve to private/metadata IP ranges.
@@ -14750,6 +15270,14 @@ pub struct SsrfPolicy {
 impl Default for SsrfPolicy {
     fn default() -> Self {
         <crawlberg::SsrfPolicy as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for SsrfPolicy {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <crawlberg::SsrfPolicy as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -15010,7 +15538,7 @@ impl SupportedFormat {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct SvgOptions {
     /// Run SVG bytes through `usvg` sanitization (strips external `href` attributes,
@@ -15028,6 +15556,14 @@ pub struct SvgOptions {
 impl Default for SvgOptions {
     fn default() -> Self {
         <xberg::core::config::extraction::SvgOptions as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for SvgOptions {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::core::config::extraction::SvgOptions as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -15054,7 +15590,7 @@ impl SvgOptions {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct Table {
     /// Table cells as a 2D vector (rows × columns)
@@ -15123,6 +15659,14 @@ impl Default for Table {
         <xberg::Table as Default>::default().into()
     }
 }
+impl<'de> serde::Deserialize<'de> for Table {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::Table as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
 
 #[pymethods]
 impl Table {
@@ -15154,7 +15698,7 @@ impl Table {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 #[allow(clippy::similar_names)]
 pub struct TableCell {
@@ -15175,6 +15719,14 @@ pub struct TableCell {
 impl Default for TableCell {
     fn default() -> Self {
         <xberg::TableCell as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for TableCell {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::TableCell as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -15270,7 +15822,7 @@ impl TableGrid {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 #[allow(clippy::similar_names)]
 pub struct TesseractConfig {
@@ -15367,6 +15919,14 @@ pub struct TesseractConfig {
 impl Default for TesseractConfig {
     fn default() -> Self {
         <xberg::TesseractConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for TesseractConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::TesseractConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -15710,7 +16270,7 @@ impl TokenReductionConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct TokenReductionOptions {
     /// Reduction mode: "off", "light", "moderate", "aggressive", "maximum"
@@ -15724,6 +16284,14 @@ pub struct TokenReductionOptions {
 impl Default for TokenReductionOptions {
     fn default() -> Self {
         <xberg::TokenReductionOptions as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for TokenReductionOptions {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::TokenReductionOptions as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -15753,7 +16321,7 @@ impl TokenReductionOptions {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct TranscriptionConfig {
     /// Master switch. When `false`, the transcription pipeline is not run.
@@ -15834,6 +16402,14 @@ pub struct TranscriptionConfig {
 impl Default for TranscriptionConfig {
     fn default() -> Self {
         <xberg::TranscriptionConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for TranscriptionConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::TranscriptionConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -15966,7 +16542,7 @@ impl TranslationConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct TreeSitterConfig {
     /// Enable code intelligence processing (default: true).
@@ -16011,6 +16587,14 @@ impl Default for TreeSitterConfig {
         <xberg::TreeSitterConfig as Default>::default().into()
     }
 }
+impl<'de> serde::Deserialize<'de> for TreeSitterConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::TreeSitterConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
+}
 
 #[pymethods]
 impl TreeSitterConfig {
@@ -16047,7 +16631,7 @@ impl TreeSitterConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 #[allow(clippy::similar_names)]
 pub struct TreeSitterProcessConfig {
@@ -16087,6 +16671,14 @@ pub struct TreeSitterProcessConfig {
 impl Default for TreeSitterProcessConfig {
     fn default() -> Self {
         <xberg::TreeSitterProcessConfig as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for TreeSitterProcessConfig {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::TreeSitterProcessConfig as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -16135,7 +16727,7 @@ impl TreeSitterProcessConfig {
     }
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 pub struct TrocrBackendOptions {
     /// Optional model variant; the backend constructor's variant is used when absent.
@@ -16155,6 +16747,14 @@ pub struct TrocrBackendOptions {
 impl Default for TrocrBackendOptions {
     fn default() -> Self {
         <xberg::candle_ocr::TrocrBackendOptions as Default>::default().into()
+    }
+}
+impl<'de> serde::Deserialize<'de> for TrocrBackendOptions {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::candle_ocr::TrocrBackendOptions as serde::Deserialize>::deserialize(deserializer).map(Into::into)
     }
 }
 
@@ -16494,7 +17094,7 @@ impl YakeParams {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize)]
 #[pyclass(frozen, from_py_object)]
 #[allow(clippy::similar_names)]
 pub struct YearRange {
@@ -16507,6 +17107,14 @@ pub struct YearRange {
     /// All individual years present in the collection.
     #[pyo3(get)]
     pub years: Vec<u32>,
+}
+impl<'de> serde::Deserialize<'de> for YearRange {
+    fn deserialize<D>(deserializer: D) -> ::core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <xberg::YearRange as serde::Deserialize>::deserialize(deserializer).map(Into::into)
+    }
 }
 
 #[pymethods]
