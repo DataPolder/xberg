@@ -160,6 +160,11 @@ fn xml_vocabulary(trimmed: &str) -> Option<&'static str> {
     if root_has_name_in_namespace(root, "kml", "http://www.opengis.net/kml/2.2") {
         return Some(KML_MIME_TYPE);
     }
+    if root_has_name_in_namespace(root, "document", ODF_OFFICE_NAMESPACE)
+        && root_attribute_value(root, "office:mimetype") == Some(ODG_MIME_TYPE)
+    {
+        return Some(ODG_FLAT_MIME_TYPE);
+    }
     root_has_name_in_namespace(root, "html", "http://www.w3.org/1999/xhtml").then_some("application/xhtml+xml")
 }
 
@@ -279,6 +284,18 @@ pub(crate) const EXCEL_MIME_TYPE: &str = "application/vnd.openxmlformats-officed
 pub(crate) const ODT_MIME_TYPE: &str = "application/vnd.oasis.opendocument.text";
 pub(crate) const ODP_MIME_TYPE: &str = "application/vnd.oasis.opendocument.presentation";
 pub(crate) const ODS_MIME_TYPE: &str = "application/vnd.oasis.opendocument.spreadsheet";
+pub(crate) const ODG_MIME_TYPE: &str = "application/vnd.oasis.opendocument.graphics";
+/// Flat single-file XML variant of [`ODG_MIME_TYPE`] (`.fodg`): the whole
+/// package's `content.xml` inlined as one document, with no ZIP layer. The
+/// packaged MIME type is carried inside it as the root element's
+/// `office:mimetype` attribute rather than as a separate file, so content
+/// detection reads that attribute (see `xml_vocabulary`) instead of sniffing
+/// a ZIP signature. ~keep
+pub(crate) const ODG_FLAT_MIME_TYPE: &str = "application/vnd.oasis.opendocument.graphics-flat-xml";
+/// ODF namespace bound to the `office:` prefix, used to confirm the root
+/// element of a flat ODF document is actually `office:document` before
+/// trusting its `office:mimetype` attribute. ~keep
+const ODF_OFFICE_NAMESPACE: &str = "urn:oasis:names:tc:opendocument:xmlns:office:1.0";
 #[cfg(any(feature = "office", feature = "hwpx", feature = "iwork", feature = "archives"))]
 const ZIP_MIME_TYPE: &str = "application/zip";
 
@@ -506,6 +523,11 @@ static FORMATS: &[FormatEntry] = &[
     FormatEntry {
         extensions: &["ods"],
         mime_type: ODS_MIME_TYPE,
+        aliases: &[],
+    },
+    FormatEntry {
+        extensions: &["fodg"],
+        mime_type: ODG_FLAT_MIME_TYPE,
         aliases: &[],
     },
     FormatEntry {
