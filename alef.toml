@@ -2491,7 +2491,12 @@ e2e = "cd e2e/elixir && XBERG_BUILD=1 mix test"
 
 [crates.test.wasm]
 precondition = "command -v wasm-pack >/dev/null 2>&1"
-before = "wasm-pack build crates/xberg-wasm --release --target nodejs --out-dir pkg/nodejs && node crates/xberg-wasm/scripts/fix-wasi-imports.mjs && cd e2e/wasm && pnpm install --ignore-workspace"
+# wasm is the only e2e harness that spawns the release mock-server without
+# building it first: e2e/wasm/globalSetup.ts states the binary "must be
+# pre-built" and spawns it unconditionally, where ruby and elixir fall back to
+# building it themselves. Without this the leg dies at globalSetup with
+# `spawn .../e2e/rust/target/release/mock-server ENOENT`. ~keep
+before = "bash scripts/e2e/build-mock-server.sh && wasm-pack build crates/xberg-wasm --release --target nodejs --out-dir pkg/nodejs && node crates/xberg-wasm/scripts/fix-wasi-imports.mjs && cd e2e/wasm && pnpm install --ignore-workspace"
 e2e = "cd e2e/wasm && pnpm test"
 
 [crates.test.rust]
