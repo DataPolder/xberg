@@ -348,14 +348,19 @@ jobs:
       # why all 110 swift snippets report Unavailable. Adding a Swift toolchain would
       # not by itself help -- swift snippets link the FFI artifact this job never
       # builds, so they would trade Unavailable for a link failure, which is why swift
-      # is excluded below rather than installed. Dart, Elixir, and Zig are not on that
-      # image, so their validators (which::which("dart"/"mix"/"zig")) always reported
-      # Unavailable and those 20 snippets were never actually checked -- confirmed via
+      # is excluded below rather than installed. Dart and Elixir are not on that
+      # image, so their validators (which::which("dart"/"mix")) always reported
+      # Unavailable and those snippets were never actually checked -- confirmed via
       # `gh run view --job=94784579741 --log`, which shows `... dart N/A ...`,
-      # `... elixir N/A ...`, `... zig N/A ...` in the summary while every other
-      # language shows a real PASS/FAIL. Versions match the e2e matrix
-      # (ci-e2e.yaml) so this job validates snippets against the same toolchains the
-      # generated e2e suites run against. ~keep
+      # `... elixir N/A ...` in the summary while every other language shows a real
+      # PASS/FAIL. Versions match the e2e matrix (ci-e2e.yaml) so this job validates
+      # snippets against the same toolchains the generated e2e suites run against.
+      # Zig was briefly added here too (a `Setup Zig` step), on the same premise --
+      # but zig's 110 snippets link `../../target/release/libxberg_ffi.so`, which this
+      # job never builds, so they report Unavailable regardless of toolchain presence.
+      # The step was removed; zig is excluded below alongside go/typescript/kotlin/
+      # swift instead -- see the `~keep` comment on `snippets:all` in
+      # `.task/tools/docs.yml` for the full accounting. ~keep
       - name: Setup Dart
         uses: dart-lang/setup-dart@v1
         with:
@@ -365,10 +370,6 @@ jobs:
         with:
           elixir-version: "1.19"
           otp-version: "28"
-      - name: Setup Zig
-        uses: xberg-io/actions/setup-zig@v1
-        with:
-          version: "0.16.0"
       # Java is the one preinstalled toolchain that is not usable as shipped: the
       # ubuntu-latest image's default JRE is 17 (`class file versions up to 61.0`), and
       # the java validator runs maven against packages/java, whose checkstyle plugin
@@ -397,7 +398,7 @@ jobs:
       # This job never runs `alef build`/`task build`, so `validation_level =
       # "compile"` (alef.toml) can only succeed for languages that need no
       # built xberg artifact: c, csharp, dart, elixir, java, php, python,
-      # ruby, rust, zig. `task docs:snippets:all` restricts the compile check
+      # ruby, rust. `task docs:snippets:all` restricts the compile check
       # to exactly that set via `--lang` -- see the `~keep` comment on
       # `snippets:all` in .task/tools/docs.yml for the measured per-language
       # breakdown and why `--lang`'s fence-tag granularity forces dropping
@@ -409,12 +410,15 @@ jobs:
       # needs the built `@xberg-io/xberg-wasm` package), kotlin (104 snippets
       # across kotlin+kotlin_android -- android needs an Android/Gradle
       # build), swift (110 snippets -- no Swift toolchain installed here at
-      # all). That is ~479 of 1985 snippets (~24%) with no compile-level gate
-      # anywhere today; audit/gaps above still cover their structure and
-      # cross-language parity. Closing this belongs in ci-e2e.yaml's
-      # per-language matrix legs, which already build each language's native
-      # artifact -- not here, where the only fix would be a second, ~1-hour,
-      # redundant FFI build per run. ~keep
+      # all), zig (110 snippets -- needs `target/release/libxberg_ffi.so`,
+      # same as go; a `Setup Zig` step was tried here first but the missing
+      # artifact is the real blocker, not the toolchain, so it was removed and
+      # zig joined this list instead). That is ~589 of 1985 snippets (~30%)
+      # with no compile-level gate anywhere today; audit/gaps above still
+      # cover their structure and cross-language parity. Closing this belongs
+      # in ci-e2e.yaml's per-language matrix legs, which already build each
+      # language's native artifact -- not here, where the only fix would be a
+      # second, ~1-hour, redundant FFI build per run. ~keep
       - name: Run docs snippets gate
         run: task docs:snippets:all
       - name: Report snippet languages not compile-verified in this job
@@ -422,8 +426,8 @@ jobs:
         run: |
           echo "::notice::docs-snippets gate does not compile-verify: go (141 snippets), \
           typescript/node+wasm (124 snippets), kotlin/kotlin_android (104 snippets), \
-          swift (110 snippets) -- see the ~keep comment above this step and in \
-          .task/tools/docs.yml:snippets:all for why and where that coverage belongs."
+          swift (110 snippets), zig (110 snippets) -- see the ~keep comment above this step \
+          and in .task/tools/docs.yml:snippets:all for why and where that coverage belongs."
 
   validate:
     if: github.event.pull_request.draft != true
