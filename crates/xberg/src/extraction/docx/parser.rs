@@ -389,6 +389,33 @@ impl Document {
         table_page_numbers
     }
 
+    /// Return the 1-based page number for each drawing, in `self.drawings` index order.
+    ///
+    /// Derived by walking the parsed element list, exactly as `table_page_numbers` does, rather
+    /// than by searching rendered markdown for a placeholder. `to_markdown` renders every drawing
+    /// to the same `![alt](image)` target, so no per-image key exists in the text to search for;
+    /// the previous lookup asked for one and always missed, reporting page 1 for every image
+    /// (GH#1546). Walking the elements is also independent of `inject_placeholders`, which
+    /// suppresses those placeholders entirely. ~keep
+    pub fn drawing_page_numbers(&self) -> Vec<usize> {
+        let mut drawing_page_numbers = vec![1; self.drawings.len()];
+        let mut current_page = 1;
+
+        for element in &self.elements {
+            match element {
+                DocumentElement::PageBreak => current_page += 1,
+                DocumentElement::Drawing(index) => {
+                    if let Some(page) = drawing_page_numbers.get_mut(*index) {
+                        *page = current_page;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        drawing_page_numbers
+    }
+
     /// Internal helper to ensure a blank line before appending new content.
     fn ensure_blank_line(output: &mut String) {
         if !output.is_empty() && !output.ends_with("\n\n") {

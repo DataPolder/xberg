@@ -704,6 +704,8 @@ type DocxParseResult = (
     Vec<Table>,
     Option<Vec<PageBoundary>>,
     Vec<crate::extraction::docx::drawing::Drawing>,
+    // 1-based page number per drawing, index-aligned with the drawings vec. ~keep
+    Vec<usize>,
     AHashMap<String, String>,
     InternalDocument,
 );
@@ -722,11 +724,11 @@ fn parse_docx_core(
     limits: crate::extractors::security::SecurityLimits,
 ) -> crate::error::Result<DocxParseResult> {
     let mut doc = crate::extraction::docx::parser::parse_document(content, &mut budget, &limits)?;
-    // `is_markdown` gates `to_markdown()` (which bakes `![desc](image_N)` placeholders into
-    // the flat text) vs. `to_plain_text()`. That placeholder is what the image-to-page
-    // association below (`text.find(&placeholder)`) relies on; without it every image
-    // silently defaults to page 1. DocTags needs the same per-image page fidelity as
-    // Markdown, so it takes the same branch here. ~keep
+    // `is_markdown` gates `to_markdown()` vs. `to_plain_text()` for the flat text; DocTags takes
+    // the markdown branch because it wants the same rendered shape. It no longer has any bearing
+    // on image page numbers: those come from `Document::drawing_page_numbers()`, walked from the
+    // parsed elements. The placeholders `to_markdown` writes are all the same `![alt](image)`
+    // target, so they never could identify an individual image (GH#1546). ~keep
     let (text, page_boundaries) = doc.extract_text_with_boundaries(
         matches!(
             output_format,
@@ -761,9 +763,13 @@ fn parse_docx_core(
             .processing_warnings
             .extend(std::mem::take(&mut doc.warnings));
     }
+    // Must run before the `mem::take` below: `drawing_page_numbers` sizes its result off
+    // `self.drawings.len()`, so taking `doc.drawings` first left it building against an
+    // already-emptied vec, always returning `[]` and defaulting every image to page 1 (GH#1546). ~keep
+    let drawing_page_nums = doc.drawing_page_numbers();
     let drawings = std::mem::take(&mut doc.drawings);
     let image_rels = std::mem::take(&mut doc.image_relationships);
-    Ok((text, tables, page_boundaries, drawings, image_rels, internal_doc))
+    Ok((text, tables, page_boundaries, drawings, drawing_page_nums, image_rels, internal_doc))
 }
 
 impl Plugin for DocxExtractor {
@@ -871,7 +877,7 @@ impl InternalDocumentExtractor for DocxExtractor {
         let budget = SecurityBudget::from_config(config);
         let limits = config.security_limits.clone().unwrap_or_default();
         let content_owned: Arc<[u8]> = Arc::from(content);
-        let (text, tables, page_boundaries, drawings, image_rels, mut internal_doc) = {
+        let (text, tables, page_boundaries, drawings, drawing_page_nums, image_rels, mut internal_doc) = {
             #[cfg(feature = "tokio-runtime")]
             if crate::core::batch_mode::is_batch_mode() {
                 if config.cancel_token.as_ref().map(|t| t.is_cancelled()).unwrap_or(false) {
@@ -1158,29 +1164,12 @@ impl InternalDocumentExtractor for DocxExtractor {
                 (Bytes::new(), format, None, None)
             };
 
-            let page_number = {
-                let placeholder = format!("![](image_{})", idx);
-                let placeholder_with_desc = description.as_ref().map(|d| format!("![{}](image_{})", d, idx));
-
-                let byte_pos = text
-                    .find(&placeholder)
-                    .or_else(|| placeholder_with_desc.as_deref().and_then(|p| text.find(p)));
-
-                if let Some(pos) = byte_pos {
-                    if let Some(ref ps) = page_structure
-                        && let Some(ref boundaries) = ps.boundaries
-                    {
-                        boundaries
-                            .iter()
-                            .find(|b| pos >= b.byte_start && pos < b.byte_end)
-                            .map(|b| b.page_number)
-                    } else {
-                        Some(1)
-                    }
-                } else {
-                    Some(1)
-                }
-            };
+            // Taken from the parsed element list, not by searching rendered markdown for a
+            // placeholder: `to_markdown` renders every drawing to the same `![alt](image)`
+            // target, so the per-image key this used to look for never existed and every image
+            // fell through to page 1 (GH#1546). The element walk is also independent of
+            // `inject_placeholders`, which suppresses those placeholders entirely. ~keep
+            let page_number = Some(drawing_page_nums.get(idx).copied().unwrap_or(1) as u32);
 
             let (image_kind, kind_confidence) =
                 crate::extraction::image_kind::classify(&data, format.as_ref(), width, height, None, None, false);
@@ -4197,6 +4186,78 @@ mod tests {
             internal_doc.images[0].data.as_ref(),
             payload.as_bytes(),
             "an honestly-declared media member must be read back in full"
+        );
+    }
+
+    /// Two drawings separated by two explicit page breaks, both referencing the same media part.
+    const PAGED_IMAGES_DOCUMENT_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p><w:r>
+      <w:drawing><wp:inline>
+        <wp:extent cx="914400" cy="914400"/>
+        <wp:docPr id="1" name="Picture 1" descr="First"/>
+        <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+          <pic:pic><pic:blipFill><a:blip r:embed="rId5"/></pic:blipFill></pic:pic>
+        </a:graphicData></a:graphic>
+      </wp:inline></w:drawing>
+    </w:r></w:p>
+    <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+    <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+    <w:p><w:r>
+      <w:drawing><wp:inline>
+        <wp:extent cx="914400" cy="914400"/>
+        <wp:docPr id="2" name="Picture 2" descr="Second"/>
+        <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+          <pic:pic><pic:blipFill><a:blip r:embed="rId5"/></pic:blipFill></pic:pic>
+        </a:graphicData></a:graphic>
+      </wp:inline></w:drawing>
+    </w:r></w:p>
+  </w:body>
+</w:document>"#;
+
+    /// GH#1546: every DOCX image reported `page_number == Some(1)`. The page was resolved by
+    /// searching the rendered text for `![](image_N)`, but `to_markdown` writes the same literal
+    /// `![alt](image)` target for every drawing, so that key never matched and each image fell
+    /// through to the page-1 default.
+    ///
+    /// Asserting the exact pair is deliberate: a check that the two page numbers merely *differ*
+    /// would also pass on `[2, 5]`, and one that they are "not all 1" would pass on `[1, 2]`.
+    ///
+    /// Neutralisation that must break this test: resolve `page_number` by searching `text` for a
+    /// per-image placeholder again instead of consulting `Document::drawing_page_numbers()`.
+    #[tokio::test]
+    async fn test_docx_image_page_numbers_follow_explicit_page_breaks() {
+        let data = build_test_docx_with_files(
+            PAGED_IMAGES_DOCUMENT_XML,
+            &[
+                ("word/_rels/document.xml.rels", FORGED_MEDIA_RELS_XML),
+                ("word/media/bomb.png", "PNGPAYLOAD"),
+            ],
+        );
+
+        let extractor = DocxExtractor::new();
+        let internal_doc = extractor
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &image_extraction_config(),
+            )
+            .await
+            .expect("a two-image document must extract");
+        let result =
+            crate::extraction::derive::derive_extraction_result(internal_doc, true, crate::core::config::OutputFormat::Plain);
+
+        let images = result.images.as_ref().expect("image extraction is enabled, so images must be populated");
+        let page_numbers: Vec<Option<u32>> = images.iter().map(|image| image.page_number).collect();
+        assert_eq!(
+            page_numbers,
+            vec![Some(1), Some(3)],
+            "the first drawing sits on page 1 and the second after two page breaks on page 3, got {page_numbers:?}"
         );
     }
 
