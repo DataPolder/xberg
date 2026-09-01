@@ -148,6 +148,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed HTML pages fetched over HTTP(S) losing every format-specific metadata field: results were
+  reported as `text/html` while `metadata.format` stayed empty, because the extraction ran over the
+  crawler's pre-rendered Markdown and never reached the HTML extractor. Title, headings, Open Graph,
+  Twitter card, links, and structured data are now recovered from the page HTML.
+- Fixed `pdf_options.hierarchy.enabled` silently producing no hierarchy: headings were detected and
+  then discarded unless the caller also set the unrelated `pages.extract_pages`. Requesting the
+  heading hierarchy now enables the per-page tracking it requires.
+- Fixed the bundled Tesseract build failing to configure on Windows when the MSVC developer
+  environment is not present, which broke building Xberg from source with the default OCR features.
 - Fixed URL extraction reporting internally converted HTML pages as `text/markdown`; results now
   retain a validated, canonical source MIME type.
 - Fixed `clear_post_processors` stopping at the first failed shutdown hook and permanently removing
