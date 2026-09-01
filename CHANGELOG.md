@@ -243,7 +243,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed PDF heading recovery for repeated bold section titles set at body font size while retaining
   short bold labels, presenter attributions, and calendar legends as body text (#1513).
 - Fixed PDF table extraction so multi-word cells, rule-less prose regions, OCR-derived tables, and
-  page-local table failures are handled correctly (#688, #1358).
+  page-local table failures are handled correctly (#688, #1358, #1542).
 - Fixed PDF Markdown and Djot output so native text is retained when structured conversion is
   incomplete.
 - Fixed PDF configuration so metadata suppression and header/footer settings are honored by every
