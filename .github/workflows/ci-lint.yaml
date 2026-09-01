@@ -439,17 +439,22 @@ jobs:
       # lints anything. Pinning skips that request. It also stops a poly release
       # from changing what this gate enforces without a commit here. ~keep
       poly-version: "v0.21.0"
-      # poly.toml:789-793 defines an `alef-snippets` pre-commit hook running
-      # `alef snippets check --strict --cache off`, and `poly lint .` runs it as part of
-      # its whole-project phase. The reusable workflow only installs the alef CLI when
-      # this input is set, and it defaults to false -- so every run that got past
-      # `Format check` died with `× alef-snippets / poly-hook: 1: alef: not found` and
-      # exit 1, with cargo-clippy green beside it (verified in jobs 93568055890 and
-      # 93702252442). The job was permanently red, masked only because `Format check`
-      # failed earlier in almost every run. Setting this also enables the workflow's own
-      # fixture-snippet generate/drift/validate steps, which were skipped for the same
-      # reason. ~keep
-      check-fixture-snippets: true
+      # Deliberately false. This input once had to be true because poly.toml defined an
+      # `alef-snippets` hook and only this input installed the alef CLI poly needed
+      # (`× alef-snippets / poly-hook: 1: alef: not found`, jobs 93568055890/93702252442).
+      # That hook no longer exists -- `1449ebdf83` dropped it and alef.toml no longer
+      # declares it -- so `poly lint .` needs no alef binary and this job needs no alef.
+      # Leaving it true is now actively harmful: it also runs the reusable workflow's own
+      # `alef snippets check --strict --cache off`, which takes NO `--lang` filter, in a
+      # job that builds no native artifacts. 469 snippets (go, typescript/wasm,
+      # kotlin_android, zig, swift) report Unavailable, and --strict fails on Unavailable,
+      # so the step can never pass here regardless of snippet quality. Both halves of it
+      # are already covered by dedicated jobs above: `Generated e2e suites freshness`
+      # runs `alef e2e generate` + `git diff --exit-code e2e/`, and `Docs snippets gate`
+      # runs the strict check scoped by `--lang` to the languages this runner can satisfy.
+      # This job's own purpose is `poly fmt --check` and `poly lint .`, which the failing
+      # step masked. ~keep
+      check-fixture-snippets: false
       setup-rust: true
       # poly's cargo-clippy hook builds the whole workspace, and
       # tools/benchmark-harness depends on xberg with `full`, which pulls
