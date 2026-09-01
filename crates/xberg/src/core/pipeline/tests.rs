@@ -121,9 +121,15 @@ fn restore_builtin_summarization() {
 }
 
 /// Maximum attempts before a lifecycle mutation is treated as genuinely stuck.
+///
+/// Carries `retry_while_registry_in_use`'s own cfg: without it the constants outlive the only
+/// function that reads them on any feature set that compiles it out, and `-D warnings` turns
+/// that into a hard error on the narrow no-ORT legs while every wide-feature leg stays green. ~keep
+#[cfg(all(feature = "quality", feature = "summarization"))]
 const REGISTRY_MUTATION_ATTEMPTS: usize = 100;
 
 /// Delay between attempts, long enough for a concurrent extraction to drop its snapshot lease.
+#[cfg(all(feature = "quality", feature = "summarization"))]
 const REGISTRY_MUTATION_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
 
 /// Retry a post-processor lifecycle mutation while the registry reports it is in use.

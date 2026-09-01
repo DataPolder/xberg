@@ -12,7 +12,13 @@ use async_trait::async_trait;
 use serial_test::serial;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use xberg::core::config::{ExtractionConfig, OcrConfig, PdfConfig};
+use xberg::core::config::{ExtractionConfig, OcrConfig};
+// `PdfConfig` lives behind the `pdf` feature, but this file is gated only on `ocr`. The
+// narrow no-ORT tract leg enables `ocr` WITHOUT `pdf`, so an unconditional import made the
+// whole test binary fail to compile there while every wide-feature leg stayed green -- a
+// `--workspace` clippy cannot fail on a feature combination it never builds. ~keep
+#[cfg(feature = "pdf")]
+use xberg::core::config::PdfConfig;
 use xberg::plugins::registry::get_ocr_backend_registry;
 use xberg::plugins::{OcrBackend, OcrBackendType, Plugin};
 use xberg::types::{ExtractedDocument, Metadata};
@@ -941,6 +947,9 @@ fn test_ocr_backend_document_processing_fallback() {
     }
 }
 
+// Exercises the document-level OCR override against a PDF, so it needs the `pdf` feature
+// that supplies `pdf_options`. ~keep
+#[cfg(feature = "pdf")]
 #[serial]
 #[test]
 fn test_ocr_backend_document_processing_override() {
