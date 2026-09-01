@@ -364,7 +364,10 @@ jobs:
       - name: Setup Dart
         uses: dart-lang/setup-dart@v1
         with:
-          sdk: "3.11"
+          # freezed ^4.0.1 (packages/dart) requires SDK >=3.12.0, so on 3.11
+          # every dart snippet fails pub version-solving before it compiles --
+          # 110 of the gate's 111 failures were this one error, not codegen. ~keep
+          sdk: "3.12"
       - name: Setup Elixir
         uses: xberg-io/actions/setup-elixir@v1
         with:
