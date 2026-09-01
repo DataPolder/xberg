@@ -9706,7 +9706,8 @@ mod tests {
         extractor.merging_config = SpanMergingConfig::legacy();
         extractor.add_font("F1".to_string(), create_test_font());
 
-        let stream = b"BT /F1 12 Tf 100 700 Td (AA) Tj [(B)(B)(B)(B)(B)(B)] TJ (CC) Tj 50 0 Td [(D)(D)(D)(D)(D)(D)] TJ ET";
+        let stream =
+            b"BT /F1 12 Tf 100 700 Td (AA) Tj [(B)(B)(B)(B)(B)(B)] TJ (CC) Tj 50 0 Td [(D)(D)(D)(D)(D)(D)] TJ ET";
         let spans = extractor.extract_text_spans(stream).unwrap();
         let text: String = spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("");
 
@@ -9714,8 +9715,12 @@ mod tests {
             !text.contains("AACC"),
             "the (CC) run was appended onto the stale (AA) buffer across the intervening TJ array, got: {text:?}"
         );
-        let b_index = text.find("BBBBBB").unwrap_or_else(|| panic!("BBBBBB run missing, got: {text:?}"));
-        let c_index = text.find("CC").unwrap_or_else(|| panic!("CC run missing, got: {text:?}"));
+        let b_index = text
+            .find("BBBBBB")
+            .unwrap_or_else(|| panic!("BBBBBB run missing, got: {text:?}"));
+        let c_index = text
+            .find("CC")
+            .unwrap_or_else(|| panic!("CC run missing, got: {text:?}"));
         assert!(
             c_index > b_index,
             "(CC) was drawn after the TJ array between it and the preceding Tj, so it must not sort ahead of it, got: {text:?}"

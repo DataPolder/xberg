@@ -223,8 +223,8 @@ fn word_language_is_forwarded_per_ocr_element() {
         min_level: xberg::OcrElementLevel::Word,
         ..Default::default()
     });
-    let result = extract_uri_document_blocking(&file_path, None, &config)
-        .expect("should extract test_hello_world.png with OCR");
+    let result =
+        extract_uri_document_blocking(&file_path, None, &config).expect("should extract test_hello_world.png with OCR");
     let captured_paragraph_skip_events = capture.events.lock().unwrap().clone();
 
     let elements = result.ocr_elements.expect("OCR should produce word-level elements");

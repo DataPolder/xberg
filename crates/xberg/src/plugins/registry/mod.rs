@@ -223,7 +223,11 @@ pub(crate) mod test_support {
                     // holds the lock and cannot race the next test's setup.
                     // While already unwinding, take a single attempt: the retry's sleeps would
                     // only delay the real failure that is being reported. ~keep
-                    let cleared = if std::thread::panicking() { $clear() } else { retry_registry_clear($clear) };
+                    let cleared = if std::thread::panicking() {
+                        $clear()
+                    } else {
+                        retry_registry_clear($clear)
+                    };
                     // Panicking inside `drop` while the thread is already unwinding aborts the
                     // process and hides the assertion failure that caused it, so only surface a
                     // teardown error when the test itself passed.

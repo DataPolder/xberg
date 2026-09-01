@@ -71,7 +71,12 @@ pub(crate) fn recover(data: &[u8]) -> Option<DiagramGraph> {
         return None;
     }
 
-    shapes.sort_by(|a, b| a.position.0.total_cmp(&b.position.0).then(a.position.1.total_cmp(&b.position.1)));
+    shapes.sort_by(|a, b| {
+        a.position
+            .0
+            .total_cmp(&b.position.0)
+            .then(a.position.1.total_cmp(&b.position.1))
+    });
 
     let mut index_of: HashMap<&str, usize> = HashMap::with_capacity(shapes.len());
     let nodes = shapes
@@ -108,7 +113,11 @@ pub(crate) fn recover(data: &[u8]) -> Option<DiagramGraph> {
         .collect();
     edges.sort_by(|a, b| a.from.cmp(&b.from).then(a.to.cmp(&b.to)));
 
-    Some(DiagramGraph { name: None, nodes, edges })
+    Some(DiagramGraph {
+        name: None,
+        nodes,
+        edges,
+    })
 }
 
 /// Every `draw:page` under `office:body > office:drawing`, in document order.
@@ -148,12 +157,29 @@ fn read_shape(node: Node, styles: &HashMap<String, GraphicStyle>) -> Option<Shap
     let id = attribute(node, DRAWING_NS, "id")?.to_string();
     let label = paragraph_text(node);
     let shape = classify_shape(node);
-    let style = style_name(node).and_then(|name| styles.get(name)).cloned().unwrap_or_default();
+    let style = style_name(node)
+        .and_then(|name| styles.get(name))
+        .cloned()
+        .unwrap_or_default();
     let position = (
-        length_value(node.attribute((SVG_COMPAT_NS, "y")).or_else(|| node.attribute("svg:y")).unwrap_or_default()),
-        length_value(node.attribute((SVG_COMPAT_NS, "x")).or_else(|| node.attribute("svg:x")).unwrap_or_default()),
+        length_value(
+            node.attribute((SVG_COMPAT_NS, "y"))
+                .or_else(|| node.attribute("svg:y"))
+                .unwrap_or_default(),
+        ),
+        length_value(
+            node.attribute((SVG_COMPAT_NS, "x"))
+                .or_else(|| node.attribute("svg:x"))
+                .unwrap_or_default(),
+        ),
     );
-    Some(ShapeCandidate { id, label, shape, style, position })
+    Some(ShapeCandidate {
+        id,
+        label,
+        shape,
+        style,
+        position,
+    })
 }
 
 fn read_connector(node: Node, styles: &HashMap<String, GraphicStyle>) -> Option<ConnectorCandidate> {
@@ -163,8 +189,16 @@ fn read_connector(node: Node, styles: &HashMap<String, GraphicStyle>) -> Option<
         let text = paragraph_text(node);
         (!text.is_empty()).then_some(text)
     };
-    let style = style_name(node).and_then(|name| styles.get(name)).cloned().unwrap_or_default();
-    Some(ConnectorCandidate { start_shape, end_shape, label, style })
+    let style = style_name(node)
+        .and_then(|name| styles.get(name))
+        .cloned()
+        .unwrap_or_default();
+    Some(ConnectorCandidate {
+        start_shape,
+        end_shape,
+        label,
+        style,
+    })
 }
 
 /// `draw:id` on a shape or connector, tried under its namespace first and as
@@ -172,11 +206,13 @@ fn read_connector(node: Node, styles: &HashMap<String, GraphicStyle>) -> Option<
 /// (`extractors/odp.rs`) resolve attributes that a producer may or may not
 /// declare with a bound namespace.
 fn attribute<'a>(node: Node<'a, '_>, namespace: &str, local_name: &str) -> Option<&'a str> {
-    node.attribute((namespace, local_name)).or_else(|| node.attribute(format!("draw:{local_name}").as_str()))
+    node.attribute((namespace, local_name))
+        .or_else(|| node.attribute(format!("draw:{local_name}").as_str()))
 }
 
 fn style_name<'a>(node: Node<'a, '_>) -> Option<&'a str> {
-    node.attribute((DRAWING_NS, "style-name")).or_else(|| node.attribute("draw:style-name"))
+    node.attribute((DRAWING_NS, "style-name"))
+        .or_else(|| node.attribute("draw:style-name"))
 }
 
 /// Concatenate every `text:p` descendant's text, one paragraph per line.
@@ -190,14 +226,23 @@ fn paragraph_text(node: Node) -> String {
 }
 
 fn element_text(node: Node) -> String {
-    node.descendants().filter(|n| n.is_text()).filter_map(|n| n.text()).collect::<String>().trim().to_string()
+    node.descendants()
+        .filter(|n| n.is_text())
+        .filter_map(|n| n.text())
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 fn classify_shape(node: Node) -> DiagramShape {
     let geometry_type = node
         .children()
         .find(|n| n.tag_name().name() == "enhanced-geometry")
-        .and_then(|geometry| geometry.attribute((DRAWING_NS, "type")).or_else(|| geometry.attribute("draw:type")));
+        .and_then(|geometry| {
+            geometry
+                .attribute((DRAWING_NS, "type"))
+                .or_else(|| geometry.attribute("draw:type"))
+        });
     match geometry_type {
         Some("ellipse") | Some("circle") => DiagramShape::Ellipse,
         Some("diamond") => DiagramShape::Diamond,
@@ -212,7 +257,9 @@ fn classify_shape(node: Node) -> DiagramShape {
 /// `svg:stroke-width`, ignoring its unit suffix. Good enough to order shapes
 /// drawn in one consistent unit; not a general length parser.
 fn length_value(value: &str) -> f32 {
-    let numeric_end = value.find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-').unwrap_or(value.len());
+    let numeric_end = value
+        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+        .unwrap_or(value.len());
     value[..numeric_end].parse().unwrap_or(0.0)
 }
 
@@ -227,7 +274,9 @@ fn collect_styles(root: Node) -> HashMap<String, GraphicStyle> {
         .children()
         .filter(|n| n.tag_name().name() == "style")
         .filter_map(|style| {
-            let name = style.attribute((STYLE_NS, "name")).or_else(|| style.attribute("style:name"))?;
+            let name = style
+                .attribute((STYLE_NS, "name"))
+                .or_else(|| style.attribute("style:name"))?;
             let properties = style.children().find(|n| n.tag_name().name() == "graphic-properties")?;
             Some((name.to_string(), read_graphic_style(properties)))
         })
@@ -235,7 +284,9 @@ fn collect_styles(root: Node) -> HashMap<String, GraphicStyle> {
 }
 
 fn read_graphic_style(properties: Node) -> GraphicStyle {
-    let fill_mode = properties.attribute((DRAWING_NS, "fill")).or_else(|| properties.attribute("draw:fill"));
+    let fill_mode = properties
+        .attribute((DRAWING_NS, "fill"))
+        .or_else(|| properties.attribute("draw:fill"));
     let fill = if fill_mode == Some("none") {
         None
     } else {
@@ -253,9 +304,16 @@ fn read_graphic_style(properties: Node) -> GraphicStyle {
         .or_else(|| properties.attribute("svg:stroke-width"))
         .map(length_value);
     let dashed = matches!(
-        properties.attribute((DRAWING_NS, "stroke")).or_else(|| properties.attribute("draw:stroke")),
+        properties
+            .attribute((DRAWING_NS, "stroke"))
+            .or_else(|| properties.attribute("draw:stroke")),
         Some("dash")
     );
 
-    GraphicStyle { fill, stroke, stroke_width, dashed }
+    GraphicStyle {
+        fill,
+        stroke,
+        stroke_width,
+        dashed,
+    }
 }

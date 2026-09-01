@@ -769,7 +769,15 @@ fn parse_docx_core(
     let drawing_page_nums = doc.drawing_page_numbers();
     let drawings = std::mem::take(&mut doc.drawings);
     let image_rels = std::mem::take(&mut doc.image_relationships);
-    Ok((text, tables, page_boundaries, drawings, drawing_page_nums, image_rels, internal_doc))
+    Ok((
+        text,
+        tables,
+        page_boundaries,
+        drawings,
+        drawing_page_nums,
+        image_rels,
+        internal_doc,
+    ))
 }
 
 impl Plugin for DocxExtractor {
@@ -4249,10 +4257,16 @@ mod tests {
             )
             .await
             .expect("a two-image document must extract");
-        let result =
-            crate::extraction::derive::derive_extraction_result(internal_doc, true, crate::core::config::OutputFormat::Plain);
+        let result = crate::extraction::derive::derive_extraction_result(
+            internal_doc,
+            true,
+            crate::core::config::OutputFormat::Plain,
+        );
 
-        let images = result.images.as_ref().expect("image extraction is enabled, so images must be populated");
+        let images = result
+            .images
+            .as_ref()
+            .expect("image extraction is enabled, so images must be populated");
         let page_numbers: Vec<Option<u32>> = images.iter().map(|image| image.page_number).collect();
         assert_eq!(
             page_numbers,

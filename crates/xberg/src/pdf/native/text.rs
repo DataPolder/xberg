@@ -1348,9 +1348,11 @@ fn span_page_y_extent(span: &xberg_native_pdf::layout::TextSpan) -> (f32, f32) {
     let advance = span.bbox.width * sin;
     let cross = span.bbox.height * cos;
     let corners = [origin, origin + advance, origin + cross, origin + advance + cross];
-    corners.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), corner| {
-        (low.min(*corner), high.max(*corner))
-    })
+    corners
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), corner| {
+            (low.min(*corner), high.max(*corner))
+        })
 }
 
 /// Whether a span escapes the header/footer furniture bands.
@@ -2585,8 +2587,14 @@ mod tests {
     /// span coalescing fuses adjacent words in production, that fusion
     /// happens upstream of this function's input and is out of scope here.
     #[test]
-    #[expect(clippy::too_many_lines, reason = "one span literal per pdftotext word, transcribed verbatim for fidelity")]
-    #[expect(clippy::print_stderr, reason = "diagnostic test reports its A/B outcome via eprintln for GH#1545 triage")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one span literal per pdftotext word, transcribed verbatim for fidelity"
+    )]
+    #[expect(
+        clippy::print_stderr,
+        reason = "diagnostic test reports its A/B outcome via eprintln for GH#1545 triage"
+    )]
     fn gh1545_diagnostic_reports_split_and_reorder_outcome() {
         const PAGE_WIDTH: f32 = 595.0;
         // The table's rightmost measured value column ends at x=285.622; the
