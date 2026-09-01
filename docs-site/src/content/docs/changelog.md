@@ -151,6 +151,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed the native C FFI library shipping without eleven features the crate advertises, so the
+  Java, Go, C#, Swift, Zig, and C bindings had no summarization, translation, analysis, HEIC,
+  captioning, ML redaction, or static-embedding support. The desktop dependency hand-maintained a
+  feature list that had drifted from `full`; a regression test now fails on any future omission.
+- Fixed HTML pages fetched over HTTP(S) losing every format-specific metadata field: results were
+  reported as `text/html` while `metadata.format` stayed empty, because the extraction ran over the
+  crawler's pre-rendered Markdown and never reached the HTML extractor. Title, headings, Open Graph,
+  Twitter card, links, and structured data are now recovered from the page HTML.
+- Fixed `pdf_options.hierarchy.enabled` silently producing no hierarchy: headings were detected and
+  then discarded unless the caller also set the unrelated `pages.extract_pages`. Requesting the
+  heading hierarchy now enables the per-page tracking it requires.
+- Fixed the bundled Tesseract build failing to configure on Windows when the MSVC developer
+  environment is not present, which broke building Xberg from source with the default OCR features.
 - Fixed URL extraction reporting internally converted HTML pages as `text/markdown`; results now
   retain a validated, canonical source MIME type.
 - Fixed `clear_post_processors` stopping at the first failed shutdown hook and permanently removing
@@ -246,7 +259,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed PDF heading recovery for repeated bold section titles set at body font size while retaining
   short bold labels, presenter attributions, and calendar legends as body text (#1513).
 - Fixed PDF table extraction so multi-word cells, rule-less prose regions, OCR-derived tables, and
-  page-local table failures are handled correctly (#688, #1358).
+  page-local table failures are handled correctly (#688, #1358, #1542).
 - Fixed PDF Markdown and Djot output so native text is retained when structured conversion is
   incomplete.
 - Fixed PDF configuration so metadata suppression and header/footer settings are honored by every
