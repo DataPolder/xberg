@@ -331,12 +331,16 @@ fn processor_handoff_rejects_a_snapshot_after_concurrent_shutdown() {
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let executed_after_shutdown = Arc::new(AtomicBool::new(false));
-    crate::plugins::register_post_processor(Arc::new(HandoffRaceProcessor {
-        shutdown: Arc::clone(&shutdown),
-        executed_after_shutdown: Arc::clone(&executed_after_shutdown),
-        mutation_error: None,
-    }))
-    .unwrap();
+    // Setup, before this test holds any lease of its own, so retrying is safe here — unlike the
+    // later `unregister`, which runs while this test's pipeline is deliberately parked and must
+    // NOT be retried. ~keep
+    retry_while_registry_in_use(|| {
+        crate::plugins::register_post_processor(Arc::new(HandoffRaceProcessor {
+            shutdown: Arc::clone(&shutdown),
+            executed_after_shutdown: Arc::clone(&executed_after_shutdown),
+            mutation_error: None,
+        }))
+    });
     initialization::initialize_processor_cache().unwrap();
 
     let (snapshot_sender, snapshot_receiver) = mpsc::channel();
@@ -373,12 +377,16 @@ fn processor_handoff_lease_rejects_shutdown_until_pipeline_finishes() {
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let executed_after_shutdown = Arc::new(AtomicBool::new(false));
-    crate::plugins::register_post_processor(Arc::new(HandoffRaceProcessor {
-        shutdown: Arc::clone(&shutdown),
-        executed_after_shutdown: Arc::clone(&executed_after_shutdown),
-        mutation_error: None,
-    }))
-    .unwrap();
+    // Setup, before this test holds any lease of its own, so retrying is safe here — unlike the
+    // later `unregister`, which runs while this test's pipeline is deliberately parked and must
+    // NOT be retried. ~keep
+    retry_while_registry_in_use(|| {
+        crate::plugins::register_post_processor(Arc::new(HandoffRaceProcessor {
+            shutdown: Arc::clone(&shutdown),
+            executed_after_shutdown: Arc::clone(&executed_after_shutdown),
+            mutation_error: None,
+        }))
+    });
     initialization::initialize_processor_cache().unwrap();
 
     let (handoff_sender, handoff_receiver) = mpsc::channel();
@@ -428,21 +436,23 @@ fn reentrant_lifecycle_mutation_returns_in_use_error_without_deadlock() {
 
     let mutation_error = Arc::new(Mutex::new(None));
     let thread_error = Arc::clone(&mutation_error);
+    // Registered BEFORE the thread is spawned, and so before `recv_timeout` starts counting.
+    // This is setup, not the behaviour under test: it races the lease held by every non-serial
+    // extraction test and the contract for that failure is to retry. Doing it inside the thread
+    // charges the retry against the 250ms deadlock window, which turns a slow-but-correct retry
+    // on a loaded runner into a spurious "must not deadlock: Timeout"; unwrapping it instead
+    // panics the thread, drops the sender, and reports the same assertion as "Disconnected".
+    // Both disguise a retryable setup error as a deadlock. The assertion that matters is on
+    // `mutation_error`, captured mid-pipeline and untouched by this. ~keep
+    retry_while_registry_in_use(|| {
+        crate::plugins::register_post_processor(Arc::new(HandoffRaceProcessor {
+            shutdown: Arc::new(AtomicBool::new(false)),
+            executed_after_shutdown: Arc::new(AtomicBool::new(false)),
+            mutation_error: Some(Arc::clone(&thread_error)),
+        }))
+    });
     let (result_sender, result_receiver) = mpsc::channel();
     let pipeline_thread = std::thread::spawn(move || {
-        // Setup, not the behaviour under test: this registration races the lease held by every
-        // non-serial extraction test, and the contract for that failure is to retry. Unwrapping
-        // it here panics the spawned thread, which drops the sender and surfaces as the
-        // `recv_timeout` "must not deadlock" failure below -- masking a retryable setup error as
-        // a deadlock. The assertion that matters is on `mutation_error`, captured mid-pipeline
-        // and left untouched by this. ~keep
-        retry_while_registry_in_use(|| {
-            crate::plugins::register_post_processor(Arc::new(HandoffRaceProcessor {
-                shutdown: Arc::new(AtomicBool::new(false)),
-                executed_after_shutdown: Arc::new(AtomicBool::new(false)),
-                mutation_error: Some(Arc::clone(&thread_error)),
-            }))
-        });
         let pipeline_result = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
