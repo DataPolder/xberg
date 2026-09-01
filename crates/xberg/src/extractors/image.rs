@@ -4314,8 +4314,12 @@ mod tests {
 
     /// Full-pipeline regression for #732: InternalDocument.images must survive the
     /// derive.rs conversion so ExtractedDocument.images is Some after run_pipeline.
+    // Holds a `ProcessorSnapshotLease` for the whole `run_pipeline` call. Without `#[serial]`
+    // this raced the `#[serial]`-guarded lifecycle tests in `core::pipeline::tests`, whose
+    // mutations are refused while any snapshot lease is live. ~keep
     #[cfg(feature = "ocr")]
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_pipeline_images_some_after_ocr_with_captioning() {
         use crate::core::config::{CaptioningConfig, LlmConfig, OcrConfig};
         use crate::core::pipeline::run_pipeline;

@@ -120,6 +120,33 @@ fn restore_builtin_summarization() {
     crate::plugins::processor::builtin::summarization::register().unwrap();
 }
 
+/// Maximum attempts before a lifecycle mutation is treated as genuinely stuck.
+const REGISTRY_MUTATION_ATTEMPTS: usize = 100;
+
+/// Delay between attempts, long enough for a concurrent extraction to drop its snapshot lease.
+const REGISTRY_MUTATION_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Retry a post-processor lifecycle mutation while the registry reports it is in use.
+///
+/// `with_registration_update` refuses a mutation whenever a snapshot lease is live, and the
+/// documented contract (`initialization.rs`) is that this failure is *retryable* -- so
+/// `.unwrap()`ing it asserts an exclusivity this binary cannot provide. `#[serial]` only orders a
+/// test against the crate's other `#[serial]` tests, while dozens of non-serial tests here run
+/// real extractions and hold that lease. Honour the contract instead of racing it. ~keep
+#[cfg(all(feature = "quality", feature = "summarization"))]
+fn retry_while_registry_in_use<T>(mut mutation: impl FnMut() -> crate::Result<T>) -> T {
+    for _ in 0..REGISTRY_MUTATION_ATTEMPTS {
+        match mutation() {
+            Ok(value) => return value,
+            Err(crate::XbergError::Other(message)) if message.contains("retry the lifecycle mutation") => {
+                std::thread::sleep(REGISTRY_MUTATION_RETRY_DELAY);
+            }
+            Err(error) => panic!("post-processor lifecycle mutation failed: {error}"),
+        }
+    }
+    panic!("post-processor registry still in use by a concurrent extraction after retrying");
+}
+
 /// Build an `InternalDocument` with a single paragraph element for pipeline tests.
 fn make_doc(content: &str, mime: &str) -> InternalDocument {
     let mut doc = InternalDocument::new("plain");
@@ -226,8 +253,8 @@ async fn builtin_processors_recover_after_public_registry_clear() {
 #[serial]
 #[cfg(all(feature = "quality", feature = "summarization"))]
 async fn unregister_remains_effective_during_pending_builtin_recovery() {
-    crate::plugins::clear_post_processors().unwrap();
-    crate::plugins::unregister_post_processor("summarization").unwrap();
+    retry_while_registry_in_use(crate::plugins::clear_post_processors);
+    retry_while_registry_in_use(|| crate::plugins::unregister_post_processor("summarization"));
 
     let config = ExtractionConfig {
         enable_quality_processing: true,
