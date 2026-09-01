@@ -4232,6 +4232,52 @@ mod tests {
         }
     }
 
+    /// GH CI E2E `test_pdf_hierarchy_config`: `pdf_options.hierarchy.enabled` used to be a silent
+    /// no-op. A `PageHierarchy` can only hang off a `PageContent`, and `page_contents` is produced
+    /// only when `pages.extract_pages` is set -- which `PageConfig::default()` leaves `false` and
+    /// nothing in the hierarchy config points at. Headings were detected, then dropped.
+    #[tokio::test]
+    #[cfg(feature = "pdf")]
+    async fn test_pdf_hierarchy_enabled_populates_page_hierarchy_without_explicit_page_config() {
+        use crate::core::config::{HierarchyConfig, PdfConfig};
+
+        let pdf_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../test_documents/pdf/embedded_images_tables.pdf");
+        let Ok(content) = std::fs::read(pdf_path) else {
+            return;
+        };
+
+        let config = ExtractionConfig {
+            pdf_options: Some(PdfConfig {
+                hierarchy: Some(HierarchyConfig {
+                    enabled: true,
+                    ..HierarchyConfig::default()
+                }),
+                ..PdfConfig::default()
+            }),
+            ..ExtractionConfig::default()
+        };
+
+        let extractor = PdfExtractor::new();
+        let result = extractor
+            .extract_content(&content, "application/pdf", &config)
+            .await
+            .expect("hierarchy extraction should succeed");
+        let result =
+            crate::extraction::derive::derive_extraction_result(result, true, crate::core::config::OutputFormat::Plain);
+
+        let pages = result.pages.as_ref().expect("hierarchy request must produce pages");
+        let hierarchy = pages[0]
+            .hierarchy
+            .as_ref()
+            .expect("pages[0].hierarchy must be populated when hierarchy.enabled is true");
+        assert!(
+            !hierarchy.blocks.is_empty(),
+            "hierarchy must carry at least one block; got block_count={}",
+            hierarchy.block_count
+        );
+    }
+
     #[tokio::test]
     #[cfg(feature = "pdf")]
     async fn test_pdf_page_marker_validation() {
