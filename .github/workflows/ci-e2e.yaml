@@ -454,11 +454,17 @@ jobs:
         env:
           RUSTFLAGS: ""
 
-      - name: Pre-build mock-server for Go e2e
-        if: matrix.lang == 'go'
+      # wasm needs this for the same reason go does: e2e/wasm/globalSetup.ts spawns
+      # e2e/rust/target/release/mock-server unconditionally and states it "must be
+      # pre-built", where ruby and elixir cargo-build it themselves when missing. Without
+      # it the leg dies in globalSetup with ENOENT before any test runs. Kept here rather
+      # than in alef.toml's `before` hook because alef.toml is a generation input: editing
+      # it invalidates the crate's inputs hash and fails `alef verify`. ~keep
+      - name: Pre-build mock-server for Go and wasm e2e
+        if: matrix.lang == 'go' || matrix.lang == 'wasm'
         shell: bash
         run: |
-          echo "Pre-building mock-server for Go e2e tests..."
+          echo "Pre-building mock-server for ${{ matrix.lang }} e2e tests..."
           cargo build --release --manifest-path e2e/rust/Cargo.toml --bin mock-server
           mkdir -p /tmp/xberg-e2e
           cp e2e/rust/target/release/mock-server /tmp/xberg-e2e/mock-server
