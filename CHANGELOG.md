@@ -157,6 +157,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a PDF page that places a statistics table beside a prose column being emitted in
+  full-width Y order, which spliced the prose apart mid-sentence (`more likely to be aged
+  35Female 51.5 ...`) and welded the table's two label/value panels together on every row. The
+  table region is now emitted whole, in row order, ahead of the prose column, and a repeated
+  panel is emitted panel by panel
+  ([#1545](https://github.com/xberg-io/xberg/issues/1545)).
 - Fixed PDF text coming back scrambled when a short `Tj` run sat between two `TJ` arrays: the run
   was emitted at an earlier run's stale position and sorted into the wrong place, so
   `within a period ... after conclusion` extracted as `wincthin a period ... after co lusion`.

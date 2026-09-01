@@ -911,6 +911,41 @@ const LINE_Y_TOLERANCE_PTS: f32 = 0.5;
 // same density bar `MIN_DENSE_COLUMN_SPANS_PER_SIDE` applies to a column's
 // population, to the evidence for the gutter's existence.
 const MIN_DENSE_COLUMN_SPLIT_LINES: usize = MIN_DENSE_COLUMN_SPANS_PER_SIDE;
+// GH#1545: two regions with different leading (a table on 8.05pt beside prose on
+// 10.45pt) are never grouped into a shared line by `group_into_lines`, so per-line
+// gutter evidence only ever sees each region's *internal* gaps and the median lands
+// inside one of them. A page-wide whitespace corridor does see the boundary between
+// them. The per-line median stays authoritative whenever it already sits in such a
+// corridor -- which is every ordinary two-column page, and every page whose corridor
+// is closed by narrow gutter-crossing furniture (the case per-line evidence exists
+// for) -- so the corridor is consulted only when the median demonstrably sits inside
+// content rather than inside whitespace. ~keep
+// Two sides of a gutter that pair up row-for-row are one table whose rows carry the
+// meaning (label left, value right); reordering column-major would destroy them, which
+// is what `dense_two_column_table_keeps_row_order` guards. Two sides that do NOT pair
+// up are independent regions and may be separated. Measured on the two fixtures: the
+// GH#1545 table/prose page pairs 3 of 47 lines (0.064) while the table guard pairs 8 of
+// 8 (1.000), so 0.5 sits in open space with no fixture anywhere near it. ~keep
+const MAX_CROSS_GUTTER_ROW_PAIRING_FRACTION: f32 = 0.5;
+// A repeated label/value panel ("Sex % Sex %") welds its two halves per row when the
+// region is emitted row-major. The panel boundary cannot be found by gutter width --
+// measured on the GH#1545 page it is 3.28pt against a 1.95pt word space, a 1.3pt margin
+// at a 6.475pt font -- but the columns' left edges repeat exactly, so the boundary is
+// recoverable as "a text column immediately following a numeric one". The measured
+// per-column numeric fractions there are 0.02 / 0.96 / 0.00 / 1.00, so these thresholds
+// sit in a gap almost as wide as the range itself and a table that does not separate
+// this cleanly declines instead of guessing. ~keep
+const MIN_PANEL_VALUE_COLUMN_NUMERIC_FRACTION: f32 = 0.8;
+const MAX_PANEL_LABEL_COLUMN_NUMERIC_FRACTION: f32 = 0.2;
+// A panel needs a label column and a value column, so splitting is only meaningful
+// from four columns up, and a boundary that would leave a one-column panel is rejected. ~keep
+const MIN_PANEL_SPLIT_COLUMNS: usize = 4;
+const MIN_COLUMNS_PER_PANEL: usize = 2;
+// A caption or title inside the region runs across every column as ordinary prose, so
+// its words land between the column edges rather than on them. Emitting it panel-major
+// would tear it in half. Measured on the GH#1545 page the title aligns 0.20 of its
+// spans to a column edge while all 30 real rows align 0.50 or more. ~keep
+const MIN_GRID_ROW_COLUMN_ALIGNMENT_FRACTION: f32 = 0.4;
 
 /// One visual line: span indices in left-to-right (`x` ascending) order.
 type SpanLine = Vec<usize>;
@@ -1031,6 +1066,78 @@ fn detect_split_x(spans: &[xberg_native_pdf::layout::TextSpan], lines: &[SpanLin
     } else {
         midpoints[mid]
     })
+}
+
+/// Move a split that still cuts through a word after snapping to the page's own
+/// whitespace corridor (GH#1545).
+///
+/// A split is only a gutter if nothing is written across it. `detect_split_x`'s
+/// median can land inside content when the page's per-line evidence is drawn from
+/// one region only — a table on 8.05pt leading beside prose on 10.45pt is never
+/// grouped into shared lines, so every midpoint comes from the table's internal
+/// gaps and the median sits between two of the table's own columns.
+///
+/// Deliberately applied *after* `snap_split_left_of_hanging_labels`, which is the
+/// existing remedy for the one case where a split legitimately starts out inside a
+/// span: a hanging clause number. On the GH#1484 fixture the median cuts six label
+/// spans and snapping already resolves it, so this pass sees a clean split and
+/// leaves it alone. Only a split that survives snapping still cutting a word is
+/// redirected here.
+fn redirect_split_out_of_content(
+    spans: &[xberg_native_pdf::layout::TextSpan],
+    lines: &[SpanLine],
+    page_width: f32,
+    split_x: f32,
+) -> f32 {
+    let cuts_a_span = spans
+        .iter()
+        .any(|span| span.bbox.left() < split_x && span.bbox.right() > split_x);
+    if !cuts_a_span {
+        return split_x;
+    }
+    let furniture_width = page_width * FULL_WIDTH_FURNITURE_FRACTION;
+    let min_gutter = (page_width * MIN_DENSE_COLUMN_GUTTER_FRACTION).max(MIN_DENSE_COLUMN_GUTTER_PTS);
+    page_whitespace_corridors(spans, lines, furniture_width, min_gutter)
+        .into_iter()
+        .max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0)))
+        .map_or(split_x, |(left, right)| (left + right) / 2.0)
+}
+
+/// Every maximal x-interval at least `min_gutter` wide that no non-furniture span
+/// occupies anywhere on the page.
+///
+/// This is the whole-page projection the per-line detector above deliberately
+/// replaced, kept here as *corroboration* rather than as the primary signal. Its
+/// known weakness is unchanged — furniture narrower than `furniture_width` that
+/// crosses a gutter closes the corridor — but that only ever removes a candidate,
+/// so a page it cannot read simply falls back to the per-line median.
+fn page_whitespace_corridors(
+    spans: &[xberg_native_pdf::layout::TextSpan],
+    lines: &[SpanLine],
+    furniture_width: f32,
+    min_gutter: f32,
+) -> Vec<(f32, f32)> {
+    let mut extents: Vec<(f32, f32)> = lines
+        .iter()
+        .filter(|&line| !line_has_width_furniture(spans, line, furniture_width))
+        .flat_map(|line| line.iter())
+        .map(|&index| (spans[index].bbox.left(), spans[index].bbox.right()))
+        .filter(|(left, right)| left.is_finite() && right.is_finite())
+        .collect();
+    extents.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    let mut corridors = Vec::new();
+    let mut running_right = match extents.first() {
+        Some(&(_, right)) => right,
+        None => return corridors,
+    };
+    for (left, right) in extents {
+        if left - running_right >= min_gutter {
+            corridors.push((running_right, left));
+        }
+        running_right = running_right.max(right);
+    }
+    corridors
 }
 
 /// Move a gutter estimate out of a repeated hanging-label band.
@@ -1164,12 +1271,232 @@ fn reorder_band_columns(
     if left.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE || right.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE {
         return None;
     }
-    let left_class = xberg_native_pdf::layout::classify_region(spans, &left);
-    let right_class = xberg_native_pdf::layout::classify_region(spans, &right);
-    if !left_class.is_reorderable_column() || !right_class.is_reorderable_column() {
+    let left_reorderable = xberg_native_pdf::layout::classify_region(spans, &left).is_reorderable_column();
+    let right_reorderable = xberg_native_pdf::layout::classify_region(spans, &right).is_reorderable_column();
+    if !left_reorderable && !right_reorderable {
         return None;
     }
+    if !(left_reorderable && right_reorderable)
+        && cross_gutter_row_pairing_fraction(spans, band, split_x) > MAX_CROSS_GUTTER_ROW_PAIRING_FRACTION
+    {
+        return None;
+    }
+    let left = if left_reorderable {
+        left
+    } else {
+        order_region_by_panels(spans, left)
+    };
+    let right = if right_reorderable {
+        right
+    } else {
+        order_region_by_panels(spans, right)
+    };
     Some(left.into_iter().chain(right).collect())
+}
+
+/// Group one region's spans into visual rows, top-to-bottom then left-to-right.
+fn region_rows(spans: &[xberg_native_pdf::layout::TextSpan], region: &[usize]) -> Vec<SpanLine> {
+    let mut order = region.to_vec();
+    order.sort_by(|&a, &b| {
+        spans[b]
+            .bbox
+            .y
+            .total_cmp(&spans[a].bbox.y)
+            .then_with(|| spans[a].bbox.x.total_cmp(&spans[b].bbox.x))
+    });
+    group_into_lines(spans, &order)
+}
+
+/// Fraction of the band's rows that place spans on both sides of `split_x`.
+///
+/// One table with a label column and a value column pairs every row across the
+/// gutter; two regions that merely sit side by side (a table beside a prose
+/// column, each on its own leading) pair almost none. That is the difference
+/// between a page whose rows carry the meaning and a page whose regions do.
+fn cross_gutter_row_pairing_fraction(
+    spans: &[xberg_native_pdf::layout::TextSpan],
+    band: &[usize],
+    split_x: f32,
+) -> f32 {
+    let rows = region_rows(spans, band);
+    if rows.is_empty() {
+        return 0.0;
+    }
+    let paired = rows
+        .iter()
+        .filter(|row| {
+            row.iter().any(|&index| spans[index].bbox.x < split_x)
+                && row.iter().any(|&index| spans[index].bbox.x >= split_x)
+        })
+        .count();
+    paired as f32 / rows.len() as f32
+}
+
+/// True when `text` is a bare numeric cell rather than a label.
+///
+/// `-` is deliberately excluded: a range label such as `18-24` is a row label,
+/// not a value, and admitting it would make a label column read as numeric.
+fn is_numeric_cell(text: &str) -> bool {
+    let trimmed = text.trim();
+    !trimmed.is_empty()
+        && trimmed
+            .chars()
+            .all(|character| character.is_ascii_digit() || matches!(character, '.' | ',' | '%'))
+}
+
+/// Left-edge x positions that at least `MIN_DENSE_COLUMN_SPLIT_LINES` distinct
+/// rows agree on — the region's column grid.
+fn strong_column_edges(spans: &[xberg_native_pdf::layout::TextSpan], rows: &[SpanLine]) -> Vec<f32> {
+    let mut edges: Vec<(f32, usize)> = rows
+        .iter()
+        .enumerate()
+        .flat_map(|(row_index, row)| row.iter().map(move |&index| (index, row_index)))
+        .map(|(index, row_index)| (spans[index].bbox.left(), row_index))
+        .collect();
+    edges.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    let mut columns = Vec::new();
+    let mut cluster: Vec<(f32, usize)> = Vec::new();
+    for edge in edges {
+        let split = cluster
+            .first()
+            .is_some_and(|&(first, _)| edge.0 - first > DENSE_COLUMN_SPLIT_SNAP_X_TOLERANCE_PTS);
+        if split {
+            push_supported_column(&mut columns, &cluster);
+            cluster.clear();
+        }
+        cluster.push(edge);
+    }
+    push_supported_column(&mut columns, &cluster);
+    columns
+}
+
+fn push_supported_column(columns: &mut Vec<f32>, cluster: &[(f32, usize)]) {
+    let Some(&(first, _)) = cluster.first() else {
+        return;
+    };
+    let mut supporting: Vec<usize> = cluster.iter().map(|&(_, row)| row).collect();
+    supporting.sort_unstable();
+    supporting.dedup();
+    if supporting.len() >= MIN_DENSE_COLUMN_SPLIT_LINES {
+        columns.push(first);
+    }
+}
+
+/// Index of the rightmost column whose left edge is at or left of `x`.
+fn column_index_for_x(columns: &[f32], x: f32) -> Option<usize> {
+    columns
+        .iter()
+        .rposition(|&column| x >= column - DENSE_COLUMN_SPLIT_SNAP_X_TOLERANCE_PTS)
+}
+
+/// Column indices at which a repeated label/value panel restarts, i.e. a
+/// predominantly textual column immediately following a predominantly numeric one.
+fn panel_boundary_columns(
+    spans: &[xberg_native_pdf::layout::TextSpan],
+    rows: &[SpanLine],
+    columns: &[f32],
+) -> Vec<usize> {
+    let mut totals = vec![0usize; columns.len()];
+    let mut numeric = vec![0usize; columns.len()];
+    for &index in rows.iter().flatten() {
+        if let Some(column) = column_index_for_x(columns, spans[index].bbox.left()) {
+            totals[column] += 1;
+            numeric[column] += usize::from(is_numeric_cell(&spans[index].text));
+        }
+    }
+    let fraction = |column: usize| {
+        if totals[column] == 0 {
+            return None;
+        }
+        Some(numeric[column] as f32 / totals[column] as f32)
+    };
+    (0..columns.len().saturating_sub(1))
+        .filter(|&column| {
+            let (Some(value), Some(label)) = (fraction(column), fraction(column + 1)) else {
+                return false;
+            };
+            value >= MIN_PANEL_VALUE_COLUMN_NUMERIC_FRACTION && label <= MAX_PANEL_LABEL_COLUMN_NUMERIC_FRACTION
+        })
+        .map(|column| column + 1)
+        .collect()
+}
+
+fn panels_are_wide_enough(boundaries: &[usize], column_count: usize) -> bool {
+    let mut start = 0usize;
+    for &boundary in boundaries {
+        if boundary.saturating_sub(start) < MIN_COLUMNS_PER_PANEL {
+            return false;
+        }
+        start = boundary;
+    }
+    column_count.saturating_sub(start) >= MIN_COLUMNS_PER_PANEL
+}
+
+/// True when `row`'s spans sit on the column grid rather than running across it.
+///
+/// A caption or title inside the region is ordinary prose: its words land between
+/// the column edges, not on them.
+fn row_follows_column_grid(spans: &[xberg_native_pdf::layout::TextSpan], row: &SpanLine, columns: &[f32]) -> bool {
+    if row.is_empty() {
+        return false;
+    }
+    let aligned = row
+        .iter()
+        .filter(|&&index| {
+            let left = spans[index].bbox.left();
+            columns
+                .iter()
+                .any(|&column| (left - column).abs() <= DENSE_COLUMN_SPLIT_SNAP_X_TOLERANCE_PTS)
+        })
+        .count();
+    aligned as f32 / row.len() as f32 >= MIN_GRID_ROW_COLUMN_ALIGNMENT_FRACTION
+}
+
+/// Reorder a non-prose region panel-major (GH#1545's second symptom).
+///
+/// A statistics table that repeats the same label/value pair across the page
+/// ("Sex % Sex %") welds its two halves on every row when the region is emitted
+/// row-major. The panel boundary is not findable by gutter width — it is a few
+/// tenths of a point wider than a word space — so it is recovered from the column
+/// grid instead. Returns `region` unchanged whenever the grid does not clearly
+/// support a split, so an ordinary table is never rearranged on a guess.
+fn order_region_by_panels(spans: &[xberg_native_pdf::layout::TextSpan], region: Vec<usize>) -> Vec<usize> {
+    let rows = region_rows(spans, &region);
+    let columns = strong_column_edges(spans, &rows);
+    if columns.len() < MIN_PANEL_SPLIT_COLUMNS {
+        return region;
+    }
+    let boundaries = panel_boundary_columns(spans, &rows, &columns);
+    if boundaries.is_empty() || !panels_are_wide_enough(&boundaries, columns.len()) {
+        return region;
+    }
+
+    let leading = rows
+        .iter()
+        .take_while(|row| !row_follows_column_grid(spans, row, &columns))
+        .count();
+    if rows[leading..]
+        .iter()
+        .any(|row| !row_follows_column_grid(spans, row, &columns))
+    {
+        return region;
+    }
+
+    let panel_of = |index: usize| {
+        let column = column_index_for_x(&columns, spans[index].bbox.left());
+        boundaries
+            .iter()
+            .filter(|&&boundary| column.is_some_and(|column| column >= boundary))
+            .count()
+    };
+    let mut ordered: Vec<usize> = rows[..leading].iter().flatten().copied().collect();
+    for panel in 0..=boundaries.len() {
+        for row in &rows[leading..] {
+            ordered.extend(row.iter().copied().filter(|&index| panel_of(index) == panel));
+        }
+    }
+    ordered
 }
 
 /// Concatenate bands into the final emission order (the emission-ordering
@@ -1261,6 +1588,7 @@ pub(crate) fn reorder_dense_two_column_page(spans: &mut [xberg_native_pdf::layou
         return false;
     };
     let split_x = snap_split_left_of_hanging_labels(spans, &lines, page_width, detected_split_x);
+    let split_x = redirect_split_out_of_content(spans, &lines, page_width, split_x);
 
     let furniture_width = page_width * FULL_WIDTH_FURNITURE_FRACTION;
     let bands = build_bands(spans, &lines, furniture_width, split_x);
@@ -2553,55 +2881,57 @@ mod tests {
         );
     }
 
-    /// GH#1545 diagnostic (NOT a regression guard — both possible outcomes
-    /// below are informative, and this test is designed to make either one
-    /// visible rather than to encode which is "correct").
+    /// GH#1545: a two-panel statistics table beside a prose column was emitted in
+    /// full-width Y order, splicing the prose apart mid-sentence and welding the
+    /// table's own panels together row by row.
     ///
-    /// Two mechanically distinct explanations were proposed for why a table
-    /// beside a prose column is emitted in raw full-width Y order instead of
-    /// table-then-prose:
+    /// Three gates declined in cascade, and the issue's own proposed fix (have
+    /// `detect_split_x` return the *set* of gutters) addressed none of them:
     ///
-    /// (A) `detect_split_x` returns a confident but wrong compromise value
-    ///     (a median over bimodal per-line gap evidence), which is then used
-    ///     by `emit_band_order`/`reorder_band_columns` to weld spans from two
-    ///     different table panels together across the wrong x.
-    /// (B) every existing reorder gate correctly declines: the table side of
-    ///     any split partitions into short label/value cells that
-    ///     `xberg_native_pdf::layout::classify_region` reads as
-    ///     `RegionClass::Table` or `RegionClass::Form`, `is_reorderable_column`
-    ///     rejects it, `reorder_band_columns` returns `None` for every band,
-    ///     `emit_band_order` returns `None`, and `reorder_dense_two_column_page`
-    ///     returns `false` — leaving the page in raw top-to-bottom order
-    ///     because nothing in this pipeline represents "table beside prose".
+    /// 1. `detect_split_x` returned 232.99 — inside the table. The table (8.05pt
+    ///    leading) and the prose (10.45pt) are not baseline-aligned, so
+    ///    `group_into_lines` never groups them into a shared line and per-line gutter
+    ///    evidence only ever saw the table's internal gaps. A page-wide whitespace
+    ///    corridor does see the real boundary; `page_whitespace_corridors` supplies it.
+    /// 2. Even forced to the ideal split the gate declined: the table side classifies
+    ///    `Form`, and `reorder_band_columns` required *both* sides to be
+    ///    `is_reorderable_column()`. That was the binding constraint.
+    ///    `MAX_CROSS_GUTTER_ROW_PAIRING_FRACTION` now admits one non-prose side when
+    ///    the two do not pair up row for row.
+    /// 3. With the repair declining, `apply_xy_cut_if_column_aware` also declined —
+    ///    `select_reading_order` needs prose lines on both sides — so the page fell
+    ///    through to plain top-to-bottom order, which is the reported defect.
     ///
-    /// Geometry is transcribed verbatim, one span per `<word>`, from
-    /// `pdftotext -bbox`'s output on page 1 of the GH#1545 repro PDF (see
-    /// `scratchpad/bugs/1545/{repro.pdf,out.xml}`): `x = xMin`,
+    /// Geometry is transcribed verbatim, one span per `<word>`, from `pdftotext
+    /// -bbox`'s output on page 1 of the GH#1545 repro PDF: `x = xMin`,
     /// `width = xMax - xMin`, `height = yMax - yMin`. `pdftotext -bbox` is
     /// top-left-origin/y-down; this crate's `Rect`/`TextSpan::bbox` is
     /// bottom-left-origin/y-up (see `group_into_lines`'s descending-`y`
     /// top-to-bottom sort, and every `y` in the `dense_two_column_*` fixtures
-    /// above decreasing top-to-bottom on the page), so `y = PAGE_HEIGHT -
-    /// yMin`. No position is invented and no word's measured gap is
-    /// pre-merged into a wider span — if `xberg_native_pdf`'s own glyph-to-
-    /// span coalescing fuses adjacent words in production, that fusion
-    /// happens upstream of this function's input and is out of scope here.
+    /// above decreasing top-to-bottom on the page), so `y = PAGE_HEIGHT - yMin`.
+    /// This transcription is the only surviving copy of that geometry. No position
+    /// is invented and no word's measured gap is pre-merged into a wider span — if
+    /// `xberg_native_pdf`'s own glyph-to-span coalescing fuses adjacent words in
+    /// production, that fusion happens upstream of this function's input.
     #[test]
     #[expect(
         clippy::too_many_lines,
         reason = "one span literal per pdftotext word, transcribed verbatim for fidelity"
     )]
-    #[expect(
-        clippy::print_stderr,
-        reason = "diagnostic test reports its A/B outcome via eprintln for GH#1545 triage"
-    )]
-    fn gh1545_diagnostic_reports_split_and_reorder_outcome() {
+    fn gh1545_table_beside_prose_emits_table_then_prose() {
         const PAGE_WIDTH: f32 = 595.0;
         // The table's rightmost measured value column ends at x=285.622; the
         // prose column starts at x=303.600. 295.0 is the midpoint of that
         // real gutter — the split a correct "table beside prose" reorder
         // would have to use, independent of whatever `detect_split_x` finds. ~keep
         const IDEAL_TABLE_PROSE_SPLIT_X: f32 = 295.0;
+        // The measured edges either side of that gutter, and the left edge of the
+        // table's second label/value panel. ~keep
+        const TABLE_RIGHT_EDGE_X: f32 = 285.622;
+        const PROSE_LEFT_EDGE_X: f32 = 303.600;
+        const PANEL_B_LEFT_EDGE_X: f32 = 164.803;
+        // The title row sits above every table row and runs across both panels. ~keep
+        const TITLE_ROW_Y: f32 = 730.0;
 
         #[rustfmt::skip]
         let mut spans = vec![
@@ -2928,63 +3258,82 @@ mod tests {
             span_with_width("pre-registered.", 452.409, 548.003, 55.267, 7.863, 7.863),
         ];
 
-        let original = spans.iter().map(|span| span.text.clone()).collect::<Vec<_>>();
+        let prose_order_before: Vec<String> = spans
+            .iter()
+            .filter(|span| span.bbox.x >= IDEAL_TABLE_PROSE_SPLIT_X)
+            .map(|span| span.text.clone())
+            .collect();
 
         let order = spans_sorted_top_to_bottom(&spans);
         let lines = group_into_lines(&spans, &order);
-        let split_x = detect_split_x(&spans, &lines, PAGE_WIDTH);
-        eprintln!("gh1545: detect_split_x = {split_x:?}");
-        if let Some(detected) = split_x {
-            let snapped = snap_split_left_of_hanging_labels(&spans, &lines, PAGE_WIDTH, detected);
-            eprintln!("gh1545: snap_split_left_of_hanging_labels = {snapped}");
-        }
-
-        // Directly probe outcome (B) independent of whatever split_x was
-        // detected: partition every band at the geometrically ideal
-        // table/prose gutter and ask classify_region what it thinks of each
-        // side. If both sides are ever accepted here, the gate is not the
-        // blocker and (A) must be the explanation; if the table side is
-        // rejected even under this ideal split, (B) holds regardless of what
-        // detect_split_x returns. ~keep
-        let furniture_width = PAGE_WIDTH * FULL_WIDTH_FURNITURE_FRACTION;
-        let ideal_bands = build_bands(&spans, &lines, furniture_width, IDEAL_TABLE_PROSE_SPLIT_X);
-        for band in &ideal_bands {
-            let Band::Content(indices) = band else { continue };
-            let (left, right): (Vec<usize>, Vec<usize>) = indices
+        let detected = detect_split_x(&spans, &lines, PAGE_WIDTH).expect("a split is detectable");
+        let snapped = snap_split_left_of_hanging_labels(&spans, &lines, PAGE_WIDTH, detected);
+        assert!(
+            spans
                 .iter()
-                .copied()
-                .partition(|&index| spans[index].bbox.x < IDEAL_TABLE_PROSE_SPLIT_X);
-            if left.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE || right.len() < MIN_DENSE_COLUMN_SPANS_PER_SIDE {
-                eprintln!(
-                    "gh1545: ideal-split band of {} spans has too few per side (left={}, right={}) to classify",
-                    indices.len(),
-                    left.len(),
-                    right.len()
-                );
-                continue;
-            }
-            let left_class = xberg_native_pdf::layout::classify_region(&spans, &left);
-            let right_class = xberg_native_pdf::layout::classify_region(&spans, &right);
-            eprintln!(
-                "gh1545: ideal-split band left={left_class:?} (reorderable={}) right={right_class:?} (reorderable={})",
-                left_class.is_reorderable_column(),
-                right_class.is_reorderable_column()
-            );
-        }
+                .any(|span| span.bbox.left() < snapped && span.bbox.right() > snapped),
+            "the per-line median is expected to still cut a word here ({snapped}); if it no longer \
+             does, this fixture has stopped exercising the redirect"
+        );
+        let split_x = redirect_split_out_of_content(&spans, &lines, PAGE_WIDTH, snapped);
+        assert!(
+            split_x > TABLE_RIGHT_EDGE_X && split_x < PROSE_LEFT_EDGE_X,
+            "split must land in the real table/prose gutter, got {split_x}"
+        );
 
-        let reordered = reorder_dense_two_column_page(&mut spans, PAGE_WIDTH);
-        let changed = spans.iter().map(|span| span.text.as_str()).collect::<Vec<_>>() != original;
-        eprintln!("gh1545: reorder_dense_two_column_page returned {reordered}, span order changed = {changed}");
+        assert!(
+            reorder_dense_two_column_page(&mut spans, PAGE_WIDTH),
+            "a table beside a prose column must be reordered, not left in full-width Y order"
+        );
 
-        // Deliberately permissive: this asserts internal consistency (a
-        // reported reorder must actually have moved spans, and vice versa),
-        // not which of (A)/(B) is true. Read the eprintln! output above —
-        // "detect_split_x" near 148-165 with a reorder that welded panel A
-        // into panel B confirms (A); every ideal-split band logging a
-        // non-reorderable left class, and reordered == false, confirms (B). ~keep
+        let table_spans = spans
+            .iter()
+            .filter(|span| span.bbox.x < IDEAL_TABLE_PROSE_SPLIT_X)
+            .count();
+        let first_prose = spans
+            .iter()
+            .position(|span| span.bbox.x >= IDEAL_TABLE_PROSE_SPLIT_X)
+            .expect("the prose column survives the reorder");
         assert_eq!(
-            reordered, changed,
-            "reorder_dense_two_column_page's return value must agree with whether spans actually moved"
+            first_prose, table_spans,
+            "every table span must be emitted before every prose span"
+        );
+
+        let prose_order_after: Vec<&str> = spans
+            .iter()
+            .filter(|span| span.bbox.x >= IDEAL_TABLE_PROSE_SPLIT_X)
+            .map(|span| span.text.as_str())
+            .collect();
+        assert_eq!(
+            prose_order_after, prose_order_before,
+            "the prose column's own reading order must be untouched"
+        );
+
+        let prose = prose_order_after.join(" ");
+        assert!(
+            prose.contains("more likely to be aged 35 to 44 years"),
+            "the sentence must not be spliced by table rows, got: {prose}"
+        );
+
+        // Panel-major emission: panel A is the label/value pair rooted at x=47.700
+        // and x=148.100, panel B the pair at x=164.803 and x=272.000. Every span of
+        // the first must precede every span of the second, so a row no longer welds
+        // "51.5" onto the next panel's "Female". The title is measured out: it runs
+        // across both panels as ordinary prose and is emitted ahead of them as a
+        // non-grid row, so it legitimately holds spans on both sides. ~keep
+        let panel_of_row = |span: &xberg_native_pdf::layout::TextSpan| {
+            (span.bbox.y < TITLE_ROW_Y && span.bbox.x < IDEAL_TABLE_PROSE_SPLIT_X)
+                .then(|| usize::from(span.bbox.x >= PANEL_B_LEFT_EDGE_X))
+        };
+        let last_panel_a = spans.iter().rposition(|span| panel_of_row(span) == Some(0));
+        let first_panel_b = spans.iter().position(|span| panel_of_row(span) == Some(1));
+        let (Some(last_panel_a), Some(first_panel_b)) = (last_panel_a, first_panel_b) else {
+            panic!("both table panels must survive the reorder");
+        };
+        assert!(
+            last_panel_a < first_panel_b,
+            "panel A must be emitted whole before panel B, but panel A's last span sits at \
+             {last_panel_a} and panel B's first at {first_panel_b}"
         );
     }
 }
