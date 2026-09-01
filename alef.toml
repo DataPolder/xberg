@@ -1363,6 +1363,18 @@ features = [
   "structured",
   "url-config-types",
   "url-ingestion",
+  # Restored after a second silent drop (the GH#1387 shape recurring): these were in core
+  # `full` but absent here, so every C-FFI binding -- Java, Go, C#, Swift, Zig, C -- shipped
+  # without them, and Java's summarization e2e got a null `summary()` while node passed the
+  # same fixture. `heic`, `formats` (which contains heic), `candle-vlm-ocr` and `services`
+  # stay out on purpose; the GH#1387 regression test carries the reason for each. ~keep
+  "analysis",
+  "redaction-ml",
+  "redaction-rehydrate",
+  "static-embeddings",
+  "summarization",
+  "summarization-llm",
+  "translation",
 ]
 plugin_error_constructor = "xberg::XbergError::Plugin { message: msg, plugin_name: String::new() }"
 exclude_types = []
