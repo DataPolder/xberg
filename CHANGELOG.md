@@ -104,7 +104,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** Rust element identifiers now use `String` directly; the `ElementId` wrapper has been
   removed.
 - **Breaking:** Public tuple fields for ranges, coordinates, dimensions, links, code blocks, and attributes now
-  use named Rust structs. Existing JSON arrays remain accepted and emitted; named JSON objects are also accepted.
+  use named Rust structs and serialize as JSON objects. Legacy positional JSON arrays are still accepted when
+  parsing, so payloads written by 1.0.x keep deserializing, but they are no longer emitted.
 - **Breaking:** removed the duplicate `xberg::llm::region_extractor::RegionKind`; import `xberg::RegionKind`
   instead.
 - Parsing and configuration deserialization now reject invalid region, redaction, and reranker values.
@@ -148,6 +149,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed the native C FFI library shipping without eleven features the crate advertises, so the
+  Java, Go, C#, Swift, Zig, and C bindings had no summarization, translation, analysis, HEIC,
+  captioning, ML redaction, or static-embedding support. The desktop dependency hand-maintained a
+  feature list that had drifted from `full`; a regression test now fails on any future omission.
 - Fixed HTML pages fetched over HTTP(S) losing every format-specific metadata field: results were
   reported as `text/html` while `metadata.format` stayed empty, because the extraction ran over the
   crawler's pre-rendered Markdown and never reached the HTML extractor. Title, headings, Open Graph,

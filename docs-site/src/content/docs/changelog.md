@@ -106,7 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** Rust element identifiers now use `String` directly; the `ElementId` wrapper has been
   removed.
 - **Breaking:** Public tuple fields for ranges, coordinates, dimensions, links, code blocks, and attributes now
-  use named Rust structs. Existing JSON arrays remain accepted and emitted; named JSON objects are also accepted.
+  use named Rust structs and serialize as JSON objects. Legacy positional JSON arrays are still accepted when
+  parsing, so payloads written by 1.0.x keep deserializing, but they are no longer emitted.
 - **Breaking:** removed the duplicate `xberg::llm::region_extractor::RegionKind`; import `xberg::RegionKind`
   instead.
 - Parsing and configuration deserialization now reject invalid region, redaction, and reranker values.
