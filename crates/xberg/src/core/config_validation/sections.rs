@@ -327,19 +327,35 @@ pub(crate) fn validate_token_reduction_level(level: &str) -> Result<()> {
 /// assert!(validate_ocr_backend("invalid").is_err());
 /// ```
 pub(crate) fn validate_ocr_backend(backend: &str) -> Result<()> {
-    let backend = backend.to_lowercase();
-    if VALID_OCR_BACKENDS.contains(&backend.as_str()) {
+    let normalized = backend.to_lowercase();
+    if VALID_OCR_BACKENDS.contains(&normalized.as_str()) || is_registered_ocr_backend(backend) {
         Ok(())
     } else {
         Err(XbergError::Validation {
             message: format!(
-                "Invalid OCR backend '{}'. Valid options are: {}",
-                backend,
+                "Invalid OCR backend '{}'. Valid options are: {}, or the name of a backend \
+                 registered through `register_ocr_backend`",
+                normalized,
                 VALID_OCR_BACKENDS.join(", ")
             ),
             source: None,
         })
     }
+}
+
+/// Whether `backend` names a plugin backend registered through `register_ocr_backend`.
+///
+/// `VALID_OCR_BACKENDS` lists only the built-ins, so consulting it alone rejected every
+/// third-party backend. That became reachable once `ExtractionConfig::validate` was wired into
+/// `extract`/`extract_batch`, which made the plugin OCR backend feature unusable: a registered
+/// custom backend was refused before extraction ever started. Matched case-insensitively so a
+/// registered name behaves like the built-in list. ~keep
+fn is_registered_ocr_backend(backend: &str) -> bool {
+    crate::plugins::registry::get_ocr_backend_registry()
+        .read()
+        .list()
+        .iter()
+        .any(|name| name.eq_ignore_ascii_case(backend))
 }
 
 /// Validate a language code (ISO 639-1 or 639-3 format).

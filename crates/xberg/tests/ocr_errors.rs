@@ -90,8 +90,12 @@ fn test_ocr_invalid_psm_mode() {
     match result {
         Err(XbergError::Ocr { message, .. }) | Err(XbergError::Validation { message, .. }) => {
             tracing::debug!("Expected error for invalid PSM: {}", message);
+            // Matched case-insensitively: the validator writes "PSM" in caps, so the
+            // lowercase-only check could never fire. It went unnoticed until the config
+            // validators were wired into the extract path and this branch became reachable. ~keep
+            let lowered = message.to_lowercase();
             assert!(
-                message.contains("psm") || message.contains("segmentation") || message.contains("mode"),
+                lowered.contains("psm") || lowered.contains("segmentation") || lowered.contains("mode"),
                 "Error message should mention PSM issue: {}",
                 message
             );
