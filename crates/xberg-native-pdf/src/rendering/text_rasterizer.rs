@@ -1586,35 +1586,51 @@ impl TextRasterizer {
             if gid == 0 && !char_at_pos.is_whitespace() {
                 dropped.record("no glyph id", u32::from(char_code), gid);
             }
-            if gid != 0 || char_at_pos.is_whitespace() {
-                if !char_at_pos.is_whitespace() {
-                    let mut pb = PathBuilder::new();
-                    let mut builder = SkiaOutlineBuilder(&mut pb);
-                    // Outlined once: `outline_glyph` appends to the builder,
-                    // so calling it twice would draw the glyph twice. ~keep
-                    let outlined = ttf_face.outline_glyph(GlyphId::from(gid), &mut builder).is_some();
-                    if !outlined {
-                        dropped.record("no outline", u32::from(char_code), gid);
-                    }
-                    if outlined {
-                        if let Some(path) = pb.finish() {
-                            let (rise_x, rise_y) = if wmode == 0 {
-                                (0.0, gs.text_rise)
-                            } else {
-                                (gs.text_rise, 0.0)
-                            };
-                            let px = (x_cursor + paint_origin_dx) * h_scale + rise_x;
-                            let py = y_cursor + paint_origin_dy + rise_y;
-                            let glyph_transform = combined_base.pre_translate(px, py).pre_scale(scale, scale);
-                            guarded_fill_path(
-                                pixmap,
-                                &path,
-                                paint,
-                                tiny_skia::FillRule::Winding,
-                                glyph_transform,
-                                clip_mask,
-                            );
-                        }
+            // Whether to paint is decided by the outline, never by the character
+            // this code is taken to represent. On the byte-indexed path that
+            // character is not text: it is the GID reverse-mapped through the
+            // font's own (1, 0) subtable and decoded as ASCII or Mac Roman, i.e.
+            // the subset's private glyph ordering read as an encoding it never
+            // expressed. Gating the paint on `is_whitespace()` made six byte
+            // values unpaintable whatever glyph the font puts on them --
+            // 0x09..0x0D and 0x20 through the ASCII pass-through, and 0xCA
+            // through Mac Roman, where U+00A0 is the table's only whitespace. A
+            // re-indexed subset numbering its glyphs from 0x01 walks straight
+            // through the first run, and the advance still ran, so the glyph
+            // left a gap that reads as a space.
+            //
+            // A glyph that genuinely is whitespace has an empty outline, so
+            // `outline_glyph` yields nothing and painting it is already a
+            // no-op; `gid != 0` still keeps .notdef out. The drop tally keeps
+            // its whitespace exemption: a space with no outline is not a lost
+            // glyph and does not belong in the diagnostic. ~keep
+            if gid != 0 {
+                let mut pb = PathBuilder::new();
+                let mut builder = SkiaOutlineBuilder(&mut pb);
+                // Outlined once: `outline_glyph` appends to the builder,
+                // so calling it twice would draw the glyph twice. ~keep
+                let outlined = ttf_face.outline_glyph(GlyphId::from(gid), &mut builder).is_some();
+                if !outlined && !char_at_pos.is_whitespace() {
+                    dropped.record("no outline", u32::from(char_code), gid);
+                }
+                if outlined {
+                    if let Some(path) = pb.finish() {
+                        let (rise_x, rise_y) = if wmode == 0 {
+                            (0.0, gs.text_rise)
+                        } else {
+                            (gs.text_rise, 0.0)
+                        };
+                        let px = (x_cursor + paint_origin_dx) * h_scale + rise_x;
+                        let py = y_cursor + paint_origin_dy + rise_y;
+                        let glyph_transform = combined_base.pre_translate(px, py).pre_scale(scale, scale);
+                        guarded_fill_path(
+                            pixmap,
+                            &path,
+                            paint,
+                            tiny_skia::FillRule::Winding,
+                            glyph_transform,
+                            clip_mask,
+                        );
                     }
                 }
             }
@@ -2495,5 +2511,261 @@ mod tests {
             (half - 10.0).abs() < 0.01,
             "Th=50% must halve the returned advance (§9.4.4 tx·Th): got {half}, full was {full}"
         );
+    }
+
+    // ---- byte-indexed fonts: the paint must follow the outline, not the
+    // ---- character the code is taken to represent.
+
+    /// A closed square, as one simple glyph: four on-curve points, 16-bit deltas.
+    fn square_glyph() -> Vec<u8> {
+        let pts: [(i16, i16); 4] = [(100, 0), (600, 0), (600, 700), (100, 700)];
+        let mut g = Vec::new();
+        g.extend_from_slice(&1i16.to_be_bytes()); // numberOfContours
+        g.extend_from_slice(&100i16.to_be_bytes()); // xMin
+        g.extend_from_slice(&0i16.to_be_bytes()); // yMin
+        g.extend_from_slice(&600i16.to_be_bytes()); // xMax
+        g.extend_from_slice(&700i16.to_be_bytes()); // yMax
+        g.extend_from_slice(&3u16.to_be_bytes()); // endPtsOfContours[0]
+        g.extend_from_slice(&0u16.to_be_bytes()); // instructionLength
+        g.extend_from_slice(&[0x01; 4]); // on-curve, 16-bit deltas
+        let mut prev = 0i16;
+        for (x, _) in pts {
+            g.extend_from_slice(&(x - prev).to_be_bytes());
+            prev = x;
+        }
+        let mut prev = 0i16;
+        for (_, y) in pts {
+            g.extend_from_slice(&(y - prev).to_be_bytes());
+            prev = y;
+        }
+        g
+    }
+
+    /// A TrueType font whose only cmap subtable is Macintosh Roman (1, 0),
+    /// format 0 — the byte-indexed classification that routes a simple font to
+    /// `render_cid_direct`. `codes[i]` addresses glyph `i + 1`, and every glyph
+    /// is the same square, so any code that paints nothing is the defect and not
+    /// a difference between shapes.
+    ///
+    /// Built here rather than loaded, so the fixture carries no third-party font.
+    fn byte_indexed_square_font(codes: &[u8]) -> Vec<u8> {
+        const UPEM: u16 = 1000;
+        let n_glyphs = codes.len() + 1;
+
+        let mut glyf = Vec::new();
+        let mut loca = vec![0u16];
+        glyf.extend_from_slice(&[]); // gid 0 = .notdef, empty
+        loca.push(0);
+        for _ in codes {
+            glyf.extend_from_slice(&square_glyph());
+            loca.push((glyf.len() / 2) as u16);
+        }
+        let loca: Vec<u8> = loca.iter().flat_map(|o| o.to_be_bytes()).collect();
+
+        let mut glyph_id_array = [0u8; 256];
+        for (i, &code) in codes.iter().enumerate() {
+            glyph_id_array[code as usize] = (i + 1) as u8;
+        }
+        let mut cmap = Vec::new();
+        cmap.extend_from_slice(&0u16.to_be_bytes()); // version
+        cmap.extend_from_slice(&1u16.to_be_bytes()); // numTables
+        cmap.extend_from_slice(&1u16.to_be_bytes()); // platformID = Macintosh
+        cmap.extend_from_slice(&0u16.to_be_bytes()); // encodingID = Roman
+        cmap.extend_from_slice(&12u32.to_be_bytes()); // offset
+        cmap.extend_from_slice(&0u16.to_be_bytes()); // format 0
+        cmap.extend_from_slice(&(6u16 + 256).to_be_bytes()); // length
+        cmap.extend_from_slice(&0u16.to_be_bytes()); // language
+        cmap.extend_from_slice(&glyph_id_array);
+
+        let mut head = Vec::new();
+        head.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // version
+        head.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // fontRevision
+        head.extend_from_slice(&0u32.to_be_bytes()); // checkSumAdjustment
+        head.extend_from_slice(&0x5F0F_3CF5u32.to_be_bytes()); // magicNumber
+        head.extend_from_slice(&0u16.to_be_bytes()); // flags
+        head.extend_from_slice(&UPEM.to_be_bytes());
+        head.extend_from_slice(&0u64.to_be_bytes()); // created
+        head.extend_from_slice(&0u64.to_be_bytes()); // modified
+        head.extend_from_slice(&0i16.to_be_bytes()); // xMin
+        head.extend_from_slice(&0i16.to_be_bytes()); // yMin
+        head.extend_from_slice(&1000i16.to_be_bytes()); // xMax
+        head.extend_from_slice(&750i16.to_be_bytes()); // yMax
+        head.extend_from_slice(&0u16.to_be_bytes()); // macStyle
+        head.extend_from_slice(&8u16.to_be_bytes()); // lowestRecPPEM
+        head.extend_from_slice(&2i16.to_be_bytes()); // fontDirectionHint
+        head.extend_from_slice(&0i16.to_be_bytes()); // indexToLocFormat = short
+        head.extend_from_slice(&0i16.to_be_bytes()); // glyphDataFormat
+
+        let mut hhea = Vec::new();
+        hhea.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+        hhea.extend_from_slice(&750i16.to_be_bytes()); // ascender
+        hhea.extend_from_slice(&(-250i16).to_be_bytes()); // descender
+        hhea.extend_from_slice(&0i16.to_be_bytes()); // lineGap
+        hhea.extend_from_slice(&700u16.to_be_bytes()); // advanceWidthMax
+        for _ in 0..3 {
+            hhea.extend_from_slice(&0i16.to_be_bytes()); // bearings, xMaxExtent
+        }
+        hhea.extend_from_slice(&1i16.to_be_bytes()); // caretSlopeRise
+        for _ in 0..7 {
+            hhea.extend_from_slice(&0i16.to_be_bytes()); // caret, reserved, format
+        }
+        hhea.extend_from_slice(&(n_glyphs as u16).to_be_bytes()); // numberOfHMetrics
+
+        let mut maxp = Vec::new();
+        maxp.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+        maxp.extend_from_slice(&(n_glyphs as u16).to_be_bytes());
+        maxp.extend_from_slice(&[0u8; 26]);
+
+        let mut hmtx = Vec::new();
+        for _ in 0..n_glyphs {
+            hmtx.extend_from_slice(&700u16.to_be_bytes()); // advanceWidth
+            hmtx.extend_from_slice(&0i16.to_be_bytes()); // lsb
+        }
+
+        let tables: Vec<(&[u8; 4], Vec<u8>)> = vec![
+            (b"cmap", cmap),
+            (b"glyf", glyf),
+            (b"head", head),
+            (b"hhea", hhea),
+            (b"hmtx", hmtx),
+            (b"loca", loca),
+            (b"maxp", maxp),
+        ];
+
+        let num_tables = tables.len() as u16;
+        let entry_selector = (15 - num_tables.leading_zeros()) as u16;
+        let search_range = 16u16 << entry_selector;
+        let mut font = Vec::new();
+        font.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+        font.extend_from_slice(&num_tables.to_be_bytes());
+        font.extend_from_slice(&search_range.to_be_bytes());
+        font.extend_from_slice(&entry_selector.to_be_bytes());
+        font.extend_from_slice(&(16 * num_tables - search_range).to_be_bytes());
+
+        let mut offset = 12 + 16 * tables.len();
+        let mut body = Vec::new();
+        for (tag, data) in &tables {
+            font.extend_from_slice(*tag);
+            font.extend_from_slice(&0u32.to_be_bytes()); // checkSum
+            font.extend_from_slice(&((offset + body.len()) as u32).to_be_bytes());
+            font.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            body.extend_from_slice(data);
+            body.resize(body.len().next_multiple_of(4), 0);
+        }
+        offset += body.len();
+        let _ = offset;
+        font.extend_from_slice(&body);
+        font
+    }
+
+    /// One page, 200x200 pt, drawing `code` as a single-byte `Tj` at 40,60.
+    /// The font is symbolic with no `/Encoding`, so the content byte is the
+    /// cmap input and nothing overrides the built-in mapping.
+    fn page_drawing_byte(font: Vec<u8>, code: u8) -> PdfDocument {
+        let widths: Vec<String> = (0..256).map(|_| "700".to_string()).collect();
+        let content = format!("BT\n/F1 100 Tf\n40 60 Td\n(\\{code:03o}) Tj\nET\n");
+
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        let append = |pdf: &mut Vec<u8>, offsets: &mut Vec<usize>, n: usize, body: &[u8]| {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{n} 0 obj\n").as_bytes());
+            pdf.extend_from_slice(body);
+            pdf.extend_from_slice(b"\nendobj\n");
+        };
+        append(&mut pdf, &mut offsets, 1, b"<< /Type /Catalog /Pages 2 0 R >>");
+        append(&mut pdf, &mut offsets, 2, b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        append(
+            &mut pdf,
+            &mut offsets,
+            3,
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources \
+              << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        );
+        append(
+            &mut pdf,
+            &mut offsets,
+            4,
+            format!(
+                "<< /Type /Font /Subtype /TrueType /BaseFont /TEST+Square \
+                 /FirstChar 0 /LastChar 255 /Widths [{}] /FontDescriptor 6 0 R >>",
+                widths.join(" ")
+            )
+            .as_bytes(),
+        );
+        append(
+            &mut pdf,
+            &mut offsets,
+            5,
+            format!("<< /Length {} >>\nstream\n{content}endstream", content.len()).as_bytes(),
+        );
+        append(
+            &mut pdf,
+            &mut offsets,
+            6,
+            b"<< /Type /FontDescriptor /FontName /TEST+Square /Flags 4 \
+              /FontBBox [0 -250 1000 750] /ItalicAngle 0 /Ascent 750 /Descent -250 \
+              /CapHeight 700 /StemV 100 /FontFile2 7 0 R >>",
+        );
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(b"7 0 obj\n");
+        pdf.extend_from_slice(format!("<< /Length {0} /Length1 {0} >>\nstream\n", font.len()).as_bytes());
+        pdf.extend_from_slice(&font);
+        pdf.extend_from_slice(b"\nendstream\nendobj\n");
+
+        let xref = pdf.len();
+        let object_count = offsets.len() + 1;
+        pdf.extend_from_slice(format!("xref\n0 {object_count}\n0000000000 65535 f \n").as_bytes());
+        for offset in offsets {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!("trailer\n<< /Size {object_count} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n").as_bytes(),
+        );
+        PdfDocument::from_bytes(pdf).expect("open the synthetic PDF")
+    }
+
+    /// Fraction of pixels carrying ink.
+    fn ink_fraction(png: &[u8]) -> f32 {
+        let img = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+            .expect("decode the rendered page")
+            .into_luma8();
+        let inked = img.pixels().filter(|p| p.0[0] < 250).count();
+        inked as f32 / (img.width() * img.height()) as f32
+    }
+
+    fn render_byte(code: u8) -> f32 {
+        let doc = page_drawing_byte(byte_indexed_square_font(&[code]), code);
+        let options = crate::rendering::RenderOptions::with_dpi(72);
+        let image = crate::rendering::render_page(&doc, 0, &options).expect("render the page");
+        ink_fraction(&image.data)
+    }
+
+    /// A glyph must be painted whenever the font has an outline for it, even
+    /// when the code's *inferred* Unicode is whitespace.
+    ///
+    /// On the byte-indexed path that inferred character is not text: it is the
+    /// GID reverse-mapped through the font's own (1, 0) subtable and decoded as
+    /// ASCII or Mac Roman. Gating the paint on it made six byte values
+    /// unpaintable — 0x09..0x0D and 0x20 via the ASCII pass-through, and 0xCA
+    /// via Mac Roman, where U+00A0 is the table's only whitespace.
+    #[test]
+    fn byte_indexed_glyph_paints_though_its_code_decodes_to_whitespace() {
+        // 0x41 decodes to 'A': never suppressed, so it fixes what "painted"
+        // looks like for this glyph at this size.
+        let reference = render_byte(0x41);
+        assert!(
+            reference > 0.0,
+            "the control code painted nothing, so the fixture is broken, not the renderer"
+        );
+
+        for code in [0x09u8, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0xCA] {
+            let inked = render_byte(code);
+            assert!(
+                (inked - reference).abs() < 1e-6,
+                "byte {code:#04X} painted {inked} of the page where the same glyph \
+                 addressed as 0x41 painted {reference}"
+            );
+        }
     }
 }
