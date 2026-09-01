@@ -433,12 +433,13 @@ jobs:
     if: github.event.pull_request.draft != true
     uses: xberg-io/actions/.github/workflows/reusable-validate.yml@v1
     with:
-      # Left empty, the reusable workflow asks the GitHub API for the newest poly
-      # release on every run, and a rate-limited or failed request kills the job
-      # with `failed to resolve latest poly release from the GitHub API` before it
-      # lints anything. Pinning skips that request. It also stops a poly release
-      # from changing what this gate enforces without a commit here. ~keep
-      poly-version: "v0.21.0"
+      # poly-version is deliberately unset so the reusable workflow resolves the
+      # newest release. A pin goes stale against the tree: an alef regen reformats
+      # with the poly bundled in the alef toolchain, so `poly fmt --check` then fails
+      # on files the regen itself just rewrote -- `c0aa8575e2` re-indented
+      # docs-site/src/components/ApiSnippetGroup.astro under a newer poly while the
+      # pin still enforced v0.21.0's rules. Reverting the file is not the fix; the
+      # next regen undoes it. ~keep
       # Deliberately false. This input once had to be true because poly.toml defined an
       # `alef-snippets` hook and only this input installed the alef CLI poly needed
       # (`× alef-snippets / poly-hook: 1: alef: not found`, jobs 93568055890/93702252442).
