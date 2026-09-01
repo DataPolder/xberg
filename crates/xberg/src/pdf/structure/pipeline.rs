@@ -55,6 +55,11 @@ const SPARSE_REPEATED_TIER_HEADING_LEVEL: u8 = 2;
 
 type HeadingMap = Vec<(f32, Option<u8>)>;
 
+/// Lowercased `(left, right)` word pairs the document itself writes as a single
+/// hyphenated token elsewhere in the text, gathered once per document (#1543).
+/// Threaded alongside [`HeadingMap`] as a document-scoped shared reference. ~keep
+type HyphenWitnesses = ahash::AHashSet<(String, String)>;
+
 fn sparse_multi_page_heading_map(
     all_page_segments: &[Vec<SegmentData>],
     heuristic_pages: &[usize],
@@ -694,6 +699,7 @@ fn process_single_page(
     input: PageInput,
     heading_map: &[(f32, Option<u8>)],
     doc_body_font_size: Option<f32>,
+    hyphen_witnesses: &HyphenWitnesses,
 ) -> Vec<PdfParagraph> {
     let PageInput {
         page_index: i,
@@ -718,7 +724,7 @@ fn process_single_page(
     #[cfg(not(feature = "layout-detection"))]
     let _ = use_layout_reading_order;
     if let Some(mut paragraphs) = struct_paragraphs {
-        apply_text_repair_to_structure_tree_paragraphs(&mut paragraphs, true);
+        apply_text_repair_to_structure_tree_paragraphs(&mut paragraphs, true, hyphen_witnesses);
         if needs_classify {
             tracing::debug!(
                 page = i,
@@ -778,19 +784,21 @@ fn process_single_page(
                         include_footnotes,
                         page_width_pts,
                         apply_layout_overrides: !preserve_native_semantics,
+                        hyphen_witnesses,
                     },
                 )
             } else {
-                let mut paragraphs = segments_to_paragraphs(page_segments, heading_map, &paragraph_gap_ys);
+                let mut paragraphs =
+                    segments_to_paragraphs(page_segments, heading_map, &paragraph_gap_ys, hyphen_witnesses);
                 let classification_hints = regular_layout_hints(hints);
                 super::layout_classify::annotate_layout_classes(&mut paragraphs, &classification_hints, 0.5, 0.2);
                 paragraphs
             }
         } else {
-            segments_to_paragraphs(page_segments, heading_map, &paragraph_gap_ys)
+            segments_to_paragraphs(page_segments, heading_map, &paragraph_gap_ys, hyphen_witnesses)
         };
         #[cfg(not(feature = "layout-detection"))]
-        let mut paragraphs = segments_to_paragraphs(page_segments, heading_map, &paragraph_gap_ys);
+        let mut paragraphs = segments_to_paragraphs(page_segments, heading_map, &paragraph_gap_ys, hyphen_witnesses);
         tracing::debug!(
             page = i,
             paragraphs = paragraphs.len(),
@@ -988,10 +996,11 @@ fn segments_to_paragraphs(
     segments: Vec<SegmentData>,
     heading_map: &[(f32, Option<u8>)],
     paragraph_gap_ys: &[f32],
+    hyphen_witnesses: &HyphenWitnesses,
 ) -> Vec<PdfParagraph> {
     let segments = order_segments_in_reading_frames(segments);
     let mut paragraphs = blocks_to_paragraphs(segments, heading_map, paragraph_gap_ys);
-    apply_text_repair_to_structure_tree_paragraphs(&mut paragraphs, true);
+    apply_text_repair_to_structure_tree_paragraphs(&mut paragraphs, true, hyphen_witnesses);
     reattach_detached_list_markers(&mut paragraphs, DetachedMarkerFrame::Native);
     merge_continuation_paragraphs(&mut paragraphs);
     synchronize_paragraph_text_metadata(&mut paragraphs);
@@ -1478,6 +1487,7 @@ struct LayoutParagraphContext<'a> {
     include_footnotes: bool,
     page_width_pts: Option<f32>,
     apply_layout_overrides: bool,
+    hyphen_witnesses: &'a HyphenWitnesses,
 }
 
 #[cfg(feature = "layout-detection")]
@@ -1503,11 +1513,21 @@ fn process_layout_segment_groups(
         context.page_width_pts,
     );
     if matches!(groups.as_slice(), [group] if group.hint_indices.is_empty() && group.region_path.is_none()) {
-        return segments_to_paragraphs(segments, context.heading_map, context.paragraph_gap_ys);
+        return segments_to_paragraphs(
+            segments,
+            context.heading_map,
+            context.paragraph_gap_ys,
+            context.hyphen_witnesses,
+        );
     }
     if !context.apply_layout_overrides {
         let group_bounds = layout_group_bounds(&groups, &segments);
-        let mut paragraphs = segments_to_paragraphs(segments, context.heading_map, context.paragraph_gap_ys);
+        let mut paragraphs = segments_to_paragraphs(
+            segments,
+            context.heading_map,
+            context.paragraph_gap_ys,
+            context.hyphen_witnesses,
+        );
         assign_native_paragraph_layout(&mut paragraphs, &groups, &group_bounds);
         let classification_hints = regular_layout_hints(hints);
         super::layout_classify::annotate_layout_classes(&mut paragraphs, &classification_hints, 0.5, 0.2);
@@ -1527,7 +1547,8 @@ fn process_layout_segment_groups(
             continue;
         }
         let gap_ys = compute_paragraph_gap_ys(&group_segments);
-        let mut group_paragraphs = segments_to_paragraphs(group_segments, context.heading_map, &gap_ys);
+        let mut group_paragraphs =
+            segments_to_paragraphs(group_segments, context.heading_map, &gap_ys, context.hyphen_witnesses);
         let group_hints = group
             .hint_indices
             .into_iter()
@@ -1563,7 +1584,12 @@ fn process_layout_segment_groups(
             "layout region plan omitted segments; appending an unsorted fallback group"
         );
         let gap_ys = compute_paragraph_gap_ys(&leftovers);
-        paragraphs.extend(segments_to_paragraphs(leftovers, context.heading_map, &gap_ys));
+        paragraphs.extend(segments_to_paragraphs(
+            leftovers,
+            context.heading_map,
+            &gap_ys,
+            context.hyphen_witnesses,
+        ));
     }
     paragraphs
 }
@@ -3095,6 +3121,7 @@ pub(crate) fn extract_document_structure_from_segments(
             })
         })
         .collect();
+    let hyphen_witnesses = collect_hyphen_witnesses(&all_page_segments);
     let page_inputs: Vec<PageInput> = (0..page_count)
         .map(|i| {
             let heuristic_segments = std::mem::take(&mut all_page_segments[i]);
@@ -3133,12 +3160,12 @@ pub(crate) fn extract_document_structure_from_segments(
     #[cfg(not(target_arch = "wasm32"))]
     let mut all_page_paragraphs: Vec<Vec<PdfParagraph>> = page_inputs
         .into_par_iter()
-        .map(|input| process_single_page(input, &heading_map, doc_body_font_size))
+        .map(|input| process_single_page(input, &heading_map, doc_body_font_size, &hyphen_witnesses))
         .collect();
     #[cfg(target_arch = "wasm32")]
     let mut all_page_paragraphs: Vec<Vec<PdfParagraph>> = page_inputs
         .into_iter()
-        .map(|input| process_single_page(input, &heading_map, doc_body_font_size))
+        .map(|input| process_single_page(input, &heading_map, doc_body_font_size, &hyphen_witnesses))
         .collect();
 
     refine_heading_hierarchy(&mut all_page_paragraphs);
@@ -4916,15 +4943,15 @@ fn paragraph_alphanum_len(para: &PdfParagraph) -> usize {
 /// trailing hyphens and implicit breaks (no hyphen, full line) are handled.
 /// When false (structure tree path with x=0, width=0), only explicit trailing
 /// hyphens are rejoined to avoid false positives.
-fn dehyphenate_paragraphs(paragraphs: &mut [PdfParagraph], has_positions: bool) {
+fn dehyphenate_paragraphs(paragraphs: &mut [PdfParagraph], has_positions: bool, hyphen_witnesses: &HyphenWitnesses) {
     for para in paragraphs.iter_mut() {
         if para.is_code_block || para.lines.len() < 2 {
             continue;
         }
         if has_positions {
-            dehyphenate_paragraph_lines(para);
+            dehyphenate_paragraph_lines(para, hyphen_witnesses);
         } else {
-            dehyphenate_hyphen_only(para);
+            dehyphenate_hyphen_only(para, hyphen_witnesses);
         }
     }
 }
@@ -4948,16 +4975,67 @@ const PRESERVED_LEXICAL_COMPOUNDS: &[(&str, &str)] = &[
     ("well", "known"),
 ];
 
-fn should_preserve_lexical_hyphen(trailing_word: &str, leading_word: &str) -> bool {
+/// Minimum letters required on each side of a mid-run hyphen before
+/// [`collect_hyphen_witnesses`] records it, to avoid single-letter noise
+/// (initials, bullet dashes) minting spurious witness pairs.
+const MIN_HYPHEN_WITNESS_WORD_LEN: usize = 2;
+
+/// Collect `(left, right)` word pairs the document itself writes as a single
+/// hyphenated token, so a genuine authored hyphen at a line break can be told
+/// apart from a hyphen that merely happens to fall at a line-wrap boundary (#1543).
+///
+/// Only a hyphen that is NOT the last character of its segment's text can witness a
+/// real compound: a line-wrap hyphen is, by construction, the final character before
+/// the break, so restricting the scan to strictly mid-run hyphens avoids witnessing
+/// the very artifact this collector exists to judge. Must run before any page's
+/// segments are moved out of `all_page_segments` (see call site in
+/// `extract_document_structure_from_segments`), since a witness on one page can be
+/// the sole evidence for a break on another. ~keep
+fn collect_hyphen_witnesses(all_page_segments: &[Vec<SegmentData>]) -> HyphenWitnesses {
+    let mut witnesses = HyphenWitnesses::default();
+    for segment in all_page_segments.iter().flatten() {
+        let characters: Vec<char> = segment.text.chars().collect();
+        if characters.len() < 3 {
+            continue;
+        }
+        for position in 1..characters.len() - 1 {
+            if characters[position] != '-' {
+                continue;
+            }
+            let left: String = characters[..position]
+                .iter()
+                .rev()
+                .take_while(|character| character.is_alphabetic())
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            let right: String = characters[position + 1..]
+                .iter()
+                .take_while(|character| character.is_alphabetic())
+                .collect();
+            let left_len = left.chars().count();
+            let right_len = right.chars().count();
+            if left_len < MIN_HYPHEN_WITNESS_WORD_LEN || right_len < MIN_HYPHEN_WITNESS_WORD_LEN {
+                continue;
+            }
+            witnesses.insert((left.to_ascii_lowercase(), right.to_ascii_lowercase()));
+        }
+    }
+    witnesses
+}
+
+fn should_preserve_lexical_hyphen(trailing_word: &str, leading_word: &str, hyphen_witnesses: &HyphenWitnesses) -> bool {
     let trim_non_lexical = |ch: char| !ch.is_alphanumeric() && ch != '-';
     let left = trailing_word.trim_matches(trim_non_lexical);
     let right = leading_word.trim_matches(trim_non_lexical);
 
-    PRESERVED_LEXICAL_COMPOUNDS
+    let matches_static_compound = PRESERVED_LEXICAL_COMPOUNDS
         .iter()
         .any(|&(expected_left, expected_right)| {
             left.eq_ignore_ascii_case(expected_left) && right.eq_ignore_ascii_case(expected_right)
-        })
+        });
+    matches_static_compound || hyphen_witnesses.contains(&(left.to_ascii_lowercase(), right.to_ascii_lowercase()))
 }
 
 /// Core dehyphenation with position-based full-line detection.
@@ -4965,7 +5043,7 @@ fn should_preserve_lexical_hyphen(trailing_word: &str, leading_word: &str) -> bo
 /// For each line boundary, checks whether the line extends close to the right
 /// margin. If so, attempts to rejoin the trailing word of one line with the
 /// leading word of the next.
-fn dehyphenate_paragraph_lines(para: &mut PdfParagraph) {
+fn dehyphenate_paragraph_lines(para: &mut PdfParagraph, hyphen_witnesses: &HyphenWitnesses) {
     let max_right_edge = para
         .lines
         .iter()
@@ -4974,7 +5052,7 @@ fn dehyphenate_paragraph_lines(para: &mut PdfParagraph) {
         .fold(0.0_f32, f32::max);
 
     if max_right_edge <= 0.0 {
-        dehyphenate_hyphen_only(para);
+        dehyphenate_hyphen_only(para, hyphen_witnesses);
         return;
     }
 
@@ -5015,7 +5093,7 @@ fn dehyphenate_paragraph_lines(para: &mut PdfParagraph) {
             continue;
         }
 
-        let preserved_hyphen = if should_preserve_lexical_hyphen(trailing_word, leading_word) {
+        let preserved_hyphen = if should_preserve_lexical_hyphen(trailing_word, leading_word, hyphen_witnesses) {
             "-"
         } else {
             ""
@@ -5046,7 +5124,7 @@ fn dehyphenate_paragraph_lines(para: &mut PdfParagraph) {
 ///
 /// Only joins lines when the trailing segment ends with an explicit hyphen.
 /// Used for structure tree pages where x/width may be zero.
-fn dehyphenate_hyphen_only(para: &mut PdfParagraph) {
+fn dehyphenate_hyphen_only(para: &mut PdfParagraph, hyphen_witnesses: &HyphenWitnesses) {
     let n = para.lines.len();
     for i in 0..(n - 1) {
         let trailing_text = match para.lines[i].segments.last() {
@@ -5072,7 +5150,7 @@ fn dehyphenate_hyphen_only(para: &mut PdfParagraph) {
             continue;
         }
 
-        let preserved_hyphen = if should_preserve_lexical_hyphen(trailing_word, leading_word) {
+        let preserved_hyphen = if should_preserve_lexical_hyphen(trailing_word, leading_word, hyphen_witnesses) {
             "-"
         } else {
             ""
@@ -5489,9 +5567,13 @@ fn run_in_list_fragment(source: &PdfParagraph, text: String, is_list_item: bool)
     }
 }
 
-fn apply_text_repair_to_structure_tree_paragraphs(paragraphs: &mut Vec<PdfParagraph>, has_positions: bool) {
+fn apply_text_repair_to_structure_tree_paragraphs(
+    paragraphs: &mut Vec<PdfParagraph>,
+    has_positions: bool,
+    hyphen_witnesses: &HyphenWitnesses,
+) {
     apply_to_all_segments(paragraphs, fused_text_repairs);
-    dehyphenate_paragraphs(paragraphs, has_positions);
+    dehyphenate_paragraphs(paragraphs, has_positions, hyphen_witnesses);
     split_embedded_list_items(paragraphs);
     synchronize_paragraph_text_metadata(paragraphs);
 }
@@ -6990,7 +7072,7 @@ mod tests {
             body_line_seg("1.6 Ventilatie", 658.0),
         ];
 
-        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &[]);
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &[], &HyphenWitnesses::default());
 
         assert_eq!(
             paragraphs.len(),
@@ -7010,7 +7092,7 @@ mod tests {
             body_line_seg("2024 was een druk jaar", 686.0),
         ];
 
-        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &[]);
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &[], &HyphenWitnesses::default());
 
         assert_eq!(
             paragraphs.len(),
@@ -7071,7 +7153,12 @@ mod tests {
             ..column_seg("gebruiker van het toestel indien genegeerd", 72.0, 190.0, 636.0)
         };
 
-        let paragraphs = segments_to_paragraphs(vec![heading, callout, body1, body2, body3], &[(12.0, None)], &[]);
+        let paragraphs = segments_to_paragraphs(
+            vec![heading, callout, body1, body2, body3],
+            &[(12.0, None)],
+            &[],
+            &HyphenWitnesses::default(),
+        );
 
         assert_eq!(
             paragraphs.len(),
@@ -7110,7 +7197,12 @@ mod tests {
         );
         let heading_continuation = column_seg("Rechterkantlijn Van Deze Kolom", 72.0, 450.0, 684.0);
 
-        let paragraphs = segments_to_paragraphs(vec![heading_start, heading_continuation], &[(11.0, None)], &[]);
+        let paragraphs = segments_to_paragraphs(
+            vec![heading_start, heading_continuation],
+            &[(11.0, None)],
+            &[],
+            &HyphenWitnesses::default(),
+        );
 
         assert_eq!(
             paragraphs.len(),
@@ -7131,7 +7223,7 @@ mod tests {
             body_line_seg("before adjourning the meeting for the day", 672.0),
         ];
 
-        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &[]);
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &[], &HyphenWitnesses::default());
 
         assert_eq!(
             paragraphs.len(),
@@ -7189,7 +7281,7 @@ mod tests {
         ];
         let gap_ys = compute_paragraph_gap_ys(&segments);
 
-        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys);
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys, &HyphenWitnesses::default());
 
         assert_eq!(
             paragraphs.len(),
@@ -7234,7 +7326,7 @@ mod tests {
         ];
         let gap_ys = compute_paragraph_gap_ys(&segments);
 
-        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys);
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys, &HyphenWitnesses::default());
 
         assert_eq!(
             paragraphs.iter().filter(|paragraph| paragraph.is_list_item).count(),
@@ -7289,7 +7381,7 @@ mod tests {
         ];
         let gap_ys = compute_paragraph_gap_ys(&segments);
 
-        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys);
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys, &HyphenWitnesses::default());
 
         assert_eq!(
             paragraphs.len(),
@@ -7436,7 +7528,7 @@ mod tests {
         ];
         let gap_ys = compute_paragraph_gap_ys(&segments);
 
-        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys);
+        let paragraphs = segments_to_paragraphs(segments, &[(11.0, None)], &gap_ys, &HyphenWitnesses::default());
 
         assert_eq!(paragraphs.len(), 2, "baseline agreement is what licenses reattachment");
         assert!(
@@ -8226,6 +8318,7 @@ where new shares are issued;";
             },
             &[],
             None,
+            &HyphenWitnesses::default(),
         )
     }
 
@@ -8257,6 +8350,7 @@ where new shares are issued;";
                 },
                 &[],
                 None,
+                &HyphenWitnesses::default(),
             )
         };
 
@@ -8337,6 +8431,7 @@ where new shares are issued;";
                 },
                 &[],
                 None,
+                &HyphenWitnesses::default(),
             )];
             reorder_pages_by_layout_region(&mut pages);
             pages[0].iter().map(paragraph_text).collect::<Vec<_>>()
@@ -8411,6 +8506,7 @@ where new shares are issued;";
             },
             &[],
             None,
+            &HyphenWitnesses::default(),
         );
 
         assert_eq!(output.len(), 1);
@@ -8448,6 +8544,7 @@ where new shares are issued;";
             },
             &[],
             None,
+            &HyphenWitnesses::default(),
         );
 
         assert_eq!(output.len(), 1);
@@ -8486,6 +8583,7 @@ where new shares are issued;";
             },
             &[],
             None,
+            &HyphenWitnesses::default(),
         );
 
         assert_eq!(output.len(), 1);
@@ -8577,6 +8675,7 @@ where new shares are issued;";
             },
             &[],
             None,
+            &HyphenWitnesses::default(),
         );
 
         assert_eq!(output.len(), 3);
@@ -8624,6 +8723,7 @@ where new shares are issued;";
             },
             &[],
             Some(12.0),
+            &HyphenWitnesses::default(),
         );
 
         assert_eq!(output.len(), 2);
@@ -8648,7 +8748,7 @@ where new shares are issued;";
             line(vec![full_line_seg("some soft-")]),
             line(vec![seg("ware is great", 10.0, 200.0)]),
         ]);
-        dehyphenate_paragraph_lines(&mut p);
+        dehyphenate_paragraph_lines(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[0].text, "some software");
         assert_eq!(p.lines[1].segments[0].text, "is great");
     }
@@ -8659,7 +8759,7 @@ where new shares are issued;";
             line(vec![full_line_seg("the soft")]),
             line(vec![seg("ware is great", 10.0, 200.0)]),
         ]);
-        dehyphenate_paragraph_lines(&mut p);
+        dehyphenate_paragraph_lines(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[0].text, "the soft");
         assert_eq!(p.lines[1].segments[0].text, "ware is great");
     }
@@ -8672,7 +8772,7 @@ where new shares are issued;";
         ]);
         let original_trailing = p.lines[0].segments[0].text.clone();
         let original_leading = p.lines[1].segments[0].text.clone();
-        dehyphenate_paragraph_lines(&mut p);
+        dehyphenate_paragraph_lines(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[0].text, original_trailing);
         assert_eq!(p.lines[1].segments[0].text, original_leading);
     }
@@ -8685,7 +8785,7 @@ where new shares are issued;";
         ]);
         p.is_code_block = true;
         let mut paragraphs = vec![p];
-        dehyphenate_paragraphs(&mut paragraphs, true);
+        dehyphenate_paragraphs(&mut paragraphs, true, &HyphenWitnesses::default());
         assert_eq!(paragraphs[0].lines[0].segments[0].text, "some soft-");
     }
 
@@ -8695,7 +8795,7 @@ where new shares are issued;";
             line(vec![full_line_seg("some text")]),
             line(vec![seg("Next sentence here", 10.0, 200.0)]),
         ]);
-        dehyphenate_paragraph_lines(&mut p);
+        dehyphenate_paragraph_lines(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[0].text, "some text");
         assert_eq!(p.lines[1].segments[0].text, "Next sentence here");
     }
@@ -8706,7 +8806,7 @@ where new shares are issued;";
             line(vec![full_line_seg("some \u{4E00}-")]),
             line(vec![seg("text here", 10.0, 200.0)]),
         ]);
-        dehyphenate_paragraph_lines(&mut p);
+        dehyphenate_paragraph_lines(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[0].text, "some \u{4E00}-");
     }
 
@@ -8716,7 +8816,7 @@ where new shares are issued;";
             line(vec![full_line_seg("advanced soft")]),
             line(vec![seg("ware development", 10.0, 200.0)]),
         ]);
-        dehyphenate_paragraph_lines(&mut p);
+        dehyphenate_paragraph_lines(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[0].text, "advanced soft");
         assert_eq!(p.lines[1].segments[0].text, "ware development");
     }
@@ -8727,7 +8827,7 @@ where new shares are issued;";
             line(vec![full_line_seg("modern hard")]),
             line(vec![seg("ware components", 10.0, 200.0)]),
         ]);
-        dehyphenate_paragraph_lines(&mut p);
+        dehyphenate_paragraph_lines(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[0].text, "modern hard");
         assert_eq!(p.lines[1].segments[0].text, "ware components");
     }
@@ -8738,7 +8838,7 @@ where new shares are issued;";
             line(vec![full_line_seg("the soft")]),
             line(vec![seg("ware, which is great", 10.0, 200.0)]),
         ]);
-        dehyphenate_paragraph_lines(&mut p);
+        dehyphenate_paragraph_lines(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[0].text, "the soft");
         assert_eq!(p.lines[1].segments[0].text, "ware, which is great");
     }
@@ -8749,7 +8849,7 @@ where new shares are issued;";
             line(vec![seg("some soft-", 0.0, 0.0)]),
             line(vec![seg("ware is great", 0.0, 0.0)]),
         ]);
-        dehyphenate_hyphen_only(&mut p);
+        dehyphenate_hyphen_only(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[0].text, "some software");
         assert_eq!(p.lines[1].segments[0].text, "is great");
     }
@@ -8760,14 +8860,14 @@ where new shares are issued;";
             line(vec![seg("some well-", 0.0, 0.0)]),
             line(vec![seg("Known thing", 0.0, 0.0)]),
         ]);
-        dehyphenate_hyphen_only(&mut p);
+        dehyphenate_hyphen_only(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[0].text, "some well-");
     }
 
     #[test]
     fn test_single_line_paragraph_skipped() {
         let mut paragraphs = vec![para(vec![line(vec![full_line_seg("single line")])])];
-        dehyphenate_paragraphs(&mut paragraphs, true);
+        dehyphenate_paragraphs(&mut paragraphs, true, &HyphenWitnesses::default());
         assert_eq!(paragraphs[0].lines[0].segments[0].text, "single line");
     }
 
@@ -8777,9 +8877,92 @@ where new shares are issued;";
             line(vec![seg("first part", 10.0, 200.0), seg("soft", 220.0, 280.0)]),
             line(vec![seg("ware next words", 10.0, 200.0)]),
         ]);
-        dehyphenate_paragraph_lines(&mut p);
+        dehyphenate_paragraph_lines(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[1].text, "soft");
         assert_eq!(p.lines[1].segments[0].text, "ware next words");
+    }
+
+    /// Regression for #1543: a hyphen appearing mid-run (not at the end of a segment's
+    /// text) witnesses a genuine authored compound, because a line-wrap hyphen is by
+    /// construction the LAST character of its segment.
+    ///
+    /// Neutralisation that must break this test: stop scanning for interior hyphens (e.g.
+    /// only ever inspect the final character of each segment) in `collect_hyphen_witnesses`.
+    #[test]
+    fn collect_hyphen_witnesses_finds_a_mid_run_compound() {
+        let pages = vec![vec![seg("the price-determining factors apply", 0.0, 0.0)]];
+
+        let witnesses = collect_hyphen_witnesses(&pages);
+
+        assert!(
+            witnesses.contains(&("price".to_string(), "determining".to_string())),
+            "a mid-run hyphen must witness its own compound: got {witnesses:?}"
+        );
+    }
+
+    /// The load-bearing negative for #1543: a hyphen at the END of a segment's text is,
+    /// by construction, a line-wrap candidate rather than evidence of an authored
+    /// compound. If this hyphen were witnessed, the collector would preserve every
+    /// trailing hyphen it exists to judge, defeating the whole mechanism.
+    ///
+    /// Neutralisation that must break this test: delete the end-of-run guard (the
+    /// `1..characters.len() - 1` range excluding the last index) in
+    /// `collect_hyphen_witnesses`.
+    #[test]
+    fn collect_hyphen_witnesses_ignores_a_hyphen_at_the_end_of_a_run() {
+        let pages = vec![vec![seg("are based on the price-", 0.0, 0.0)]];
+
+        let witnesses = collect_hyphen_witnesses(&pages);
+
+        assert!(
+            witnesses.is_empty(),
+            "a trailing hyphen must never become a witness: got {witnesses:?}"
+        );
+    }
+
+    /// A pair witnessed only by the document's own mid-line usage -- absent from the
+    /// static `PRESERVED_LEXICAL_COMPOUNDS` list -- must still license preservation.
+    ///
+    /// Neutralisation that must break this test: make `should_preserve_lexical_hyphen`
+    /// ignore its `hyphen_witnesses` argument and consult only the static list.
+    #[test]
+    fn should_preserve_lexical_hyphen_true_for_a_witnessed_pair_not_in_the_static_list() {
+        let mut witnesses = HyphenWitnesses::default();
+        witnesses.insert(("price".to_string(), "determining".to_string()));
+
+        assert!(should_preserve_lexical_hyphen("price", "determining", &witnesses));
+    }
+
+    /// The soft-hyphenation control: `auto` + `matic` (from a line broken as `auto-` /
+    /// `matic`) is a genuine mid-word wrap with no witness and no static-list entry, so
+    /// the hyphen must still be dropped on rejoin.
+    ///
+    /// Neutralisation that must break this test: widen the static list or witness lookup
+    /// to a prefix/suffix match instead of the exact-pair comparison.
+    #[test]
+    fn should_preserve_lexical_hyphen_false_for_genuine_soft_hyphenation() {
+        let witnesses = HyphenWitnesses::default();
+
+        assert!(!should_preserve_lexical_hyphen("auto", "matic", &witnesses));
+    }
+
+    /// Char-boundary regression: a non-ASCII word sitting next to a mid-run hyphen must
+    /// not panic. This repo has a documented history of char-boundary panics from byte
+    /// slicing a `&str`; `collect_hyphen_witnesses` must only ever slice by `char`.
+    ///
+    /// Neutralisation that must break this test: rewrite the left/right run extraction
+    /// with byte-offset string slicing (e.g. `&text[..byte_index]`) instead of the
+    /// char-safe `Vec<char>` scan.
+    #[test]
+    fn collect_hyphen_witnesses_does_not_panic_on_non_ascii_word_boundaries() {
+        let pages = vec![vec![seg("café-terrasse is open déjà-vu style", 0.0, 0.0)]];
+
+        let witnesses = collect_hyphen_witnesses(&pages);
+
+        assert!(
+            witnesses.contains(&("café".to_string(), "terrasse".to_string())),
+            "a non-ASCII word must still be witnessed: got {witnesses:?}"
+        );
     }
 
     fn para_with_font_size(font_size: f32) -> PdfParagraph {
@@ -9716,6 +9899,7 @@ where new shares are issued;";
             },
             &heading_map,
             Some(12.0),
+            &HyphenWitnesses::default(),
         );
         let level_for = |text: &str| {
             classified
@@ -10550,6 +10734,7 @@ where new shares are issued;";
             },
             &[],
             None,
+            &HyphenWitnesses::default(),
         );
         assert_eq!(
             output.len(),
@@ -10605,6 +10790,7 @@ where new shares are issued;";
             },
             &[],
             None,
+            &HyphenWitnesses::default(),
         );
         assert_eq!(
             output.len(),
