@@ -308,42 +308,11 @@ fn build_internal_document(
                 {
                     builder.push_paragraph(caption, vec![], Some(current_page), None);
                 }
-                let mut cells: Vec<Vec<String>> = Vec::new();
-                for row in &table.rows {
-                    let mut row_cells = Vec::new();
-                    for cell in &row.cells {
-                        let text = cell
-                            .paragraphs
-                            .iter()
-                            .map(|p| p.runs_to_markdown())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                            .trim()
-                            .to_string();
-                        let span = cell.properties.as_ref().and_then(|p| p.grid_span).unwrap_or(1);
-                        for _ in 0..span {
-                            row_cells.push(text.clone());
-                        }
-                    }
-                    cells.push(row_cells);
-                }
-                for row_idx in 1..table.rows.len() {
-                    let mut col = 0usize;
-                    for cell in &table.rows[row_idx].cells {
-                        let span = cell.properties.as_ref().and_then(|p| p.grid_span).unwrap_or(1) as usize;
-                        let is_vmerge_continue = cell.properties.as_ref().is_some_and(|p| {
-                            matches!(p.v_merge, Some(crate::extraction::docx::table::VerticalMerge::Continue))
-                        });
-                        if is_vmerge_continue {
-                            for c in col..col + span {
-                                if c < cells[row_idx].len() && c < cells[row_idx - 1].len() {
-                                    cells[row_idx][c] = cells[row_idx - 1][c].clone();
-                                }
-                            }
-                        }
-                        col += span;
-                    }
-                }
+                // A gridSpan/vMerge cell is written once at its origin and left blank in the
+                // columns/rows it covers, matching `Table::to_cell_grid` — the grid a
+                // consumer sees must not diverge from the one `Table::to_markdown` already
+                // renders correctly (xberg-io/xberg#1549). ~keep
+                let cells = table.to_cell_grid(crate::extraction::docx::parser::Paragraph::runs_to_markdown);
                 if !cells.is_empty() {
                     builder.push_table_from_cells(&cells, Some(current_page), None);
                 }
@@ -506,24 +475,10 @@ fn push_header_footer_content(
     }
 
     for table in &hf.tables {
-        let cells: Vec<Vec<String>> = table
-            .rows
-            .iter()
-            .map(|row| {
-                row.cells
-                    .iter()
-                    .map(|cell| {
-                        cell.paragraphs
-                            .iter()
-                            .map(|p| p.runs_to_markdown())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                            .trim()
-                            .to_string()
-                    })
-                    .collect()
-            })
-            .collect();
+        // Previously read no span at all, so a merged header/footer cell shifted every
+        // following cell left; now shares the same origin-once grid as body tables
+        // (xberg-io/xberg#1549). ~keep
+        let cells = table.to_cell_grid(crate::extraction::docx::parser::Paragraph::runs_to_markdown);
         if !cells.is_empty() {
             let idx = builder.push_table_from_cells(&cells, None, None);
             builder.set_layer(idx, layer);
@@ -815,43 +770,10 @@ impl Plugin for DocxExtractor {
 /// # Returns
 /// * `Table` - Converted table with cells and markdown representation
 fn convert_docx_table_to_table(docx_table: &crate::extraction::docx::parser::Table, page_number: u32) -> Table {
-    let mut cells: Vec<Vec<String>> = Vec::new();
-    for row in &docx_table.rows {
-        let mut row_cells = Vec::new();
-        for cell in &row.cells {
-            let cell_text = cell
-                .paragraphs
-                .iter()
-                .map(|para| para.runs_to_markdown())
-                .collect::<Vec<_>>()
-                .join(" ")
-                .trim()
-                .to_string();
-            let span = cell.properties.as_ref().and_then(|p| p.grid_span).unwrap_or(1);
-            for _ in 0..span {
-                row_cells.push(cell_text.clone());
-            }
-        }
-        cells.push(row_cells);
-    }
-    for row_idx in 1..docx_table.rows.len() {
-        let mut col = 0usize;
-        for cell in &docx_table.rows[row_idx].cells {
-            let span = cell.properties.as_ref().and_then(|p| p.grid_span).unwrap_or(1) as usize;
-            let is_vmerge_continue = cell
-                .properties
-                .as_ref()
-                .is_some_and(|p| matches!(p.v_merge, Some(crate::extraction::docx::table::VerticalMerge::Continue)));
-            if is_vmerge_continue {
-                for c in col..col + span {
-                    if c < cells[row_idx].len() && c < cells[row_idx - 1].len() {
-                        cells[row_idx][c] = cells[row_idx - 1][c].clone();
-                    }
-                }
-            }
-            col += span;
-        }
-    }
+    // Same grid as the element builder's Table arm above, and the same reason: a
+    // gridSpan/vMerge cell must appear once, not cloned per covered column/row
+    // (xberg-io/xberg#1549). ~keep
+    let cells = docx_table.to_cell_grid(crate::extraction::docx::parser::Paragraph::runs_to_markdown);
 
     let markdown = cells_to_markdown(&cells);
 

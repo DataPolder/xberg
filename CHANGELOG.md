@@ -167,6 +167,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a DOCX table cell spanning several grid columns (`w:gridSpan`) or rows (`w:vMerge`) being
+  returned once per covered column and again for every covered row, so a cell merged across 4
+  columns and 3 rows came back 12 times in `result.tables[].cells`, `result.tables[].markdown`,
+  and `result.content` alike — a 39 KB document could extract to 232 KB. A merged/spanned cell's
+  text is now written once, at its origin, with the columns and rows it covers left blank. This
+  also fixes a DOCX header or footer table with a merged cell shifting every following cell one
+  column to the left ([#1549](https://github.com/xberg-io/xberg/issues/1549)).
 - Fixed a PDF page that places a statistics table beside a prose column being emitted in
   full-width Y order, which spliced the prose apart mid-sentence (`more likely to be aged
   35Female 51.5 ...`) and welded the table's two label/value panels together on every row. The

@@ -18,12 +18,14 @@
 //!
 //! 2. `w:gridSpan` (table cell column span) is a bare `.parse::<u32>().ok()`
 //!    (`extraction/docx/table.rs::get_attribute_u32`), stored unclamped in
-//!    `CellProperties::grid_span`. Four call sites (`extractors/docx.rs` x2,
-//!    `extraction/docx/parser.rs` x2) all do `for _ in 0..span { row_cells.push(text.clone()) }`,
-//!    so `w:val="4294967295"` attempts on the order of 4 billion `String` clones. Fixed at
-//!    the single parse boundary in `extraction/docx/table.rs::validate_grid_span`, which
-//!    rejects (not clamps) any span outside `1..=MAX_CELL_GRID_SPAN` (1,024) back to
-//!    `None`, so the cell falls back to its unspanned default of 1 column.
+//!    `CellProperties::grid_span`. At the time this was written, all four grid builders
+//!    did `for _ in 0..span { row_cells.push(text.clone()) }`, so `w:val="4294967295"`
+//!    attempted on the order of 4 billion `String` clones. Since xberg-io/xberg#1549,
+//!    every builder shares `Table::to_cell_grid`, which writes a spanned cell once and
+//!    pushes `1..span` blanks instead of `0..span` clones, so this class of allocation is
+//!    also gone by construction; `validate_grid_span` remains the single parse-time
+//!    boundary that rejects (not clamps) any span outside `1..=MAX_CELL_GRID_SPAN`
+//!    (1,024) back to `None`, so the cell falls back to its unspanned default of 1 column.
 //!
 //! 3. The DOCX extractor opens the source ZIP archive a second time (metadata parts:
 //!    `docProps/core.xml`, `docProps/app.xml`, ...) without ever calling
@@ -342,8 +344,11 @@ fn test_grid_span_one_past_cap_defaults_to_single_column() {
     );
 }
 
-/// At-the-cap boundary: `w:gridSpan="1024"` must still expand to 1,024 columns. This is
-/// the guard against a cap set too tight silently truncating real documents.
+/// At-the-cap boundary: `w:gridSpan="1024"` must still reserve 1,024 columns on the grid.
+/// This is the guard against a cap set too tight silently truncating real documents.
+///
+/// Updated for xberg-io/xberg#1549: a spanned cell now appears once, at its origin, with
+/// the columns it covers left blank, rather than cloned into every covered column.
 #[test]
 fn test_grid_span_at_cap_boundary_still_expands() {
     let bytes = build_docx(&table_with_grid_span("1024"));
@@ -359,17 +364,25 @@ fn test_grid_span_at_cap_boundary_still_expands() {
         1025,
         "gridSpan=1024 plus the unspanned C2 cell must be 1025 columns"
     );
+    assert_eq!(
+        row[0], "Merged",
+        "the spanned cell's text must sit at its origin column"
+    );
     assert!(
-        row[..1024].iter().all(|cell| cell == "Merged"),
-        "all 1024 spanned columns must carry the merged cell's text"
+        row[1..1024].iter().all(|cell| cell.is_empty()),
+        "the 1023 columns the span covers beyond its origin must be left blank, not cloned"
     );
     assert_eq!(row[1024], "C2", "the trailing unspanned cell must be untouched");
 }
 
 /// Positive control: a normal `gridSpan="2"` merged cell (well within the cap) must
-/// produce exactly the same expanded row it produced before this fix.
+/// write its text once, at its origin, and leave the column it covers blank.
+///
+/// Updated for xberg-io/xberg#1549: this test previously pinned the pre-fix cloning
+/// behaviour (`["Merged", "Merged", "C2"]`); the correct grid — the one
+/// `Table::to_markdown` already produced — is `["Merged", "", "C2"]`.
 #[test]
-fn test_grid_span_two_positive_control_unchanged() {
+fn test_grid_span_two_leaves_covered_column_blank() {
     let bytes = build_docx(&table_with_grid_span("2"));
     let config = default_config();
 
@@ -381,8 +394,8 @@ fn test_grid_span_two_positive_control_unchanged() {
         table.cells,
         vec![
             vec!["A".to_string(), "B".to_string()],
-            vec!["Merged".to_string(), "Merged".to_string(), "C2".to_string()],
+            vec!["Merged".to_string(), String::new(), "C2".to_string()],
         ],
-        "a normal gridSpan=2 table must produce the same expanded cells as before this fix"
+        "a normal gridSpan=2 cell must appear once, at its origin, with the covered column blank"
     );
 }

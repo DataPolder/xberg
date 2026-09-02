@@ -1013,18 +1013,15 @@ impl Table {
         Self::default()
     }
 
-    /// Render this table as a markdown table.
+    /// Build this table's cell grid, writing each `gridSpan`/`vMerge`-spanned cell once at
+    /// its origin and leaving the columns and rows it covers blank.
     ///
-    /// Uses table row and cell properties to improve formatting:
-    /// - Respects `RowProperties.is_header` to identify header rows
-    /// - Handles `CellProperties.grid_span` to account for merged cells
-    ///
-    /// If no explicit header row is marked, treats the first row as the header.
-    pub(crate) fn to_markdown(&self) -> String {
-        if self.rows.is_empty() {
-            return String::new();
-        }
-
+    /// `render` extracts a paragraph's text (`runs_to_markdown` for Markdown output,
+    /// `to_text` for plain text); it is the only difference between `to_markdown` and
+    /// `to_plain_text`'s grids, so both share this builder (xberg-io/xberg#1549 — this is
+    /// also the one grid `extractors/docx.rs`'s consumer-visible paths must match, instead
+    /// of separately cloning a spanned cell's text into every covered column). ~keep
+    pub(crate) fn to_cell_grid(&self, render: impl Fn(&Paragraph) -> String) -> Vec<Vec<String>> {
         let mut cells: Vec<Vec<String>> = Vec::new();
         for row in &self.rows {
             let mut row_cells = Vec::new();
@@ -1039,7 +1036,7 @@ impl Table {
                 } else {
                     cell.paragraphs
                         .iter()
-                        .map(|para| para.runs_to_markdown())
+                        .map(&render)
                         .collect::<Vec<_>>()
                         .join(" ")
                         .trim()
@@ -1054,6 +1051,22 @@ impl Table {
             }
             cells.push(row_cells);
         }
+        cells
+    }
+
+    /// Render this table as a markdown table.
+    ///
+    /// Uses table row and cell properties to improve formatting:
+    /// - Respects `RowProperties.is_header` to identify header rows
+    /// - Handles `CellProperties.grid_span` to account for merged cells
+    ///
+    /// If no explicit header row is marked, treats the first row as the header.
+    pub(crate) fn to_markdown(&self) -> String {
+        if self.rows.is_empty() {
+            return String::new();
+        }
+
+        let cells = self.to_cell_grid(Paragraph::runs_to_markdown);
 
         if cells.is_empty() {
             return String::new();
@@ -1110,35 +1123,7 @@ impl Table {
             return String::new();
         }
 
-        let mut cells: Vec<Vec<String>> = Vec::new();
-        for row in &self.rows {
-            let mut row_cells = Vec::new();
-            for cell in &row.cells {
-                let is_vmerge_continue = cell
-                    .properties
-                    .as_ref()
-                    .is_some_and(|p| matches!(p.v_merge, Some(super::table::VerticalMerge::Continue)));
-
-                let cell_text = if is_vmerge_continue {
-                    String::new()
-                } else {
-                    cell.paragraphs
-                        .iter()
-                        .map(|para| para.to_text())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                        .trim()
-                        .to_string()
-                };
-                row_cells.push(cell_text);
-
-                let span = cell.properties.as_ref().and_then(|p| p.grid_span).unwrap_or(1);
-                for _ in 1..span {
-                    row_cells.push(String::new());
-                }
-            }
-            cells.push(row_cells);
-        }
+        let cells = self.to_cell_grid(Paragraph::to_text);
 
         crate::extraction::cells_to_text(&cells)
     }
