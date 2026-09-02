@@ -74,6 +74,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- PDF parsing no longer reports recoverable input at WARN. A missing embedded font, an object
+  outside the xref table, an unreadable CFF version, and a reading-order fallback are ordinary
+  properties of real PDFs rather than conditions an operator can act on; they are now TRACE (or
+  DEBUG for strategy fallbacks), and each document emits a single DEBUG summary on the
+  `xberg_native_pdf::recovery` target carrying the totals instead of one event per occurrence.
+  Measured over a 4,000-document corpus this removed 4,012,488 of 4,014,206 log events, against
+  which 44 genuine parse failures had been sitting at a ratio of about 1 in 91,000. ERROR
+  behaviour is unchanged — it already corresponded one to one with documents that failed
+  ([#1547](https://github.com/xberg-io/xberg/issues/1547)).
+
 - **Breaking (Rust source):** `validate_mime_type` no longer accepts any value with an `image/`
   prefix. It now parses the MIME type and requires exact membership in the supported-format
   registry, so unregistered vendor image subtypes such as `image/x-custom-format` are rejected as
