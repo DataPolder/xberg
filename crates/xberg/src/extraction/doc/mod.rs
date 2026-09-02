@@ -88,6 +88,15 @@ pub(crate) fn extract_doc_text(content: &[u8]) -> Result<DocExtractionResult> {
 /// Index of `ccpText` (main document CP count) in the FIB's `FibRgLw97`
 /// long-word array.
 const FIB_LW_IDX_CCP_TEXT: usize = 3;
+
+/// Index of the `fcClx`/`lcbClx` pair in the FIB's `FibRgFcLcb97` array.
+///
+/// [MS-DOC] 2.5.5 orders the array `fcStshfOrig`(0) ... `fcSttbfAssoc`(32),
+/// `fcClx`(33). This read used index 66 (`fcBkdFtnOldOld`, an obsolete field
+/// Word writes as zero) until #1551, so `fc_clx == 0` held for every real
+/// document and the piece table was never walked -- the whole `Clx` path was
+/// unreachable at runtime and only the contiguous fallback ever ran. ~keep
+const FIB_FC_LCB_IDX_CLX: usize = 33;
 /// Index of `ccpFtn` (footnote subdocument CP count) in the FIB's `FibRgLw97`
 /// long-word array.
 const FIB_LW_IDX_CCP_FTN: usize = 4;
@@ -283,7 +292,7 @@ fn extract_text_word97(word_doc: &[u8], table_stream: &[u8], warnings: &mut Vec<
     let _ = u16::from_le_bytes([word_doc[cbrgfclcb_offset], word_doc[cbrgfclcb_offset + 1]]) as usize;
     let rg_fc_lcb_offset = cbrgfclcb_offset + 2;
 
-    let fc_clx_offset = rg_fc_lcb_offset + 66 * 8;
+    let fc_clx_offset = rg_fc_lcb_offset + FIB_FC_LCB_IDX_CLX * 8;
     let lcb_clx_offset = fc_clx_offset + 4;
 
     if word_doc.len() < lcb_clx_offset + 4 {
@@ -1192,7 +1201,7 @@ mod tests {
         let rg_lw_offset = test_rg_lw_offset();
         let cbrgfclcb_offset = rg_lw_offset + TEST_CSLW * 4;
         let rg_fc_lcb_offset = cbrgfclcb_offset + 2;
-        rg_fc_lcb_offset + 66 * 8
+        rg_fc_lcb_offset + FIB_FC_LCB_IDX_CLX * 8
     }
 
     /// Build a `len`-byte WordDocument-stream FIB header with the given
@@ -1365,6 +1374,80 @@ mod tests {
                 .contains("past the end of the WordDocument stream"),
             "warning should name the overrun: {:?}",
             result.processing_warnings[0].message
+        );
+    }
+
+    /// #1551: `fcClx` was read from `FibRgFcLcb97` pair 66 (`fcBkdFtnOldOld`,
+    /// an obsolete field Word writes as zero) instead of pair 33. `fc_clx == 0`
+    /// therefore held for every real document, the piece table was never walked,
+    /// and extraction silently fell back to reading `reserved5`/`reserved6` at
+    /// `0x18`/`0x1C` -- bytes [MS-DOC] says a reader must ignore.
+    ///
+    /// The pair index is written here as a literal rather than through
+    /// [`FIB_FC_LCB_IDX_CLX`], deliberately. Both the reader and `build_fib`'s
+    /// helper use that constant, so a test that positioned the `Clx` through the
+    /// helper would move with a regression and stay green -- which is exactly why
+    /// the original defect survived a suite that already covered the piece table.
+    /// Pinning 33 independently is what makes this guard able to fail. ~keep
+    #[test]
+    fn fc_clx_is_read_at_ms_doc_pair_33_not_the_obsolete_pair_66() {
+        const MS_DOC_SPEC_FC_CLX_PAIR: usize = 33;
+        const OBSOLETE_PAIR_THE_READER_USED_TO_USE: usize = 66;
+        const TEXT: &str = "lorem ipsum dolor sit amet";
+        /// Placed where the contiguous fallback looks, so the two paths cannot be
+        /// confused for one another: whichever string comes back names the path
+        /// that ran. ~keep
+        const FALLBACK_DECOY: &str = "FALLBACK DECOY TEXT NOT THE DOCUMENT BODY";
+        const TEXT_OFFSET: usize = 2048;
+        const DECOY_OFFSET: usize = 1536;
+
+        let mut word_doc = build_fib(TEXT_OFFSET + TEXT.len(), TEXT.len() as u32, 0, 0, 0);
+        word_doc[TEXT_OFFSET..TEXT_OFFSET + TEXT.len()].copy_from_slice(TEXT.as_bytes());
+        word_doc[DECOY_OFFSET..DECOY_OFFSET + FALLBACK_DECOY.len()].copy_from_slice(FALLBACK_DECOY.as_bytes());
+
+        // reserved5/reserved6 -- what the fallback reads as fcMin/fcMac.
+        write_u32(&mut word_doc, 0x18, DECOY_OFFSET as u32);
+        write_u32(&mut word_doc, 0x1C, (DECOY_OFFSET + FALLBACK_DECOY.len()) as u32);
+
+        let plc_pcd = build_plc_pcd(&[TestPiece {
+            cp_start: 0,
+            cp_end: TEXT.len() as u32,
+            fc_raw: compressed_fc(TEXT_OFFSET as u32),
+        }]);
+
+        const FC_CLX: u32 = 8;
+        let mut clx = vec![0x02u8];
+        clx.extend_from_slice(&0u32.to_le_bytes());
+        clx.extend_from_slice(&plc_pcd);
+
+        let rg_fc_lcb_offset = test_rg_lw_offset() + TEST_CSLW * 4 + 2;
+        let spec_pair = rg_fc_lcb_offset + MS_DOC_SPEC_FC_CLX_PAIR * 8;
+        write_u32(&mut word_doc, spec_pair, FC_CLX);
+        write_u32(&mut word_doc, spec_pair + 4, clx.len() as u32);
+
+        let obsolete_pair = rg_fc_lcb_offset + OBSOLETE_PAIR_THE_READER_USED_TO_USE * 8;
+        assert_eq!(
+            u32::from_le_bytes(word_doc[obsolete_pair..obsolete_pair + 4].try_into().expect("4 bytes")),
+            0,
+            "pair 66 must stay zero -- it is what every real document holds, and the defect \
+             was invisible precisely because reading it yields 0"
+        );
+
+        let mut table_stream = vec![0u8; FC_CLX as usize];
+        table_stream.extend_from_slice(&clx);
+
+        let doc_bytes = build_doc_ole(&word_doc, &table_stream);
+        let result = extract_doc_text(&doc_bytes).expect("DOC extraction should succeed");
+
+        assert_eq!(
+            result.content, TEXT,
+            "text must come from the piece table at pair 33; got {:?}",
+            result.content
+        );
+        assert!(
+            !result.content.contains("FALLBACK DECOY"),
+            "the contiguous fallback ran, so fcClx read as 0: {:?}",
+            result.content
         );
     }
 }

@@ -167,6 +167,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed legacy `.doc` extraction reading `fcClx` from `FibRgFcLcb97` pair 66 — an obsolete field
+  Word writes as zero — instead of pair 33, so the piece table was never walked for any document
+  and extraction always fell back to reading `reserved5`/`reserved6`, bytes [MS-DOC] requires a
+  reader to ignore. Where those bytes disagreed with the real text start, whole documents were
+  decoded as UTF-16LE and returned as glued CJK-looking code points; multi-piece and fast-saved
+  documents could not be assembled at all. Footnote, header/footer, comment, and text-box
+  subdocument text now also reaches the output for these files
+  ([#1551](https://github.com/xberg-io/xberg/issues/1551)).
 - Fixed the Elixir NIF's vendored `Cargo.lock`, shipped in the Hex package, pinning
   `tree-sitter-language-pack` 1.15.12 while the crate requires 1.16.1 — a source build of the NIF
   with `--locked` could not resolve. This affects anyone whose platform has no precompiled
