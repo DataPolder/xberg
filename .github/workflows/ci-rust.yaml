@@ -184,7 +184,18 @@ jobs:
           # not belong here. ~keep
           cargo test --locked -p xberg-tesseract --doc
           cargo test --locked -p xberg-gliner --doc
-          cargo test --locked -p xberg-candle-ocr --doc
+          # xberg-candle-ocr pulls candle and so gemm-f16, whose aarch64 inline asm needs
+          # the fullfp16 target feature this runner's baseline lacks -- the same wall the
+          # `xberg` feature substitution above sidesteps, and that scripts/ci/rust/
+          # run-unit-tests.sh excludes xberg-gliner and xberg-wasm for. Verified with
+          # `cargo tree -p xberg-candle-ocr --target aarch64-unknown-linux-gnu -i gemm-f16`;
+          # xberg-gliner is clean by default here because its candle backend is opt-in.
+          # x86_64 Linux and macOS still run these doctests. ~keep
+          if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "aarch64" ]; then
+            echo "Skipping xberg-candle-ocr doctests on Linux aarch64 (gemm-f16 needs fullfp16)"
+          else
+            cargo test --locked -p xberg-candle-ocr --doc
+          fi
           cargo test --locked -p xberg-libheif --doc
           cargo test --locked -p xberg-libwpd --doc
           cargo test --locked -p xberg-native-pdf --doc
