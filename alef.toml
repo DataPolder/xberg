@@ -1,5 +1,5 @@
 [workspace]
-alef_version = "0.81.0"
+alef_version = "0.82.0"
 languages = [
   "python",
   "node",
@@ -46,22 +46,6 @@ user_owned = [
   "test_apps/wasm/package.json",
   "test_apps/zig/build.zig",
 ]
-
-[workspace.build_commands.python]
-precondition = "command -v uv >/dev/null 2>&1"
-build = "cd packages/python && uv run --project ../.. --frozen --only-dev maturin develop --manifest-path ../../crates/xberg-py/Cargo.toml --features extension-module"
-build_release = "cd packages/python && uv run --project ../.. --frozen --only-dev maturin develop --manifest-path ../../crates/xberg-py/Cargo.toml --features extension-module --release"
-
-# Alef currently has two Kotlin Android defaults: its resolved config uses the
-# variant-scoped assemble tasks, while the CLI fallback uses umbrella `gradle
-# build`, which also runs release validation before Android ABI libraries have
-# been staged. Keep local builds on the debug variant; publishing stages native
-# libraries before invoking the release task. ~keep
-[workspace.build_commands.kotlin_android]
-precondition = "command -v gradle >/dev/null 2>&1"
-build = "cd packages/kotlin-android && gradle assembleDebug"
-build_release = "cd packages/kotlin-android && gradle assembleRelease"
-
 
 [workspace.dto]
 python = "dataclass"
@@ -2428,26 +2412,6 @@ functions = [
   "preload_tokenizer",
 
 ]
-
-[crates.update.kotlin_android]
-precondition = "command -v gradle >/dev/null 2>&1"
-update = "echo 'kotlin-android: no-op (versions pinned by alef regen)'"
-upgrade = "echo 'kotlin-android: no-op (versions pinned by alef regen)'"
-
-[crates.update.swift]
-precondition = "command -v swift >/dev/null 2>&1"
-update = "cd packages/swift && swift package update"
-upgrade = "cd packages/swift && swift package update"
-
-[crates.update.dart]
-precondition = "command -v dart >/dev/null 2>&1"
-update = "cd packages/dart && dart pub upgrade"
-upgrade = "cd packages/dart && dart pub upgrade --major-versions"
-
-[crates.update.zig]
-precondition = "command -v zig >/dev/null 2>&1"
-update = "cd packages/zig && zig build --fetch"
-upgrade = "cd packages/zig && zig build --fetch"
 
 [crates.test.python]
 precondition = "command -v uv >/dev/null 2>&1"
