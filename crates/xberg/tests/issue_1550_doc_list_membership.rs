@@ -63,12 +63,14 @@ async fn auto_numbered_doc_paragraphs_are_list_items_not_prose() {
 }
 
 #[tokio::test]
-async fn a_document_without_list_bindings_keeps_its_previous_element_shape() {
-    // `fake.doc` has no list bindings, so #1550 must leave it on the original
-    // blank-line chunking path -- Word paragraphs are finer-grained than those
-    // chunks, and switching every document over is a separate change.
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../test_documents/vendored/unstructured/doc/fake.doc");
+async fn a_document_without_list_bindings_still_gets_one_element_per_word_paragraph() {
+    // Elements follow Word's paragraph structure for every Word97+ document,
+    // not only ones with lists. `vendor_renewal_letter.doc` is the case that
+    // makes this visible: its 10 paragraphs used to arrive as a SINGLE element
+    // because the old path split `content` on "\n\n" and the letter's
+    // paragraphs are separated by single marks.
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_documents/doc/vendor_renewal_letter.doc");
     assert!(path.exists(), "corpus fixture missing at {}", path.display());
     let config = ExtractionConfig {
         result_format: ResultFormat::ElementBased,
@@ -81,9 +83,15 @@ async fn a_document_without_list_bindings_keeps_its_previous_element_shape() {
 
     assert_eq!(
         elements.len(),
-        1,
-        "unchanged blank-line chunking for a list-free document"
+        10,
+        "expected one element per Word paragraph; got {} -- 1 would mean the blank-line \
+         chunking path ran and merged them",
+        elements.len()
     );
-    assert_eq!(elements[0].element_type, ElementType::NarrativeText);
-    assert_eq!(elements[0].text, "Lorem ipsum dolor sit amet.");
+    assert!(
+        !elements
+            .iter()
+            .any(|element| element.element_type == ElementType::ListItem),
+        "this document has no list bindings and must not gain list structure"
+    );
 }

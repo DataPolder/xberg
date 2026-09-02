@@ -99,16 +99,14 @@ impl InternalDocumentExtractor for DocExtractor {
 
         doc.metadata = build_metadata(result.metadata);
 
-        // #1550: a document with automatic list numbering is emitted from
-        // Word's own paragraph structure so list membership survives. Every
-        // other document keeps the blank-line chunking byte for byte -- Word
-        // paragraphs are finer-grained than these chunks, so switching
-        // unconditionally would silently change element boundaries for every
-        // `.doc` ever extracted, which is a separate change from this one.
-        if result.paragraphs.iter().any(|paragraph| paragraph.list.is_some()) {
-            push_paragraph_elements(&mut doc, &result.paragraphs);
-        } else {
+        // Elements follow Word's own paragraph structure, matching what the
+        // DOCX path does with `w:p`. The blank-line fallback is only for
+        // documents that carry no paragraph properties at all (Word 6/95, or
+        // the contiguous fallback), where there is nothing finer to use.
+        if result.paragraphs.is_empty() {
             push_blank_line_chunks(&mut doc, &result.content);
+        } else {
+            push_paragraph_elements(&mut doc, &result.paragraphs);
         }
 
         Ok(doc)
@@ -164,8 +162,12 @@ fn looks_like_heading(text: &str, next: Option<&str>) -> bool {
     is_single_line && is_short && no_trailing_punct && next_is_longer
 }
 
-/// Emit one element per blank-line-separated chunk -- the pre-#1550 behavior,
-/// kept verbatim for documents with no list bindings.
+/// Emit one element per blank-line-separated chunk.
+///
+/// Only reachable for documents that carry no paragraph properties -- Word
+/// 6/95, and the contiguous fallback -- where Word's own paragraph boundaries
+/// are not available. It merges any two paragraphs not separated by a blank
+/// line, which is why it is no longer the main path.
 fn push_blank_line_chunks(doc: &mut InternalDocument, content: &str) {
     let chunks: Vec<&str> = content.split("\n\n").collect();
     for (i, chunk) in chunks.iter().enumerate() {
