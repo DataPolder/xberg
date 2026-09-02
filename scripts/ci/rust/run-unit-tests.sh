@@ -130,6 +130,14 @@ if ! {
   # leg was the one place it was missing, so the crate becoming a workspace member
   # would have failed the workspace test run outright. ~keep
   extra_excludes+=(--exclude xberg-pdfium-render)
+  # xberg-libheif: --all-features turns on its `latest` feature, which chains to
+  # `libheif-sys/v1_21` and so raises the build script's `pkg-config --atleast-version`
+  # floor to `libheif >= 1.21`. CI installs 1.19.8 on purpose -- artifacts link libheif
+  # dynamically and must stay loadable on Debian 13 (#1541), which is why the crate's
+  # default is `v1_19` and not `latest`. `--all-features` bypasses that default exactly
+  # as `cargo clippy --workspace` once did. Tested separately below with its real
+  # (default) feature set, so the crate keeps its coverage. ~keep
+  extra_excludes+=(--exclude xberg-libheif)
   # The same fullfp16 wall as xberg-gliner and xberg-wasm above, reached by a third
   # route: under --all-features these four binding crates pull candle -> gemm-f16,
   # whose aarch64 inline asm needs a target feature this runner's baseline lacks.
@@ -174,6 +182,11 @@ if ! {
   RUST_BACKTRACE=full cargo test --locked -p xberg-gliner \
     ${gliner_features[@]+"${gliner_features[@]}"} \
     --all-targets --verbose || exit
+
+  echo "=== cargo test -p xberg-libheif (default features) ==="
+  # Default features, not --all-features: `latest` would demand libheif >= 1.21 while
+  # CI installs the 1.19.8 the shipped artifacts must load against. ~keep
+  RUST_BACKTRACE=full cargo test --locked -p xberg-libheif --all-targets --verbose || exit
 } 2>&1 | tee "$TEST_LOG"; then
   echo "=== Test execution failed ==="
   echo "Last 50 lines of test output:"
