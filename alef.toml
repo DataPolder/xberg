@@ -1,5 +1,10 @@
 [workspace]
-alef_version = "0.82.0"
+# Held at 0.81.0 deliberately while the config below is the 0.82 surface. install-alef
+# honours this key, so it decides which alef CI validates against, and 0.82.0's `alef e2e
+# generate` is nondeterministic (measured upstream: 2/10 runs divergent). 0.81.0 parses
+# this migrated file with exit 0 and no unknown-field errors, so the pair is consistent.
+# Goes to 0.82.1 with the regen when that tag is cut. ~keep
+alef_version = "0.81.0"
 languages = [
   "python",
   "node",
