@@ -5,12 +5,38 @@
 //!
 //! Supports Word 97, 2000, XP, and 2003 (.doc) files.
 
+mod papx;
+
 use crate::error::{Result, XbergError};
 use crate::types::ProcessingWarning;
 use std::io::Cursor;
 
 /// Warning source tag for `.doc` extraction diagnostics (#171 convention).
 const DOC_WARNING_SOURCE: &str = "doc";
+
+/// One main-document paragraph, carrying the list binding Word gave it.
+///
+/// #1550: the extractor previously returned text only, so a paragraph Word
+/// numbers automatically was indistinguishable from prose. This carries
+/// membership and depth; the number Word paints is deliberately not resolved
+/// (that needs `PlfLst`/`PlfLfo` and a counter walk). ~keep
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct DocParagraph {
+    pub content: String,
+    /// `Some(..)` when the paragraph is bound to an automatic list. `None`
+    /// means ordinary prose.
+    pub list: Option<DocListMembership>,
+}
+
+/// A paragraph's place in an automatic list.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub(crate) struct DocListMembership {
+    /// Zero-based nesting depth (`ilvl`).
+    pub level: u8,
+    /// Whether the level paints numbers rather than bullets, resolved from the
+    /// list tables' `nfc`.
+    pub ordered: bool,
+}
 
 /// Result of DOC text extraction.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -22,6 +48,10 @@ pub(crate) struct DocExtractionResult {
     /// Non-fatal degradations encountered while extracting (see
     /// `core::diagnostics`). Empty when extraction was complete.
     pub processing_warnings: Vec<ProcessingWarning>,
+    /// Main-document paragraphs. Empty when the document took a path that
+    /// carries no paragraph properties (Word 6/95, or the contiguous
+    /// fallback), in which case callers keep using `content`. ~keep
+    pub paragraphs: Vec<DocParagraph>,
 }
 
 /// Metadata extracted from DOC files.
@@ -71,16 +101,21 @@ pub(crate) fn extract_doc_text(content: &[u8]) -> Result<DocExtractionResult> {
     let mut processing_warnings = Vec::new();
 
     if n_fib >= 101 {
-        extract_text_word97(&word_doc, &table_stream, &mut processing_warnings).map(|text| DocExtractionResult {
-            content: text,
-            metadata,
-            processing_warnings,
+        extract_text_word97(&word_doc, &table_stream, &mut processing_warnings).map(|(text, paragraphs)| {
+            DocExtractionResult {
+                content: text,
+                metadata,
+                processing_warnings,
+                paragraphs,
+            }
         })
     } else {
         extract_text_word6(&word_doc).map(|text| DocExtractionResult {
             content: text,
             metadata,
             processing_warnings,
+            // Word 6/95 has no FKP paragraph properties this reader understands.
+            paragraphs: Vec::new(),
         })
     }
 }
@@ -240,6 +275,11 @@ impl SubdocRanges {
 #[derive(Default)]
 struct SubdocumentText {
     main: String,
+    /// Byte offset one past each character in `main`, same length as its char
+    /// count. Only the main document needs it: #1550 binds paragraph
+    /// properties for body text, and subdocument paragraphs carry no list
+    /// numbering a reader would see. ~keep
+    main_fc_ends: Vec<u32>,
     footnote: String,
     header: String,
     annotation: String,
@@ -247,7 +287,11 @@ struct SubdocumentText {
 }
 
 /// Extract text from Word 97/2000/XP/2003 files using the piece table.
-fn extract_text_word97(word_doc: &[u8], table_stream: &[u8], warnings: &mut Vec<ProcessingWarning>) -> Result<String> {
+fn extract_text_word97(
+    word_doc: &[u8],
+    table_stream: &[u8],
+    warnings: &mut Vec<ProcessingWarning>,
+) -> Result<(String, Vec<DocParagraph>)> {
     let fib_base_size = 32;
     let csw_offset = fib_base_size;
 
@@ -313,7 +357,7 @@ fn extract_text_word97(word_doc: &[u8], table_stream: &[u8], warnings: &mut Vec<
     ]) as usize;
 
     if fc_clx == 0 || lcb_clx == 0 {
-        return extract_text_contiguous(word_doc, ccp_text);
+        return extract_text_contiguous(word_doc, ccp_text).map(|text| (text, Vec::new()));
     }
 
     if table_stream.len() < fc_clx + lcb_clx {
@@ -334,7 +378,8 @@ fn extract_text_word97(word_doc: &[u8], table_stream: &[u8], warnings: &mut Vec<
             pos += 4;
 
             let plc_pcd = &clx[pos..];
-            return extract_text_from_piece_table(word_doc, plc_pcd, &subdoc_ranges, total_cp, warnings);
+            let list_tables = papx::ListTables::build(word_doc, table_stream, rg_fc_lcb_offset);
+            return extract_text_from_piece_table(word_doc, plc_pcd, &subdoc_ranges, total_cp, warnings, &list_tables);
         } else if clxt == 0x01 {
             pos += 1;
             if pos + 2 > clx.len() {
@@ -347,7 +392,7 @@ fn extract_text_word97(word_doc: &[u8], table_stream: &[u8], warnings: &mut Vec<
         }
     }
 
-    extract_text_fallback(word_doc, ccp_text)
+    extract_text_fallback(word_doc, ccp_text).map(|text| (text, Vec::new()))
 }
 
 /// Record that a piece's declared byte range runs past the end of the
@@ -378,19 +423,58 @@ fn push_piece_overrun_warning(
 ///
 /// Returns fewer than `char_count` characters -- and records a warning via
 /// [`push_piece_overrun_warning`] -- when the piece's declared FC/length
-/// overruns `word_doc` (#92).
+/// A decoded piece: its characters, plus for each character the byte offset
+/// (`FC`) in the WordDocument stream it was read from.
+///
+/// The two vectors are always the same length. Paragraph properties are
+/// FC-addressed while text is CP-addressed, so #1550 needs this pairing to
+/// bind a paragraph to its `PAPX`; the uncompressed path can drop a code unit
+/// that is not a scalar value, which is why the offsets are recorded during
+/// decoding rather than recomputed from an index afterwards.
+///
+/// `fc_ends` holds the offset one *past* each character, because that is what
+/// an FKP's `rgfc` entry stores for a paragraph. Recording the end during
+/// decoding avoids re-deriving it as `fc + 1`, which is only correct for
+/// compressed pieces -- an uncompressed character is two bytes wide. ~keep
+#[derive(Default)]
+struct DecodedPiece {
+    chars: Vec<char>,
+    fc_ends: Vec<u32>,
+}
+
+impl DecodedPiece {
+    fn len(&self) -> usize {
+        self.chars.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.chars.is_empty()
+    }
+}
+
+/// Decode one piece's characters, recording each character's `FC`.
 fn decode_piece_chars(
     word_doc: &[u8],
     fc_raw: u32,
     char_count: usize,
     piece_index: usize,
     warnings: &mut Vec<ProcessingWarning>,
-) -> Vec<char> {
+) -> DecodedPiece {
     let is_compressed = (fc_raw & 0x4000_0000) != 0;
     let fc = (fc_raw & 0x3FFF_FFFF) as usize;
     // Compressed (CP1252) pieces address `word_doc` at half the raw FC value;
     // uncompressed (UTF-16LE) pieces address it directly. ~keep
     let byte_offset = if is_compressed { fc / 2 } else { fc };
+
+    let decode_cp1252 = |start: usize, end: usize| -> DecodedPiece {
+        if start >= end {
+            return DecodedPiece::default();
+        }
+        DecodedPiece {
+            chars: word_doc[start..end].iter().map(|&b| cp1252_to_char(b)).collect(),
+            fc_ends: (start..end).map(|fc| (fc + 1) as u32).collect(),
+        }
+    };
 
     if is_compressed {
         let end = byte_offset + char_count;
@@ -400,13 +484,7 @@ fn decode_piece_chars(
         } else {
             end
         };
-        if byte_offset >= available_end {
-            return Vec::new();
-        }
-        word_doc[byte_offset..available_end]
-            .iter()
-            .map(|&b| cp1252_to_char(b))
-            .collect()
+        decode_cp1252(byte_offset, available_end)
     } else {
         let end = byte_offset + char_count * 2;
         let available_end = if end > word_doc.len() {
@@ -415,44 +493,55 @@ fn decode_piece_chars(
         } else {
             end
         };
-        let chars: Vec<char> = if byte_offset >= available_end {
-            Vec::new()
+        let piece: DecodedPiece = if byte_offset >= available_end {
+            DecodedPiece::default()
         } else {
-            word_doc[byte_offset..available_end]
-                .chunks_exact(2)
-                .filter_map(|c| char::from_u32(u16::from_le_bytes([c[0], c[1]]) as u32))
-                .collect()
+            let mut chars = Vec::new();
+            let mut fc_ends = Vec::new();
+            for (i, unit) in word_doc[byte_offset..available_end].chunks_exact(2).enumerate() {
+                if let Some(c) = char::from_u32(u16::from_le_bytes([unit[0], unit[1]]) as u32) {
+                    chars.push(c);
+                    fc_ends.push((byte_offset + i * 2 + 2) as u32);
+                }
+            }
+            DecodedPiece { chars, fc_ends }
         };
 
-        let suspicious = chars
+        let suspicious = piece
+            .chars
             .iter()
             .filter(|c| (0x4E00..=0x9FFF).contains(&(**c as u32)))
             .count();
-        if chars.len() > 4 && suspicious > chars.len() / 4 {
+        if piece.len() > 4 && suspicious > piece.len() / 4 {
             let cp1252_end = (byte_offset + char_count).min(word_doc.len());
-            if byte_offset >= cp1252_end {
-                return Vec::new();
-            }
-            return word_doc[byte_offset..cp1252_end]
-                .iter()
-                .map(|&b| cp1252_to_char(b))
-                .collect();
+            return decode_cp1252(byte_offset, cp1252_end);
         }
-        chars
+        piece
     }
 }
 
 /// Append the overlap between `[cp_start, cp_start + chars.len())` and `range`
 /// to `out`, translating the overlap into an index range on `chars`.
-fn append_range_overlap(chars: &[char], cp_start: usize, range: SubdocRange, out: &mut String) {
+fn append_range_overlap(
+    piece: &DecodedPiece,
+    cp_start: usize,
+    range: SubdocRange,
+    out: &mut String,
+    out_fcs: Option<&mut Vec<u32>>,
+) {
     if range.len() == 0 {
         return;
     }
-    let piece_end = cp_start + chars.len();
+    let piece_end = cp_start + piece.len();
     let overlap_start = cp_start.max(range.start);
     let overlap_end = piece_end.min(range.end);
     if overlap_start < overlap_end {
-        out.extend(&chars[overlap_start - cp_start..overlap_end - cp_start]);
+        let from = overlap_start - cp_start;
+        let to = overlap_end - cp_start;
+        out.extend(&piece.chars[from..to]);
+        if let Some(out_fcs) = out_fcs {
+            out_fcs.extend_from_slice(&piece.fc_ends[from..to]);
+        }
     }
 }
 
@@ -467,7 +556,8 @@ fn extract_text_from_piece_table(
     ranges: &SubdocRanges,
     total_cp: usize,
     warnings: &mut Vec<ProcessingWarning>,
-) -> Result<String> {
+    list_tables: &papx::ListTables,
+) -> Result<(String, Vec<DocParagraph>)> {
     let plc_size = plc_pcd.len();
     if plc_size < 16 {
         return Err(XbergError::parsing("PlcPcd too small"));
@@ -475,7 +565,7 @@ fn extract_text_from_piece_table(
 
     let n = (plc_size - 4) / 12;
     if n == 0 {
-        return Ok(String::new());
+        return Ok((String::new(), Vec::new()));
     }
 
     let mut text = SubdocumentText::default();
@@ -529,16 +619,22 @@ fn extract_text_from_piece_table(
             continue;
         }
 
-        let chars = decode_piece_chars(word_doc, fc_raw, char_count, i, warnings);
-        if chars.is_empty() {
+        let piece = decode_piece_chars(word_doc, fc_raw, char_count, i, warnings);
+        if piece.is_empty() {
             continue;
         }
 
-        append_range_overlap(&chars, cp_start, ranges.main, &mut text.main);
-        append_range_overlap(&chars, cp_start, ranges.footnote, &mut text.footnote);
-        append_range_overlap(&chars, cp_start, ranges.header, &mut text.header);
-        append_range_overlap(&chars, cp_start, ranges.annotation, &mut text.annotation);
-        append_range_overlap(&chars, cp_start, ranges.textbox, &mut text.textbox);
+        append_range_overlap(
+            &piece,
+            cp_start,
+            ranges.main,
+            &mut text.main,
+            Some(&mut text.main_fc_ends),
+        );
+        append_range_overlap(&piece, cp_start, ranges.footnote, &mut text.footnote, None);
+        append_range_overlap(&piece, cp_start, ranges.header, &mut text.header, None);
+        append_range_overlap(&piece, cp_start, ranges.annotation, &mut text.annotation, None);
+        append_range_overlap(&piece, cp_start, ranges.textbox, &mut text.textbox, None);
     }
 
     if ranges.has_unextracted_subdocument() {
@@ -567,7 +663,78 @@ fn extract_text_from_piece_table(
         }
     }
 
-    Ok(content)
+    Ok((
+        content,
+        split_main_paragraphs(&text.main, &text.main_fc_ends, list_tables),
+    ))
+}
+
+/// Word's paragraph mark. Splitting the raw main text on it gives the
+/// document's own paragraph granularity, which is finer than the blank-line
+/// chunking `content` consumers use. ~keep
+const PARAGRAPH_MARK: char = '\r';
+
+/// Split the raw main text into paragraphs and attach each one's list binding.
+///
+/// Operates on the *raw* text so that character positions still line up with
+/// `main_fcs`; each paragraph's text is normalized individually afterwards.
+/// `content` is still produced by normalizing the whole main text in one pass,
+/// so it stays byte-identical to what this module produced before #1550 --
+/// `normalize_doc_text` carries a field stack across the whole string, and a
+/// field that opens before a paragraph mark and closes after it would
+/// normalize differently piecewise. No document in the corpus does that, but
+/// deriving `content` from these paragraphs would make that an unstated
+/// assumption rather than a measured one. ~keep
+fn split_main_paragraphs(main: &str, main_fc_ends: &[u32], list_tables: &papx::ListTables) -> Vec<DocParagraph> {
+    let mut paragraphs = Vec::new();
+    let mut start = 0usize;
+
+    for (i, c) in main.chars().enumerate() {
+        if c != PARAGRAPH_MARK {
+            continue;
+        }
+        push_paragraph(
+            &mut paragraphs,
+            main,
+            start,
+            i,
+            main_fc_ends.get(i).copied(),
+            list_tables,
+        );
+        start = i + 1;
+    }
+
+    let char_count = main.chars().count();
+    if start < char_count {
+        // A final run with no paragraph mark still has properties keyed on the
+        // FC one past its last character.
+        let last_fc = main_fc_ends.get(char_count.saturating_sub(1)).copied();
+        push_paragraph(&mut paragraphs, main, start, char_count, last_fc, list_tables);
+    }
+
+    paragraphs
+}
+
+/// Normalize one paragraph's raw text and record it when it survives.
+fn push_paragraph(
+    out: &mut Vec<DocParagraph>,
+    main: &str,
+    start: usize,
+    end: usize,
+    mark_fc_end: Option<u32>,
+    list_tables: &papx::ListTables,
+) {
+    let raw: String = main.chars().skip(start).take(end.saturating_sub(start)).collect();
+    let content = normalize_doc_text(&raw);
+    if content.is_empty() {
+        return;
+    }
+    // Word keys a paragraph's PAPX on the FC one past its paragraph mark,
+    // which is exactly what `fc_ends` recorded for that character.
+    let list = mark_fc_end
+        .and_then(|fc_end| list_tables.membership_for_paragraph_end(fc_end))
+        .map(|(level, ordered)| DocListMembership { level, ordered });
+    out.push(DocParagraph { content, list });
 }
 
 /// Extract text from a "simple" DOC file where text is stored contiguously.

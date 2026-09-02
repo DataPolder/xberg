@@ -167,6 +167,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed legacy `.doc` automatic list numbering being dropped entirely: a paragraph Word numbers
+  through its list tables arrived as prose, indistinguishable from an unnumbered sentence, while
+  the DOCX path emitted a `ListItem` for the same construct. Auto-numbered paragraphs now arrive
+  as `ListItem`s inside an ordered or bulleted list container, with their nesting depth, matching
+  the DOCX path. The number Word paints (`1.1`, `a.`) is still not rendered — recovering it needs
+  list-table counter state — so a document mixing automatic and hand-typed numbering shows the
+  typed numbers as text and the automatic ones as list structure. **Element boundaries change for
+  documents that contain automatic lists**: they are now emitted one element per Word paragraph
+  rather than one per blank-line-separated block, which also alters `content` line spacing for
+  those documents. Documents with no automatic lists are unaffected
+  ([#1550](https://github.com/xberg-io/xberg/issues/1550)).
 - Fixed legacy `.doc` extraction reading `fcClx` from `FibRgFcLcb97` pair 66 — an obsolete field
   Word writes as zero — instead of pair 33, so the piece table was never walked for any document
   and extraction always fell back to reading `reserved5`/`reserved6`, bytes [MS-DOC] requires a

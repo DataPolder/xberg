@@ -5,7 +5,7 @@
 use crate::Result;
 use crate::core::config::ExtractionConfig;
 use crate::core::mime::LEGACY_WORD_MIME_TYPE;
-use crate::extraction::doc::extract_doc_text;
+use crate::extraction::doc::{DocParagraph, extract_doc_text};
 use crate::plugins::{InternalDocumentExtractor, Plugin};
 use crate::types::Metadata;
 use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
@@ -97,58 +97,18 @@ impl InternalDocumentExtractor for DocExtractor {
         doc.mime_type = mime_type.to_string();
         doc.processing_warnings.extend(result.processing_warnings);
 
-        let mut metadata_map = AHashMap::new();
+        doc.metadata = build_metadata(result.metadata);
 
-        let meta_title = result.metadata.title;
-        let meta_subject = result.metadata.subject;
-
-        let (meta_authors, meta_created_by) = if let Some(author) = result.metadata.author {
-            (Some(vec![author.clone()]), Some(author))
+        // #1550: a document with automatic list numbering is emitted from
+        // Word's own paragraph structure so list membership survives. Every
+        // other document keeps the blank-line chunking byte for byte -- Word
+        // paragraphs are finer-grained than these chunks, so switching
+        // unconditionally would silently change element boundaries for every
+        // `.doc` ever extracted, which is a separate change from this one.
+        if result.paragraphs.iter().any(|paragraph| paragraph.list.is_some()) {
+            push_paragraph_elements(&mut doc, &result.paragraphs);
         } else {
-            (None, None)
-        };
-
-        let meta_modified_by = result.metadata.last_author;
-
-        if let Some(revision) = result.metadata.revision_number {
-            metadata_map.insert(Cow::Borrowed("revision"), serde_json::Value::String(revision));
-        }
-
-        metadata_map.insert(
-            Cow::Borrowed("extraction_method"),
-            serde_json::Value::String("native_ole".to_string()),
-        );
-
-        doc.metadata = Metadata {
-            title: meta_title,
-            subject: meta_subject,
-            authors: meta_authors,
-            created_by: meta_created_by,
-            modified_by: meta_modified_by,
-            additional: metadata_map,
-            ..Default::default()
-        };
-
-        let paragraphs: Vec<&str> = result.content.split("\n\n").collect();
-        for (i, paragraph) in paragraphs.iter().enumerate() {
-            let trimmed = paragraph.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            let is_single_line = !trimmed.contains('\n');
-            let is_short = trimmed.len() <= 80;
-            let no_trailing_punct = !trimmed.ends_with('.') && !trimmed.ends_with(':') && !trimmed.ends_with(';');
-            let next_is_longer = paragraphs.get(i + 1).is_some_and(|next| {
-                let next_trimmed = next.trim();
-                !next_trimmed.is_empty() && next_trimmed.len() > trimmed.len()
-            });
-
-            if is_single_line && is_short && no_trailing_punct && next_is_longer {
-                doc.push_element(InternalElement::text(ElementKind::Heading { level: 2 }, trimmed, 0));
-            } else {
-                doc.push_element(InternalElement::text(ElementKind::Paragraph, trimmed, 0));
-            }
+            push_blank_line_chunks(&mut doc, &result.content);
         }
 
         Ok(doc)
@@ -163,9 +123,225 @@ impl InternalDocumentExtractor for DocExtractor {
     }
 }
 
+/// Map the `.doc` module's metadata onto the public [`Metadata`] shape.
+fn build_metadata(source: crate::extraction::doc::DocMetadata) -> Metadata {
+    let mut additional = AHashMap::new();
+    if let Some(revision) = source.revision_number {
+        additional.insert(Cow::Borrowed("revision"), serde_json::Value::String(revision));
+    }
+    additional.insert(
+        Cow::Borrowed("extraction_method"),
+        serde_json::Value::String("native_ole".to_string()),
+    );
+
+    let (authors, created_by) = match source.author {
+        Some(author) => (Some(vec![author.clone()]), Some(author)),
+        None => (None, None),
+    };
+
+    Metadata {
+        title: source.title,
+        subject: source.subject,
+        authors,
+        created_by,
+        modified_by: source.last_author,
+        additional,
+        ..Default::default()
+    }
+}
+
+/// Whether a chunk looks like a heading, by shape rather than by style.
+///
+/// Deliberately unchanged by #1550. Once paragraphs carry properties the
+/// document's own `istd` is available and is probably a better signal, but
+/// swapping it would change element kinds on every `.doc` including ones with
+/// no lists at all, so it belongs in its own change. ~keep
+fn looks_like_heading(text: &str, next: Option<&str>) -> bool {
+    let is_single_line = !text.contains('\n');
+    let is_short = text.len() <= 80;
+    let no_trailing_punct = !text.ends_with('.') && !text.ends_with(':') && !text.ends_with(';');
+    let next_is_longer = next.is_some_and(|next| !next.is_empty() && next.len() > text.len());
+    is_single_line && is_short && no_trailing_punct && next_is_longer
+}
+
+/// Emit one element per blank-line-separated chunk -- the pre-#1550 behavior,
+/// kept verbatim for documents with no list bindings.
+fn push_blank_line_chunks(doc: &mut InternalDocument, content: &str) {
+    let chunks: Vec<&str> = content.split("\n\n").collect();
+    for (i, chunk) in chunks.iter().enumerate() {
+        let trimmed = chunk.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let next = chunks.get(i + 1).map(|next| next.trim());
+        if looks_like_heading(trimmed, next.filter(|next| !next.is_empty())) {
+            doc.push_element(InternalElement::text(ElementKind::Heading { level: 2 }, trimmed, 0));
+        } else {
+            doc.push_element(InternalElement::text(ElementKind::Paragraph, trimmed, 0));
+        }
+    }
+}
+
+/// Emit one element per Word paragraph, so a list-bound paragraph becomes a
+/// `ListItem` inside a list container -- the shape the DOCX path already
+/// produces for `w:numPr`.
+///
+/// Consecutive bound paragraphs share a container. A change of nesting depth
+/// opens or closes nested containers, and a change of *kind* at the same depth
+/// closes and reopens: a document can move from a numbered run straight into a
+/// bulleted one at the same level, and merging those would label half the
+/// items wrongly. ~keep
+fn push_paragraph_elements(doc: &mut InternalDocument, paragraphs: &[DocParagraph]) {
+    // One entry per open container, holding whether it is ordered.
+    let mut open: Vec<bool> = Vec::new();
+
+    for (i, paragraph) in paragraphs.iter().enumerate() {
+        let text = paragraph.content.trim();
+        if text.is_empty() {
+            continue;
+        }
+
+        let Some(list) = paragraph.list else {
+            close_lists(doc, &mut open, 0);
+            let next = paragraphs
+                .get(i + 1)
+                .map(|next| next.content.trim())
+                .filter(|next| !next.is_empty());
+            let kind = if looks_like_heading(text, next) {
+                ElementKind::Heading { level: 2 }
+            } else {
+                ElementKind::Paragraph
+            };
+            doc.push_element(InternalElement::text(kind, text, 0));
+            continue;
+        };
+
+        let depth = usize::from(list.level) + 1;
+        close_lists(doc, &mut open, depth);
+        if open.len() == depth && open.last() != Some(&list.ordered) {
+            close_lists(doc, &mut open, depth - 1);
+        }
+        while open.len() < depth {
+            let element_depth = u16::try_from(open.len()).unwrap_or(u16::MAX);
+            doc.push_element(InternalElement::text(
+                ElementKind::ListStart { ordered: list.ordered },
+                "",
+                element_depth,
+            ));
+            open.push(list.ordered);
+        }
+
+        let element_depth = u16::try_from(open.len()).unwrap_or(u16::MAX);
+        doc.push_element(InternalElement::text(
+            ElementKind::ListItem { ordered: list.ordered },
+            text,
+            element_depth,
+        ));
+    }
+
+    close_lists(doc, &mut open, 0);
+}
+
+/// Close open list containers until only `target` remain.
+fn close_lists(doc: &mut InternalDocument, open: &mut Vec<bool>, target: usize) {
+    while open.len() > target {
+        open.pop();
+        let element_depth = u16::try_from(open.len()).unwrap_or(u16::MAX);
+        doc.push_element(InternalElement::text(ElementKind::ListEnd, "", element_depth));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn corpus(relative: &str) -> Vec<u8> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
+        assert!(
+            path.exists(),
+            "corpus fixture missing at {}; fetch test_documents rather than skipping",
+            path.display()
+        );
+        std::fs::read(&path).expect("read fixture")
+    }
+
+    async fn internal_document(relative: &str) -> InternalDocument {
+        DocExtractor::new()
+            .extract_content(&corpus(relative), LEGACY_WORD_MIME_TYPE, &ExtractionConfig::default())
+            .await
+            .expect("DOC extraction should succeed")
+    }
+
+    /// #1550: `ordered` distinguishes a numbered list from a bulleted one, and
+    /// it is resolved from the list tables' `nfc` rather than assumed.
+    ///
+    /// A reader that never resolved `nfc` and fell back to a constant would
+    /// emit one kind for everything and still look entirely plausible --
+    /// twelve ordered lists and zero bulleted reads as a clean result, not as
+    /// a lookup that never ran. That is precisely what happened while the
+    /// `LVL` blocks were being sliced off at `lcbPlfLst`, because they live
+    /// *past* that length.
+    ///
+    /// FIXTURE REQUIREMENT: this assertion can only fail if the document
+    /// contains **both** kinds. `unit_test_lists.doc` carries `nfc` 0 (arabic)
+    /// and `nfc` 23 (bullet). Swapping in a bullets-only or numbers-only
+    /// document -- or "simplifying" this one -- disarms the guard silently: it
+    /// keeps passing while `nfc` resolution is dead. The property that makes
+    /// this test able to fail belongs to the corpus, not to the code, so it is
+    /// recorded here next to the assertion that depends on it. ~keep
+    #[tokio::test]
+    async fn list_containers_carry_the_kind_resolved_from_nfc() {
+        let doc = internal_document("../../test_documents/doc/unit_test_lists.doc").await;
+
+        let mut ordered = 0;
+        let mut bulleted = 0;
+        for element in &doc.elements {
+            if let ElementKind::ListStart { ordered: is_ordered } = element.kind {
+                if is_ordered { ordered += 1 } else { bulleted += 1 }
+            }
+        }
+
+        assert!(
+            ordered > 0 && bulleted > 0,
+            "the document mixes nfc 0 and nfc 23, so both container kinds must appear; \
+             got {ordered} ordered and {bulleted} bulleted -- a single kind means nfc was \
+             never read and a default was used"
+        );
+    }
+
+    /// Every opened list container is closed, at the right nesting depth.
+    #[tokio::test]
+    async fn list_containers_are_balanced() {
+        let doc = internal_document("../../test_documents/doc/unit_test_lists.doc").await;
+
+        let mut depth: i32 = 0;
+        for element in &doc.elements {
+            match element.kind {
+                ElementKind::ListStart { .. } => depth += 1,
+                ElementKind::ListEnd => {
+                    depth -= 1;
+                    assert!(depth >= 0, "a list was closed that had not been opened");
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(depth, 0, "every opened list container must be closed");
+    }
+
+    /// A document with no list bindings must keep the blank-line chunking it
+    /// had before #1550 -- Word paragraphs are finer-grained than those chunks.
+    #[tokio::test]
+    async fn a_list_free_document_emits_no_list_elements() {
+        let doc = internal_document("../../test_documents/vendored/unstructured/doc/fake.doc").await;
+
+        assert!(
+            !doc.elements.iter().any(|element| matches!(
+                element.kind,
+                ElementKind::ListStart { .. } | ElementKind::ListEnd | ElementKind::ListItem { .. }
+            )),
+            "a document with no list bindings must not gain list structure"
+        );
+    }
 
     #[tokio::test]
     async fn test_doc_extractor_plugin_interface() {
