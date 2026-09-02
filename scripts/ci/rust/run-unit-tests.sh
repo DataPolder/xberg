@@ -130,6 +130,23 @@ if ! {
   # leg was the one place it was missing, so the crate becoming a workspace member
   # would have failed the workspace test run outright. ~keep
   extra_excludes+=(--exclude xberg-pdfium-render)
+  # The same fullfp16 wall as xberg-gliner and xberg-wasm above, reached by a third
+  # route: under --all-features these four binding crates pull candle -> gemm-f16,
+  # whose aarch64 inline asm needs a target feature this runner's baseline lacks.
+  # The set is measured, not guessed -- `cargo tree -p <crate> --all-features
+  # --target aarch64-unknown-linux-gnu -i gemm-f16` names exactly these four and no
+  # others. Note that check must read cargo tree's OUTPUT: `-i` prints "nothing to
+  # print" and still exits 0, so an exit-code test reports every crate as a hit.
+  # Subtracting the candle-* features instead does not work -- each crate's xberg
+  # dependency turns them on directly, past its own feature table. These crates are
+  # compiled and exercised on the x86_64 and macOS legs and across ci-e2e. ~keep
+  if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "aarch64" ]; then
+    echo "Linux aarch64: excluding the candle-bearing binding crates (gemm-f16 needs fullfp16)"
+    extra_excludes+=(--exclude xberg-ffi)
+    extra_excludes+=(--exclude xberg-php)
+    extra_excludes+=(--exclude xberg-dart)
+    extra_excludes+=(--exclude xberg-swift)
+  fi
   RUST_BACKTRACE=full cargo test --locked \
     --workspace \
     --exclude xberg \
