@@ -2487,6 +2487,11 @@ jobs:
     needs: prepare
     if: ${{ needs.prepare.outputs.release_swift == 'true' }}
     runs-on: macos-15
+    # This job legitimately takes ~4h -- it succeeded in 251m in run 33623195090, by far the
+    # longest in the workflow (next is 92m). The bound exists only so a genuine hang fails in
+    # 5.5h instead of burning GitHub's 6h default; it is NOT sized to catch a slow build, and
+    # anything below ~300m would kill a healthy one. Re-measure before lowering it. ~keep
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v7
         with:
