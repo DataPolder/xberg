@@ -59,7 +59,14 @@ jobs:
     name: Rust (${{ matrix.os }})
     if: github.repository == 'xberg-io/xberg' && github.actor != 'dependabot[bot]' && github.event.pull_request.draft != true
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    # Raised from 90m, which was silently marginal: the legs used to abort early on the
+    # first failure and finish in 35-82m, so nobody saw that a leg running to COMPLETION
+    # exceeds 90m. Removing the early aborts (--no-fail-fast in run-unit-tests.sh, and
+    # doctests no longer stopping at the first crate) did not make this job slower than
+    # a full run always was -- it unmasked it. Measured on 3f9b1aa0: ubuntu-latest
+    # completed in 87m, while macos-latest and ubuntu-24.04-arm were both cancelled at
+    # exactly 90m, so their true completion time is unknown and above it. ~keep
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
