@@ -167,6 +167,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed the Elixir NIF's vendored `Cargo.lock`, shipped in the Hex package, pinning
+  `tree-sitter-language-pack` 1.15.12 while the crate requires 1.16.1 — a source build of the NIF
+  with `--locked` could not resolve. This affects anyone whose platform has no precompiled
+  artifact and therefore builds from source.
 - Fixed a DOCX table cell spanning several grid columns (`w:gridSpan`) or rows (`w:vMerge`) being
   returned once per covered column and again for every covered row, so a cell merged across 4
   columns and 3 rows came back 12 times in `result.tables[].cells`, `result.tables[].markdown`,
