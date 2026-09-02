@@ -13171,8 +13171,10 @@ class OcrQualityThresholds {
   /// recorded municipal ordinance (10 prose pages, 6 scanned survey/architectural drawings)
   /// with Tesseract 5.5.3:
   ///
-  ///     prose      86.3 - 95.3
-  ///     drawings   18.5 - 64.3
+  /// ```text
+  /// prose      86.3 - 95.3
+  /// drawings   18.5 - 64.3
+  /// ```
   ///
   /// The default sits in that gap with ~11 points of margin on each side. Compare the
   /// short-word ratio, which separated the same two groups by 0.09 on a 0-1 scale.
