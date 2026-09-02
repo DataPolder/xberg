@@ -75,6 +75,12 @@ export XBERG_SKIP_LIVE_HF=1
 # NIF, html/stack_management.rs). ~keep
 export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
 
+# Every cargo invocation below runs with --no-fail-fast so one failing test binary
+# reports alongside the others instead of hiding them. Without it, cargo stops at the
+# first failing binary and the `|| exit` between commands stops the script, so a run
+# surfaces exactly one problem per CI cycle. That cost three round-trips on 2026-09-02:
+# fixing a font test revealed an identical bug in a second binary, and fixing a pipeline
+# test revealed a libheif floor mismatch that had never had a chance to run. ~keep
 echo "=== Starting cargo test ==="
 
 # NOTE: We intentionally avoid `--all-features` for the `xberg` crate because
@@ -105,7 +111,7 @@ if ! {
     echo "Linux aarch64: using full-no-heic,heic (full pulls candle -> gemm-f16 needs fullfp16)"
     xberg_test_features=full-no-heic,heic,formula-recognition
   fi
-  RUST_BACKTRACE=full cargo test --locked -p xberg --features "$xberg_test_features" --all-targets --verbose || exit
+  RUST_BACKTRACE=full cargo test --locked --no-fail-fast -p xberg --features "$xberg_test_features" --all-targets --verbose || exit
 
   echo "=== cargo test --workspace (all features, excluding xberg) ==="
   extra_excludes=()
@@ -155,7 +161,7 @@ if ! {
     extra_excludes+=(--exclude xberg-dart)
     extra_excludes+=(--exclude xberg-swift)
   fi
-  RUST_BACKTRACE=full cargo test --locked \
+  RUST_BACKTRACE=full cargo test --locked --no-fail-fast \
     --workspace \
     --exclude xberg \
     --exclude xberg-e2e-generator \
@@ -179,14 +185,14 @@ if ! {
     echo "Dropping the candle feature on Linux aarch64 (gemm-f16 needs fullfp16)"
     gliner_features=(--features ort-dynamic)
   fi
-  RUST_BACKTRACE=full cargo test --locked -p xberg-gliner \
+  RUST_BACKTRACE=full cargo test --locked --no-fail-fast -p xberg-gliner \
     ${gliner_features[@]+"${gliner_features[@]}"} \
     --all-targets --verbose || exit
 
   echo "=== cargo test -p xberg-libheif (default features) ==="
   # Default features, not --all-features: `latest` would demand libheif >= 1.21 while
   # CI installs the 1.19.8 the shipped artifacts must load against. ~keep
-  RUST_BACKTRACE=full cargo test --locked -p xberg-libheif --all-targets --verbose || exit
+  RUST_BACKTRACE=full cargo test --locked --no-fail-fast -p xberg-libheif --all-targets --verbose || exit
 } 2>&1 | tee "$TEST_LOG"; then
   echo "=== Test execution failed ==="
   echo "Last 50 lines of test output:"
