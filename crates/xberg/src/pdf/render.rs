@@ -262,23 +262,6 @@ pub fn install_pdf_render_diagnostics() -> bool {
 /// Turn one captured `xberg_native_pdf` log line into a `(page, message)`
 /// [`ProcessingWarning`], naming the page so a multi-page document does not
 /// read as "somewhere in this PDF, something happened".
-/// Whether a captured engine warning actually means glyph ink went missing.
-///
-/// Everything this sink captures used to be wrapped as a glyph drop unconditionally. That was
-/// invisible while the capture was broken (#697) because nothing was ever wrapped, but the
-/// engine also emits warnings about situations it handled correctly, and telling a user that
-/// "glyph ink is missing" when the text rendered fine is worse than saying nothing.
-///
-/// The engine hands us a formatted string and no structured kind, so this has to match on the
-/// message. It is deliberately an EXCLUDE-list, not an include-list: an unrecognised warning is
-/// still reported as a glyph drop, so a new failure mode is over-reported rather than silently
-/// swallowed -- the failure direction #697 already cost us once.
-fn indicates_dropped_glyph_ink(cause: &str) -> bool {
-    // "No font provided for N bytes, using Latin-1 fallback (PDF spec compliant)" -- the text
-    // is rendered via the fallback, so there is no missing ink to warn about.
-    !cause.contains("PDF spec compliant")
-}
-
 fn glyph_drop_warning(page_index: usize, cause: &str) -> ProcessingWarning {
     warning(
         PDF_RENDER_WARNING_SOURCE,
@@ -336,7 +319,13 @@ fn render_page_capturing_glyph_drops(
     if !captured.is_empty() {
         ENGINE_PENDING_WARNINGS.with(|pending| {
             let mut pending = pending.borrow_mut();
-            for cause in captured.iter().filter(|cause| indicates_dropped_glyph_ink(cause)) {
+            // GH#1548: this used to also filter out any cause containing "PDF spec compliant",
+            // to exclude the Latin-1-fallback message. That message now stays below the
+            // capture threshold (TRACE, gated on <= WARN by `EngineWarningCapture::interested`)
+            // so it can never reach here, and the substring match was a trap for whoever next
+            // wrote a genuinely actionable warning that happened to share the phrase. Every
+            // captured cause is classified below instead of pre-filtered. ~keep
+            for cause in captured.iter() {
                 let processing_warning = if indicates_unrenderable_image(cause) {
                     image_render_failure_warning(page_index, cause)
                 } else {
@@ -1511,6 +1500,43 @@ mod tests {
         assert!(
             !is_pdf_engine_target("xberg::extractors::pdf"),
             "xberg's own records must not be captured"
+        );
+    }
+
+    /// GH#1548: `render_page_capturing_glyph_drops` used to exclude any captured cause
+    /// containing the literal substring "PDF spec compliant" -- originally meant only to skip
+    /// the Latin-1-fallback message, which is now emitted at TRACE and never reaches this
+    /// capture at all (see `EngineWarningCapture::interested`, gated on `<= Level::WARN`).
+    /// A genuine WARN-level engine event whose text incidentally shares that phrase must still
+    /// surface as a `ProcessingWarning` rather than being silently dropped by a substring trap.
+    #[test]
+    fn genuine_warning_sharing_the_old_substring_is_not_silently_excluded() {
+        assert!(
+            install_pdf_render_diagnostics(),
+            "no other component should own the tracing dispatcher in this test binary"
+        );
+        let _ = take_xberg_native_pdf_render_warnings();
+
+        let result = render_page_capturing_glyph_drops(0, || {
+            tracing::warn!(
+                target: "xberg_native_pdf::fonts",
+                "a genuine problem that happens to mention PDF spec compliant wording"
+            );
+            Ok(xberg_native_pdf::rendering::RenderedImage {
+                data: vec![0u8; 4],
+                width: 1,
+                height: 1,
+                format: xberg_native_pdf::rendering::ImageFormat::RawRgba8,
+            })
+        });
+        assert!(result.is_ok(), "capturing a warning must not change the render outcome");
+
+        let warnings = take_xberg_native_pdf_render_warnings();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "a captured WARN-level engine event must be reported even when its text incidentally \
+             contains the retired Latin-1-fallback substring; got: {warnings:?}"
         );
     }
 }

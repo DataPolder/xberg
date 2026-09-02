@@ -174,6 +174,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   text is now written once, at its origin, with the columns and rows it covers left blank. This
   also fixes a DOCX header or footer table with a merged cell shifting every following cell one
   column to the left ([#1549](https://github.com/xberg-io/xberg/issues/1549)).
+- Fixed PDF render diagnostics matching a captured engine warning against a hardcoded message
+  substring to decide whether it meant a glyph actually failed to paint. The message it was built
+  to exclude no longer reaches this capture at all (it moved to TRACE under #1547), so the match
+  could only ever misfire: a future warning whose text happened to share that substring would have
+  been silently dropped instead of surfacing as a `ProcessingWarning`. Every captured warning is
+  now reported ([#1548](https://github.com/xberg-io/xberg/issues/1548)).
 - Fixed a PDF page that places a statistics table beside a prose column being emitted in
   full-width Y order, which spliced the prose apart mid-sentence (`more likely to be aged
   35Female 51.5 ...`) and welded the table's two label/value panels together on every row. The
