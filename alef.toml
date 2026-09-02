@@ -2507,7 +2507,10 @@ e2e = "cd e2e/dart && for dir in docx html json pdf text xlsx images; do test -L
 precondition = "command -v zig >/dev/null 2>&1"
 before = "bash scripts/e2e/build-mock-server.sh && cargo build --release -p xberg-ffi"
 command = "cd packages/zig && zig build test -Dffi_path=$PWD/../../target/release -Dffi_include_path=$PWD/../../crates/xberg-ffi/include"
-e2e = "cd e2e/zig && zig build test -Dffi_path=$PWD/../../target/release -Dffi_include_path=$PWD/../../crates/xberg-ffi/include"
+# Fixture dirs are symlinked in, as the dart leg does: the generated zig tests open
+# fixtures by a path relative to e2e/zig ("html/html.html"), so without these the
+# batch tests die with error.FileNotFound. ~keep
+e2e = "cd e2e/zig && for dir in docx html json pdf text xlsx images; do test -L $dir || ln -sf ../../test_documents/$dir $dir; done && zig build test -Dffi_path=$PWD/../../target/release -Dffi_include_path=$PWD/../../crates/xberg-ffi/include"
 
 [crates.publish]
 core_crate = "crates/xberg"
@@ -2718,6 +2721,11 @@ bigint_fields = ["cacheTtlSecs", "extractionTimeoutSecs"]
 [crates.e2e.call.overrides.swift]
 unnamed_arg_indices = [0, 1, 2]
 
+# alef's php e2e class-override validator rejects the name alef's own php binding
+# emitter writes -- it accepts only "Xberg", while crates/xberg-php/src/lib.rs
+# (alef-generated) declares `#[php(name = "Xberg\\XbergApi")]`. No value satisfies
+# both, so this stays wrong and the php e2e leg stays red until alef is fixed.
+# Reported upstream. ~keep
 [crates.e2e.call.overrides.php]
 class = "Xberg\\Xberg"
 function = "extract"
