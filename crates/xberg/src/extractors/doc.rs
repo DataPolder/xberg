@@ -150,10 +150,11 @@ fn build_metadata(source: crate::extraction::doc::DocMetadata) -> Metadata {
 
 /// Whether a chunk looks like a heading, by shape rather than by style.
 ///
-/// Deliberately unchanged by #1550. Once paragraphs carry properties the
-/// document's own `istd` is available and is probably a better signal, but
-/// swapping it would change element kinds on every `.doc` including ones with
-/// no lists at all, so it belongs in its own change. ~keep
+/// Used only for documents whose style sheet declares no heading style at all.
+/// #1553 measured the alternative: deriving headings purely from `istd` would
+/// have deleted all 13 headings from one reporter document and all 12 from
+/// another, because both style their headings as bold `Normal`. Half this
+/// corpus does. Shape is the only signal those documents carry. ~keep
 fn looks_like_heading(text: &str, next: Option<&str>) -> bool {
     let is_single_line = !text.contains('\n');
     let is_short = text.len() <= 80;
@@ -194,6 +195,22 @@ fn push_blank_line_chunks(doc: &mut InternalDocument, content: &str) {
 /// bulleted one at the same level, and merging those would label half the
 /// items wrongly. ~keep
 fn push_paragraph_elements(doc: &mut InternalDocument, paragraphs: &[DocParagraph]) {
+    // The switch is "does this document EMIT styled headings", which is
+    // narrower than either alternative that looks right.
+    //
+    // Not "does the style sheet define headings": nearly every Word style
+    // sheet defines heading 1..9 whether or not the author applied one, so
+    // that answers yes almost always.
+    //
+    // And not merely "does any paragraph carry a heading style": a list-bound
+    // paragraph is emitted as a ListItem regardless of its style, matching the
+    // DOCX path's handling of `w:numPr`. `simple.doc` is the case -- its one
+    // Heading 1 paragraph is also list-bound, so counting it flipped the
+    // document into styled mode and suppressed every heading while emitting
+    // none, leaving the document with no heading structure at all. ~keep
+    let styled_headings = paragraphs
+        .iter()
+        .any(|paragraph| paragraph.heading_level.is_some() && paragraph.list.is_none());
     // One entry per open container, holding whether it is ordered.
     let mut open: Vec<bool> = Vec::new();
 
@@ -205,14 +222,9 @@ fn push_paragraph_elements(doc: &mut InternalDocument, paragraphs: &[DocParagrap
 
         let Some(list) = paragraph.list else {
             close_lists(doc, &mut open, 0);
-            let next = paragraphs
-                .get(i + 1)
-                .map(|next| next.content.trim())
-                .filter(|next| !next.is_empty());
-            let kind = if looks_like_heading(text, next) {
-                ElementKind::Heading { level: 2 }
-            } else {
-                ElementKind::Paragraph
+            let kind = match heading_kind(paragraphs, i, text, styled_headings) {
+                Some(level) => ElementKind::Heading { level },
+                None => ElementKind::Paragraph,
             };
             doc.push_element(InternalElement::text(kind, text, 0));
             continue;
@@ -242,6 +254,30 @@ fn push_paragraph_elements(doc: &mut InternalDocument, paragraphs: &[DocParagrap
     }
 
     close_lists(doc, &mut open, 0);
+}
+
+/// Decide whether a paragraph is a heading, and at what level.
+///
+/// #1553: the two signals are not interchangeable and neither is usable alone.
+/// A document that declares heading styles is taken at its word -- `istd` is
+/// what Word itself renders from, and the shape heuristic invents headings
+/// there (1 detected against 7 declared in one corpus document). A document
+/// that declares none has nothing to be taken at its word about, and falls
+/// back to shape.
+///
+/// The switch is per *document*, not per paragraph. Per-paragraph fallback
+/// would re-add the invented headings alongside the declared ones, which is
+/// the worst of both. ~keep
+fn heading_kind(paragraphs: &[DocParagraph], index: usize, text: &str, styled_headings: bool) -> Option<u8> {
+    if styled_headings {
+        return paragraphs.get(index).and_then(|paragraph| paragraph.heading_level);
+    }
+    let next = paragraphs
+        .get(index + 1)
+        .map(|next| next.content.trim())
+        .filter(|next| !next.is_empty());
+    // The shape heuristic has no notion of depth; it only ever claimed h2.
+    looks_like_heading(text, next).then_some(2)
 }
 
 /// Close open list containers until only `target` remain.
@@ -328,6 +364,68 @@ mod tests {
             }
         }
         assert_eq!(depth, 0, "every opened list container must be closed");
+    }
+
+    /// #1553: a document that applies heading styles is taken at its word,
+    /// and the level comes from the style rather than being a fixed h2.
+    ///
+    /// FIXTURE REQUIREMENT: `unit_test_lists.doc` applies `heading 1` and
+    /// `heading 3` to seven paragraphs that are NOT list-bound. A fixture
+    /// whose styled headings were all list-bound would emit them as ListItems
+    /// and exercise the fallback instead, passing this file's other test while
+    /// leaving this one asserting nothing. ~keep
+    #[tokio::test]
+    async fn a_document_that_applies_heading_styles_uses_them_and_their_levels() {
+        let doc = internal_document("../../test_documents/doc/unit_test_lists.doc").await;
+
+        let levels: Vec<u8> = doc
+            .elements
+            .iter()
+            .filter_map(|element| match element.kind {
+                ElementKind::Heading { level } => Some(level),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            levels.len(),
+            7,
+            "expected the 7 style-declared headings; got {levels:?}"
+        );
+        assert!(
+            levels.contains(&1) && levels.contains(&3),
+            "levels must come from the styles actually applied (heading 1 and heading 3); got {levels:?}"
+        );
+        assert!(
+            !levels.contains(&2),
+            "h2 is what the shape heuristic emits for everything; seeing it here means the \
+             heuristic ran instead of the styles: {levels:?}"
+        );
+    }
+
+    /// #1553: a document whose only heading-styled paragraph is list-bound
+    /// emits no styled heading at all, so it must fall back to shape rather
+    /// than end up with no heading structure.
+    ///
+    /// `simple.doc` is exactly that: its `Heading 1` paragraph also carries a
+    /// list binding, and a list binding wins (matching the DOCX path's
+    /// handling of `w:numPr`). Counting it as "this document uses heading
+    /// styles" suppressed the heuristic while emitting nothing in its place.
+    #[tokio::test]
+    async fn a_document_whose_only_styled_heading_is_list_bound_falls_back_to_shape() {
+        let doc = internal_document("../../test_documents/vendored/unstructured/doc/simple.doc").await;
+
+        let headings = doc
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Heading { .. }))
+            .count();
+
+        assert_eq!(
+            headings, 3,
+            "expected the shape heuristic's 3 headings; 0 means the document was treated as \
+             style-declaring on the strength of a paragraph emitted as a ListItem"
+        );
     }
 
     /// A document with no list bindings must keep the blank-line chunking it

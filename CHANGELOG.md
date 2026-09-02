@@ -167,6 +167,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed legacy `.doc` headings being guessed from line length rather than read from the document's
+  own styles. A paragraph styled `heading 1`..`heading 9` — directly or through a custom style
+  derived from one, such as `TOC Heading` — now becomes a `Heading` at that level, instead of every
+  detected heading being a level 2. Documents that apply no heading style keep the previous
+  shape-based detection, because roughly half the test corpus styles its headings as bold `Normal`
+  and would otherwise lose every one; the choice is made per document, not per paragraph. A
+  heading-styled paragraph that is also list-bound stays a `ListItem`, matching how the DOCX path
+  treats `w:numPr` ([#1553](https://github.com/xberg-io/xberg/issues/1553)).
 - Fixed legacy `.doc` automatic list numbering being dropped entirely: a paragraph Word numbers
   through its list tables arrived as prose, indistinguishable from an unnumbered sentence, while
   the DOCX path emitted a `ListItem` for the same construct. Auto-numbered paragraphs now arrive

@@ -26,6 +26,27 @@ pub(crate) struct DocParagraph {
     /// `Some(..)` when the paragraph is bound to an automatic list. `None`
     /// means ordinary prose.
     pub list: Option<DocListMembership>,
+    /// `Some(level)` when the paragraph's style resolves to `heading 1`..
+    /// `heading 9`, directly or through its base style.
+    pub heading_level: Option<u8>,
+}
+
+/// What the Word97+ text path produces: the assembled text plus the paragraph
+/// structure behind it.
+struct MainText {
+    content: String,
+    paragraphs: Vec<DocParagraph>,
+}
+
+impl MainText {
+    /// A document whose paragraph properties were not read -- Word 6/95, or
+    /// the contiguous fallback. Callers fall back to `content`.
+    fn text_only(content: String) -> Self {
+        Self {
+            content,
+            paragraphs: Vec::new(),
+        }
+    }
 }
 
 /// A paragraph's place in an automatic list.
@@ -101,13 +122,11 @@ pub(crate) fn extract_doc_text(content: &[u8]) -> Result<DocExtractionResult> {
     let mut processing_warnings = Vec::new();
 
     if n_fib >= 101 {
-        extract_text_word97(&word_doc, &table_stream, &mut processing_warnings).map(|(text, paragraphs)| {
-            DocExtractionResult {
-                content: text,
-                metadata,
-                processing_warnings,
-                paragraphs,
-            }
+        extract_text_word97(&word_doc, &table_stream, &mut processing_warnings).map(|main| DocExtractionResult {
+            content: main.content,
+            metadata,
+            processing_warnings,
+            paragraphs: main.paragraphs,
         })
     } else {
         extract_text_word6(&word_doc).map(|text| DocExtractionResult {
@@ -291,7 +310,7 @@ fn extract_text_word97(
     word_doc: &[u8],
     table_stream: &[u8],
     warnings: &mut Vec<ProcessingWarning>,
-) -> Result<(String, Vec<DocParagraph>)> {
+) -> Result<MainText> {
     let fib_base_size = 32;
     let csw_offset = fib_base_size;
 
@@ -357,7 +376,7 @@ fn extract_text_word97(
     ]) as usize;
 
     if fc_clx == 0 || lcb_clx == 0 {
-        return extract_text_contiguous(word_doc, ccp_text).map(|text| (text, Vec::new()));
+        return extract_text_contiguous(word_doc, ccp_text).map(MainText::text_only);
     }
 
     if table_stream.len() < fc_clx + lcb_clx {
@@ -392,7 +411,7 @@ fn extract_text_word97(
         }
     }
 
-    extract_text_fallback(word_doc, ccp_text).map(|text| (text, Vec::new()))
+    extract_text_fallback(word_doc, ccp_text).map(MainText::text_only)
 }
 
 /// Record that a piece's declared byte range runs past the end of the
@@ -557,7 +576,7 @@ fn extract_text_from_piece_table(
     total_cp: usize,
     warnings: &mut Vec<ProcessingWarning>,
     list_tables: &papx::ListTables,
-) -> Result<(String, Vec<DocParagraph>)> {
+) -> Result<MainText> {
     let plc_size = plc_pcd.len();
     if plc_size < 16 {
         return Err(XbergError::parsing("PlcPcd too small"));
@@ -565,7 +584,7 @@ fn extract_text_from_piece_table(
 
     let n = (plc_size - 4) / 12;
     if n == 0 {
-        return Ok((String::new(), Vec::new()));
+        return Ok(MainText::text_only(String::new()));
     }
 
     let mut text = SubdocumentText::default();
@@ -663,10 +682,10 @@ fn extract_text_from_piece_table(
         }
     }
 
-    Ok((
+    Ok(MainText {
+        paragraphs: split_main_paragraphs(&text.main, &text.main_fc_ends, list_tables),
         content,
-        split_main_paragraphs(&text.main, &text.main_fc_ends, list_tables),
-    ))
+    })
 }
 
 /// Word's paragraph mark. Splitting the raw main text on it gives the
@@ -734,7 +753,12 @@ fn push_paragraph(
     let list = mark_fc_end
         .and_then(|fc_end| list_tables.membership_for_paragraph_end(fc_end))
         .map(|(level, ordered)| DocListMembership { level, ordered });
-    out.push(DocParagraph { content, list });
+    let heading_level = mark_fc_end.and_then(|fc_end| list_tables.heading_level_for_paragraph_end(fc_end));
+    out.push(DocParagraph {
+        content,
+        list,
+        heading_level,
+    });
 }
 
 /// Extract text from a "simple" DOC file where text is stored contiguously.

@@ -12,6 +12,23 @@ use ahash::AHashMap;
 /// `FibRgFcLcb97` pair holding `fcPlcfBtePapx`/`lcbPlcfBtePapx`.
 const FIB_FC_LCB_IDX_PLCF_BTE_PAPX: usize = 13;
 
+/// `FibRgFcLcb97` pair holding `fcStshf` -- the style sheet.
+const FIB_FC_LCB_IDX_STSHF: usize = 1;
+
+/// `STD.istdBase` value meaning "this style has no base style".
+const ISTD_NO_BASE: u16 = 0x0FFF;
+
+/// Built-in style identifiers 1..=9 are `heading 1`..`heading 9`; [MS-DOC]
+/// reserves the low `sti` range for fixed built-in styles, so this mapping is
+/// specified rather than conventional. ~keep
+const STI_HEADING_MIN: u16 = 1;
+const STI_HEADING_MAX: u16 = 9;
+
+/// Bound on how far a style's base chain is followed. Chains are shallow in
+/// practice; the bound exists so a malformed self- or cycle-referencing sheet
+/// cannot spin. ~keep
+const MAX_STYLE_BASE_DEPTH: usize = 8;
+
 /// `FibRgFcLcb97` pair holding `fcPlfLst` -- the list definition table.
 const FIB_FC_LCB_IDX_PLF_LST: usize = 73;
 
@@ -119,12 +136,14 @@ fn list_binding_from_grpprl(grpprl: &[u8]) -> Option<ListBinding> {
     }
 }
 
-/// Extract the `GrpPrlAndIstd` grpprl for one `BxPap` entry of an FKP page.
+/// Extract one `BxPap` entry's `GrpPrlAndIstd`: the paragraph's style index
+/// and the grpprl that overrides it.
 ///
 /// `bOffset` is a *word* offset into the page; zero means the paragraph has no
-/// `PAPX` and inherits its style's properties. The stored run begins with a
-/// 2-byte `istd` that is not part of the grpprl.
-fn grpprl_at(page: &[u8], b_offset: u8) -> Option<&[u8]> {
+/// `PAPX` at all. Measured across every `.doc` available, no paragraph is in
+/// that state -- but it is returned as `None` rather than defaulted, so a
+/// document that does have one is not silently attributed style 0. ~keep
+fn style_and_grpprl_at(page: &[u8], b_offset: u8) -> Option<(u16, &[u8])> {
     if b_offset == 0 {
         return None;
     }
@@ -136,8 +155,9 @@ fn grpprl_at(page: &[u8], b_offset: u8) -> Option<&[u8]> {
         let cb2 = *page.get(at + 1)?;
         (at + 2, usize::from(cb2) * 2)
     };
-    // Skip the leading istd; a run too short to hold one carries no sprms.
-    page.get(start..start + len)?.get(2..)
+    let run = page.get(start..start + len)?;
+    let istd = u16::from_le_bytes([*run.first()?, *run.get(1)?]);
+    Some((istd, run.get(2..)?))
 }
 
 /// Whether a list level paints numbers or bullets, resolved through
@@ -271,11 +291,100 @@ fn parse_plf_lst(plf_lst: &[u8], lcb: usize) -> AHashMap<u32, Vec<u8>> {
     nfc_by_lsid
 }
 
+/// The document's style sheet, reduced to the one question this module asks:
+/// does a given `istd` denote a heading, and at what level.
+///
+/// Resolution follows `istdBase`, so a custom style derived from a built-in
+/// heading resolves too. That case is real and not hypothetical -- a corpus
+/// document carries `istd` 97 = `TOC Heading`, whose `sti` is 46 but whose
+/// base is `heading 1`. Checking `sti` 1..=9 alone would miss it. ~keep
+#[derive(Default)]
+pub(super) struct StyleSheet {
+    /// Indexed by `istd`; `None` for an absent or unparseable entry.
+    styles: Vec<Option<StyleEntry>>,
+}
+
+#[derive(Clone, Copy)]
+struct StyleEntry {
+    sti: u16,
+    istd_base: u16,
+}
+
+impl StyleSheet {
+    fn build(word_doc: &[u8], table_stream: &[u8], rg_fc_lcb_offset: usize) -> Self {
+        let mut sheet = Self::default();
+        let Some((fc, lcb)) = read_fc_lcb(word_doc, rg_fc_lcb_offset, FIB_FC_LCB_IDX_STSHF) else {
+            return sheet;
+        };
+        let Some(stsh) = table_stream.get(fc..fc + lcb) else {
+            return sheet;
+        };
+        // STSH: cbStshi, then STSHI (whose first field is cstd), then one
+        // LPStd per style -- a 16-bit length followed by that many bytes.
+        let Some(cb_stshi) = stsh.get(..2) else {
+            return sheet;
+        };
+        let cb_stshi = usize::from(u16::from_le_bytes([cb_stshi[0], cb_stshi[1]]));
+        let Some(cstd) = stsh.get(2..4) else {
+            return sheet;
+        };
+        let cstd = usize::from(u16::from_le_bytes([cstd[0], cstd[1]]));
+
+        let mut pos = 2 + cb_stshi;
+        for _ in 0..cstd {
+            let Some(raw) = stsh.get(pos..pos + 2) else {
+                break;
+            };
+            let cb_std = usize::from(u16::from_le_bytes([raw[0], raw[1]]));
+            pos += 2;
+            if cb_std == 0 {
+                // An empty slot: the istd exists but names no style.
+                sheet.styles.push(None);
+                continue;
+            }
+            let Some(std) = stsh.get(pos..pos + cb_std) else {
+                break;
+            };
+            pos += cb_std;
+            // STDFBase's first two 16-bit words: sti in the low 12 bits of the
+            // first, istdBase in the high 12 bits of the second.
+            sheet.styles.push(match (std.get(..2), std.get(2..4)) {
+                (Some(first), Some(second)) => Some(StyleEntry {
+                    sti: u16::from_le_bytes([first[0], first[1]]) & 0x0FFF,
+                    istd_base: (u16::from_le_bytes([second[0], second[1]]) >> 4) & 0x0FFF,
+                }),
+                _ => None,
+            });
+        }
+
+        sheet
+    }
+
+    /// Heading level for a paragraph style, or `None` if it is not a heading.
+    pub(super) fn heading_level(&self, istd: u16) -> Option<u8> {
+        let mut current = istd;
+        for _ in 0..MAX_STYLE_BASE_DEPTH {
+            let entry = (*self.styles.get(usize::from(current))?)?;
+            if (STI_HEADING_MIN..=STI_HEADING_MAX).contains(&entry.sti) {
+                return u8::try_from(entry.sti).ok();
+            }
+            if entry.istd_base == ISTD_NO_BASE || entry.istd_base == current {
+                return None;
+            }
+            current = entry.istd_base;
+        }
+        None
+    }
+}
+
 /// List bindings for a document, keyed by the byte offset (`FC`) of each
 /// paragraph mark.
 #[derive(Default)]
 pub(super) struct ParagraphListIndex {
     by_end_fc: AHashMap<u32, ListBinding>,
+    /// Paragraph style index (`istd`), for every paragraph that carries a
+    /// `PAPX` -- not only list-bound ones.
+    style_by_end_fc: AHashMap<u32, u16>,
 }
 
 impl ParagraphListIndex {
@@ -337,9 +446,13 @@ impl ParagraphListIndex {
             let end_fc = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
 
             let b_offset = page[rgbx_at + i * BX_PAP_LEN];
-            if let Some(binding) = grpprl_at(page, b_offset).and_then(list_binding_from_grpprl) {
-                // The FKP's rgfc entry i+1 is the FC one past the paragraph's
-                // last character, i.e. just past its paragraph mark.
+            let Some((istd, grpprl)) = style_and_grpprl_at(page, b_offset) else {
+                continue;
+            };
+            // The FKP's rgfc entry i+1 is the FC one past the paragraph's last
+            // character, i.e. just past its paragraph mark.
+            self.style_by_end_fc.insert(end_fc, istd);
+            if let Some(binding) = list_binding_from_grpprl(grpprl) {
                 self.by_end_fc.insert(end_fc, binding);
             }
         }
@@ -348,6 +461,11 @@ impl ParagraphListIndex {
     /// Look up the binding for a paragraph whose mark ends at `end_fc`.
     pub(super) fn binding_for_paragraph_end(&self, end_fc: u32) -> Option<ListBinding> {
         self.by_end_fc.get(&end_fc).copied()
+    }
+
+    /// Look up the style index for a paragraph whose mark ends at `end_fc`.
+    fn style_for_paragraph_end(&self, end_fc: u32) -> Option<u16> {
+        self.style_by_end_fc.get(&end_fc).copied()
     }
 
     #[cfg(test)]
@@ -362,6 +480,7 @@ impl ParagraphListIndex {
 pub(super) struct ListTables {
     pub index: ParagraphListIndex,
     pub formats: ListFormats,
+    pub styles: StyleSheet,
 }
 
 impl ListTables {
@@ -369,7 +488,13 @@ impl ListTables {
         Self {
             index: ParagraphListIndex::build(word_doc, table_stream, rg_fc_lcb_offset),
             formats: ListFormats::build(table_stream, word_doc, rg_fc_lcb_offset),
+            styles: StyleSheet::build(word_doc, table_stream, rg_fc_lcb_offset),
         }
+    }
+
+    /// Declared heading level for the paragraph whose mark ends at `end_fc`.
+    pub(super) fn heading_level_for_paragraph_end(&self, end_fc: u32) -> Option<u8> {
+        self.styles.heading_level(self.index.style_for_paragraph_end(end_fc)?)
     }
 
     /// Membership for the paragraph whose mark ends at `end_fc`.
@@ -455,7 +580,56 @@ mod tests {
     #[test]
     fn a_zero_boffset_paragraph_has_no_papx() {
         let page = vec![0u8; FKP_PAGE_LEN];
-        assert!(grpprl_at(&page, 0).is_none(), "bOffset 0 means the paragraph inherits");
+        assert!(
+            style_and_grpprl_at(&page, 0).is_none(),
+            "bOffset 0 means the paragraph has no PAPX at all"
+        );
+    }
+
+    fn sheet(entries: &[(u16, u16)]) -> StyleSheet {
+        StyleSheet {
+            styles: entries
+                .iter()
+                .map(|&(sti, istd_base)| Some(StyleEntry { sti, istd_base }))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_built_in_heading_style_resolves_to_its_level() {
+        let styles = sheet(&[(0, ISTD_NO_BASE), (1, ISTD_NO_BASE), (3, ISTD_NO_BASE)]);
+        assert_eq!(styles.heading_level(1), Some(1));
+        assert_eq!(styles.heading_level(2), Some(3), "istd 2 carries sti 3 here");
+        assert_eq!(styles.heading_level(0), None, "sti 0 is Normal");
+    }
+
+    /// A custom style derived from a heading is still a heading. `TOC Heading`
+    /// in a corpus document is exactly this shape -- `sti` 46, base `heading
+    /// 1` -- so checking `sti` 1..=9 alone would miss it. No corpus document
+    /// *applies* such a style, which is why this case is synthesized rather
+    /// than asserted against a fixture. ~keep
+    #[test]
+    fn a_custom_style_based_on_a_heading_resolves_through_its_base() {
+        let styles = sheet(&[(0, ISTD_NO_BASE), (1, ISTD_NO_BASE), (46, 1)]);
+        assert_eq!(styles.heading_level(2), Some(1), "sti 46 based on heading 1");
+    }
+
+    #[test]
+    fn a_base_chain_that_cycles_terminates_instead_of_spinning() {
+        // Two styles naming each other as base, and one naming itself.
+        let styles = sheet(&[(40, 1), (41, 0), (42, 2)]);
+        assert_eq!(styles.heading_level(0), None);
+        assert_eq!(styles.heading_level(2), None, "self-referencing base must terminate");
+    }
+
+    #[test]
+    fn an_istd_past_the_end_of_the_sheet_is_not_a_heading() {
+        let styles = sheet(&[(1, ISTD_NO_BASE)]);
+        assert_eq!(
+            styles.heading_level(99),
+            None,
+            "out-of-range istd must not panic or match"
+        );
     }
 
     #[test]
