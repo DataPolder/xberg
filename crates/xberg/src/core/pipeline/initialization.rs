@@ -113,9 +113,16 @@ fn with_registration_update<T>(update: impl FnOnce() -> Result<T>) -> Result<T> 
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let _registration_update = RegistrationUpdate::begin();
+    // Read the lease count BEFORE the hook, not after. The hook is how a test learns this
+    // mutation has started, and its only caller then releases the parked pipeline that holds
+    // the lease. Loading afterwards let that release win the race under CI contention: the
+    // mutation observed a count of 0 and succeeded, failing an assertion that it be rejected.
+    // Sampling first fixes the outcome while the lease is still provably held. Production is
+    // unaffected -- the hook compiles away outside `cfg(test)`. ~keep
+    let registry_in_use = ACTIVE_PROCESSOR_SNAPSHOTS.load(Ordering::SeqCst) != 0;
     #[cfg(test)]
     run_after_registration_update_began_hook();
-    if ACTIVE_PROCESSOR_SNAPSHOTS.load(Ordering::SeqCst) != 0 {
+    if registry_in_use {
         return Err(crate::XbergError::Other(
             "post-processor registry is in use by an active extraction; retry the lifecycle mutation after extraction completes"
                 .to_string(),
