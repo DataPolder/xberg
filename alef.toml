@@ -2456,7 +2456,16 @@ e2e = "dotnet test e2e/csharp"
 [crates.test.elixir]
 precondition = "command -v mix >/dev/null 2>&1"
 before = "cd packages/elixir && XBERG_BUILD=1 mix deps.get && XBERG_BUILD=1 mix compile && cd ../../e2e/elixir && XBERG_BUILD=1 mix deps.get"
-e2e = "cd e2e/elixir && XBERG_BUILD=1 mix test"
+# Fixture dirs are symlinked in, as the dart and zig legs do. alef's elixir e2e
+# codegen emits "Tests construct absolute paths via test_documents_path, so no chdir
+# needed" into test_helper.exs, but it only prefixes test_documents_path for top-level
+# call args -- not for file paths nested inside struct/map inputs, which is what these
+# fixtures use. So the paths stay relative to e2e/elixir and 10 tests die with
+# `File.Error could not read file "pdf/fake_memo.pdf"`. Reported upstream; this is the
+# stopgap until the generator emits a real chdir. The dir list is the same hardcoded
+# set the dart and zig hooks carry and will need extending if a fixture reaches for a
+# top-level dir outside it. ~keep
+e2e = "cd e2e/elixir && for dir in docx html json pdf text xlsx images; do test -L $dir || ln -sf ../../test_documents/$dir $dir; done && XBERG_BUILD=1 mix test"
 
 [crates.test.wasm]
 precondition = "command -v wasm-pack >/dev/null 2>&1"
