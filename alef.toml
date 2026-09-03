@@ -1,9 +1,12 @@
 [workspace]
 # install-alef honours this key, so it decides which alef CI validates against. The pin
 # sat at 0.81.0 while 0.82.0's `alef e2e generate` was nondeterministic (2/10 runs
-# divergent upstream); 0.82.2 is adopted only after a same-tree fixed-point re-run of
-# `alef all` produced an empty diff, which is the check that hold existed for. ~keep
-alef_version = "0.82.2"
+# divergent upstream); every bump since is taken only after a same-tree fixed-point
+# re-run of `alef all` produces an empty diff, which is the check that hold existed
+# for. 0.83.0 additionally fixes the php/napi/pyo3 mirror defaults, the elixir bytes
+# hop and the typescript/wasm mock-url builder that this repo's e2e legs were red on.
+# ~keep
+alef_version = "0.83.0"
 languages = [
   "python",
   "node",
