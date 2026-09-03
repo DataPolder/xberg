@@ -72,6 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking (Python binding):** `ExtractionConfig` and `DoctorReport` are now frozen dataclasses
+  rather than `TypedDict`s, matching the 121 option types that were already dataclasses. Passing a
+  plain `dict` or a JSON string as `config` still works — `extract()` coerces both — but an
+  `ExtractionConfig` *object* no longer supports mapping operations, so `config.get("chunking")` and
+  `config["chunking"] = ...` now raise `AttributeError`/`TypeError`, and the instance is immutable.
+  Build a modified config with `dataclasses.replace(config, chunking=...)`.
 - PDF parsing no longer reports recoverable input at WARN. A missing embedded font, an object
   outside the xref table, an unreadable CFF version, and a reading-order fallback are ordinary
   properties of real PDFs rather than conditions an operator can act on; they are now TRACE (or
