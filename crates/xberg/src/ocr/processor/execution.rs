@@ -9,6 +9,7 @@ use super::validation::{
     resolve_all_installed_languages, resolve_tessdata_path, strip_control_characters, validate_language_and_traineddata,
 };
 use crate::core::config::ExtractionConfig;
+use crate::extractors::security::SecurityLimits;
 use crate::image::normalize_image_dpi_owned;
 use crate::ocr::cache::OcrCache;
 use crate::ocr::conversion::{TsvRow, iterator_word_to_element, tsv_row_to_element};
@@ -1143,6 +1144,19 @@ fn extract_elements_via_iterator(
     })
 }
 
+/// Resolve the `SecurityLimits` to apply when decoding an image for OCR.
+///
+/// `None` means no `ExtractionConfig` reached this call (internal/test call sites), not
+/// that limits should be waived — this falls back to the same default a configured caller
+/// gets when they never set `security_limits` explicitly (GH#1554: `load_image_for_ocr`
+/// previously hardcoded this default unconditionally, ignoring a caller's own configured,
+/// possibly higher, limit). ~keep
+fn security_limits_for_ocr(extraction_config: Option<&ExtractionConfig>) -> SecurityLimits {
+    extraction_config
+        .and_then(|config| config.security_limits.clone())
+        .unwrap_or_default()
+}
+
 /// Perform OCR on an image using Tesseract.
 ///
 /// This function handles the complete OCR pipeline:
@@ -1178,8 +1192,9 @@ pub(super) fn perform_ocr(
         )
     });
 
+    let security_limits = security_limits_for_ocr(extraction_config);
     let rgb_image = {
-        let img = crate::extraction::image::load_image_for_ocr(image_bytes)
+        let img = crate::extraction::image::load_image_for_ocr(image_bytes, &security_limits)
             .map_err(|e| OcrError::ImageProcessingFailed(e.to_string()))?;
         img.into_rgb8()
     };
@@ -2104,6 +2119,33 @@ mod tests {
         assert_eq!(metadata.get("p10_word_conf"), Some(&serde_json::json!(20)));
         assert_eq!(metadata.get("low_conf_word_count"), Some(&serde_json::json!(1)));
         assert_eq!(metadata.len(), 5);
+    }
+
+    /// GH#1554 regression: `perform_ocr` must use the caller's `ExtractionConfig.security_limits`
+    /// rather than always decoding under `SecurityLimits::default()`, which silently refused
+    /// ordinary high-DPI scans a caller had explicitly configured a higher limit to permit.
+    #[test]
+    fn should_use_configured_security_limits_when_extraction_config_present() {
+        let config = ExtractionConfig {
+            security_limits: Some(SecurityLimits {
+                max_content_size: 200 * 1024 * 1024,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let resolved = security_limits_for_ocr(Some(&config));
+
+        assert_eq!(resolved.max_content_size, 200 * 1024 * 1024);
+    }
+
+    /// `None` (no `ExtractionConfig` reached the call) must fall back to
+    /// `SecurityLimits::default()`, not to an unbounded/disabled check.
+    #[test]
+    fn should_fall_back_to_default_security_limits_when_extraction_config_absent() {
+        let resolved = security_limits_for_ocr(None);
+
+        assert_eq!(resolved.max_content_size, SecurityLimits::default().max_content_size);
     }
 
     #[test]

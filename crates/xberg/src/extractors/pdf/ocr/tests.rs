@@ -2699,6 +2699,120 @@ mod tests {
         crate::plugins::unregister_ocr_backend("mock").unwrap();
     }
 
+    /// GH#1554 regression, scanned-page route: `ExtractionConfig::security_limits` must
+    /// reach the `OcrConfig` handed to `OcrBackend::process_image` for a scanned PDF page
+    /// OCR'd through [`extract_with_ocr`] -- the actual per-page render+OCR route the issue's
+    /// headline case (ordinary 300-600 dpi scans refused) goes through, distinct from the
+    /// embedded-image route covered by `extraction_config_security_limits_reach_embedded_
+    /// image_ocr_config` in `extraction/image_ocr.rs`. Before this fix `OcrConfig` had no
+    /// `security_limits` field reachable from this route at all, so a caller's configured,
+    /// possibly higher, limit could never reach a backend here -- every scanned page decoded
+    /// under `SecurityLimits::default()` regardless of what the caller configured.
+    #[cfg(feature = "ocr")]
+    #[tokio::test]
+    async fn extraction_config_security_limits_reach_scanned_page_ocr_config() {
+        use crate::core::config::OcrConfig;
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::ExtractedDocument;
+        use std::sync::{Arc, Mutex};
+
+        const BACKEND_NAME: &str = "scanned-page-security-limits-capture-test-backend";
+
+        struct SecurityLimitsCaptureBackend {
+            observed_max_content_size: Arc<Mutex<Option<Option<usize>>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl OcrBackend for SecurityLimitsCaptureBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], config: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                let observed = config.security_limits.as_ref().map(|limits| limits.max_content_size);
+                *self.observed_max_content_size.lock().unwrap() = Some(observed);
+                Ok(ExtractedDocument::default())
+            }
+        }
+
+        impl Plugin for SecurityLimitsCaptureBackend {
+            fn name(&self) -> &str {
+                BACKEND_NAME
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        let observed_max_content_size = Arc::new(Mutex::new(None));
+        crate::plugins::register_ocr_backend(Arc::new(SecurityLimitsCaptureBackend {
+            observed_max_content_size: Arc::clone(&observed_max_content_size),
+        }))
+        .unwrap();
+        struct Guard;
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = crate::plugins::unregister_ocr_backend(BACKEND_NAME);
+            }
+        }
+        let _guard = Guard;
+
+        let configured_limit = 200 * 1024 * 1024;
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                backend: BACKEND_NAME.to_string(),
+                ..Default::default()
+            }),
+            security_limits: Some(crate::extractors::security::SecurityLimits {
+                max_content_size: configured_limit,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let tiny_png = {
+            use image::ImageEncoder;
+            use image::codecs::png::PngEncoder;
+            use std::io::Cursor;
+            let img = image::DynamicImage::new_rgb8(1, 1);
+            let rgb = img.to_rgb8();
+            let (w, h) = rgb.dimensions();
+            let mut buf = Cursor::new(Vec::new());
+            PngEncoder::new(&mut buf)
+                .write_image(&rgb, w, h, image::ColorType::Rgb8.into())
+                .unwrap();
+            image::load_from_memory(&buf.into_inner()).unwrap()
+        };
+
+        let result = extract_with_ocr(
+            None,
+            Some(&[tiny_png]),
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            None,
+        )
+        .await;
+
+        result.expect("scanned-page OCR must succeed");
+
+        let observed = observed_max_content_size.lock().unwrap();
+        assert_eq!(
+            *observed,
+            Some(Some(configured_limit)),
+            "OcrConfig::security_limits must carry the caller's ExtractionConfig::security_limits \
+             on the scanned-page OCR route"
+        );
+    }
+
     #[cfg(feature = "ocr")]
     #[test]
     fn should_filter_public_ocr_elements_by_effective_pdf_margins() {

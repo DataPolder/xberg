@@ -233,6 +233,12 @@ pub(crate) async fn extract_mixed_ocr_native(
     if ocr_config_resolved.acceleration.is_none() {
         ocr_config_resolved.acceleration = config.acceleration.clone();
     }
+    // GH#1554: mirrors `acceleration` above so this mixed native/OCR route inherits the
+    // caller's configured decode limits instead of always falling back to
+    // `SecurityLimits::default()`. ~keep
+    if ocr_config_resolved.security_limits.is_none() {
+        ocr_config_resolved.security_limits = config.security_limits.clone();
+    }
 
     let batch_size = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
 
@@ -1135,10 +1141,20 @@ pub(super) async fn extract_with_ocr_for_page(
     let base_ocr_config = config.ocr.as_ref().unwrap_or(&default_ocr_config);
 
     let accel_ocr_config;
-    let base_ocr_config = if base_ocr_config.acceleration.is_none() && config.acceleration.is_some() {
+    let base_ocr_config = if (base_ocr_config.acceleration.is_none() && config.acceleration.is_some())
+        || (base_ocr_config.security_limits.is_none() && config.security_limits.is_some())
+    {
         accel_ocr_config = {
             let mut c = base_ocr_config.clone();
-            c.acceleration = config.acceleration.clone();
+            if c.acceleration.is_none() {
+                c.acceleration = config.acceleration.clone();
+            }
+            // GH#1554: mirrors `acceleration` above so the scanned-page OCR route inherits the
+            // caller's configured decode limits instead of always falling back to
+            // `SecurityLimits::default()`. ~keep
+            if c.security_limits.is_none() {
+                c.security_limits = config.security_limits.clone();
+            }
             c
         };
         &accel_ocr_config
@@ -1281,6 +1297,10 @@ pub(super) async fn extract_with_ocr_for_page(
 
     let mut ocr_config_owned = ocr_config.clone();
     ocr_config_owned.acceleration = config.acceleration.clone();
+    // GH#1554: mirrors `acceleration` above so the full-document scanned-page OCR route
+    // inherits the caller's configured decode limits instead of always falling back to
+    // `SecurityLimits::default()`. ~keep
+    ocr_config_owned.security_limits = config.security_limits.clone();
     let total_pages = if let Some(imgs) = images {
         imgs.len()
     } else {

@@ -876,6 +876,20 @@ pub struct OcrConfig {
     #[serde(skip)]
     pub acceleration: Option<super::acceleration::AccelerationConfig>,
 
+    /// Security limits applied when decoding raw image bytes for OCR (GH#1554).
+    ///
+    /// Not user-configurable via config files — injected at runtime from
+    /// `ExtractionConfig::security_limits` before each `process_image` call, the same
+    /// pattern [`Self::acceleration`] uses. `ExtractionConfig::security_limits` is the
+    /// single source of truth: this field only ever holds a copy the caller placed here
+    /// immediately before dispatch, so the two cannot drift. A backend consulting a
+    /// `backend_options` override for this call may still let that override win, but in
+    /// the absence of one this field is what backends should fall back to instead of
+    /// `SecurityLimits::default()`. `None` means "use `SecurityLimits::default()`", never
+    /// "disable the check". ~keep
+    #[serde(skip)]
+    pub security_limits: Option<crate::extractors::security::SecurityLimits>,
+
     /// Caller-supplied Tesseract `traineddata` bytes per language code.
     ///
     /// Primary use case is the WASM build, which has no filesystem and cannot
@@ -917,6 +931,7 @@ impl Default for OcrConfig {
             vlm_config: None,
             vlm_prompt: None,
             acceleration: None,
+            security_limits: None,
             tessdata_bytes: None,
             tessdata_path: None,
         }
