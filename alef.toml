@@ -34,6 +34,7 @@ node_package_manager = "pnpm"
 user_owned = [
   "e2e/csharp/Xberg.E2eTests.csproj",
   "e2e/dart/pubspec.yaml",
+  "e2e/go/go.mod",
   "e2e/java/pom.xml",
   "e2e/kotlin_android/build.gradle.kts",
   "e2e/node/package.json",
@@ -44,6 +45,7 @@ user_owned = [
   "packages/kotlin-android/src/test/kotlin/io/xberg/XbergScaffoldTest.kt",
   "test_apps/csharp/Xberg.E2eTests.csproj",
   "test_apps/dart/pubspec.yaml",
+  "test_apps/go/go.mod",
   "test_apps/homebrew/README.md",
   "test_apps/java/pom.xml",
   "test_apps/kotlin_android/build.gradle.kts",
