@@ -21,7 +21,7 @@ use super::types::PdfParagraph;
 /// ASCII characters. This function detects and repairs these patterns:
 ///
 /// **f-ligatures**: `!` → fi/ff, `"` → ffi, `#` → fi/fl
-/// **t-ligatures**: `*` → tt, `:` → ti, uppercase `M` between lowercase → tti
+/// **t-ligature**: `*` → tt
 ///
 /// All patterns are contextual: the corrupt character must appear between
 /// alphabetic characters (mid-word), where it virtually never occurs in real text.
@@ -105,24 +105,16 @@ pub(super) fn repair_contextual_ligatures(text: &str) -> Cow<'_, str> {
                 result.push_str("tt");
                 repaired = true;
             }
-            // NOTE: deliberately NO letter+'*'+end/non-alpha repair — that pattern is a
-            ':' if prev_is_alpha && next_is_lower => {
-                result.push_str("ti");
-                repaired = true;
-            }
-            'M' if prev_is_alpha && !prev_is_space_or_start => {
-                let prev_was_lower = if byte_idx > 0 {
-                    bytes.get(byte_idx - 1).is_some_and(|&b| (b as char).is_lowercase())
-                } else {
-                    false
-                };
-                if prev_was_lower && next_is_lower {
-                    result.push_str("tti");
-                    repaired = true;
-                } else {
-                    result.push(ch);
-                }
-            }
+            // NOTE: deliberately NO letter+'*'+end/non-alpha repair.
+
+            // Issue #1556 removed the ':'→"ti" and 'M'→"tti" arms: both are ordinary
+            // characters that occur constantly in healthy text (ratios, times, URLs,
+            // units like "nM"/"µM", identifiers), and corrupted arbitrary text
+            // (e.g. "aMb" -> "attib"). The evidence that justified them at
+            // introduction — a per-font broken-CMap signal from pdfium's
+            // has_unicode_map_error() — no longer exists in this codebase; pdfium was
+            // removed as a backend and that font-level detection was never ported to
+            // pdf_oxide. Re-add only alongside a real document-level evidence gate. ~keep
             _ => result.push(ch),
         }
 
@@ -1122,6 +1114,15 @@ mod overreach_regression_tests {
     fn mid_word_repairs_still_fire() {
         assert_eq!(repair_contextual_ligatures("di!erent"), "different");
         assert_eq!(repair_contextual_ligatures("speci!c"), "specific");
-        assert_eq!(repair_contextual_ligatures("aMb"), "attib");
+    }
+
+    // Issue #1556: ':' -> "ti" and 'M' -> "tti" were removed outright (not gated) because
+    // they rewrite ordinary text. Healthy documents must pass through unchanged. ~keep
+    #[test]
+    fn colon_and_uppercase_m_never_rewritten() {
+        assert_eq!(repair_contextual_ligatures("aMb"), "aMb");
+        assert_eq!(repair_contextual_ligatures("ges:one"), "ges:one");
+        assert_eq!(repair_contextual_ligatures("progeM"), "progeM");
+        assert_eq!(repair_contextual_ligatures("ratio:x"), "ratio:x");
     }
 }
