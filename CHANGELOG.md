@@ -167,6 +167,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed optional fields in the Python and PHP bindings rejecting payloads that omit them.
+  The generated mirror structs lost their `#[serde(default)]` attributes, so deserializing a
+  document whose JSON left an optional field out failed instead of falling back to the default.
+
 - Fixed legacy `.doc` headings being guessed from line length rather than read from the document's
   own styles. A paragraph styled `heading 1`..`heading 9` — directly or through a custom style
   derived from one, such as `TOC Heading` — now becomes a `Heading` at that level, instead of every

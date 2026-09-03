@@ -1,10 +1,9 @@
 [workspace]
-# Held at 0.81.0 deliberately while the config below is the 0.82 surface. install-alef
-# honours this key, so it decides which alef CI validates against, and 0.82.0's `alef e2e
-# generate` is nondeterministic (measured upstream: 2/10 runs divergent). 0.81.0 parses
-# this migrated file with exit 0 and no unknown-field errors, so the pair is consistent.
-# Goes to 0.82.1 with the regen when that tag is cut. ~keep
-alef_version = "0.81.0"
+# install-alef honours this key, so it decides which alef CI validates against. The pin
+# sat at 0.81.0 while 0.82.0's `alef e2e generate` was nondeterministic (2/10 runs
+# divergent upstream); 0.82.2 is adopted only after a same-tree fixed-point re-run of
+# `alef all` produced an empty diff, which is the check that hold existed for. ~keep
+alef_version = "0.82.2"
 languages = [
   "python",
   "node",
@@ -2730,13 +2729,13 @@ bigint_fields = ["cacheTtlSecs", "extractionTimeoutSecs"]
 [crates.e2e.call.overrides.swift]
 unnamed_arg_indices = [0, 1, 2]
 
-# alef's php e2e class-override validator rejects the name alef's own php binding
-# emitter writes -- it accepts only "Xberg", while crates/xberg-php/src/lib.rs
-# (alef-generated) declares `#[php(name = "Xberg\\XbergApi")]`. No value satisfies
-# both, so this stays wrong and the php e2e leg stays red until alef is fixed.
-# Reported upstream. ~keep
+# Must match the name the php binding emitter actually registers:
+# crates/xberg-php/src/lib.rs declares `#[php(name = "Xberg\\XbergApi")]`. alef 0.82.1
+# fixed the e2e class-override validator to ask the backend for its facade name
+# instead of re-deriving it, so this value is now both accepted and correct; before
+# that fix no value satisfied both sides and the php leg was red by construction. ~keep
 [crates.e2e.call.overrides.php]
-class = "Xberg\\Xberg"
+class = "Xberg\\XbergApi"
 function = "extract"
 options_type = "ExtractionConfig"
 
