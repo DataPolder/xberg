@@ -465,6 +465,23 @@ fn detect_monospace_code_blocks(paragraphs: &mut [PdfParagraph]) {
             continue;
         }
 
+        // A lone paragraph that already carries two or more monospace lines is a
+        // complete multi-line code listing by itself — it does not need a consecutive
+        // monospace neighbor to qualify, unlike the one-monospace-line-per-paragraph
+        // case merged below (common when code line-leading splits each line into its
+        // own paragraph). This purely font-based signal cannot distinguish a genuine
+        // code listing from a document set entirely in a monospace face, or from a
+        // 2-line caption/table cell that happens to share that font — both are
+        // accepted, pre-existing limitations of this heuristic (unchanged by this
+        // addition, which only mirrors pipeline.rs's identical paragraph-level gate),
+        // not something overlooked here. ~keep
+        if para.lines.len() >= 2 {
+            paragraphs[i].is_code_block = true;
+            paragraphs[i].layout_class = Some(LayoutHintClass::Code);
+            i += 1;
+            continue;
+        }
+
         if i + 1 < paragraphs.len() {
             let next_para = &paragraphs[i + 1];
             let next_is_monospace = !next_para.lines.is_empty()
@@ -3217,6 +3234,87 @@ mod tests {
         mark_cross_page_repeating_short_text(&mut pages);
 
         assert!(pages.iter().all(|page| !page[0].is_page_furniture));
+    }
+
+    fn make_line_paragraph(line_count: usize, is_monospace: bool) -> PdfParagraph {
+        let lines: Vec<super::super::types::PdfLine> = (0..line_count)
+            .map(|i| super::super::types::PdfLine {
+                segments: vec![SegmentData {
+                    text: format!("line{i}"),
+                    x: 0.0,
+                    y: 700.0 - i as f32 * 12.0,
+                    width: 40.0,
+                    height: 10.0,
+                    font_size: 10.0,
+                    is_bold: false,
+                    is_italic: false,
+                    is_monospace,
+                    baseline_y: 700.0 - i as f32 * 12.0,
+                    rotation_degrees: 0.0,
+                    assigned_role: None,
+                }],
+                baseline_y: 700.0 - i as f32 * 12.0,
+                dominant_font_size: 10.0,
+                is_bold: false,
+                is_monospace,
+            })
+            .collect();
+        let word_count = PdfParagraph::compute_word_count("", &lines);
+
+        PdfParagraph {
+            text: String::new(),
+            lines,
+            dominant_font_size: 10.0,
+            heading_level: None,
+            is_bold: false,
+            is_list_item: false,
+            is_code_block: false,
+            is_formula: false,
+            is_page_furniture: false,
+            layout_class: None,
+            layout_region_path: None,
+            caption_for: None,
+            block_bbox: None,
+            word_count,
+        }
+    }
+
+    #[test]
+    fn detect_monospace_code_blocks_fences_a_lone_multi_line_paragraph() {
+        // Regression test for GH#1557: a standalone 2-line monospace paragraph (no
+        // consecutive monospace neighbor) must still be recognized as a code block. ~keep
+        let mut paragraphs = vec![make_line_paragraph(2, true), make_line_paragraph(3, false)];
+
+        detect_monospace_code_blocks(&mut paragraphs);
+
+        assert!(
+            paragraphs[0].is_code_block,
+            "a standalone 2-line all-monospace paragraph must be fenced as code"
+        );
+        assert_eq!(paragraphs[0].layout_class, Some(LayoutHintClass::Code));
+        assert!(
+            !paragraphs[1].is_code_block,
+            "an ordinary multi-line prose paragraph must not be fenced as code"
+        );
+    }
+
+    #[test]
+    fn detect_monospace_code_blocks_still_merges_one_line_per_paragraph_listings() {
+        // Pre-existing behavior must be unaffected: a code listing split into
+        // one-line-per-paragraph still merges across consecutive monospace paragraphs. ~keep
+        let mut paragraphs = vec![
+            make_line_paragraph(1, true),
+            make_line_paragraph(1, true),
+            make_line_paragraph(1, true),
+            make_line_paragraph(1, false),
+        ];
+
+        detect_monospace_code_blocks(&mut paragraphs);
+
+        assert!(paragraphs[0].is_code_block);
+        assert!(paragraphs[1].is_code_block);
+        assert!(paragraphs[2].is_code_block);
+        assert!(!paragraphs[3].is_code_block);
     }
 }
 
