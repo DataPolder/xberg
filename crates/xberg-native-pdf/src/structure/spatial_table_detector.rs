@@ -2466,12 +2466,40 @@ fn group_cells_into_tables(cells: &[IntersectionCell]) -> Vec<Vec<usize>> {
     groups
 }
 
+/// Minimum number of distinct columns a Y-cluster must carry independent text
+/// evidence in for a row split to be credible. A cluster below this bar is a
+/// single wrapped cell's continuation line, not a second logical row
+/// (xberg-io/xberg#1555). ~keep
+const MIN_ROW_SPLIT_EVIDENCE_COLUMNS: usize = 2;
+
 /// Split table rows that contain text spans at multiple distinct Y positions into sub-rows.
 ///
 /// This handles the hybrid case where column boundaries come from vertical lines but there
 /// are no horizontal lines between individual rows. In that scenario the intersection-based
 /// pipeline produces a single mega-row; this function detects multiple Y-clusters within
 /// each row and splits accordingly.
+///
+/// The only caller (`finalize_intersection_tables`) runs exclusively on grids the drawn
+/// geometry already delimited into rows (`detect_tables_from_intersections` via
+/// `build_grid_from_lines`), so every row entering here is a producer-drawn row band, and a
+/// split is a hypothesis about *sub*-dividing that band, not about discovering rows from
+/// scratch. The drawn band boundary is authoritative; text baselines inside it are only
+/// advisory. A candidate split is therefore accepted only when EVERY resulting cluster is
+/// independently evidenced in >= `MIN_ROW_SPLIT_EVIDENCE_COLUMNS` columns; if even one
+/// cluster falls short (e.g. it holds only a wrapped cell's extra baseline) the whole split
+/// is rejected and the band is kept as the single, already-merged row it was built as
+/// (xberg-io/xberg#1555). This is deliberately all-or-nothing per band rather than a
+/// per-cluster filter: folding a deficient cluster into whichever neighbor happens to be
+/// nearest can manufacture false 2-column evidence out of two unrelated single-column
+/// artifacts, which is the exact failure mode this gate exists to prevent.
+///
+/// The evidence bar is capped at the band's own column count
+/// (`MIN_ROW_SPLIT_EVIDENCE_COLUMNS.min(num_cols)`): a single-column band has no second
+/// column to ever produce corroborating evidence from, so requiring 2 there would reject
+/// every split unconditionally, including genuinely distinct rows sharing one drawn cell
+/// (e.g. a label/value pair). For `num_cols == 1` this restores the pre-#1555 behaviour of
+/// accepting any non-empty cluster as evidence; the #1555 guard itself only applies where
+/// it can be evaluated, at `num_cols >= 2`.
 fn split_rows_by_text_positions(
     table_rows: Vec<TableRow>,
     row_cell_span_indices: &[Vec<Vec<usize>>],
@@ -2516,11 +2544,52 @@ fn split_rows_by_text_positions(
             continue;
         }
 
-        y_clusters.sort_by(|a, b| crate::utils::safe_float_cmp(*b, *a));
-
         let num_cols = row.cells.len();
+        let nearest_cluster_value = |sy: f32| -> f32 {
+            *y_clusters
+                .iter()
+                .min_by_key(|&&cy| ((sy - cy).abs() * 1000.0) as i32)
+                .unwrap_or(&sy)
+        };
 
-        for &cluster_y in &y_clusters {
+        // Tally, per cluster, which columns have at least one span assigned to it. ~keep
+        let mut cluster_columns: Vec<Vec<bool>> = vec![vec![false; num_cols]; y_clusters.len()];
+        for (ci, col_spans) in cell_indices.iter().enumerate() {
+            for &idx in col_spans {
+                if let Some(s) = spans.get(idx) {
+                    let nearest = nearest_cluster_value(s.bbox.center().y);
+                    if let Some(cluster_idx) = y_clusters.iter().position(|&cy| (cy - nearest).abs() < 0.01) {
+                        cluster_columns[cluster_idx][ci] = true;
+                    }
+                }
+            }
+        }
+
+        // A single-column band (num_cols == 1) can never carry cross-column
+        // evidence at all — there is only one column to begin with, so the
+        // wrapped-cell-vs-genuine-row ambiguity #1555 targets is undecidable
+        // by this signal there. Requiring the full MIN_ROW_SPLIT_EVIDENCE_COLUMNS
+        // in that case would make the gate reject every split on a
+        // single-column grid unconditionally, including genuinely distinct
+        // rows (e.g. label/value pairs sharing one drawn cell). Scale the
+        // requirement down to the band's own column count so a single-column
+        // band keeps its pre-#1555 behaviour (any non-empty cluster counts as
+        // evidence) while a multi-column band still needs the full bar
+        // (xberg-io/xberg#1555). ~keep
+        let required_evidence_columns = MIN_ROW_SPLIT_EVIDENCE_COLUMNS.min(num_cols.max(1));
+        let split_is_evidenced = cluster_columns
+            .iter()
+            .all(|cols| cols.iter().filter(|&&present| present).count() >= required_evidence_columns);
+
+        if !split_is_evidenced {
+            result.push(row);
+            continue;
+        }
+
+        let mut cluster_order = y_clusters.clone();
+        cluster_order.sort_by(|a, b| crate::utils::safe_float_cmp(*b, *a));
+
+        for &cluster_y in &cluster_order {
             let mut new_row = TableRow::new(row.is_header);
             for ci in 0..num_cols {
                 let matching_indices: Vec<usize> = cell_indices[ci]
@@ -2529,13 +2598,7 @@ fn split_rows_by_text_positions(
                     .filter(|&idx| {
                         spans
                             .get(idx)
-                            .map(|s| {
-                                let sy = s.bbox.center().y;
-                                y_clusters
-                                    .iter()
-                                    .min_by_key(|&&cy| ((sy - cy).abs() * 1000.0) as i32)
-                                    .is_some_and(|&nearest| (nearest - cluster_y).abs() < 0.01)
-                            })
+                            .map(|s| (nearest_cluster_value(s.bbox.center().y) - cluster_y).abs() < 0.01)
                             .unwrap_or(false)
                     })
                     .collect();
@@ -7420,5 +7483,80 @@ mod tests {
         let prev = ts("Quarter ", 100.0, 200.0, 35.0, 10.0);
         let curr = ts("Total", 140.0, 200.0, 25.0, 10.0);
         assert_eq!(cell_span_separator(&prev, &curr), "");
+    }
+
+    /// Reproduces xberg-io/xberg#1555: a drawn row band whose baselines are
+    /// 288.7 (col0), 294.7/282.7 (col1, wraps to 2 lines) and
+    /// 300.7/288.7/276.7 (col2, wraps to 3 lines). Clustering naively at
+    /// `strict()`'s `row_tolerance` of 1.0 yields 5 Y-clusters, and only the
+    /// 288.7 cluster (col0 + col2's middle line) has evidence in >= 2
+    /// columns. The split must be rejected in full and the drawn band must
+    /// survive as the single row it was already built as. ~keep
+    #[test]
+    fn split_rows_by_text_positions_keeps_drawn_band_as_one_row_when_only_one_cell_wraps() {
+        let spans = vec![
+            create_test_span("1", 90.2, 288.7, 5.0, 0.0),
+            create_test_span("Versterking van het", 118.6, 294.7, 60.0, 0.0),
+            create_test_span("MKB-segment", 118.6, 282.7, 40.0, 0.0),
+            create_test_span("Ontwikkel gerichte campagnes", 246.1, 300.7, 90.0, 0.0),
+            create_test_span("een vereenvoudigde waardepropositie", 246.1, 288.7, 100.0, 0.0),
+            create_test_span("om de conversie te verhogen.", 246.1, 276.7, 90.0, 0.0),
+        ];
+
+        let row = TableRow {
+            cells: vec![
+                prose_cell("1"),
+                prose_cell("Versterking van het MKB-segment"),
+                prose_cell(
+                    "Ontwikkel gerichte campagnes een vereenvoudigde waardepropositie \
+                     om de conversie te verhogen.",
+                ),
+            ],
+            is_header: false,
+        };
+
+        let row_cell_span_indices = vec![vec![vec![0], vec![1, 2], vec![3, 4, 5]]];
+        let config = TableDetectionConfig::strict();
+
+        let result = split_rows_by_text_positions(vec![row], &row_cell_span_indices, &spans, &config);
+
+        assert_eq!(
+            result.len(),
+            1,
+            "one wrapped cell must not fracture the drawn band into extra rows"
+        );
+        assert_eq!(result[0].cells[0].text, "1");
+        assert_eq!(result[0].cells[1].text, "Versterking van het MKB-segment");
+    }
+
+    /// The hybrid case `split_rows_by_text_positions` exists for: vertical
+    /// column lines exist but no horizontal rule separates two real rows
+    /// crammed into one intersection cell. Each candidate row has
+    /// independent text in both columns, so this split must be kept intact
+    /// and produce exactly 2 rows in page order. ~keep
+    #[test]
+    fn split_rows_by_text_positions_splits_genuine_multi_row_band_with_two_column_evidence() {
+        let spans = vec![
+            create_test_span("Alice", 10.0, 200.0, 30.0, 0.0),
+            create_test_span("30", 60.0, 200.0, 10.0, 0.0),
+            create_test_span("Bob", 10.0, 180.0, 30.0, 0.0),
+            create_test_span("25", 60.0, 180.0, 10.0, 0.0),
+        ];
+
+        let row = TableRow {
+            cells: vec![prose_cell("Alice Bob"), prose_cell("30 25")],
+            is_header: false,
+        };
+
+        let row_cell_span_indices = vec![vec![vec![0, 2], vec![1, 3]]];
+        let config = TableDetectionConfig::strict();
+
+        let result = split_rows_by_text_positions(vec![row], &row_cell_span_indices, &spans, &config);
+
+        assert_eq!(result.len(), 2, "two genuinely distinct rows must survive the split");
+        assert_eq!(result[0].cells[0].text, "Alice");
+        assert_eq!(result[0].cells[1].text, "30");
+        assert_eq!(result[1].cells[0].text, "Bob");
+        assert_eq!(result[1].cells[1].text, "25");
     }
 }
