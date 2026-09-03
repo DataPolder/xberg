@@ -13712,6 +13712,7 @@ const _: fn() = || {
         let _: Option<crate::LlmConfig> = OcrConfig.vlm_config;
         let _: Option<String> = OcrConfig.vlm_prompt;
         let _: Option<crate::AccelerationConfig> = OcrConfig.acceleration;
+        let _: Option<crate::SecurityLimits> = OcrConfig.security_limits;
         let _: Option<std::collections::HashMap<String, Vec<u8>>> = OcrConfig.tessdata_bytes;
         let _: Option<String> = OcrConfig.tessdata_path;
     }
@@ -21290,6 +21291,7 @@ impl SseDecode for crate::OcrConfig {
         let mut var_vlmConfig = <Option<crate::LlmConfig>>::sse_decode(deserializer);
         let mut var_vlmPrompt = <Option<String>>::sse_decode(deserializer);
         let mut var_acceleration = <Option<crate::AccelerationConfig>>::sse_decode(deserializer);
+        let mut var_securityLimits = <Option<crate::SecurityLimits>>::sse_decode(deserializer);
         let mut var_tessdataBytes = <Option<std::collections::HashMap<String, Vec<u8>>>>::sse_decode(deserializer);
         let mut var_tessdataPath = <Option<String>>::sse_decode(deserializer);
         return crate::OcrConfig {
@@ -21308,6 +21310,7 @@ impl SseDecode for crate::OcrConfig {
             vlm_config: var_vlmConfig,
             vlm_prompt: var_vlmPrompt,
             acceleration: var_acceleration,
+            security_limits: var_securityLimits,
             tessdata_bytes: var_tessdataBytes,
             tessdata_path: var_tessdataPath,
         };
@@ -30743,6 +30746,7 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::OcrConfig> {
             self.0.vlm_config.into_into_dart().into_dart(),
             self.0.vlm_prompt.into_into_dart().into_dart(),
             self.0.acceleration.into_into_dart().into_dart(),
+            self.0.security_limits.into_into_dart().into_dart(),
             self.0.tessdata_bytes.into_into_dart().into_dart(),
             self.0.tessdata_path.into_into_dart().into_dart(),
         ]
@@ -38240,6 +38244,7 @@ impl SseEncode for crate::OcrConfig {
         <Option<crate::LlmConfig>>::sse_encode(self.vlm_config, serializer);
         <Option<String>>::sse_encode(self.vlm_prompt, serializer);
         <Option<crate::AccelerationConfig>>::sse_encode(self.acceleration, serializer);
+        <Option<crate::SecurityLimits>>::sse_encode(self.security_limits, serializer);
         <Option<std::collections::HashMap<String, Vec<u8>>>>::sse_encode(self.tessdata_bytes, serializer);
         <Option<String>>::sse_encode(self.tessdata_path, serializer);
     }
