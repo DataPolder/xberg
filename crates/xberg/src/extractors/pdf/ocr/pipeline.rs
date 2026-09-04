@@ -1132,6 +1132,12 @@ pub(super) async fn extract_with_ocr_for_page(
     use image::codecs::png::PngEncoder;
     use std::io::Cursor;
 
+    // Re-seed the built-in backends if a prior `clear_ocr_backends()` call (a real user API,
+    // also exercised by binding e2e suites sharing this process) left the registry without a
+    // usable default. Cheap when the default is already present -- see
+    // `ensure_ocr_backends_initialized`'s own doc comment. ~keep
+    crate::plugins::ensure_ocr_backends_initialized();
+
     // Same slice as `ocr_points_per_pixel`'s suppression above: the only two readers of
     // `points_per_pixel_override` are compiled out, but every caller still passes it. ~keep
     #[cfg(all(feature = "layout-detection", not(feature = "ocr"), not(feature = "ocr-wasm")))]
@@ -2872,6 +2878,13 @@ pub(super) async fn run_ocr_pipeline_for_page(
     ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata>,
 )> {
     use crate::plugins::registry::get_ocr_backend_registry;
+
+    // Re-seed the built-in backends before deciding which pipeline stages are available. A
+    // prior `clear_ocr_backends()` call in the same process (e.g. a binding e2e suite's
+    // backend-management test running before this one) otherwise leaves the registry
+    // empty, so every stage below reads as unavailable and the pipeline fails outright
+    // instead of falling back to (or re-using) the built-in defaults. ~keep
+    crate::plugins::ensure_ocr_backends_initialized();
 
     let default_ocr_config = crate::core::config::OcrConfig::default();
     let ocr_config = config.ocr.as_ref().unwrap_or(&default_ocr_config);

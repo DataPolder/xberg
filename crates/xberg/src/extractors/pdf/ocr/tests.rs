@@ -3913,6 +3913,74 @@ Buffers:           50000 kB
         );
     }
 
+    /// A sibling test (or a real caller) invoking the public `clear_ocr_backends()` API empties
+    /// the process-global OCR registry, including the built-in `tesseract` backend. Generated
+    /// language-binding e2e suites exercise exactly this: a backend-management test calls the
+    /// equivalent of `clear_ocr_backends()` in the same process as later OCR-dispatch tests, and
+    /// test order across suites/classes is not pinned, so a later test can see an empty registry.
+    ///
+    /// `ensure_ocr_backends_initialized` (`plugins::ocr::ensure_ocr_backends_initialized`) exists
+    /// precisely to heal this -- re-seeding the built-in defaults whenever the registry is
+    /// missing one -- and is already wired into a handful of call sites (`extract_with_ocr_for_page`,
+    /// the `ocr_inline_images` path in `extractors::pdf::mod.rs`, `doctor::ocr`). It was never
+    /// wired into `run_ocr_pipeline_for_page`'s own stage-availability check, which reads the
+    /// registry directly: a cleared registry made every stage read as unavailable and the pipeline
+    /// fail immediately with "No available OCR backends", regardless of what any individual stage's
+    /// own dispatch could otherwise have healed. This proves the pipeline route now self-heals too.
+    #[cfg(feature = "ocr")]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn pipeline_recovers_default_backend_after_global_registry_cleared() {
+        use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
+
+        crate::plugins::clear_ocr_backends().expect("clearing the global OCR registry must succeed");
+
+        let pipeline = OcrPipelineConfig {
+            stages: vec![OcrPipelineStage {
+                backend: "tesseract".to_string(),
+                priority: 100,
+                language: None,
+                tesseract_config: None,
+                paddle_ocr_config: None,
+                vlm_config: None,
+                backend_options: None,
+            }],
+            quality_thresholds: OcrQualityThresholds {
+                pipeline_min_quality: 0.0,
+                ..Default::default()
+            },
+        };
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                pipeline: Some(pipeline.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let images = [image::DynamicImage::new_rgb8(4, 4)];
+        let result = run_ocr_pipeline(
+            None,
+            Some(&images),
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            &pipeline,
+            None,
+        )
+        .await;
+
+        if let Err(ref error) = result {
+            let message = error.to_string();
+            assert!(
+                !message.contains("No available OCR backends"),
+                "the built-in `tesseract` backend must be re-seeded before pipeline stage \
+                 selection runs, even though the global registry was cleared just before this \
+                 call: {message}"
+            );
+        }
+    }
+
     /// #1444: `run_ocr_pipeline` has no OCR execution loop of its own -- every stage is
     /// delegated to `extract_with_ocr`, which already carries the force_ocr image-XObject
     /// fallback (#1355, lines ~2593-2630). This proves that delegation actually threads
