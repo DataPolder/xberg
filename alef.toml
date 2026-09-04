@@ -1117,6 +1117,10 @@ features = [
   "layout-types",
   "transcription-types",
   "html",
+  # "hwpx": now enabled on `wasm-target` in crates/xberg/Cargo.toml (unhwp target-gates its
+  # `zip` dep to a deflate-only, lzma-free variant for wasm32 — see the comment there). Listed
+  # literally because alef matches leaf cfg strings, same reasoning as keywords-yake/rake above.
+  "hwpx",
   # NOT listed yet, pending a one-at-a-time regen: "layout-types",
   # "transcription-types", "html".
   # - "layout-types" / "transcription-types": LayoutDetectionConfig, LayoutStrategy,
@@ -2844,6 +2848,11 @@ module = "xberg"
 async = false
 args = []
 
+[crates.e2e.calls.list_ocr_backends.overrides.rust]
+function = "list_ocr_backends"
+module = "xberg"
+returns_result = true
+
 [crates.e2e.calls.list_ocr_backends.overrides.go]
 result_is_simple = true
 returns_result = true
@@ -2858,6 +2867,11 @@ function = "list_post_processors"
 module = "xberg"
 async = false
 args = []
+
+[crates.e2e.calls.list_post_processors.overrides.rust]
+function = "list_post_processors"
+module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.list_post_processors.overrides.go]
 result_is_simple = true
@@ -2874,6 +2888,11 @@ module = "xberg"
 async = false
 args = []
 
+[crates.e2e.calls.list_validators.overrides.rust]
+function = "list_validators"
+module = "xberg"
+returns_result = true
+
 [crates.e2e.calls.list_validators.overrides.go]
 result_is_simple = true
 returns_result = true
@@ -2889,6 +2908,11 @@ module = "xberg"
 async = false
 args = []
 
+[crates.e2e.calls.list_embedding_backends.overrides.rust]
+function = "list_embedding_backends"
+module = "xberg"
+returns_result = true
+
 [crates.e2e.calls.list_embedding_backends.overrides.go]
 result_is_simple = true
 returns_result = true
@@ -2903,6 +2927,11 @@ function = "list_tokenizer_backends"
 module = "xberg"
 async = false
 args = []
+
+[crates.e2e.calls.list_tokenizer_backends.overrides.rust]
+function = "list_tokenizer_backends"
+module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.list_tokenizer_backends.overrides.go]
 result_is_simple = true
@@ -2920,6 +2949,11 @@ module = "xberg"
 async = false
 args = []
 
+[crates.e2e.calls.list_reranker_backends.overrides.rust]
+function = "list_reranker_backends"
+module = "xberg"
+returns_result = true
+
 [crates.e2e.calls.list_reranker_backends.overrides.go]
 result_is_simple = true
 returns_result = true
@@ -2934,6 +2968,11 @@ function = "list_renderers"
 module = "xberg"
 async = false
 args = []
+
+[crates.e2e.calls.list_renderers.overrides.rust]
+function = "list_renderers"
+module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.list_renderers.overrides.go]
 result_is_simple = true
@@ -2959,6 +2998,7 @@ module = "xberg"
 [crates.e2e.calls.clear_ocr_backends.overrides.rust]
 function = "clear_ocr_backends"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.clear_ocr_backends.overrides.node]
 function = "clearOcrBackends"
@@ -3023,6 +3063,7 @@ module = "xberg"
 [crates.e2e.calls.clear_post_processors.overrides.rust]
 function = "clear_post_processors"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.clear_post_processors.overrides.node]
 function = "clearPostProcessors"
@@ -3087,6 +3128,7 @@ module = "xberg"
 [crates.e2e.calls.clear_validators.overrides.rust]
 function = "clear_validators"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.clear_validators.overrides.node]
 function = "clearValidators"
@@ -3151,6 +3193,7 @@ module = "xberg"
 [crates.e2e.calls.unregister_ocr_backend.overrides.rust]
 function = "unregister_ocr_backend"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.unregister_ocr_backend.overrides.node]
 function = "unregisterOcrBackend"
@@ -3215,6 +3258,7 @@ module = "xberg"
 [crates.e2e.calls.unregister_post_processor.overrides.rust]
 function = "unregister_post_processor"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.unregister_post_processor.overrides.node]
 function = "unregisterPostProcessor"
@@ -3279,6 +3323,7 @@ module = "xberg"
 [crates.e2e.calls.unregister_validator.overrides.rust]
 function = "unregister_validator"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.unregister_validator.overrides.node]
 function = "unregisterValidator"
@@ -3343,6 +3388,7 @@ module = "xberg"
 [crates.e2e.calls.register_ocr_backend.overrides.rust]
 function = "register_ocr_backend"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.register_ocr_backend.overrides.node]
 function = "registerOcrBackend"
@@ -3408,6 +3454,7 @@ module = "xberg"
 [crates.e2e.calls.register_post_processor.overrides.rust]
 function = "register_post_processor"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.register_post_processor.overrides.node]
 function = "registerPostProcessor"
@@ -3473,6 +3520,7 @@ module = "xberg"
 [crates.e2e.calls.register_validator.overrides.rust]
 function = "register_validator"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.register_validator.overrides.node]
 function = "registerValidator"
@@ -3538,6 +3586,7 @@ module = "xberg"
 [crates.e2e.calls.register_embedding_backend.overrides.rust]
 function = "register_embedding_backend"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.register_embedding_backend.overrides.node]
 function = "registerEmbeddingBackend"
@@ -3603,6 +3652,7 @@ module = "xberg"
 [crates.e2e.calls.unregister_embedding_backend.overrides.rust]
 function = "unregister_embedding_backend"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.unregister_embedding_backend.overrides.node]
 function = "unregisterEmbeddingBackend"
@@ -3667,6 +3717,7 @@ module = "xberg"
 [crates.e2e.calls.clear_embedding_backends.overrides.rust]
 function = "clear_embedding_backends"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.clear_embedding_backends.overrides.node]
 function = "clearEmbeddingBackends"
@@ -3732,6 +3783,7 @@ module = "xberg"
 [crates.e2e.calls.register_reranker_backend.overrides.rust]
 function = "register_reranker_backend"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.register_reranker_backend.overrides.node]
 function = "registerRerankerBackend"
@@ -3797,6 +3849,7 @@ module = "xberg"
 [crates.e2e.calls.unregister_reranker_backend.overrides.rust]
 function = "unregister_reranker_backend"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.unregister_reranker_backend.overrides.node]
 function = "unregisterRerankerBackend"
@@ -3861,6 +3914,7 @@ module = "xberg"
 [crates.e2e.calls.clear_reranker_backends.overrides.rust]
 function = "clear_reranker_backends"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.clear_reranker_backends.overrides.node]
 function = "clearRerankerBackends"
@@ -3926,6 +3980,7 @@ module = "xberg"
 [crates.e2e.calls.register_tokenizer_backend.overrides.rust]
 function = "register_tokenizer_backend"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.register_tokenizer_backend.overrides.node]
 function = "registerTokenizerBackend"
@@ -3991,6 +4046,7 @@ module = "xberg"
 [crates.e2e.calls.unregister_tokenizer_backend.overrides.rust]
 function = "unregister_tokenizer_backend"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.unregister_tokenizer_backend.overrides.node]
 function = "unregisterTokenizerBackend"
@@ -4055,6 +4111,7 @@ module = "xberg"
 [crates.e2e.calls.clear_tokenizer_backends.overrides.rust]
 function = "clear_tokenizer_backends"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.clear_tokenizer_backends.overrides.node]
 function = "clearTokenizerBackends"
@@ -4119,6 +4176,7 @@ module = "xberg"
 [crates.e2e.calls.register_renderer.overrides.rust]
 function = "register_renderer"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.register_renderer.overrides.node]
 function = "registerRenderer"
@@ -4184,6 +4242,7 @@ module = "xberg"
 [crates.e2e.calls.unregister_renderer.overrides.rust]
 function = "unregister_renderer"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.unregister_renderer.overrides.node]
 function = "unregisterRenderer"
@@ -4248,6 +4307,7 @@ module = "xberg"
 [crates.e2e.calls.clear_renderers.overrides.rust]
 function = "clear_renderers"
 module = "xberg"
+returns_result = true
 
 [crates.e2e.calls.clear_renderers.overrides.node]
 function = "clearRenderers"

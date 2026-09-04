@@ -1657,7 +1657,7 @@
       "target": "c",
       "session": "c",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -1681,7 +1681,7 @@
       "target": "c",
       "session": "c",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -2905,7 +2905,7 @@
       "target": "csharp",
       "session": "csharp",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -2929,7 +2929,7 @@
       "target": "csharp",
       "session": "csharp",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -4153,7 +4153,7 @@
       "target": "dart",
       "session": "dart",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -4177,7 +4177,7 @@
       "target": "dart",
       "session": "dart",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -5401,7 +5401,7 @@
       "target": "elixir",
       "session": "elixir",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -5425,7 +5425,7 @@
       "target": "elixir",
       "session": "elixir",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -6649,7 +6649,7 @@
       "target": "go",
       "session": "go",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -6673,7 +6673,7 @@
       "target": "go",
       "session": "go",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -7897,7 +7897,7 @@
       "target": "java",
       "session": "java",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -7921,7 +7921,7 @@
       "target": "java",
       "session": "java",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -9145,7 +9145,7 @@
       "target": "kotlin_android",
       "session": "kotlin_android",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -9169,7 +9169,7 @@
       "target": "kotlin_android",
       "session": "kotlin_android",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -10393,7 +10393,7 @@
       "target": "php",
       "session": "php",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -10417,7 +10417,7 @@
       "target": "php",
       "session": "php",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -11641,7 +11641,7 @@
       "target": "python",
       "session": "python",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -11665,7 +11665,7 @@
       "target": "python",
       "session": "python",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -12889,7 +12889,7 @@
       "target": "ruby",
       "session": "ruby",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -12913,7 +12913,7 @@
       "target": "ruby",
       "session": "ruby",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -14161,7 +14161,7 @@
         "crate:serde_json",
         "crate:tokio"
       ],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -14191,7 +14191,7 @@
         "crate:serde_json",
         "crate:tokio"
       ],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -15604,7 +15604,7 @@
       "target": "swift",
       "session": "swift",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -15628,7 +15628,7 @@
       "target": "swift",
       "session": "swift",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -16852,7 +16852,7 @@
       "target": "node",
       "session": "node",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -16876,7 +16876,7 @@
       "target": "node",
       "session": "node",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -18100,7 +18100,7 @@
       "target": "wasm",
       "session": "wasm",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -18124,7 +18124,7 @@
       "target": "wasm",
       "session": "wasm",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -19348,7 +19348,7 @@
       "target": "zig",
       "session": "zig",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {
@@ -19372,7 +19372,7 @@
       "target": "zig",
       "session": "zig",
       "requires": [],
-      "side_effect": "safe"
+      "side_effect": "server"
     },
     {
       "key": {

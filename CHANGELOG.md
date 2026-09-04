@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added HWPX (Hangul Word Processor XML) extraction to the WebAssembly package. `unhwp`
+  target-gates its ZIP reader to a deflate-only, LZMA-free build under `wasm32`, so the
+  native-C dependency that previously kept `hwpx` off `wasm-target` does not apply there.
 - Added diagram recovery from flat OpenDocument drawings (`.fodg`), including content-based
   detection of the `application/vnd.oasis.opendocument.graphics-flat-xml` MIME type. Connectors
   name their endpoints outright, so the recovered graph is exact rather than inferred from
