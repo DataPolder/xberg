@@ -2479,6 +2479,13 @@ const MIN_ROW_SPLIT_EVIDENCE_COLUMNS: usize = 2;
 /// is one gap away; a heading inside the band is set off further. ~keep
 const X3_CONTINUATION_PITCH: f32 = 1.5;
 
+/// DataPolder X3 — how wide a horizontal gap, in ems of the larger adjacent
+/// font, still counts as "the same line continues" when deciding whether a
+/// column rule cut a line rather than separating two cells. A space is about
+/// 0.25 em and cell padding is several ems, so this sits well below the gap a
+/// real column boundary leaves. ~keep
+const X3_SAME_LINE_GAP_EM: f32 = 0.8;
+
 /// Split table rows that contain text spans at multiple distinct Y positions into sub-rows.
 ///
 /// This handles the hybrid case where column boundaries come from vertical lines but there
@@ -2697,6 +2704,68 @@ fn split_rows_by_text_positions(
                     .iter()
                     .any(|&gi| (y_clusters[gi] - nearest).abs() < 0.01)
             };
+
+            // DataPolder X3 part 3 — a line the COLUMN RULES cut is not a row of
+            // cells. Collect this group's spans left to right; if they occupy
+            // more than one column but run on horizontally — each next fragment
+            // starting within about a space of where the previous ended, on the
+            // same baseline — then the grid's vertical rule fell mid-line and
+            // the fragments are one piece of text. `8.2.7 Warmwater komt niet
+            // op` + `temperatuur` is a section heading crossing the rule, and
+            // emitting it per column renders it as `… op<TAB>temperatuur`, which
+            // is no longer the line the document prints. Emit one cell spanning
+            // the row instead. General, not a heading rule: a caption or a
+            // continued sentence inside a drawn grid is cut the same way. ~keep
+            let mut line_indices: Vec<usize> = Vec::new();
+            let mut columns_touched = 0usize;
+            for col_spans in cell_indices.iter() {
+                let mut any = false;
+                for &idx in col_spans {
+                    if spans.get(idx).is_some_and(|s| in_group(s.bbox.center().y)) {
+                        line_indices.push(idx);
+                        any = true;
+                    }
+                }
+                if any {
+                    columns_touched += 1;
+                }
+            }
+            line_indices.sort_by(|&a, &b| {
+                crate::utils::safe_float_cmp(spans[a].bbox.x, spans[b].bbox.x)
+            });
+            let runs_on_horizontally = columns_touched >= 2
+                && line_indices.windows(2).all(|w| {
+                    let (a, b) = (&spans[w[0]], &spans[w[1]]);
+                    let gap = b.bbox.x - (a.bbox.x + a.bbox.width);
+                    let em = a.font_size.max(b.font_size).max(1.0);
+                    gap <= em * X3_SAME_LINE_GAP_EM
+                        && (a.bbox.center().y - b.bbox.center().y).abs() <= config.row_tolerance
+                });
+
+            if runs_on_horizontally {
+                let mut b = spans[line_indices[0]].bbox;
+                for &idx in &line_indices[1..] {
+                    b = b.union(&spans[idx].bbox);
+                }
+                let mut new_row = TableRow::new(row.is_header);
+                new_row.cells.push(TableCell {
+                    text: extract_cell_text(&line_indices, spans),
+                    spans: line_indices
+                        .iter()
+                        .filter_map(|&idx| spans.get(idx).cloned())
+                        .collect(),
+                    colspan: num_cols as u32,
+                    rowspan: 1,
+                    mcids: line_indices
+                        .iter()
+                        .filter_map(|&idx| spans.get(idx).and_then(|s| s.mcid))
+                        .collect(),
+                    bbox: Some(b),
+                    is_header: row.is_header,
+                });
+                result.push(new_row);
+                continue;
+            }
             let mut new_row = TableRow::new(row.is_header);
             for ci in 0..num_cols {
                 let matching_indices: Vec<usize> = cell_indices[ci]
