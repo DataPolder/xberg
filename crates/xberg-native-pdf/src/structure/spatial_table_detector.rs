@@ -2472,6 +2472,13 @@ fn group_cells_into_tables(cells: &[IntersectionCell]) -> Vec<Vec<usize>> {
 /// (xberg-io/xberg#1555). ~keep
 const MIN_ROW_SPLIT_EVIDENCE_COLUMNS: usize = 2;
 
+/// DataPolder X3 — how far from a credible row, in multiples of the band's own
+/// median cluster gap, a cluster that cannot meet
+/// [`MIN_ROW_SPLIT_EVIDENCE_COLUMNS`] is still taken for that row's wrapped
+/// continuation rather than a row of its own. At the line pitch a wrapped line
+/// is one gap away; a heading inside the band is set off further. ~keep
+const X3_CONTINUATION_PITCH: f32 = 1.5;
+
 /// Split table rows that contain text spans at multiple distinct Y positions into sub-rows.
 ///
 /// This handles the hybrid case where column boundaries come from vertical lines but there
@@ -2577,19 +2584,119 @@ fn split_rows_by_text_positions(
         // evidence) while a multi-column band still needs the full bar
         // (xberg-io/xberg#1555). ~keep
         let required_evidence_columns = MIN_ROW_SPLIT_EVIDENCE_COLUMNS.min(num_cols.max(1));
-        let split_is_evidenced = cluster_columns
-            .iter()
-            .all(|cols| cols.iter().filter(|&&present| present).count() >= required_evidence_columns);
+        let is_evidenced = |ci: usize| {
+            cluster_columns[ci]
+                .iter()
+                .filter(|&&present| present)
+                .count()
+                >= required_evidence_columns
+        };
 
-        if !split_is_evidenced {
+        // Clusters top to bottom, as indexes into `y_clusters`.
+        let mut cluster_order: Vec<usize> = (0..y_clusters.len()).collect();
+        cluster_order
+            .sort_by(|&a, &b| crate::utils::safe_float_cmp(y_clusters[b], y_clusters[a]));
+
+        // DataPolder X3 — a band in which NO cluster is credible is left whole:
+        // that is #1555's outcome and it is right, because there is nothing to
+        // anchor a split on.
+        if !cluster_order.iter().any(|&ci| is_evidenced(ci)) {
             result.push(row);
             continue;
         }
 
-        let mut cluster_order = y_clusters.clone();
-        cluster_order.sort_by(|a, b| crate::utils::safe_float_cmp(*b, *a));
+        // DataPolder X3 — but one deficient cluster must not veto the split for
+        // the WHOLE band. On a fault-finding grid the single-column lines are
+        // section headings and lead-ins, and vetoing there keeps a band hundreds
+        // of points tall as one row, so a whole page becomes one table whose
+        // cells swallow every heading in it.
+        //
+        // A wrapped cell's continuation line sits at the text's own line pitch
+        // from the line it continues; a heading is set off from the rows around
+        // it. So a deficient cluster is absorbed into the nearest credible row
+        // only while it stays within `X3_CONTINUATION_PITCH` times the band's own
+        // median cluster gap of a cluster already in that row — measured against
+        // the nearest MEMBER, so a cell wrapping to three lines still gathers all
+        // of them. Anything further out stands as its own row, one cell wide,
+        // which is what a heading inside a drawn band is.
+        let mut gaps: Vec<f32> = cluster_order
+            .windows(2)
+            .map(|w| (y_clusters[w[0]] - y_clusters[w[1]]).abs())
+            .collect();
+        gaps.sort_by(|a, b| crate::utils::safe_float_cmp(*a, *b));
+        let median_gap = gaps.get(gaps.len() / 2).copied().unwrap_or(0.0);
+        let absorb_within = median_gap * X3_CONTINUATION_PITCH;
 
-        for &cluster_y in &cluster_order {
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for &ci in &cluster_order {
+            if is_evidenced(ci) {
+                groups.push(vec![ci]);
+                continue;
+            }
+            // Nearest member of the group above, if it is close enough.
+            let joins_above = groups.last().is_some_and(|group: &Vec<usize>| {
+                group
+                    .iter()
+                    .map(|&gi| (y_clusters[gi] - y_clusters[ci]).abs())
+                    .fold(f32::INFINITY, f32::min)
+                    <= absorb_within
+            });
+            if joins_above {
+                if let Some(group) = groups.last_mut() {
+                    group.push(ci);
+                }
+            } else {
+                groups.push(vec![ci]);
+            }
+        }
+
+        // A deficient cluster ABOVE the band's first credible row has no group to
+        // fold back into. It is carried forward into the row below only when it
+        // STRADDLES that row: every column it occupies must also carry a
+        // deficient cluster BELOW the first credible one. That is what a wrapped
+        // cell looks like — its lines run above and below the line that carries
+        // the row's cross-column evidence — and it is exactly the shape #1555
+        // was filed on. A heading sits only above, never below, so it is not
+        // carried and keeps a row of its own.
+        while groups.len() >= 2 && !groups[0].iter().any(|&ci| is_evidenced(ci)) {
+            let first_credible_y = cluster_order
+                .iter()
+                .find(|&&ci| is_evidenced(ci))
+                .map(|&ci| y_clusters[ci]);
+            let Some(first_credible_y) = first_credible_y else {
+                break;
+            };
+            let straddles = groups[0].iter().all(|&ci| {
+                (0..num_cols).filter(|&col| cluster_columns[ci][col]).all(|col| {
+                    cluster_order.iter().any(|&other| {
+                        !is_evidenced(other)
+                            && y_clusters[other] < first_credible_y
+                            && cluster_columns[other][col]
+                    })
+                })
+            });
+            if !straddles {
+                break;
+            }
+            let leading = groups.remove(0);
+            groups[0].extend(leading);
+        }
+
+        // No split survived the grouping: leave the band exactly as it was built,
+        // rather than rebuilding identical cells through `extract_cell_text` and
+        // changing how wrapped lines inside a cell are joined.
+        if groups.len() <= 1 {
+            result.push(row);
+            continue;
+        }
+
+        for group in &groups {
+            let in_group = |sy: f32| -> bool {
+                let nearest = nearest_cluster_value(sy);
+                group
+                    .iter()
+                    .any(|&gi| (y_clusters[gi] - nearest).abs() < 0.01)
+            };
             let mut new_row = TableRow::new(row.is_header);
             for ci in 0..num_cols {
                 let matching_indices: Vec<usize> = cell_indices[ci]
@@ -2598,7 +2705,7 @@ fn split_rows_by_text_positions(
                     .filter(|&idx| {
                         spans
                             .get(idx)
-                            .map(|s| (nearest_cluster_value(s.bbox.center().y) - cluster_y).abs() < 0.01)
+                            .map(|s| in_group(s.bbox.center().y))
                             .unwrap_or(false)
                     })
                     .collect();
