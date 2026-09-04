@@ -152,7 +152,27 @@ jobs:
         shell: bash
 
       - name: Run tests
-        run: task rust:test:ci
+        # ~keep `task rust:test:ci` is gated on its exit code alone, which cannot distinguish a
+        # real pass from a run that executed nothing: a feature-gating typo that drops an entire
+        # `#[cfg(test)]` module still exits 0. The sibling legs in this file (tract-no-ort,
+        # pdfium-engine, the cli feature legs) already assert a nonzero pass count; this is the
+        # broadest leg and was the one without that guard. The total is echoed so a silent
+        # collapse is visible in the log as a number, not inferred from the word "ok" -- note
+        # ~23 test binaries legitimately report "ok. 0 passed", so only the SUM is meaningful.
+        run: |
+          set -euo pipefail
+          task rust:test:ci 2>&1 | tee /tmp/rust-tests.log
+          # awk, not grep|paste|bc: this job also runs on windows-latest where `bc` is absent,
+          # and a no-match `grep` under `set -e` would abort with its own exit 1 before the
+          # explicit error below could ever be printed. awk always exits 0 and prints 0. ~keep
+          total="$(awk '/^test result: ok\./ {
+            for (i = 1; i <= NF; i++) { if ($i ~ /^passed;?$/) { s += $(i - 1) } }
+          } END { print s + 0 }' /tmp/rust-tests.log)"
+          echo "::notice::rust workspace tests passed: ${total}"
+          if [ "${total}" -eq 0 ]; then
+            echo "::error::the rust workspace test leg reported 0 passing tests -- the suite ran nothing" >&2
+            exit 1
+          fi
         shell: bash
         env:
           LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH || '' }}
