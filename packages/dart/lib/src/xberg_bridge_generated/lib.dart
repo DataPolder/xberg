@@ -12664,6 +12664,19 @@ class OcrConfig {
   /// `ExtractionConfig::acceleration` before each `process_image` call.
   final AccelerationConfig? acceleration;
 
+  /// Security limits applied when decoding raw image bytes for OCR (GH#1554).
+  ///
+  /// Not user-configurable via config files — injected at runtime from
+  /// `ExtractionConfig::security_limits` before each `process_image` call, the same
+  /// pattern [`Self::acceleration`] uses. `ExtractionConfig::security_limits` is the
+  /// single source of truth: this field only ever holds a copy the caller placed here
+  /// immediately before dispatch, so the two cannot drift. A backend consulting a
+  /// `backend_options` override for this call may still let that override win, but in
+  /// the absence of one this field is what backends should fall back to instead of
+  /// `SecurityLimits::default()`. `None` means "use `SecurityLimits::default()`", never
+  /// "disable the check".
+  final SecurityLimits? securityLimits;
+
   /// Caller-supplied Tesseract `traineddata` bytes per language code.
   ///
   /// Primary use case is the WASM build, which has no filesystem and cannot
@@ -12700,6 +12713,7 @@ class OcrConfig {
     this.vlmConfig,
     this.vlmPrompt,
     this.acceleration,
+    this.securityLimits,
     this.tessdataBytes,
     this.tessdataPath,
   });
@@ -12721,6 +12735,7 @@ class OcrConfig {
       vlmConfig.hashCode ^
       vlmPrompt.hashCode ^
       acceleration.hashCode ^
+      securityLimits.hashCode ^
       tessdataBytes.hashCode ^
       tessdataPath.hashCode;
 
@@ -12744,6 +12759,7 @@ class OcrConfig {
           vlmConfig == other.vlmConfig &&
           vlmPrompt == other.vlmPrompt &&
           acceleration == other.acceleration &&
+          securityLimits == other.securityLimits &&
           tessdataBytes == other.tessdataBytes &&
           tessdataPath == other.tessdataPath;
 }

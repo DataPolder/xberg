@@ -338,7 +338,12 @@ impl PdfDocument {
 
         match reading_order {
             ReadingOrder::TopToBottom => {
-                spans.sort_by(|a, b| crate::utils::row_aware_span_cmp(a.bbox.y, a.bbox.x, b.bbox.y, b.bbox.x));
+                crate::utils::sort_by_visual_rows(
+                    &mut spans,
+                    |span| span.bbox.y,
+                    |span| span.bbox.x,
+                    |span| span.font_size.max(span.bbox.height),
+                );
             }
             ReadingOrder::ColumnAware => {
                 spans = self.order_spans_column_aware(spans, page_index)?;

@@ -233,6 +233,12 @@ pub(crate) async fn extract_mixed_ocr_native(
     if ocr_config_resolved.acceleration.is_none() {
         ocr_config_resolved.acceleration = config.acceleration.clone();
     }
+    // GH#1554: mirrors `acceleration` above so this mixed native/OCR route inherits the
+    // caller's configured decode limits instead of always falling back to
+    // `SecurityLimits::default()`. ~keep
+    if ocr_config_resolved.security_limits.is_none() {
+        ocr_config_resolved.security_limits = config.security_limits.clone();
+    }
 
     let batch_size = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
 
@@ -1126,6 +1132,12 @@ pub(super) async fn extract_with_ocr_for_page(
     use image::codecs::png::PngEncoder;
     use std::io::Cursor;
 
+    // Re-seed the built-in backends if a prior `clear_ocr_backends()` call (a real user API,
+    // also exercised by binding e2e suites sharing this process) left the registry without a
+    // usable default. Cheap when the default is already present -- see
+    // `ensure_ocr_backends_initialized`'s own doc comment. ~keep
+    crate::plugins::ensure_ocr_backends_initialized();
+
     // Same slice as `ocr_points_per_pixel`'s suppression above: the only two readers of
     // `points_per_pixel_override` are compiled out, but every caller still passes it. ~keep
     #[cfg(all(feature = "layout-detection", not(feature = "ocr"), not(feature = "ocr-wasm")))]
@@ -1135,10 +1147,20 @@ pub(super) async fn extract_with_ocr_for_page(
     let base_ocr_config = config.ocr.as_ref().unwrap_or(&default_ocr_config);
 
     let accel_ocr_config;
-    let base_ocr_config = if base_ocr_config.acceleration.is_none() && config.acceleration.is_some() {
+    let base_ocr_config = if (base_ocr_config.acceleration.is_none() && config.acceleration.is_some())
+        || (base_ocr_config.security_limits.is_none() && config.security_limits.is_some())
+    {
         accel_ocr_config = {
             let mut c = base_ocr_config.clone();
-            c.acceleration = config.acceleration.clone();
+            if c.acceleration.is_none() {
+                c.acceleration = config.acceleration.clone();
+            }
+            // GH#1554: mirrors `acceleration` above so the scanned-page OCR route inherits the
+            // caller's configured decode limits instead of always falling back to
+            // `SecurityLimits::default()`. ~keep
+            if c.security_limits.is_none() {
+                c.security_limits = config.security_limits.clone();
+            }
             c
         };
         &accel_ocr_config
@@ -1281,6 +1303,10 @@ pub(super) async fn extract_with_ocr_for_page(
 
     let mut ocr_config_owned = ocr_config.clone();
     ocr_config_owned.acceleration = config.acceleration.clone();
+    // GH#1554: mirrors `acceleration` above so the full-document scanned-page OCR route
+    // inherits the caller's configured decode limits instead of always falling back to
+    // `SecurityLimits::default()`. ~keep
+    ocr_config_owned.security_limits = config.security_limits.clone();
     let total_pages = if let Some(imgs) = images {
         imgs.len()
     } else {
@@ -2852,6 +2878,13 @@ pub(super) async fn run_ocr_pipeline_for_page(
     ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata>,
 )> {
     use crate::plugins::registry::get_ocr_backend_registry;
+
+    // Re-seed the built-in backends before deciding which pipeline stages are available. A
+    // prior `clear_ocr_backends()` call in the same process (e.g. a binding e2e suite's
+    // backend-management test running before this one) otherwise leaves the registry
+    // empty, so every stage below reads as unavailable and the pipeline fails outright
+    // instead of falling back to (or re-using) the built-in defaults. ~keep
+    crate::plugins::ensure_ocr_backends_initialized();
 
     let default_ocr_config = crate::core::config::OcrConfig::default();
     let ocr_config = config.ocr.as_ref().unwrap_or(&default_ocr_config);

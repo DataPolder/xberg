@@ -1164,11 +1164,25 @@ struct BodyParseOutputs {
     tables: Vec<Table>,
     drawings: Vec<super::drawing::Drawing>,
     elements: Vec<DocumentElement>,
-    sections: Vec<super::section::SectionProperties>,
+    sections: Vec<ParsedSection>,
+    /// True when a malformed placement made section-to-element ownership ambiguous.
+    ambiguous_sections: bool,
     revisions: Vec<crate::types::revisions::DocumentRevision>,
     /// `w:id` values from `w:commentReference` markers encountered in this content,
     /// for validation against `word/comments.xml` (#82).
     comment_ref_ids: Vec<String>,
+}
+
+/// Section properties plus the exclusive end of the element range they govern.
+///
+/// Word stores a section's properties at its end: either inside the final
+/// paragraph's `w:pPr`, or as the final body-level `w:sectPr`. Keeping that
+/// endpoint lets post-parse layout heuristics select the section actually in
+/// force without exposing a rendering-only marker in [`DocumentElement`].
+#[derive(Debug)]
+struct ParsedSection {
+    properties: super::section::SectionProperties,
+    end_element_index: Option<usize>,
 }
 
 /// Apply run-level formatting from run property child elements.
@@ -1686,6 +1700,82 @@ struct PageBreakState {
     text_since_break: bool,
 }
 
+fn section_text_column_height_emu(section: &super::section::SectionProperties) -> Option<i64> {
+    const EMUS_PER_TWIP: i64 = super::EMUS_PER_INCH / 1440;
+
+    let page_height = i64::from(section.page_height_twips?);
+    let top = i64::from(section.margins.top?);
+    let bottom = i64::from(section.margins.bottom?);
+    let usable_twips = page_height - top - bottom;
+    (usable_twips > 0).then(|| usable_twips * EMUS_PER_TWIP)
+}
+
+/// Insert conservative page breaks where inline drawings alone cannot fit in
+/// the text column of the section that owns them (#1559).
+fn insert_missing_inline_drawing_page_breaks(
+    elements: &mut Vec<DocumentElement>,
+    drawings: &[super::drawing::Drawing],
+    sections: &[ParsedSection],
+    ambiguous_sections: bool,
+) {
+    if ambiguous_sections || sections.is_empty() {
+        return;
+    }
+
+    let original = std::mem::take(elements);
+    let Some(ends) = sections
+        .iter()
+        .map(|section| section.end_element_index)
+        .collect::<Option<Vec<_>>>()
+    else {
+        *elements = original;
+        return;
+    };
+    if ends.windows(2).any(|pair| pair[0] > pair[1]) || ends.last().is_some_and(|end| *end > original.len()) {
+        *elements = original;
+        return;
+    }
+
+    let mut rebuilt = Vec::with_capacity(original.len());
+    let mut start = 0usize;
+    for (section, end) in sections.iter().zip(ends) {
+        let Some(capacity) = section_text_column_height_emu(&section.properties) else {
+            rebuilt.extend_from_slice(&original[start..end]);
+            start = end;
+            continue;
+        };
+
+        let mut used_height = 0i64;
+        for element in &original[start..end] {
+            match element {
+                DocumentElement::PageBreak => used_height = 0,
+                DocumentElement::Drawing(index) => {
+                    let height = drawings
+                        .get(*index)
+                        .filter(|drawing| matches!(drawing.drawing_type, super::drawing::DrawingType::Inline))
+                        .and_then(|drawing| drawing.extent.as_ref())
+                        .map(|extent| extent.cy)
+                        .filter(|height| *height > 0);
+                    if let Some(height) = height {
+                        let next_height = used_height.saturating_add(height);
+                        if used_height > 0 && next_height > capacity {
+                            rebuilt.push(DocumentElement::PageBreak);
+                            used_height = height;
+                        } else {
+                            used_height = next_height;
+                        }
+                    }
+                }
+                _ => {}
+            }
+            rebuilt.push(element.clone());
+        }
+        start = end;
+    }
+    rebuilt.extend_from_slice(&original[start..]);
+    *elements = rebuilt;
+}
+
 /// Push a page-break marker, or defer it, depending on where it was encountered.
 ///
 /// Inside a table it is always deferred to [`PageBreakState::pending_table`], flushed
@@ -2112,12 +2202,18 @@ impl<R: Read + Seek> DocxParser<R> {
     ) -> Result<Vec<String>, DocxParseError> {
         let mut reader = Reader::from_str(xml);
         reader.config_mut().trim_text(false);
-        let out = self.parse_body_elements(&mut reader, None, budget, &mut document.warnings)?;
+        let mut out = self.parse_body_elements(&mut reader, None, budget, &mut document.warnings)?;
+        insert_missing_inline_drawing_page_breaks(
+            &mut out.elements,
+            &out.drawings,
+            &out.sections,
+            out.ambiguous_sections,
+        );
         document.paragraphs = out.paragraphs;
         document.tables = out.tables;
         document.drawings = out.drawings;
         document.elements = out.elements;
-        document.sections = out.sections;
+        document.sections = out.sections.into_iter().map(|section| section.properties).collect();
         document.revisions = out.revisions;
         Ok(out.comment_ref_ids)
     }
@@ -2174,6 +2270,7 @@ impl<R: Read + Seek> DocxParser<R> {
             text_since_break: true,
             ..PageBreakState::default()
         };
+        let mut pending_section: Option<usize> = None;
 
         let mut revision_kind: Option<RevisionKind> = None;
         let mut revision_attrs: (Option<String>, Option<String>, Option<String>) = (None, None, None);
@@ -2424,7 +2521,20 @@ impl<R: Read + Seek> DocxParser<R> {
                             // `enter()` above internally, so no manual `budget.leave()` is
                             // needed here. ~keep
                             let sect_props = super::section::parse_section_properties_streaming(reader, budget)?;
-                            out.sections.push(sect_props);
+                            let section_index = out.sections.len();
+                            out.sections.push(ParsedSection {
+                                properties: sect_props,
+                                end_element_index: None,
+                            });
+                            if !table_stack.is_empty() {
+                                out.ambiguous_sections = true;
+                            } else if current_paragraph.is_some() {
+                                if pending_section.replace(section_index).is_some() {
+                                    out.ambiguous_sections = true;
+                                }
+                            } else {
+                                out.sections[section_index].end_element_index = Some(out.elements.len());
+                            }
                         }
                         "w:ins" => {
                             revision_kind = Some(RevisionKind::Insertion);
@@ -2540,7 +2650,20 @@ impl<R: Read + Seek> DocxParser<R> {
                             }
                         }
                         "w:sectPr" => {
-                            out.sections.push(super::section::SectionProperties::default());
+                            let section_index = out.sections.len();
+                            out.sections.push(ParsedSection {
+                                properties: super::section::SectionProperties::default(),
+                                end_element_index: None,
+                            });
+                            if !table_stack.is_empty() {
+                                out.ambiguous_sections = true;
+                            } else if current_paragraph.is_some() {
+                                if pending_section.replace(section_index).is_some() {
+                                    out.ambiguous_sections = true;
+                                }
+                            } else {
+                                out.sections[section_index].end_element_index = Some(out.elements.len());
+                            }
                         }
                         "w:tblPr" => {
                             if let Some(ctx) = table_stack.last_mut() {
@@ -2678,6 +2801,9 @@ impl<R: Read + Seek> DocxParser<R> {
                                 out.elements.push(DocumentElement::Paragraph(idx));
                                 for _ in 0..std::mem::take(&mut page_breaks.pending_paragraph) {
                                     out.elements.push(DocumentElement::PageBreak);
+                                }
+                                if let Some(section_index) = pending_section.take() {
+                                    out.sections[section_index].end_element_index = Some(out.elements.len());
                                 }
                             }
                         }
@@ -4893,6 +5019,24 @@ mod tests {
         )
     }
 
+    fn inline_drawing_xml(id: usize, height_emu: i64) -> String {
+        format!(
+            r#"<w:p><w:r><w:drawing>
+                <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+                    <wp:extent cx="5400000" cy="{height_emu}"/>
+                    <wp:docPr id="{id}" name="Picture {id}"/>
+                    <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+                        <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                            <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                                <pic:blipFill><a:blip r:embed="rId1"/></pic:blipFill>
+                            </pic:pic>
+                        </a:graphicData>
+                    </a:graphic>
+                </wp:inline>
+            </w:drawing></w:r></w:p>"#
+        )
+    }
+
     #[test]
     fn test_plain_paragraph_text() {
         let xml = wrap_body(r#"<w:p><w:r><w:t>Hello World</w:t></w:r></w:p>"#);
@@ -5153,6 +5297,303 @@ mod tests {
             "page 1 must not be reported as a zero-length blank page"
         );
         assert!(text[boundaries[1].byte_start..boundaries[1].byte_end].contains("After table"));
+    }
+
+    /// GH#1559: Word can paginate a vertical block of inline images without
+    /// writing a `lastRenderedPageBreak` for one of the transitions.
+    #[test]
+    fn should_infer_missing_page_break_when_inline_drawings_exceed_section_height() {
+        let xml = wrap_body(&format!(
+            r#"<w:p><w:r><w:t>PAGE ONE TEXT</w:t></w:r></w:p>
+               {}
+               <w:p><w:r><w:lastRenderedPageBreak/><w:t>PAGE TWO TEXT</w:t></w:r></w:p>
+               {}{}{}
+               <w:p><w:r><w:lastRenderedPageBreak/><w:t>TAIL MARKER</w:t></w:r></w:p>
+               <w:sectPr>
+                 <w:pgSz w:w="11906" w:h="16838"/>
+                 <w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/>
+               </w:sectPr>"#,
+            inline_drawing_xml(1, 4_000_000),
+            inline_drawing_xml(2, 3_500_000),
+            inline_drawing_xml(3, 3_500_000),
+            inline_drawing_xml(4, 3_500_000),
+        ));
+        let doc = parse_xml(&xml);
+
+        assert_eq!(doc.drawing_page_numbers(), vec![1, 2, 2, 3]);
+        let page_breaks = doc
+            .elements
+            .iter()
+            .filter(|element| matches!(element, DocumentElement::PageBreak))
+            .count();
+        assert_eq!(page_breaks, 3, "two recorded breaks plus one inferred break");
+
+        let (text, boundaries) = doc.extract_text_with_boundaries(true, true);
+        assert_eq!(boundaries.len(), 4);
+        let tail = &boundaries[3];
+        assert!(text[tail.byte_start..tail.byte_end].contains("TAIL MARKER"));
+    }
+
+    /// Section properties describe the content that precedes them. A paragraph-level
+    /// `sectPr` therefore closes the first span after that paragraph, while the final
+    /// body-level `sectPr` closes the second span (#1559).
+    #[test]
+    fn should_use_the_geometry_of_each_section_for_inferred_breaks() {
+        let xml = wrap_body(&format!(
+            r#"{}{}
+               <w:p><w:pPr><w:sectPr>
+                 <w:pgSz w:w="10000" w:h="10000"/>
+                 <w:pgMar w:top="1000" w:right="1000" w:bottom="1000" w:left="1000"/>
+               </w:sectPr></w:pPr><w:r><w:t>END FIRST SECTION</w:t></w:r></w:p>
+               {}{}
+               <w:sectPr>
+                 <w:pgSz w:w="12000" w:h="12000"/>
+                 <w:pgMar w:top="500" w:right="500" w:bottom="500" w:left="500"/>
+               </w:sectPr>"#,
+            inline_drawing_xml(1, 3_000_000),
+            inline_drawing_xml(2, 3_000_000),
+            inline_drawing_xml(3, 3_000_000),
+            inline_drawing_xml(4, 3_000_000),
+        ));
+        let doc = parse_xml(&xml);
+
+        assert_eq!(doc.sections.len(), 2);
+        assert_eq!(doc.sections[0].page_height_twips, Some(10_000));
+        assert_eq!(doc.sections[1].page_height_twips, Some(12_000));
+        let page_breaks = doc
+            .elements
+            .iter()
+            .filter(|element| matches!(element, DocumentElement::PageBreak))
+            .count();
+        assert_eq!(page_breaks, 1, "only the tighter first section should overflow");
+        assert_eq!(doc.drawing_page_numbers(), vec![1, 2, 2, 2]);
+    }
+
+    #[test]
+    fn should_skip_only_a_section_whose_page_geometry_is_incomplete() {
+        let xml = wrap_body(&format!(
+            r#"{}{}
+               <w:p><w:pPr><w:sectPr><w:pgSz w:w="10000" w:h="10000"/></w:sectPr></w:pPr></w:p>
+               {}{}
+               <w:sectPr>
+                 <w:pgSz w:w="10000" w:h="10000"/>
+                 <w:pgMar w:top="1000" w:right="1000" w:bottom="1000" w:left="1000"/>
+               </w:sectPr>"#,
+            inline_drawing_xml(1, 3_000_000),
+            inline_drawing_xml(2, 3_000_000),
+            inline_drawing_xml(3, 3_000_000),
+            inline_drawing_xml(4, 3_000_000),
+        ));
+        let doc = parse_xml(&xml);
+
+        assert_eq!(doc.drawing_page_numbers(), vec![1, 1, 1, 2]);
+    }
+
+    #[test]
+    fn should_not_create_a_blank_page_for_one_oversized_inline_drawing() {
+        let xml = wrap_body(&format!(
+            r#"{}
+               <w:sectPr>
+                 <w:pgSz w:w="10000" w:h="10000"/>
+                 <w:pgMar w:top="1000" w:right="1000" w:bottom="1000" w:left="1000"/>
+               </w:sectPr>"#,
+            inline_drawing_xml(1, 6_000_000),
+        ));
+        let doc = parse_xml(&xml);
+        assert!(
+            !doc.elements
+                .iter()
+                .any(|element| matches!(element, DocumentElement::PageBreak))
+        );
+        assert_eq!(doc.drawing_page_numbers(), vec![1]);
+    }
+
+    #[test]
+    fn should_ignore_anchored_and_dimensionless_drawings_and_allow_an_exact_fit() {
+        let mut elements = vec![
+            DocumentElement::Drawing(0),
+            DocumentElement::Drawing(1),
+            DocumentElement::Drawing(2),
+            DocumentElement::Drawing(3),
+            DocumentElement::Drawing(4),
+        ];
+        let drawings = vec![
+            super::super::drawing::Drawing {
+                extent: Some(super::super::drawing::Extent { cx: 1, cy: 4_000_000 }),
+                ..Default::default()
+            },
+            super::super::drawing::Drawing {
+                drawing_type: super::super::drawing::DrawingType::Anchored(Default::default()),
+                extent: Some(super::super::drawing::Extent { cx: 1, cy: 4_000_000 }),
+                ..Default::default()
+            },
+            super::super::drawing::Drawing::default(),
+            super::super::drawing::Drawing {
+                extent: Some(super::super::drawing::Extent { cx: 1, cy: 1_080_000 }),
+                ..Default::default()
+            },
+            super::super::drawing::Drawing {
+                extent: Some(super::super::drawing::Extent { cx: 1, cy: -1 }),
+                ..Default::default()
+            },
+        ];
+        let sections = vec![ParsedSection {
+            properties: super::super::section::SectionProperties {
+                page_height_twips: Some(10_000),
+                margins: super::super::section::PageMargins {
+                    top: Some(1_000),
+                    bottom: Some(1_000),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            end_element_index: Some(elements.len()),
+        }];
+
+        insert_missing_inline_drawing_page_breaks(&mut elements, &drawings, &sections, false);
+
+        assert!(
+            !elements
+                .iter()
+                .any(|element| matches!(element, DocumentElement::PageBreak)),
+            "4,000,000 + 1,080,000 EMU exactly fills the column"
+        );
+
+        let mut reset_elements = vec![
+            DocumentElement::Drawing(0),
+            DocumentElement::PageBreak,
+            DocumentElement::Drawing(0),
+        ];
+        let reset_sections = vec![ParsedSection {
+            properties: sections[0].properties.clone(),
+            end_element_index: Some(reset_elements.len()),
+        }];
+        insert_missing_inline_drawing_page_breaks(&mut reset_elements, &drawings, &reset_sections, false);
+        assert_eq!(
+            reset_elements
+                .iter()
+                .filter(|element| matches!(element, DocumentElement::PageBreak))
+                .count(),
+            1,
+            "the recorded break must reset the height budget without gaining a duplicate"
+        );
+    }
+
+    #[test]
+    fn should_disable_inference_when_a_section_is_nested_in_a_table() {
+        let xml = wrap_body(&format!(
+            r#"{}{}
+               <w:tbl><w:tblPr/><w:tblGrid><w:gridCol w:w="2000"/></w:tblGrid>
+                 <w:tr><w:tc><w:p><w:pPr><w:sectPr>
+                   <w:pgSz w:w="10000" w:h="10000"/>
+                   <w:pgMar w:top="1000" w:bottom="1000"/>
+                 </w:sectPr></w:pPr></w:p></w:tc></w:tr>
+               </w:tbl>
+               <w:sectPr>
+                 <w:pgSz w:w="10000" w:h="10000"/>
+                 <w:pgMar w:top="1000" w:bottom="1000"/>
+               </w:sectPr>"#,
+            inline_drawing_xml(1, 3_000_000),
+            inline_drawing_xml(2, 3_000_000),
+        ));
+        let doc = parse_xml(&xml);
+
+        assert!(
+            !doc.elements
+                .iter()
+                .any(|element| matches!(element, DocumentElement::PageBreak)),
+            "ambiguous section ownership must disable synthetic pagination"
+        );
+    }
+
+    #[test]
+    fn should_disable_inference_for_nonmonotonic_section_endpoints() {
+        let mut elements = vec![DocumentElement::Drawing(0), DocumentElement::Drawing(1)];
+        let drawings = vec![
+            super::super::drawing::Drawing {
+                extent: Some(super::super::drawing::Extent { cx: 1, cy: 3_000_000 }),
+                ..Default::default()
+            },
+            super::super::drawing::Drawing {
+                extent: Some(super::super::drawing::Extent { cx: 1, cy: 3_000_000 }),
+                ..Default::default()
+            },
+        ];
+        let properties = super::super::section::SectionProperties {
+            page_height_twips: Some(10_000),
+            margins: super::super::section::PageMargins {
+                top: Some(1_000),
+                bottom: Some(1_000),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let sections = vec![
+            ParsedSection {
+                properties: properties.clone(),
+                end_element_index: Some(2),
+            },
+            ParsedSection {
+                properties,
+                end_element_index: Some(1),
+            },
+        ];
+
+        insert_missing_inline_drawing_page_breaks(&mut elements, &drawings, &sections, false);
+
+        assert!(
+            !elements
+                .iter()
+                .any(|element| matches!(element, DocumentElement::PageBreak)),
+            "invalid section ownership must leave the original elements untouched"
+        );
+    }
+
+    /// GH#1562: quick-xml emits XML and numeric references as `GeneralRef`
+    /// events, so both text-box routes must resolve them explicitly.
+    #[test]
+    fn should_preserve_entity_references_in_drawingml_and_vml_textboxes() {
+        let escaped = "Research &amp; Development &lt;tagged&gt; &#8364;50 &amp; more";
+        let xml = wrap_body(&format!(
+            r#"<w:p><w:r><w:t>BODY: {escaped}</w:t></w:r></w:p>
+               <w:p><w:r><w:drawing>
+                 <wps:wsp xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+                   <wps:txbx><w:txbxContent><w:p><w:r><w:t>{escaped}</w:t></w:r></w:p></w:txbxContent></wps:txbx>
+                 </wps:wsp>
+               </w:drawing></w:r></w:p>
+               <w:p><w:r><w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml">
+                 <v:textbox><w:txbxContent><w:p><w:r><w:t>{escaped}</w:t></w:r></w:p></w:txbxContent></v:textbox>
+               </v:shape></w:pict></w:r></w:p>"#,
+        ));
+        let doc = parse_xml(&xml);
+        let expected = "Research & Development <tagged> €50 & more";
+
+        assert_eq!(doc.paragraphs[0].to_text(), format!("BODY: {expected}"));
+        let textboxes: Vec<&str> = doc
+            .drawings
+            .iter()
+            .filter_map(|drawing| drawing.text_box_content.as_deref())
+            .collect();
+        assert_eq!(textboxes, vec![expected, expected]);
+    }
+
+    #[test]
+    fn should_account_textbox_text_against_the_content_budget() {
+        let xml = wrap_body(
+            r#"<w:p><w:r><w:drawing>
+                 <wps:wsp xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+                   <wps:txbx><w:txbxContent><w:p><w:r><w:t>1234&amp;6789</w:t></w:r></w:p></w:txbxContent></wps:txbx>
+                 </wps:wsp>
+               </w:drawing></w:r></w:p>"#,
+        );
+        let limits = crate::extractors::security::SecurityLimits {
+            max_content_size: 8,
+            ..Default::default()
+        };
+        let mut budget = SecurityBudget::from_limits(&limits);
+
+        let result = try_parse_xml_with_budget(&xml, &mut budget);
+        assert!(matches!(result, Err(DocxParseError::SecurityLimit(_))));
     }
 
     #[test]

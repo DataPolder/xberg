@@ -79,9 +79,26 @@ pub(super) fn segments_need_space(
         return true;
     }
 
-    let (_, prev_end) = prev_seg.upright_advance_extent();
+    let (prev_start, prev_end) = prev_seg.upright_advance_extent();
     let (next_start, _) = next_seg.upright_advance_extent();
     let advance_gap = next_start - prev_end;
+
+    // A fragment that jumps substantially backwards on the advance axis is a
+    // reordered cell/field rather than a kerning-run continuation. Preserve a
+    // word boundary so a bad upstream permutation cannot fuse identifiers
+    // such as `700004` + `2` into `7000042`.
+    // Leftward advance is normal for RTL text, so keep that case on the
+    // existing bidi path. ~keep
+    let font_size = prev_seg.font_size.max(next_seg.font_size).max(1.0);
+    let has_rtl_text = prev_word
+        .chars()
+        .chain(next_word.chars())
+        .any(|character| xberg_native_pdf::text::is_rtl_text(character as u32));
+    let severe_backtrack = next_start <= prev_start + 0.5 && advance_gap < -font_size;
+    if severe_backtrack && !has_rtl_text {
+        return true;
+    }
+
     advance_gap > next_seg.font_size * SEGMENT_GAP_SPACE_RATIO
 }
 
@@ -186,6 +203,24 @@ mod tests {
         assert!(!segments_need_space(&prev, "T", &below_threshold, "ower"));
         assert!(!segments_need_space(&prev, "T", &at_threshold, "ower"));
         assert!(segments_need_space(&prev, "T", &above_threshold, "ower"));
+    }
+
+    #[test]
+    fn issue_1560_reordered_numeric_fragments_cannot_fuse() {
+        let prev = segment("700004", 68.279, 35.0, 8.6, 623.481);
+        let next = segment("2", 50.0, 5.0, 8.6, 622.401);
+        let same_baseline_next = segment("2", 50.0, 5.0, 8.6, 623.481);
+
+        assert!(segments_need_space(&prev, "700004", &next, "2"));
+        assert!(segments_need_space(&prev, "700004", &same_baseline_next, "2"));
+    }
+
+    #[test]
+    fn issue_1560_rtl_backtracking_keeps_existing_join_behavior() {
+        let prev = segment("אבג", 68.279, 35.0, 8.6, 623.481);
+        let next = segment("ד", 50.0, 5.0, 8.6, 622.401);
+
+        assert!(!segments_need_space(&prev, "אבג", &next, "ד"));
     }
 
     #[test]

@@ -979,17 +979,25 @@ pub(crate) fn starts_with_agl_ligature(text: &str) -> bool {
 /// (LMMono*) families that frequently appear in academic PDFs.
 pub(crate) fn is_monospace_font(font_name: &str) -> bool {
     let lower = font_name.to_lowercase();
+    // "Monotype" is a type-foundry name, not a monospace indicator. A bare substring
+    // match on "mono" would otherwise misclassify script/display faces sold under that
+    // foundry name (e.g. Monotype Corsiva) as monospace, so it is excluded explicitly
+    // rather than folded into the marker list below. Genuinely monospace faces that
+    // happen to be Monotype-branded (e.g. "Monotype Consolas") still match via their
+    // own marker ("consolas") below, and ordinary "*mono*"-named families (PT Mono,
+    // Roboto Mono, Nimbus Mono, DejaVu Sans Mono, Fira Mono, LMMono, ...) are unaffected
+    // since none of them contain "monotype". ~keep
+    if lower.contains("mono") && !lower.contains("monotype") {
+        return true;
+    }
     const MONO_MARKERS: &[&str] = &[
-        "mono",
         "courier",
         "consolas",
         "menlo",
-        "fira code",
-        "fira mono",
+        "fira code", // does NOT match "Fira Sans" (proportional) ~keep
         "source code",
         "inconsolata",
-        "cmtt",   // pdfTeX Computer Modern Typewriter ~keep
-        "lmmono", // Latin Modern Mono (pdfTeX) ~keep
+        "cmtt", // pdfTeX Computer Modern Typewriter ~keep
         "letter gothic",
         "ocr ", // OCR-A, OCR-B ~keep
         "fixedsys",
@@ -1901,13 +1909,9 @@ impl TjBuffer {
                 .as_ref()
                 .is_some_and(|f| f.base_font.to_uppercase().contains("GLYPHLESS"));
         let is_monospace = !is_invisible_or_glyphless
-            && cached_font.as_ref().is_some_and(|f| {
-                if f.flags.is_some_and(|flags| flags & 1 != 0) {
-                    return true;
-                }
-                let name = f.base_font.to_uppercase();
-                name.contains("COURIER") || name.contains("CONSOLAS") || name.contains("MONO") || name.contains("FIXED")
-            });
+            && cached_font
+                .as_ref()
+                .is_some_and(|f| f.flags.is_some_and(|flags| flags & 1 != 0) || is_monospace_font(&f.base_font));
         let rotation_degrees = snap_run_rotation(&combined);
         let text_pos = state.text_matrix.transform_point(0.0, 0.0);
         let user_pos = state.ctm.transform_point(text_pos.x, text_pos.y);

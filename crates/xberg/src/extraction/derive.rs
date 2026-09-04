@@ -606,6 +606,11 @@ pub fn derive_extraction_result(
             }
         }
         crate::core::config::OutputFormat::Custom(ref name) => {
+            // A prior `clear_renderers()` call (e.g. by a sibling test, or any consumer
+            // resetting the plugin lifecycle) empties this global registry, including the
+            // built-ins. Self-heal before dispatch so a built-in reached only through
+            // `Custom` (such as "dot") is never permanently lost. ~keep
+            crate::plugins::ensure_renderers_initialized();
             let registry = crate::plugins::registry::get_renderer_registry();
             let registry = registry.read();
             match registry.render(name, &doc) {
@@ -1786,6 +1791,47 @@ mod tests {
         );
 
         crate::plugins::unregister_renderer("shout-259").unwrap();
+    }
+
+    /// Regression test mirroring the OCR backend registry's self-heal
+    /// (`plugins::ocr::ensure_ocr_backends_initialized`): `clear_renderers()` (called here to
+    /// simulate a sibling test, or any consumer resetting the plugin lifecycle) empties the
+    /// global renderer registry, including the built-ins. Before
+    /// `crate::plugins::ensure_renderers_initialized()` was wired into the `Custom` arm of
+    /// `derive_extraction_result`, a subsequent `Custom("markdown")` render found nothing
+    /// registered and silently fell back to plain text with a warning, even though
+    /// "markdown" is a built-in that must always be available. Delete the
+    /// `ensure_renderers_initialized()` call at `derive.rs`'s `OutputFormat::Custom` arm to
+    /// verify this test fails without the fix.
+    #[test]
+    fn should_reseed_builtin_renderers_after_global_registry_cleared() {
+        let _guard = crate::plugins::registry::test_support::RendererRegistryGuard::acquire();
+        crate::plugins::clear_renderers().unwrap();
+        assert!(
+            crate::plugins::list_renderers().unwrap().is_empty(),
+            "precondition: the global renderer registry must be empty after clear_renderers()"
+        );
+
+        let mut doc = make_doc("markdown");
+        doc.push_element(InternalElement::text(ElementKind::Paragraph, "Hello world.", 0));
+        let expected = crate::rendering::render_markdown(&doc);
+
+        let result = derive_extraction_result(
+            doc,
+            false,
+            crate::core::config::OutputFormat::Custom("markdown".to_string()),
+        );
+
+        assert_eq!(
+            result.formatted_content.as_deref(),
+            Some(expected.as_str()),
+            "the built-in 'markdown' renderer must self-heal back into the registry after a clear"
+        );
+        assert!(
+            result.processing_warnings.is_empty(),
+            "a healed built-in render must not warn: {:?}",
+            result.processing_warnings
+        );
     }
 
     /// #259: `code_intelligence` must surface the tree-sitter-derived

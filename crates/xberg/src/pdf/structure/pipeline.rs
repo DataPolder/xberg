@@ -2094,6 +2094,38 @@ pub(super) fn heading_wraps_onto(prev: &SegmentData, line: &SegmentData) -> bool
 /// at the segment level so that the assembly layer can emit properly annotated markdown
 /// with bold/italic emphasis.
 fn reconstruct_pdf_lines(segments: &[&SegmentData]) -> Vec<super::types::PdfLine> {
+    const MAX_LINE_TOLERANCE_PT: f32 = 3.0;
+    const LINE_TOLERANCE_SCALE_FACTOR: f32 = 0.25;
+
+    fn finish_line(mut segments: Vec<SegmentData>, baseline_y: f32) -> super::types::PdfLine {
+        let contains_rtl = segments.iter().any(|segment| {
+            segment
+                .text
+                .chars()
+                .any(|character| xberg_native_pdf::text::is_rtl_text(character as u32))
+        });
+        if !contains_rtl {
+            segments.sort_by(|a, b| a.upright_advance_extent().0.total_cmp(&b.upright_advance_extent().0));
+        }
+
+        let dominant_font_size = segments.iter().map(|s| s.font_size).fold(0.0, |a, b| {
+            if a > 0.0 && b > a / 2.0 && b < a * 2.0 {
+                (a + b) / 2.0
+            } else {
+                a.max(b)
+            }
+        });
+        let is_bold = segments.iter().filter(|s| s.is_bold).count() > segments.len() / 2;
+        let is_monospace = segments.iter().all(|s| s.is_monospace);
+        super::types::PdfLine {
+            segments,
+            baseline_y,
+            dominant_font_size,
+            is_bold,
+            is_monospace,
+        }
+    }
+
     if segments.is_empty() {
         return Vec::new();
     }
@@ -2101,54 +2133,30 @@ fn reconstruct_pdf_lines(segments: &[&SegmentData]) -> Vec<super::types::PdfLine
     let mut lines: Vec<super::types::PdfLine> = Vec::new();
     let mut current_baseline = segments[0].upright_baseline();
     let mut current_rotation = segments[0].rotation_degrees;
+    let mut current_scale = segments[0].font_size.max(segments[0].height).abs();
     let mut current_segments: Vec<SegmentData> = Vec::new();
 
     for seg in segments {
         let same_rotation = (seg.rotation_degrees - current_rotation).abs() <= f32::EPSILON;
         let segment_baseline = seg.upright_baseline();
-        if !same_rotation || (segment_baseline - current_baseline).abs() > 0.5 {
+        let segment_scale = seg.font_size.max(seg.height).abs();
+        let baseline_tolerance =
+            (current_scale.max(segment_scale) * LINE_TOLERANCE_SCALE_FACTOR).min(MAX_LINE_TOLERANCE_PT);
+        if !same_rotation || (segment_baseline - current_baseline).abs() > baseline_tolerance {
             if !current_segments.is_empty() {
-                let dominant_font_size = current_segments.iter().map(|s| s.font_size).fold(0.0, |a, b| {
-                    if a > 0.0 && b > a / 2.0 && b < a * 2.0 {
-                        (a + b) / 2.0
-                    } else {
-                        a.max(b)
-                    }
-                });
-                let is_bold = current_segments.iter().filter(|s| s.is_bold).count() > current_segments.len() / 2;
-                let is_monospace = current_segments.iter().all(|s| s.is_monospace);
-                lines.push(super::types::PdfLine {
-                    segments: current_segments.clone(),
-                    baseline_y: current_baseline,
-                    dominant_font_size,
-                    is_bold,
-                    is_monospace,
-                });
+                lines.push(finish_line(std::mem::take(&mut current_segments), current_baseline));
             }
             current_baseline = segment_baseline;
             current_rotation = seg.rotation_degrees;
-            current_segments.clear();
+            current_scale = segment_scale;
+        } else {
+            current_scale = current_scale.max(segment_scale);
         }
         current_segments.push((*seg).clone());
     }
 
     if !current_segments.is_empty() {
-        let dominant_font_size = current_segments.iter().map(|s| s.font_size).fold(0.0, |a, b| {
-            if a > 0.0 && b > a / 2.0 && b < a * 2.0 {
-                (a + b) / 2.0
-            } else {
-                a.max(b)
-            }
-        });
-        let is_bold = current_segments.iter().filter(|s| s.is_bold).count() > current_segments.len() / 2;
-        let is_monospace = current_segments.iter().all(|s| s.is_monospace);
-        lines.push(super::types::PdfLine {
-            segments: current_segments,
-            baseline_y: current_baseline,
-            dominant_font_size,
-            is_bold,
-            is_monospace,
-        });
+        lines.push(finish_line(current_segments, current_baseline));
     }
 
     lines
@@ -5038,6 +5046,25 @@ fn should_preserve_lexical_hyphen(trailing_word: &str, leading_word: &str, hyphe
     matches_static_compound || hyphen_witnesses.contains(&(left.to_ascii_lowercase(), right.to_ascii_lowercase()))
 }
 
+/// Whether adjacent extraction runs actually cross a visual line boundary.
+///
+/// `PdfLine` boundaries can also be introduced by inline style/run splitting. A
+/// suspended hyphen such as `vracht- en` may therefore appear at the end of one
+/// logical line and the start of the next while both runs still share a baseline.
+/// Dehyphenation is only licensed when the runs use the same reading frame and
+/// their upright baselines differ by more than the inline-style tolerance.
+fn spans_visual_line_break(trailing: &SegmentData, leading: &SegmentData) -> bool {
+    if !trailing.has_same_rotation(leading) {
+        return false;
+    }
+
+    let trailing_baseline = trailing.upright_baseline();
+    let leading_baseline = leading.upright_baseline();
+    trailing_baseline.is_finite()
+        && leading_baseline.is_finite()
+        && (trailing_baseline - leading_baseline).abs() > INLINE_STYLE_BASELINE_TOLERANCE
+}
+
 /// Core dehyphenation with position-based full-line detection.
 ///
 /// For each line boundary, checks whether the line extends close to the right
@@ -5062,6 +5089,14 @@ fn dehyphenate_paragraph_lines(para: &mut PdfParagraph, hyphen_witnesses: &Hyphe
     for i in 0..(n - 1) {
         let trailing_right = para.lines[i].segments.last().map(|s| s.x + s.width).unwrap_or(0.0);
         if trailing_right < threshold {
+            continue;
+        }
+
+        let crosses_visual_line = match (para.lines[i].segments.last(), para.lines[i + 1].segments.first()) {
+            (Some(trailing), Some(leading)) => spans_visual_line_break(trailing, leading),
+            _ => false,
+        };
+        if !crosses_visual_line {
             continue;
         }
 
@@ -5127,6 +5162,14 @@ fn dehyphenate_paragraph_lines(para: &mut PdfParagraph, hyphen_witnesses: &Hyphe
 fn dehyphenate_hyphen_only(para: &mut PdfParagraph, hyphen_witnesses: &HyphenWitnesses) {
     let n = para.lines.len();
     for i in 0..(n - 1) {
+        let crosses_visual_line = match (para.lines[i].segments.last(), para.lines[i + 1].segments.first()) {
+            (Some(trailing), Some(leading)) => spans_visual_line_break(trailing, leading),
+            _ => false,
+        };
+        if !crosses_visual_line {
+            continue;
+        }
+
         let trailing_text = match para.lines[i].segments.last() {
             Some(s) if s.text.ends_with('-') => s.text.clone(),
             _ => continue,
@@ -7564,6 +7607,39 @@ mod tests {
     }
 
     #[test]
+    fn issue_1560_reconstructs_jittered_table_fragments_as_one_x_ordered_line() {
+        let mut article = inline_seg("700004", 68.279, 623.481, false);
+        article.font_size = 8.6;
+        article.height = 8.6;
+        article.width = 35.0;
+        let mut position = inline_seg("2", 50.0, 622.401, false);
+        position.font_size = 8.6;
+        position.height = 8.6;
+        position.width = 5.0;
+        let mut description = inline_seg("Fastening screw", 124.9, 622.401, false);
+        description.font_size = 8.6;
+        description.height = 8.6;
+        description.width = 60.0;
+        let mut next_row = inline_seg("3", 50.0, 610.0, false);
+        next_row.font_size = 8.6;
+        next_row.height = 8.6;
+
+        let segments = [&article, &position, &description, &next_row];
+        let lines = reconstruct_pdf_lines(&segments);
+
+        assert_eq!(lines.len(), 2, "ordinary row leading must still split lines");
+        assert_eq!(
+            lines[0]
+                .segments
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<Vec<_>>(),
+            ["2", "700004", "Fastening screw"]
+        );
+        assert_eq!(lines[1].segments[0].text, "3");
+    }
+
+    #[test]
     fn inline_bold_runs_stay_in_one_paragraph() {
         let segments = vec![
             inline_seg("plain", 10.0, 100.0, false),
@@ -8734,7 +8810,9 @@ where new shares are issued;";
 
     /// Full-width line at x=10, width=490 → right edge 500.
     fn full_line_seg(text: &str) -> SegmentData {
-        seg(text, 10.0, 490.0)
+        let mut segment = seg(text, 10.0, 490.0);
+        segment.baseline_y = 20.0;
+        segment
     }
 
     /// Short line at x=10, width=100 → right edge 110 (well below 500*0.85=425).
@@ -8845,13 +8923,71 @@ where new shares are issued;";
 
     #[test]
     fn test_hyphen_only_fallback() {
-        let mut p = para(vec![
-            line(vec![seg("some soft-", 0.0, 0.0)]),
-            line(vec![seg("ware is great", 0.0, 0.0)]),
-        ]);
+        let mut trailing = seg("some soft-", 0.0, 0.0);
+        trailing.baseline_y = 20.0;
+        let mut p = para(vec![line(vec![trailing]), line(vec![seg("ware is great", 0.0, 0.0)])]);
         dehyphenate_hyphen_only(&mut p, &HyphenWitnesses::default());
         assert_eq!(p.lines[0].segments[0].text, "some software");
         assert_eq!(p.lines[1].segments[0].text, "is great");
+    }
+
+    #[test]
+    fn suspended_hyphens_on_one_baseline_are_preserved() {
+        for (left, right) in [
+            ("vracht-", "en verzendkosten"),
+            ("In-", "en uitvoer"),
+            ("onderhouds-", "en installatiewerkzaamheden"),
+            ("Verkoop-", "en Leveringvoorwaarden"),
+        ] {
+            let mut trailing = full_line_seg(left);
+            trailing.baseline_y = 100.0;
+            let mut leading = seg(right, 480.0, 80.0);
+            leading.baseline_y = 100.0;
+            let mut paragraph = para(vec![line(vec![trailing]), line(vec![leading])]);
+
+            dehyphenate_paragraph_lines(&mut paragraph, &HyphenWitnesses::default());
+
+            assert_eq!(paragraph_text(&paragraph), format!("{left} {right}"));
+        }
+    }
+
+    #[test]
+    fn suspended_and_wrapped_hyphens_in_one_paragraph_are_distinguished() {
+        let mut suspended = full_line_seg("De bijbehorende montage-");
+        suspended.baseline_y = 100.0;
+        let mut wrapped = full_line_seg("en installatie-");
+        wrapped.baseline_y = 100.0;
+        let mut continuation = seg("handleiding wordt op aanvraag toegezonden.", 10.0, 220.0);
+        continuation.baseline_y = 80.0;
+        let mut paragraph = para(vec![
+            line(vec![suspended]),
+            line(vec![wrapped]),
+            line(vec![continuation]),
+        ]);
+
+        dehyphenate_paragraph_lines(&mut paragraph, &HyphenWitnesses::default());
+
+        assert_eq!(
+            paragraph_text(&paragraph),
+            "De bijbehorende montage- en installatiehandleiding wordt op aanvraag toegezonden."
+        );
+    }
+
+    #[test]
+    fn dehyphenation_requires_finite_baselines_in_the_same_reading_frame() {
+        let cases = [(f32::NAN, 0.0, 0.0), (20.0, 0.0, 90.0)];
+        for (trailing_baseline, leading_baseline, leading_rotation) in cases {
+            let mut trailing = full_line_seg("some soft-");
+            trailing.baseline_y = trailing_baseline;
+            let mut leading = seg("ware remains", 10.0, 100.0);
+            leading.baseline_y = leading_baseline;
+            leading.rotation_degrees = leading_rotation;
+            let mut paragraph = para(vec![line(vec![trailing]), line(vec![leading])]);
+
+            dehyphenate_paragraph_lines(&mut paragraph, &HyphenWitnesses::default());
+
+            assert_eq!(paragraph_text(&paragraph), "some soft- ware remains");
+        }
     }
 
     #[test]

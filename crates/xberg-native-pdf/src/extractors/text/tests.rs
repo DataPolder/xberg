@@ -6642,3 +6642,74 @@ fn test_merge_offset_semantic_space_suppression() {
     let text = &extractor.spans[0].text;
     assert!(!text.contains("  "), "Should not have double space, got: '{}'", text);
 }
+
+#[test]
+fn test_is_monospace_font_recognizes_broad_mono_families() {
+    assert!(is_monospace_font("Menlo"));
+    assert!(is_monospace_font("Fira Code"));
+    assert!(is_monospace_font("Fira Mono"));
+    assert!(is_monospace_font("Source Code Pro"));
+    assert!(is_monospace_font("Inconsolata"));
+    assert!(is_monospace_font("CMTT10"));
+    assert!(is_monospace_font("LMMono10-Regular"));
+    assert!(is_monospace_font("DejaVu Sans Mono"));
+}
+
+#[test]
+fn test_is_monospace_font_recognizes_bare_word_mono_families() {
+    // These carry "mono" as an ordinary word/suffix, not the "Monotype" foundry
+    // name, and must still match. ~keep
+    assert!(is_monospace_font("PT Mono"));
+    assert!(is_monospace_font("Roboto Mono"));
+    assert!(is_monospace_font("Nimbus Mono"));
+}
+
+#[test]
+fn test_is_monospace_font_rejects_monotype_foundry_names() {
+    // "Monotype" is a foundry, not a monospace family; these are script/display faces. ~keep
+    assert!(!is_monospace_font("Monotype Corsiva"));
+    assert!(!is_monospace_font("Arial Monotype"));
+}
+
+#[test]
+fn test_is_monospace_font_still_matches_monotype_branded_monospace_faces() {
+    // A Monotype-branded face that is genuinely monospace still matches via its
+    // own marker ("consolas"), even though the "monotype" exclusion suppresses
+    // the bare "mono" check for it. ~keep
+    assert!(is_monospace_font("Monotype Consolas"));
+}
+
+#[test]
+fn test_is_monospace_font_rejects_fira_sans() {
+    // Fira Sans is a proportional face; only Fira Code / Fira Mono are monospace. ~keep
+    assert!(!is_monospace_font("Fira Sans"));
+    assert!(!is_monospace_font("Fira Sans Condensed"));
+}
+
+#[test]
+fn test_tj_buffer_marks_menlo_as_monospace() {
+    let state = crate::content::graphics_state::GraphicsStateStack::new();
+    let font = Arc::new(FontInfo {
+        base_font: "Menlo".to_string(),
+        ..create_test_font()
+    });
+    let buffer = TjBuffer::new(state.current(), None, Some(font));
+    assert!(
+        buffer.is_monospace,
+        "Menlo must be recognized as monospace via is_monospace_font, not just the narrow legacy list"
+    );
+}
+
+#[test]
+fn test_tj_buffer_does_not_mark_fira_sans_as_monospace() {
+    let state = crate::content::graphics_state::GraphicsStateStack::new();
+    let font = Arc::new(FontInfo {
+        base_font: "Fira Sans".to_string(),
+        ..create_test_font()
+    });
+    let buffer = TjBuffer::new(state.current(), None, Some(font));
+    assert!(
+        !buffer.is_monospace,
+        "Fira Sans is proportional prose text and must not be routed toward code fencing"
+    );
+}

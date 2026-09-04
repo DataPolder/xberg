@@ -48,21 +48,28 @@ let package = Package(
     ),
     // RustBridge: Swift wrapper around the Rust static library.
     // Depends on RustBridgeC so the generated Swift files can use the C types.
-    // linkerSettings wire the Rust staticlibs (libxberg_swift.a and libxberg_ffi.a)
-    // produced by `cargo build -p xberg-swift` and the FFI crate so
-    // `swift build` / `swift test` can resolve the `__swift_bridge__$*` and FFI C symbols.
-    // Explicit absolute paths (see `resolvedStaticLib` above) are used instead of
-    // `.linkedLibrary(...)` so the linker cannot substitute the sibling `.dylib` artifacts.
-    // The FFI library is needed because the generated Swift service API code (App.swift)
-    // calls FFI functions directly via @_silgen_name declarations.
+    // linkerSettings wire the Rust staticlib (libxberg_swift.a) produced by
+    // `cargo build -p xberg-swift` so `swift build` / `swift test` can resolve
+    // the `__swift_bridge__$*` and FFI C symbols. An explicit absolute path (see
+    // `resolvedStaticLib` above) is used instead of `.linkedLibrary(...)` so the
+    // linker cannot substitute the sibling `.dylib` artifact.
+    // Only `xberg_swift` is linked here, NOT `xberg_ffi` separately: the generated
+    // Swift service API code (App.swift) calls FFI functions directly via
+    // @_silgen_name declarations, so `packages/swift/rust/src/lib.rs` keeps an
+    // `#[used] __ALEF_KEEP_FFI_LINKED` static referencing `xberg_ffi::xberg_version`
+    // that forces cargo to fold the *entire* compiled `xberg-ffi` crate into
+    // `libxberg_swift.a` (a Rust staticlib only bundles the object code of
+    // dependencies it can prove are used). Linking `libxberg_ffi.a` in addition to
+    // that already-self-contained archive duplicates every Rust core/std/alloc and
+    // FFI symbol between the two archives and fails the link with "duplicate
+    // symbol" errors.
     .target(
       name: "RustBridge",
       dependencies: ["RustBridgeC"],
       path: "Sources/RustBridge",
       linkerSettings: [
         .unsafeFlags([
-          resolvedStaticLib("xberg_swift"),
-          resolvedStaticLib("xberg_ffi"),
+          resolvedStaticLib("xberg_swift")
         ]),
         // The Rust staticlib records native-library dependencies (e.g. `lzma-sys`
         // via the archive/`xz2` path emits `cargo:rustc-link-lib`) that cargo would

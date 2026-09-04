@@ -17629,6 +17629,10 @@ extension OcrConfigRef {
         { let val = __swift_bridge__$OcrConfig$acceleration(ptr); if val != nil { return AccelerationConfig(ptr: val!) } else { return nil } }()
     }
 
+    public func securityLimits() -> Optional<SecurityLimits> {
+        { let val = __swift_bridge__$OcrConfig$security_limits(ptr); if val != nil { return SecurityLimits(ptr: val!) } else { return nil } }()
+    }
+
     public func tessdataBytes() -> RustString {
         RustString(ptr: __swift_bridge__$OcrConfig$tessdata_bytes(ptr))
     }

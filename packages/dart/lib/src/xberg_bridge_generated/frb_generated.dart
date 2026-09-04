@@ -21323,8 +21323,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   OcrConfig dco_decode_ocr_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 17)
-      throw Exception('unexpected arr length: expect 17 but see ${arr.length}');
+    if (arr.length != 18)
+      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
     return OcrConfig(
       enabled: dco_decode_bool(arr[0]),
       backend: dco_decode_String(arr[1]),
@@ -21343,10 +21343,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       vlmConfig: dco_decode_opt_box_autoadd_llm_config(arr[12]),
       vlmPrompt: dco_decode_opt_String(arr[13]),
       acceleration: dco_decode_opt_box_autoadd_acceleration_config(arr[14]),
+      securityLimits: dco_decode_opt_box_autoadd_security_limits(arr[15]),
       tessdataBytes: dco_decode_opt_Map_String_list_prim_u_8_strict_None(
-        arr[15],
+        arr[16],
       ),
-      tessdataPath: dco_decode_opt_String(arr[16]),
+      tessdataPath: dco_decode_opt_String(arr[17]),
     );
   }
 
@@ -31221,6 +31222,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_acceleration = sse_decode_opt_box_autoadd_acceleration_config(
       deserializer,
     );
+    var var_securityLimits = sse_decode_opt_box_autoadd_security_limits(
+      deserializer,
+    );
     var var_tessdataBytes = sse_decode_opt_Map_String_list_prim_u_8_strict_None(
       deserializer,
     );
@@ -31241,6 +31245,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       vlmConfig: var_vlmConfig,
       vlmPrompt: var_vlmPrompt,
       acceleration: var_acceleration,
+      securityLimits: var_securityLimits,
       tessdataBytes: var_tessdataBytes,
       tessdataPath: var_tessdataPath,
     );
@@ -41575,6 +41580,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       self.acceleration,
       serializer,
     );
+    sse_encode_opt_box_autoadd_security_limits(self.securityLimits, serializer);
     sse_encode_opt_Map_String_list_prim_u_8_strict_None(
       self.tessdataBytes,
       serializer,
