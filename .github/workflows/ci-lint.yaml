@@ -121,6 +121,22 @@ jobs:
       - name: Verify submodule gitlinks are reachable on their remotes
         run: scripts/ci/check-submodule-gitlinks.sh --on-fetch-failure=fail
 
+  ruby-windows-features:
+    if: github.event.pull_request.draft != true
+    name: Ruby Windows feature agreement
+    runs-on: ubuntu-latest
+    steps:
+      # submodules: false -- this job reads three manifests and a workflow file, no fixtures. ~keep
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+      # The Windows gem's binding features and the core features it compiles against are two
+      # independent switches, and when they drift the generated conversions stop compiling on
+      # that leg alone. It has broken the release twice and is invisible to every other job
+      # here, because Linux and macOS never take the `--no-default-features` path. ~keep
+      - name: Verify the Windows Ruby leg's features match the core bundle
+        run: scripts/ci/check-ruby-windows-features.sh
+
   alef-readme-paths:
     if: github.event.pull_request.draft != true
     name: Alef readme/docs paths resolve

@@ -1132,22 +1132,27 @@ jobs:
           - { os: macos-15, label: macos-arm64 }
           - os: windows-latest
             label: windows-x86_64
-            # svg, keywords-yake and keywords-rake are here to keep the binding's
-            # feature set in step with the core's, not because the Windows gem needs
-            # anything extra. The generated conversions gate their match arms on
-            # xberg-rb's OWN features (`#[cfg(feature = "keywords-yake")]`) while the
-            # variants they match come from the core, and on this leg alone the two are
-            # separate switches: `--no-default-features` turns the binding's off, while
-            # the Windows target dep in packages/ruby/ext/xberg_rb/native/Cargo.toml
-            # asks the core for `windows-gnu-target`, a bundle that contains both
-            # `keywords` (= yake + rake) and `svg`. The core keeps the variants, the
-            # binding loses the arms, and `From<KeywordAlgorithm>` stops being
-            # exhaustive -- 827 E0004 errors, none of them visible on the Linux/macOS
-            # legs, whose target dep names those three features explicitly so both
-            # switches happen to agree. Each is a pure forward (`svg = ["xberg/svg"]`)
-            # to a core feature the bundle already enabled, so this restores the arms
-            # without changing what the core compiles. ~keep
-            ruby_cargo_args: --no-default-features --features pdf,markdown-footnotes,url-ingestion,svg,keywords-yake,keywords-rake
+            # This leg's binding features and the core features actually compiled are two
+            # separate switches: `--no-default-features` here turns xberg-rb's OWN
+            # `#[cfg(feature = "...")]`-gated match arms/fields off, while the Windows target
+            # dep in packages/ruby/ext/xberg_rb/native/Cargo.toml unconditionally asks the core
+            # for the whole `windows-gnu-target` bundle (crates/xberg/Cargo.toml), regardless of
+            # what is listed here. Whenever a core feature inside that bundle also has a
+            # same-named xberg-rb feature (a pure forward, e.g. `office = ["xberg/office"]`),
+            # that xberg-rb feature MUST be listed below too, or the core keeps a variant/field
+            # the generated binding lost the match arm for (E0004 non-exhaustive match, E0063
+            # missing struct field, E0609 unknown field -- previously 827 E0004s on
+            # `From<KeywordAlgorithm>` alone, from `svg`/`keywords-yake`/`keywords-rake` missing
+            # here). This list is exactly xberg-rb's own `default` feature set (see the
+            # generated `packages/ruby/ext/xberg_rb/native/Cargo.toml`) minus the four entries
+            # `windows-gnu-target` deliberately excludes: `candle-ocr` and `ocr-wasm` (not part
+            # of the bundle -- native `ocr` is used instead) and `reranker`/`late-interaction`
+            # (the ORT-backed engines; `windows-gnu-target` keeps only their ORT-free
+            # `reranker-presets`/`late-interaction-presets` siblings, since MinGW has no ORT
+            # prebuilt). `heic` is already excluded from xberg-rb's default via alef.toml's
+            # `excluded_default_features`. Adding a new xberg-rb feature later means adding it
+            # here too whenever `windows-gnu-target` (or its core feature) also carries it. ~keep
+            ruby_cargo_args: --no-default-features --features api,api-types,auto-rotate-types,chunking-tokenizers,classification,diff,embedding-presets,heuristics,html,keywords-rake,keywords-yake,late-interaction-presets,layout-types,markdown-footnotes,ocr,office,paddle-ocr-types,pdf,presets,quality,redaction,reranker-presets,sparse-embedding-presets,svg,transcription-types,tree-sitter,url-config-types,url-ingestion,xml
     steps:
       - uses: actions/checkout@v7
         with:
