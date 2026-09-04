@@ -4356,6 +4356,13 @@ path = "../../crates/xberg-wasm/pkg/nodejs"
 
 [crates.e2e.env]
 CRAWLBERG_ALLOW_PRIVATE_NETWORK = "true"
+# The extract future is large enough in a debug build that `test_config_security_limits`
+# overflows the default 2 MiB test-thread stack -- measured: it fails at 2304 KiB and passes
+# at 2560 KiB. Every CI workflow already exports RUST_MIN_STACK=16777216, so CI never saw
+# it and only local `task e2e:lang E2E_LANG=rust` runs failed. Emitted with force = false,
+# so an explicit shell value still wins. Verified that cargo's [env] table does reach the
+# test binary by running the failing test with the shell variable unset. ~keep
+RUST_MIN_STACK = "16777216"
 
 [crates.e2e.format]
 python = "uv run --no-sync ruff check --fix {dir} && uv run --no-sync ruff format {dir}"
