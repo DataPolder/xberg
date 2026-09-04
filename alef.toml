@@ -2434,12 +2434,12 @@ e2e = "cd e2e/node && pnpm test"
 
 [crates.test.go]
 precondition = "command -v go >/dev/null 2>&1"
-before = "cargo build --release -p xberg-ffi && mkdir -p packages/go/include && cp crates/xberg-ffi/include/xberg.h packages/go/include/ && bash scripts/stage_go_native_local.sh"
+before = "bash scripts/e2e/build-mock-server.sh && cargo build --release -p xberg-ffi && mkdir -p packages/go/include && cp crates/xberg-ffi/include/xberg.h packages/go/include/ && bash scripts/stage_go_native_local.sh"
 e2e = "cd e2e/go && go test ./... -count=1"
 
 [crates.test.ruby]
 precondition = "export PATH=\"$HOME/.rbenv/shims:$HOME/.asdf/shims:$PATH\" && command -v ruby >/dev/null 2>&1 && BUNDLE_PATH=vendor/bundle ruby -S bundle --version >/dev/null 2>&1"
-before = "export PATH=\"$HOME/.rbenv/shims:$HOME/.asdf/shims:$PATH\" && cd packages/ruby && BUNDLE_PATH=vendor/bundle ruby -S bundle install && BUNDLE_PATH=vendor/bundle ruby -S bundle exec ruby -S rake compile && cd ../../e2e/ruby && BUNDLE_PATH=vendor/bundle ruby -S bundle install"
+before = "bash scripts/e2e/build-mock-server.sh && export PATH=\"$HOME/.rbenv/shims:$HOME/.asdf/shims:$PATH\" && cd packages/ruby && BUNDLE_PATH=vendor/bundle ruby -S bundle install && BUNDLE_PATH=vendor/bundle ruby -S bundle exec ruby -S rake compile && cd ../../e2e/ruby && BUNDLE_PATH=vendor/bundle ruby -S bundle install"
 e2e = "export PATH=\"$HOME/.rbenv/shims:$HOME/.asdf/shims:$PATH\" && cd e2e/ruby && BUNDLE_PATH=vendor/bundle ruby -S bundle exec ruby -S rspec"
 
 [crates.test.php]
@@ -2459,7 +2459,7 @@ e2e = "dotnet test e2e/csharp"
 
 [crates.test.elixir]
 precondition = "command -v mix >/dev/null 2>&1"
-before = "cd packages/elixir && XBERG_BUILD=1 mix deps.get && XBERG_BUILD=1 mix compile && cd ../../e2e/elixir && XBERG_BUILD=1 mix deps.get"
+before = "bash scripts/e2e/build-mock-server.sh && cd packages/elixir && XBERG_BUILD=1 mix deps.get && XBERG_BUILD=1 mix compile && cd ../../e2e/elixir && XBERG_BUILD=1 mix deps.get"
 # Fixture dirs are symlinked in, as the dart and zig legs do. alef's elixir e2e
 # codegen emits "Tests construct absolute paths via test_documents_path, so no chdir
 # needed" into test_helper.exs, but it only prefixes test_documents_path for top-level
@@ -2473,7 +2473,7 @@ e2e = "cd e2e/elixir && for dir in docx html json pdf text xlsx images; do test 
 
 [crates.test.wasm]
 precondition = "command -v wasm-pack >/dev/null 2>&1"
-before = "wasm-pack build crates/xberg-wasm --release --target nodejs --out-dir pkg/nodejs && node crates/xberg-wasm/scripts/fix-wasi-imports.mjs && cd e2e/wasm && pnpm install --ignore-workspace"
+before = "bash scripts/e2e/build-mock-server.sh && wasm-pack build crates/xberg-wasm --release --target nodejs --out-dir pkg/nodejs && node crates/xberg-wasm/scripts/fix-wasi-imports.mjs && cd e2e/wasm && pnpm install --ignore-workspace"
 e2e = "cd e2e/wasm && pnpm test"
 
 [crates.test.rust]
