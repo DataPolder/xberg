@@ -8,6 +8,11 @@ on:
       - "crates/xberg-native-pdf/**"
       - "crates/xberg-ffi/**"
       - "crates/xberg-jni/**"
+      # ~keep `--features android-target` transitively enables ocr/paddle-ocr-tract, so both of
+      # these are compiled by this workflow. Without them in the filter a source-only edit that
+      # breaks the Android or iOS build never triggers the job that would have caught it.
+      - "crates/xberg-tesseract/**"
+      - "crates/xberg-paddle-ocr/**"
       - "packages/dart/**"
       - "packages/swift/**"
       - "packages/kotlin-android/**"
@@ -22,6 +27,11 @@ on:
       - "crates/xberg-native-pdf/**"
       - "crates/xberg-ffi/**"
       - "crates/xberg-jni/**"
+      # ~keep `--features android-target` transitively enables ocr/paddle-ocr-tract, so both of
+      # these are compiled by this workflow. Without them in the filter a source-only edit that
+      # breaks the Android or iOS build never triggers the job that would have caught it.
+      - "crates/xberg-tesseract/**"
+      - "crates/xberg-paddle-ocr/**"
       - "packages/dart/**"
       - "packages/swift/**"
       - "packages/kotlin-android/**"
