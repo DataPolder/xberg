@@ -490,7 +490,15 @@ fn post_process_table_inner(
     let mut data_rows = table[data_start..].to_vec();
 
     if header_rows.len() > 2 {
-        header_rows = header_rows[header_rows.len() - 2..].to_vec();
+        // Keep the established two-row header cap, but do not discard an
+        // unusually long prefix inferred by `find_data_start`. Earlier rows
+        // are still table content; demote them to data in their original
+        // order while retaining the two rows closest to the detected data
+        // boundary as the header. ~keep
+        let surplus_header_rows = header_rows.len() - 2;
+        let mut demoted_rows: Vec<Vec<String>> = header_rows.drain(..surplus_header_rows).collect();
+        demoted_rows.append(&mut data_rows);
+        data_rows = demoted_rows;
     }
 
     if header_rows.is_empty() {
@@ -2257,6 +2265,48 @@ mod tests {
 
         assert_eq!(find_data_start(&table, true), 2);
         assert_eq!(find_data_start(&table, false), 0);
+    }
+
+    #[test]
+    fn issue_1558_surplus_inferred_header_rows_are_demoted_not_dropped() {
+        let table: Vec<Vec<String>> = (1..=18)
+            .map(|row| {
+                vec![
+                    format!("{row} 8000{row:02}"),
+                    "Fastening screw".into(),
+                    format!("{row},10"),
+                    if row == 7 {
+                        "package of 30".into()
+                    } else {
+                        "available".into()
+                    },
+                ]
+            })
+            .collect();
+
+        assert_eq!(find_data_start(&table, true), 6);
+        let processed = post_process_table(table, true, false).expect("dense parts table should remain valid");
+
+        // Six inferred header rows become one merged header plus four demoted
+        // data rows. No source row may disappear.
+        assert_eq!(processed.len(), 17);
+        let flattened = processed.iter().flatten().cloned().collect::<Vec<_>>().join(" ");
+        for row in 1..=18 {
+            let article = format!("8000{row:02}");
+            assert_eq!(
+                flattened.matches(&article).count(),
+                1,
+                "{article} must survive exactly once"
+            );
+        }
+        assert!(
+            processed[0]
+                .iter()
+                .any(|cell| cell.contains("800005") && cell.contains("800006"))
+        );
+        assert!(processed[1].iter().any(|cell| cell.contains("800001")));
+        assert!(processed[4].iter().any(|cell| cell.contains("800004")));
+        assert!(processed[5].iter().any(|cell| cell.contains("800007")));
     }
 
     #[test]

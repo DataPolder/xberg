@@ -445,7 +445,7 @@ fn is_numeric_prose_continuation(text: &str) -> bool {
 /// marked as code blocks. This handles code snippets that don't have explicit
 /// code block markers.
 fn detect_monospace_code_blocks(paragraphs: &mut [PdfParagraph]) {
-    if paragraphs.len() < 2 {
+    if paragraphs.is_empty() {
         return;
     }
 
@@ -3315,6 +3315,29 @@ mod tests {
         assert!(paragraphs[1].is_code_block);
         assert!(paragraphs[2].is_code_block);
         assert!(!paragraphs[3].is_code_block);
+    }
+
+    #[test]
+    fn detect_monospace_code_blocks_renders_singleton_with_original_lines() {
+        let mut paragraph = make_line_paragraph(3, true);
+        paragraph.lines[0].segments[0].text = "import java.net.URI;".to_string();
+        paragraph.lines[1].segments[0].text = "public class Example {".to_string();
+        paragraph.lines[2].segments[0].text = "}".to_string();
+        let mut paragraphs = vec![paragraph];
+
+        detect_monospace_code_blocks(&mut paragraphs);
+
+        assert!(
+            paragraphs[0].is_code_block,
+            "a singleton multi-line listing must be fenced"
+        );
+        let document = super::super::assembly::assemble_internal_document(vec![paragraphs], &[], None, &[]);
+        let markdown = crate::rendering::render_markdown(&document);
+        assert_eq!(
+            markdown.trim(),
+            "```\nimport java.net.URI;\npublic class Example {\n}\n```",
+            "assembly and Markdown rendering must preserve the code listing's physical lines"
+        );
     }
 }
 

@@ -1124,5 +1124,20 @@ mod overreach_regression_tests {
         assert_eq!(repair_contextual_ligatures("ges:one"), "ges:one");
         assert_eq!(repair_contextual_ligatures("progeM"), "progeM");
         assert_eq!(repair_contextual_ligatures("ratio:x"), "ratio:x");
+        assert_eq!(repair_contextual_ligatures("TestMethodOrder"), "TestMethodOrder");
+        assert_eq!(repair_contextual_ligatures("currentTimeMillis"), "currentTimeMillis");
+        assert_eq!(
+            repair_contextual_ligatures("TestMethodOrder(OrderAnnotation.class)"),
+            "TestMethodOrder(OrderAnnotation.class)"
+        );
+        assert_eq!(
+            repair_contextual_ligatures("engine:junit-jupiter"),
+            "engine:junit-jupiter"
+        );
+        assert_eq!(repair_contextual_ligatures("class:example"), "class:example");
+        assert_eq!(
+            repair_contextual_ligatures("method:skippedTest()"),
+            "method:skippedTest()"
+        );
     }
 }

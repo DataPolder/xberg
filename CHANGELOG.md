@@ -177,6 +177,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed PDF table reconstruction dropping early rows when data-start inference classified more
+  than two leading rows as headers. The two-row header cap is retained, but surplus inferred
+  header rows are now demoted to data in source order instead of being discarded
+  ([#1558](https://github.com/xberg-io/xberg/issues/1558)).
+- Fixed native PDF top-to-bottom reading order splitting one visual table row at an absolute
+  3-point coordinate-band boundary, which could move an article number before its position and
+  fuse the two identifiers. Visual rows now use an anchored, font-scaled tolerance, reconstructed
+  lines restore left-to-right fragment order, and narrative assembly preserves a separator after
+  a severe geometric backtrack ([#1560](https://github.com/xberg-io/xberg/issues/1560)).
+- Fixed PDF dehyphenation treating inline run/style boundaries as visual line wraps. Suspended
+  hyphens such as `vracht- en verzendkosten` are now preserved, while compounds genuinely split
+  across different baselines are still rejoined
+  ([#1561](https://github.com/xberg-io/xberg/issues/1561)).
+- Fixed DOCX page attribution staying permanently low after Word omitted a rendered-page marker
+  between vertically stacked inline images. The parser now conservatively infers missing breaks
+  from each section's usable page height, including documents with different section geometries
+  ([#1559](https://github.com/xberg-io/xberg/issues/1559)).
+- Fixed DOCX DrawingML and VML text boxes dropping XML and numeric character references such as
+  `&amp;` and `&#8364;` from extracted text
+  ([#1562](https://github.com/xberg-io/xberg/issues/1562)).
 - Fixed OCR image decoding ignoring the caller's configured `security_limits`. Every OCR route —
   embedded images, Tesseract, PaddleOCR, and scanned PDF pages — decoded raw image bytes under a
   hardcoded `SecurityLimits::default()`, so raising `ExtractionConfig::security_limits` to accept a

@@ -757,6 +757,11 @@ mod tests {
         let default_error = load_image_for_ocr(&bytes, &default_limits)
             .expect_err("a 111,630,000-byte decode must be refused under the 100 MiB default");
         assert!(matches!(default_error, XbergError::Validation { .. }));
+        let default_message = default_error.to_string();
+        assert!(
+            default_message.contains("security_limits.max_content_size (104857600 bytes)"),
+            "the refusal must identify the default field and ceiling actually enforced: {default_message}"
+        );
 
         let configured_limits = SecurityLimits {
             max_content_size: 200 * 1024 * 1024,

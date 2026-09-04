@@ -7529,6 +7529,98 @@ mod tests {
         assert_eq!(result[0].cells[1].text, "Versterking van het MKB-segment");
     }
 
+    #[test]
+    fn split_rows_by_text_positions_keeps_single_column_split_behavior() {
+        let spans = vec![
+            create_test_span("Label", 10.0, 200.0, 30.0, 0.0),
+            create_test_span("Value", 10.0, 180.0, 30.0, 0.0),
+        ];
+        let row = TableRow {
+            cells: vec![prose_cell("Label Value")],
+            is_header: false,
+        };
+        let row_cell_span_indices = vec![vec![vec![0, 1]]];
+
+        let result = split_rows_by_text_positions(
+            vec![row],
+            &row_cell_span_indices,
+            &spans,
+            &TableDetectionConfig::strict(),
+        );
+
+        assert_eq!(
+            result.len(),
+            2,
+            "the two-column evidence floor must be capped for one-column bands"
+        );
+        assert_eq!(result[0].cells[0].text, "Label");
+        assert_eq!(result[1].cells[0].text, "Value");
+    }
+
+    /// Page-3-shaped downstream regression for #1555: one header band and three
+    /// data bands each contain 1/2/3-line cells on staggered baselines. Keeping
+    /// every drawn band whole must leave a four-row, three-column table that
+    /// clears the real-grid gate; the old sixteen-row expansion failed it at 4/16.
+    #[test]
+    fn wrapped_drawn_bands_remain_a_real_four_row_grid() {
+        let mut spans = vec![
+            create_test_span("#", 90.2, 330.0, 5.0, 0.0),
+            create_test_span("Aanbeveling", 118.6, 330.0, 60.0, 0.0),
+            create_test_span("Toelichting", 246.1, 330.0, 90.0, 0.0),
+        ];
+        let mut rows = vec![TableRow {
+            cells: vec![prose_cell("#"), prose_cell("Aanbeveling"), prose_cell("Toelichting")],
+            is_header: true,
+        }];
+        let mut row_cell_span_indices = vec![vec![vec![0], vec![1], vec![2]]];
+
+        for (row_number, baseline) in [(1, 288.7), (2, 242.7), (3, 196.7)] {
+            let start = spans.len();
+            spans.extend([
+                create_test_span(&row_number.to_string(), 90.2, baseline, 5.0, 0.0),
+                create_test_span("Versterking van het", 118.6, baseline + 6.0, 60.0, 0.0),
+                create_test_span("MKB-segment", 118.6, baseline - 6.0, 40.0, 0.0),
+                create_test_span("Ontwikkel gerichte campagnes", 246.1, baseline + 12.0, 90.0, 0.0),
+                create_test_span("een vereenvoudigde waardepropositie", 246.1, baseline, 100.0, 0.0),
+                create_test_span("om de conversie te verhogen.", 246.1, baseline - 12.0, 90.0, 0.0),
+            ]);
+            rows.push(TableRow {
+                cells: vec![
+                    prose_cell(&row_number.to_string()),
+                    prose_cell("Versterking van het MKB-segment"),
+                    prose_cell(
+                        "Ontwikkel gerichte campagnes een vereenvoudigde waardepropositie \
+                         om de conversie te verhogen.",
+                    ),
+                ],
+                is_header: false,
+            });
+            row_cell_span_indices.push(vec![
+                vec![start],
+                vec![start + 1, start + 2],
+                vec![start + 3, start + 4, start + 5],
+            ]);
+        }
+
+        let rows = split_rows_by_text_positions(rows, &row_cell_span_indices, &spans, &TableDetectionConfig::strict());
+        let table = Table {
+            rows,
+            has_header: true,
+            col_count: 3,
+            bbox: None,
+        };
+
+        assert_eq!(table.rows.len(), 4, "four producer-drawn bands must remain four rows");
+        assert!(
+            table.is_real_grid(),
+            "the repaired table must survive the downstream real-grid gate"
+        );
+        assert_eq!(table.rows[1].cells[0].text, "1");
+        assert_eq!(table.rows[1].cells[1].text, "Versterking van het MKB-segment");
+        assert_eq!(table.rows[3].cells[0].text, "3");
+        assert_eq!(table.rows[3].cells[1].text, "Versterking van het MKB-segment");
+    }
+
     /// The hybrid case `split_rows_by_text_positions` exists for: vertical
     /// column lines exist but no horizontal rule separates two real rows
     /// crammed into one intersection cell. Each candidate row has
