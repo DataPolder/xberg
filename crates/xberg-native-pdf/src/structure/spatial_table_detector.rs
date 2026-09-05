@@ -2472,6 +2472,17 @@ fn group_cells_into_tables(cells: &[IntersectionCell]) -> Vec<Vec<usize>> {
 /// (xberg-io/xberg#1555). ~keep
 const MIN_ROW_SPLIT_EVIDENCE_COLUMNS: usize = 2;
 
+/// Minimum number of Y-clusters that must *independently* clear
+/// `MIN_ROW_SPLIT_EVIDENCE_COLUMNS` before a producer-drawn row band is treated as more than
+/// one row at all. One evidenced cluster is not enough: two unrelated single-column spans can
+/// land within `row_tolerance` of each other by pure chance (see the #1555 regression fixture
+/// `split_rows_by_text_positions_keeps_drawn_band_as_one_row_when_only_one_cell_wraps`, where a
+/// row-number span and an unrelated wrapped cell's middle baseline coincide on one Y value and
+/// nowhere else) and that single coincidence must not be enough to accept a split. A second,
+/// independently evidenced cluster is what tells a genuinely tabular band apart from one
+/// baseline that happened to line up (xberg-io/xberg#1565). ~keep
+const MIN_EVIDENCED_CLUSTERS_FOR_SPLIT: usize = 2;
+
 /// Split table rows that contain text spans at multiple distinct Y positions into sub-rows.
 ///
 /// This handles the hybrid case where column boundaries come from vertical lines but there
@@ -2484,14 +2495,26 @@ const MIN_ROW_SPLIT_EVIDENCE_COLUMNS: usize = 2;
 /// `build_grid_from_lines`), so every row entering here is a producer-drawn row band, and a
 /// split is a hypothesis about *sub*-dividing that band, not about discovering rows from
 /// scratch. The drawn band boundary is authoritative; text baselines inside it are only
-/// advisory. A candidate split is therefore accepted only when EVERY resulting cluster is
-/// independently evidenced in >= `MIN_ROW_SPLIT_EVIDENCE_COLUMNS` columns; if even one
-/// cluster falls short (e.g. it holds only a wrapped cell's extra baseline) the whole split
-/// is rejected and the band is kept as the single, already-merged row it was built as
-/// (xberg-io/xberg#1555). This is deliberately all-or-nothing per band rather than a
-/// per-cluster filter: folding a deficient cluster into whichever neighbor happens to be
-/// nearest can manufacture false 2-column evidence out of two unrelated single-column
-/// artifacts, which is the exact failure mode this gate exists to prevent.
+/// advisory.
+///
+/// The band is treated as more than one row only once at least
+/// `MIN_EVIDENCED_CLUSTERS_FOR_SPLIT` of its Y-clusters are *independently* evidenced in
+/// `MIN_ROW_SPLIT_EVIDENCE_COLUMNS` columns; see that constant's doc for why one evidenced
+/// cluster is not trusted on its own. Once the band clears that bar, each remaining deficient
+/// cluster (one that does not clear the evidence bar by itself) is resolved on its own terms
+/// instead of vetoing the whole band (xberg-io/xberg#1565: a band mixing multi-column data
+/// rows with single-column section headings, lead-ins, or wrapped continuations was previously
+/// collapsed back into one mega-row in full, and the headings disappeared into whatever cell
+/// absorbed them). A deficient cluster folds into the cluster directly above it in reading
+/// order — the adjacent Y-cluster with the *larger* y, since PDF space is y-up and "above" on
+/// the page means a larger y — only when the fold cannot manufacture evidence that was not
+/// already there: the deficient cluster's populated columns must already be a non-empty subset
+/// of the columns the cluster above populates. That is the signature of a wrapped
+/// continuation line, which only ever repeats content in a column the cell above was already
+/// using. A deficient cluster that fails this test — because it has no cluster above it at
+/// all, or because it carries text in a column the cluster above left empty — is kept as a row
+/// of its own, one cell wide: that is what a heading or lead-in line inside a ruled band
+/// actually is.
 ///
 /// The evidence bar is capped at the band's own column count
 /// (`MIN_ROW_SPLIT_EVIDENCE_COLUMNS.min(num_cols)`): a single-column band has no second
@@ -2577,19 +2600,59 @@ fn split_rows_by_text_positions(
         // evidence) while a multi-column band still needs the full bar
         // (xberg-io/xberg#1555). ~keep
         let required_evidence_columns = MIN_ROW_SPLIT_EVIDENCE_COLUMNS.min(num_cols.max(1));
-        let split_is_evidenced = cluster_columns
+        let is_evidenced: Vec<bool> = cluster_columns
             .iter()
-            .all(|cols| cols.iter().filter(|&&present| present).count() >= required_evidence_columns);
+            .map(|cols| cols.iter().filter(|&&present| present).count() >= required_evidence_columns)
+            .collect();
+        let evidenced_cluster_count = is_evidenced.iter().filter(|&&evidenced| evidenced).count();
 
-        if !split_is_evidenced {
+        if evidenced_cluster_count < MIN_EVIDENCED_CLUSTERS_FOR_SPLIT {
             result.push(row);
             continue;
         }
 
-        let mut cluster_order = y_clusters.clone();
-        cluster_order.sort_by(|a, b| crate::utils::safe_float_cmp(*b, *a));
+        // Resolve a fold target for every deficient cluster: it folds into the cluster
+        // directly above it (ascending index + 1, i.e. the next-larger y) only when doing so
+        // introduces no column the cluster above didn't already have. Evidenced clusters never
+        // fold — they are anchors in their own right. Fold targets strictly increase (i can
+        // only point to i + 1), so following the chain in `resolve_group` always terminates
+        // without needing cycle protection. ~keep
+        let mut fold_into: Vec<Option<usize>> = vec![None; y_clusters.len()];
+        for i in 0..y_clusters.len().saturating_sub(1) {
+            if is_evidenced[i] {
+                continue;
+            }
+            let is_wrapped_continuation = cluster_columns[i]
+                .iter()
+                .zip(cluster_columns[i + 1].iter())
+                .all(|(&here, &above)| !here || above);
+            if is_wrapped_continuation {
+                fold_into[i] = Some(i + 1);
+            }
+        }
 
-        for &cluster_y in &cluster_order {
+        let resolve_group = |mut idx: usize| -> usize {
+            while let Some(next) = fold_into[idx] {
+                idx = next;
+            }
+            idx
+        };
+
+        let mut group_members: Vec<Vec<usize>> = vec![Vec::new(); y_clusters.len()];
+        for i in 0..y_clusters.len() {
+            group_members[resolve_group(i)].push(i);
+        }
+
+        // Emit one output row per non-empty group, topmost (largest y) first. A group's
+        // resolved anchor index always carries the largest y in the group, since folding only
+        // ever points toward a larger-y neighbor. ~keep
+        let mut group_order: Vec<usize> = (0..y_clusters.len())
+            .filter(|&g| !group_members[g].is_empty())
+            .collect();
+        group_order.sort_by(|&a, &b| crate::utils::safe_float_cmp(y_clusters[b], y_clusters[a]));
+
+        for group_idx in group_order {
+            let members = &group_members[group_idx];
             let mut new_row = TableRow::new(row.is_header);
             for ci in 0..num_cols {
                 let matching_indices: Vec<usize> = cell_indices[ci]
@@ -2598,7 +2661,10 @@ fn split_rows_by_text_positions(
                     .filter(|&idx| {
                         spans
                             .get(idx)
-                            .map(|s| (nearest_cluster_value(s.bbox.center().y) - cluster_y).abs() < 0.01)
+                            .map(|s| {
+                                let nearest = nearest_cluster_value(s.bbox.center().y);
+                                members.iter().any(|&m| (y_clusters[m] - nearest).abs() < 0.01)
+                            })
                             .unwrap_or(false)
                     })
                     .collect();
@@ -7650,5 +7716,51 @@ mod tests {
         assert_eq!(result[0].cells[1].text, "30");
         assert_eq!(result[1].cells[0].text, "Bob");
         assert_eq!(result[1].cells[1].text, "25");
+    }
+
+    /// REGRESSION xberg-io/xberg#1565: a producer-drawn band mixing genuine multi-column data
+    /// rows with a single-column section lead-in ("Mogelijke oorzaken:") must not collapse
+    /// back into one mega-row just because the lead-in itself lacks two-column evidence. The
+    /// two data rows are independently evidenced, so the split is accepted; the lead-in shares
+    /// no column with anything to its left/right that it doesn't already have on its own — it
+    /// is the topmost cluster and has no cluster above it to fold into — so it must survive as
+    /// its own one-cell-wide row instead of being fused into a data row's cell. ~keep
+    #[test]
+    fn split_rows_by_text_positions_keeps_heading_line_separate_amid_multi_column_rows() {
+        let spans = vec![
+            create_test_span("Mogelijke oorzaken:", 10.0, 220.0, 100.0, 0.0),
+            create_test_span("Symptom A", 10.0, 200.0, 40.0, 0.0),
+            create_test_span("Cause A", 60.0, 200.0, 40.0, 0.0),
+            create_test_span("Symptom B", 10.0, 180.0, 40.0, 0.0),
+            create_test_span("Cause B", 60.0, 180.0, 40.0, 0.0),
+        ];
+
+        let row = TableRow {
+            cells: vec![
+                prose_cell("Mogelijke oorzaken: Symptom A Symptom B"),
+                prose_cell("Cause A Cause B"),
+            ],
+            is_header: false,
+        };
+
+        let row_cell_span_indices = vec![vec![vec![0, 1, 3], vec![2, 4]]];
+        let config = TableDetectionConfig::strict();
+
+        let result = split_rows_by_text_positions(vec![row], &row_cell_span_indices, &spans, &config);
+
+        assert_eq!(
+            result.len(),
+            3,
+            "the heading and both genuine data rows must each survive as their own row"
+        );
+        assert_eq!(result[0].cells[0].text, "Mogelijke oorzaken:");
+        assert_eq!(
+            result[0].cells[1].text, "",
+            "the heading must not be fused into a data row's cell text"
+        );
+        assert_eq!(result[1].cells[0].text, "Symptom A");
+        assert_eq!(result[1].cells[1].text, "Cause A");
+        assert_eq!(result[2].cells[0].text, "Symptom B");
+        assert_eq!(result[2].cells[1].text, "Cause B");
     }
 }

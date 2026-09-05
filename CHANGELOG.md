@@ -180,6 +180,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a ruled troubleshooting page collapsing into one table, taking its section headings
+  down with it as cell text. `split_rows_by_text_positions` subdivides a producer-drawn row
+  band by the Y positions of the text inside it, and since the #1555 fix a candidate split was
+  accepted only when EVERY resulting Y-cluster carried text in at least two columns, with the
+  rejection all-or-nothing for the band. A band that mixes multi-column data rows with
+  single-column lines -- a section heading, a lead-in, a wrapped continuation -- can never
+  satisfy that, so one such line vetoed the split for the whole band and every line inside it
+  became cell text. On one 56-page installation manual, six ~20 pt row bands became a single
+  522 pt table, the document went from 808 elements to 759, and four numbered headings
+  disappeared from the outline. The band is now split once at least two of its clusters are
+  independently evidenced, and each deficient cluster is resolved on its own terms: it folds
+  into the cluster above only when it introduces no column that cluster left empty, which is
+  the signature of a wrapped continuation. Anything else -- a heading, a lead-in -- stays a row
+  of its own, one cell wide, which is what such a line inside a ruled band actually is. Two
+  independently evidenced clusters are required rather than one because a single evidenced
+  cluster can be coincidence, which is precisely the #1555 case
+  ([#1565](https://github.com/xberg-io/xberg/issues/1565)).
 - Fixed a word split across two touching PDF spans being rejoined with a space, so `prijs`
   extracted as `pri js`. The gap between the two spans measures 0.069 pt -- 0.008 em at 9 pt,
   against a 2.5 pt space glyph -- on an identical baseline at an identical font size, so no gap
