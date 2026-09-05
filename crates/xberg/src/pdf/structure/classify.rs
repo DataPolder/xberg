@@ -1,6 +1,6 @@
 //! Heading classification for paragraphs using font-size clustering.
 
-// TODO(quality-debt): 4 cyclomatic-complexity and 12 size/complexity findings
+// TODO(xberg-io/xberg#1567): 4 cyclomatic-complexity and 12 size/complexity findings
 // in this file, currently excluded via the quality-debt baseline in alef.toml. Splitting
 // these needs compiler-in-the-loop verification, not a mechanical pass. Delete this
 // note and the file's baseline entry together once it goes green. Help wanted.
