@@ -554,6 +554,29 @@ WebUI = "WebUI"
 traineddata = "traineddata"
 
 [workspace.poly.per-file-ignores]
+# Quality metrics do not apply to test code. A test function's length is its assertion
+# count and a table-driven test's arity mirrors its cases; splitting either to satisfy a
+# production-code maintainability metric makes the test harder to read, not easier. Only
+# `file-too-long` and `type-too-long` still apply here -- an oversized test FILE is a real
+# organisational problem, unlike an oversized test function. ~keep
+"**/tests/**/*" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/test/**/*" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/benches/**/*" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*_test.rs" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*_tests.rs" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/test_*.py" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*_test.py" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/conftest.py" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*.test.ts" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*.test.js" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*.test.mjs" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*.spec.ts" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*.spec.js" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*_test.go" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*Test.java" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*Tests.cs" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*_test.dart" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
+"**/*_spec.rb" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep", "too-many-parameters"]
 # Stylistic rules disabled repo-wide. Each is a formatting or idiom preference with no
 # correctness or security consequence, and each fires in volumes no one can hand-maintain
 # (`require-unicode-regexp` alone was 724 across the polyrepo, `no-inline-comments` 200).
@@ -752,6 +775,20 @@ traineddata = "traineddata"
 # Example scripts: legitimately print output, aren't packages, and skip full
 # annotations/docstrings. Not a builtin default — declared here in full. ~keep
 "**/examples/**" = ["ANN", "D100", "D103", "I001", "INP001", "PLR2004", "S101", "PLC0415", "SLF001", "T201", "typo"]
+# JS/TS counterpart of the `T201` relaxation already granted to `scripts/**/*.py`: these are
+# build, CI, publish-smoke and local-dev tools run from a terminal, where the console output IS
+# the deliverable (progress, failure reasons, the patched-file path) and there is no logger to
+# route it to. `crates/xberg-wasm/scripts` is the wasm-pack post-build patcher, in the same
+# class. Library code is deliberately NOT covered by these globs. ~keep
+"scripts/**" = ["no-console"]
+"crates/xberg-wasm/scripts/**" = ["no-console"]
+# The llamaindex reader/node-parser document a `raiseOnError: false` mode whose contract is to
+# warn and skip rather than throw, mirroring `logger.warning` in the Python packages. Node ships
+# no logging facility and the package takes no logger dependency, so `console.warn` (stderr) is
+# the implementation of that documented behaviour, not stray debug output. ~keep
+"integrations/node/llamaindex-xberg/src/nodeParser.ts" = ["no-console"]
+"integrations/node/llamaindex-xberg/src/reader.ts" = ["no-console"]
+"integrations/node/llamaindex-xberg/src/readerMapping.ts" = ["no-console"]
 
 [[crates]]
 name = "xberg"
