@@ -547,20 +547,37 @@ traineddata = "traineddata"
 
 [workspace.poly.per-file-ignores]
 # Alef-generated binding output — never hand-clean comments; regeneration owns them. ~keep
+#
+# The `quality` rules below are suppressed on these same paths for a second, distinct reason.
+# poly's quality tier measures function length, parameter count, file length, nesting depth and
+# cyclomatic complexity — metrics written for hand-maintained code. A generated FFI surface cannot
+# satisfy them and must not try: a binding function's parameter list mirrors the core API it
+# wraps one-for-one, and a single-file binding crate is one file by construction. poly deliberately
+# still REPORTS on generated files (only `--fix-generated` gates rewriting, and a `DO NOT EDIT`
+# banner holds nothing back), so without these entries the metrics fire on every regeneration and
+# no edit here could ever silence them — regeneration would revert it. Measured at 471 of the
+# repository's 3,048 findings. The `astgrep` and language-specific rules stay ACTIVE on these
+# paths on purpose: those catch real generator defects, and did — 8 `blocking-call-in-async-fn`
+# hits in the php trait bridge survive this suppression and are tracked as codegen bugs. ~keep
 ".cargo/config.toml" = ["comment", "doc-comment"]
 "Package.swift" = ["comment", "doc-comment"]
-"packages/**" = ["comment", "doc-comment"]
-"crates/xberg-node/**" = ["comment", "doc-comment"]
-"crates/xberg-php/**" = ["comment", "doc-comment"]
-"crates/xberg-jni/**" = ["comment", "doc-comment"]
+"packages/**" = ["comment", "doc-comment", "cyclomatic-complexity", "file-too-long", "function-too-long", "nesting-too-deep", "too-many-parameters", "type-too-long"]
+"crates/xberg-node/**" = ["comment", "doc-comment", "cyclomatic-complexity", "file-too-long", "function-too-long", "nesting-too-deep", "too-many-parameters", "type-too-long"]
+"crates/xberg-php/**" = ["comment", "doc-comment", "cyclomatic-complexity", "file-too-long", "function-too-long", "nesting-too-deep", "too-many-parameters", "type-too-long"]
+"crates/xberg-jni/**" = ["comment", "doc-comment", "cyclomatic-complexity", "file-too-long", "function-too-long", "nesting-too-deep", "too-many-parameters", "type-too-long"]
 # xberg-ffi/py/wasm are MIXED: only src/lib.rs (+ ffi build.rs/cbindgen.toml) is
 # alef-generated; the other modules are hand-written and get the uncomment sweep. ~keep
-"crates/xberg-ffi/src/lib.rs" = ["comment", "doc-comment"]
+"crates/xberg-ffi/src/lib.rs" = ["comment", "doc-comment", "cyclomatic-complexity", "file-too-long", "function-too-long", "nesting-too-deep", "too-many-parameters", "type-too-long"]
 "crates/xberg-ffi/build.rs" = ["comment", "doc-comment"]
-"crates/xberg-ffi/cbindgen.toml" = ["comment", "doc-comment"]
+"crates/xberg-ffi/cbindgen.toml" = ["comment", "doc-comment", "cyclomatic-complexity", "file-too-long", "function-too-long", "nesting-too-deep", "too-many-parameters", "type-too-long"]
 "crates/xberg-ffi/include/xberg.h" = ["comment", "doc-comment"]
-"crates/xberg-py/src/lib.rs" = ["comment", "doc-comment"]
-"crates/xberg-wasm/src/lib.rs" = ["comment", "doc-comment"]
+"crates/xberg-py/src/lib.rs" = ["comment", "doc-comment", "cyclomatic-complexity", "file-too-long", "function-too-long", "nesting-too-deep", "too-many-parameters", "type-too-long"]
+"crates/xberg-wasm/src/lib.rs" = ["comment", "doc-comment", "cyclomatic-complexity", "file-too-long", "function-too-long", "nesting-too-deep", "too-many-parameters", "type-too-long"]
+# Alef-generated API reference pages and the generated CLI README: one page per language, each a
+# full rendering of the public surface, so `file-too-long` is a property of the surface's size
+# rather than of anything editable here. ~keep
+"docs-site/src/content/docs/reference/**" = ["file-too-long"]
+"crates/xberg-cli/README.md" = ["file-too-long"]
 "**/text_repair.rs" = ["typo"]
 # Executable CI helper (git mode 100755); poly runs ruff via stdin and cannot
 # see the exec bit, so EXE001 always false-fires on shebang'd scripts. ~keep
