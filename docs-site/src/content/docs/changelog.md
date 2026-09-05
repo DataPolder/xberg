@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added HWPX (Hangul Word Processor XML) extraction to the WebAssembly package. `unhwp`
+  target-gates its ZIP reader to a deflate-only, LZMA-free build under `wasm32`, so the
+  native-C dependency that previously kept `hwpx` off `wasm-target` does not apply there.
 - Added diagram recovery from flat OpenDocument drawings (`.fodg`), including content-based
   detection of the `application/vnd.oasis.opendocument.graphics-flat-xml` MIME type. Connectors
   name their endpoints outright, so the recovered graph is exact rather than inferred from
@@ -71,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `classify_chunks_owned` for classifying and returning an owned document.
 - Exposed chunk-classification and LLM concurrency, provider, cache, budget, and rate-limit configuration
   types at the Rust crate root.
+- Added `OcrConfig::security_limits`. `ExtractionConfig::security_limits` is now threaded through to
+  every OCR route — embedded images, Tesseract, PaddleOCR, and scanned PDF pages — instead of each
+  route decoding images under a hardcoded `SecurityLimits::default()`
+  ([#1554](https://github.com/xberg-io/xberg/issues/1554)).
 
 ### Changed
 
@@ -175,6 +182,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed PDF table reconstruction dropping early rows when data-start inference classified more
+  than two leading rows as headers. The two-row header cap is retained, but surplus inferred
+  header rows are now demoted to data in source order instead of being discarded
+  ([#1558](https://github.com/xberg-io/xberg/issues/1558)).
+- Fixed native PDF top-to-bottom reading order splitting one visual table row at an absolute
+  3-point coordinate-band boundary, which could move an article number before its position and
+  fuse the two identifiers. Visual rows now use an anchored, font-scaled tolerance, reconstructed
+  lines restore left-to-right fragment order, and narrative assembly preserves a separator after
+  a severe geometric backtrack ([#1560](https://github.com/xberg-io/xberg/issues/1560)).
+- Fixed PDF dehyphenation treating inline run/style boundaries as visual line wraps. Suspended
+  hyphens such as `vracht- en verzendkosten` are now preserved, while compounds genuinely split
+  across different baselines are still rejoined
+  ([#1561](https://github.com/xberg-io/xberg/issues/1561)).
+- Fixed DOCX page attribution staying permanently low after Word omitted a rendered-page marker
+  between vertically stacked inline images. The parser now conservatively infers missing breaks
+  from each section's usable page height, including documents with different section geometries
+  ([#1559](https://github.com/xberg-io/xberg/issues/1559)).
+- Fixed DOCX DrawingML and VML text boxes dropping XML and numeric character references such as
+  `&amp;` and `&#8364;` from extracted text
+  ([#1562](https://github.com/xberg-io/xberg/issues/1562)).
+- Fixed OCR image decoding ignoring the caller's configured `security_limits`. Every OCR route —
+  embedded images, Tesseract, PaddleOCR, and scanned PDF pages — decoded raw image bytes under a
+  hardcoded `SecurityLimits::default()`, so raising `ExtractionConfig::security_limits` to accept a
+  large scan still had it rejected at the OCR decode step. The configured limits now reach all four
+  routes, and PaddleOCR also honors a per-call `backend_options["security_limits"]` override
+  ([#1554](https://github.com/xberg-io/xberg/issues/1554)).
+- Fixed a drawn PDF table row with a wrapped cell being shattered into extra rows. Splitting a row
+  band by text Y-position now requires at least two columns to have independent text evidence for
+  every candidate row before splitting; a band where only one column wraps to a second line now
+  stays a single row ([#1555](https://github.com/xberg-io/xberg/issues/1555)).
+- Fixed monospace font detection matching any font name containing "mono", misclassifying foundry
+  names such as "Monotype Corsiva" as a monospace font and skewing the word-spacing heuristic and
+  code-block detection that depend on it. "Monotype" is now excluded from the substring match, and
+  the PDF text run buffer's separate ad hoc monospace check was replaced with the same shared
+  helper.
+- Fixed a standalone multi-line monospace paragraph not being recognized as a code block unless it
+  had a consecutive monospace neighbor paragraph. A lone paragraph that already carries two or more
+  monospace lines is now fenced as a code block on its own
+  ([#1557](https://github.com/xberg-io/xberg/issues/1557)).
+- Fixed PDF text extraction silently corrupting ordinary text. A contextual ligature-repair pass
+  rewrote `:` to `ti` and an uppercase `M` between lowercase letters to `tti` on every element of
+  every document, mangling identifiers, ratios, times, URLs, and units such as `nM` (for example
+  `aMb` became `attib`). The repair was introduced for European PDFs that encode ligature glyphs
+  at ASCII code points, but it was gated at the time on a per-font broken-CMap signal from
+  pdfium's `has_unicode_map_error()`. That gate was lost when pdfium was removed as a backend and
+  was never ported to pdf_oxide, leaving the rewrite running unconditionally. Both substitutions
+  are removed; they can only return alongside a real document-level evidence gate
+  ([#1556](https://github.com/xberg-io/xberg/issues/1556)).
 - Fixed optional fields in the Python and PHP bindings rejecting payloads that omit them.
   The generated mirror structs lost their `#[serde(default)]` attributes, so deserializing a
   document whose JSON left an optional field out failed instead of falling back to the default.
