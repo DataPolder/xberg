@@ -416,6 +416,14 @@ use-default-ignores = true
 preserve-patterns = ["SAFETY", "SPDX", "Copyright", "License", "licensed under", "namespace"]
 
 [workspace.poly.typos.extend-words]
+# word-split example "eigenv"+"alue" in a kerning comment ~keep
+alue = "alue"
+# PDF text-extraction test fixture ~keep
+beng = "beng"
+# Dutch-language table-detection test fixture ~keep
+conversie = "conversie"
+# PDF text-extraction test fixture ~keep
+liev = "liev"
 # These exact tokens are audited corpus/language terms, tokenizer or hyphenation fragments,
 # standardized glyph/PDF names, and deliberately malformed regression inputs. They must remain
 # verbatim for the tests and formats they represent; this is not a blanket typo suppression. ~keep
