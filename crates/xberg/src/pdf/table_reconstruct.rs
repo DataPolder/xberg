@@ -2091,6 +2091,58 @@ mod tests {
         assert_eq!(texts, vec!["2", "per", "ketel,", "prijs", "per", "meter"]);
     }
 
+    /// FINDING 1 (adversarial review): determines the exact gutter, in points at a 9pt
+    /// font, at which `segments_are_touching` starts fusing two *different table columns*
+    /// (a "100" cell followed by a "5" cell) rather than a genuine split word. The
+    /// analytic threshold is `font_size * TOUCHING_SPAN_GAP_EM_RATIO` = `9.0 * 0.025` =
+    /// 0.225pt (confirmed in f32 arithmetic separately). This test pins that boundary
+    /// empirically through the real `segments_to_words` path, not just the predicate.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn digit_column_fusion_boundary_for_9pt_font() {
+        let font_size = 9.0_f32;
+        let build = |gap: f32| {
+            let seg_a = make_seg("100", 100.0, 500.0, 15.0, font_size);
+            let seg_b = make_seg("5", 100.0 + 15.0 + gap, 500.0, 5.0, font_size);
+            segments_to_words(&[seg_a, seg_b], 800.0)
+        };
+
+        // Just under the 0.225pt threshold: the guard still treats this as one
+        // split word and fuses "100" + "5" into "1005".
+        let texts: Vec<String> = build(0.20).into_iter().map(|w| w.text).collect();
+        assert_eq!(
+            texts,
+            vec!["1005".to_string()],
+            "expected fusion just below the 0.225pt threshold"
+        );
+
+        // At/just over the 0.225pt threshold: the two columns stay separate words.
+        let texts: Vec<String> = build(0.25).into_iter().map(|w| w.text).collect();
+        assert_eq!(
+            texts,
+            vec!["100".to_string(), "5".to_string()],
+            "expected no fusion at/above the 0.225pt threshold"
+        );
+    }
+
+    /// FINDING 1 (adversarial review), continued: is a sub-quarter-point gutter
+    /// physically achievable in a real ruled table? A hairline rule stroke is
+    /// commonly ~0.5pt and cell text needs a non-zero clearance from that rule on
+    /// each side to avoid visually touching it (a documents-in-the-wild minimum is
+    /// on the order of 0.5-1pt per side). This test uses a deliberately tight but
+    /// still physically real gutter (1.5pt: a 0.5pt rule plus 0.5pt padding on each
+    /// side) between two adjacent numeric-column segments and asserts they do NOT
+    /// fuse — guarding the currently-unmodified behavior rather than a hypothetical.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn ruled_table_realistic_gutter_does_not_fuse_adjacent_numeric_columns() {
+        let seg_a = make_seg("100", 287.864, 331.641, 15.0, 9.0);
+        let seg_b = make_seg("5", 287.864 + 15.0 + 1.5, 331.641, 5.0, 9.0);
+        let words = segments_to_words(&[seg_a, seg_b], 800.0);
+        let texts: Vec<&str> = words.iter().map(|word| word.text.as_str()).collect();
+        assert_eq!(texts, vec!["100", "5"]);
+    }
+
     #[test]
     fn test_post_process_rejects_prose_as_table() {
         let table = vec![

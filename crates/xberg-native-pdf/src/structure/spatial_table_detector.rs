@@ -7763,4 +7763,164 @@ mod tests {
         assert_eq!(result[2].cells[0].text, "Symptom B");
         assert_eq!(result[2].cells[1].text, "Cause B");
     }
+
+    /// FINDING 2 (adversarial review): does the #1565 row-split fix create a new
+    /// single-cell-wide row shaped exactly like `strip_form_numbering_artifacts`'s Phase 1
+    /// numbering-artifact signature (every cell empty or a lone digit 1-9, with at least one
+    /// lone digit) out of what used to be a non-foldable single-column lead-in? Runs the
+    /// *whole* `finalize_intersection_tables` pipeline (split, then artifact-strip, then
+    /// empty-row table segmentation) rather than just `split_rows_by_text_positions`, since
+    /// that is the real caller order and Phase 1 runs immediately after the split.
+    ///
+    /// `min_table_cells` is deliberately set to 1 so the outer table-emission gate cannot
+    /// mask what happens to this one row -- the question under test is row-level survival,
+    /// not table-level acceptance.
+    #[test]
+    fn finalize_intersection_tables_deletes_lone_digit_lead_in_row() {
+        let spans = vec![
+            create_test_span("5", 10.0, 220.0, 5.0, 0.0),
+            create_test_span("Symptom A", 10.0, 200.0, 40.0, 0.0),
+            create_test_span("Cause A", 60.0, 200.0, 40.0, 0.0),
+            create_test_span("Symptom B", 10.0, 180.0, 40.0, 0.0),
+            create_test_span("Cause B", 60.0, 180.0, 40.0, 0.0),
+        ];
+
+        let row = TableRow {
+            cells: vec![prose_cell("5 Symptom A Symptom B"), prose_cell("Cause A Cause B")],
+            is_header: false,
+        };
+
+        let row_cell_span_indices = vec![vec![vec![0, 1, 3], vec![2, 4]]];
+        let config = TableDetectionConfig {
+            min_table_cells: 1,
+            ..TableDetectionConfig::strict()
+        };
+
+        // Confirm, as a checkpoint, that the split itself still isolates "5" into its own
+        // one-cell-wide row -- the same shape as the heading test above, just digit-shaped
+        // instead of alphabetic. If this checkpoint ever stops holding the rest of this test
+        // is testing a different mechanism than the one under review.
+        let split_only = split_rows_by_text_positions(vec![row.clone()], &row_cell_span_indices, &spans, &config);
+        assert_eq!(
+            split_only.len(),
+            3,
+            "checkpoint: split must isolate the lead-in as its own row"
+        );
+        assert_eq!(split_only[0].cells[0].text, "5");
+        assert_eq!(split_only[0].cells[1].text, "");
+
+        let tables = finalize_intersection_tables(vec![row], &row_cell_span_indices, &spans, &config, 2);
+
+        assert_eq!(tables.len(), 1, "the two evidenced data rows must still form one table");
+        let surviving_rows: Vec<Vec<&str>> = tables[0]
+            .rows
+            .iter()
+            .map(|r| r.cells.iter().map(|c| c.text.as_str()).collect())
+            .collect();
+
+        // Documents observed behavior: Phase 1 of `strip_form_numbering_artifacts` deletes
+        // this row whole. This is the same rule the module already pins for a row that was
+        // ALWAYS a standalone lone-digit row (`test_strip_form_numbering_artifacts` row 0):
+        // that rule is not new, and reachable-from-a-real-band content shaped exactly like a
+        // classic form row-number (a bare digit, sharing no column with any neighboring data)
+        // is indistinguishable, by any signal Phase 1 has, from the artifact it exists to
+        // remove. Judgment call: NOT a regression fix here -- see the finding-2 report for
+        // why a content-preserving change is not being made.
+        assert_eq!(
+            surviving_rows,
+            vec![vec!["Symptom A", "Cause A"], vec!["Symptom B", "Cause B"]],
+            "lone-digit lead-in row is removed by Phase 1, same as a pre-existing standalone artifact row"
+        );
+    }
+
+    /// "CLEARED" CLAIM 1 (adversarial review): a multi-hop fold chain must not manufacture
+    /// column evidence that was never actually present. Three-cluster band: the topmost and
+    /// bottommost clusters are each independently evidenced (2 columns), and a middle
+    /// deficient cluster carries text in only ONE of those two columns. The deficient
+    /// cluster's own column footprint ({0}) is a subset of the cluster above it ({0, 1}), so
+    /// it is allowed to fold -- but the emitted rows must still reflect only the columns each
+    /// physical cluster actually had text in; folding must never cause a group's rendered
+    /// column count, or the per-column text, to exceed what the real spans support.
+    #[test]
+    fn split_rows_by_text_positions_fold_chain_does_not_fabricate_column_evidence() {
+        let spans = vec![
+            // Bottom cluster (y=180): evidenced, both columns. ~keep
+            create_test_span("Alice", 10.0, 180.0, 30.0, 0.0),
+            create_test_span("30", 60.0, 180.0, 10.0, 0.0),
+            // Middle cluster (y=200): deficient, column 0 only -- a wrapped continuation of
+            // the row above it (y=220), not of the row below. ~keep
+            create_test_span("continued", 10.0, 200.0, 40.0, 0.0),
+            // Top cluster (y=220): evidenced, both columns. ~keep
+            create_test_span("Bob", 10.0, 220.0, 30.0, 0.0),
+            create_test_span("25", 60.0, 220.0, 10.0, 0.0),
+        ];
+
+        let row = TableRow {
+            cells: vec![prose_cell("Alice continued Bob"), prose_cell("30 25")],
+            is_header: false,
+        };
+
+        let row_cell_span_indices = vec![vec![vec![0, 2, 3], vec![1, 4]]];
+        let config = TableDetectionConfig::strict();
+
+        let result = split_rows_by_text_positions(vec![row], &row_cell_span_indices, &spans, &config);
+
+        assert_eq!(
+            result.len(),
+            2,
+            "the deficient middle cluster must fold, not survive alone"
+        );
+        // Top group (y=220 anchor with y=200 folded in): column 0 gets both lines, column 1
+        // only ever had "25" -- folding must not invent a "25 continued" or duplicate value. ~keep
+        assert_eq!(result[0].cells[0].text, "Bob\ncontinued");
+        assert_eq!(
+            result[0].cells[1].text, "25",
+            "folding a column-0-only cluster must not fabricate evidence in column 1"
+        );
+        assert_eq!(result[1].cells[0].text, "Alice");
+        assert_eq!(result[1].cells[1].text, "30");
+    }
+
+    /// "CLEARED" CLAIM 2 (adversarial review): every span fed into a deficient-cluster-heavy
+    /// band must land in exactly one output cell -- never duplicated across two groups, and
+    /// never silently dropped by the `members.iter().any(...)` filter in the final
+    /// cell-assembly pass. Uses the same fold-chain fixture as claim 1 and checks span
+    /// accounting by content rather than by trusting row/column counts alone.
+    #[test]
+    fn split_rows_by_text_positions_fold_chain_drops_no_span_and_duplicates_none() {
+        let spans = vec![
+            create_test_span("Alice", 10.0, 180.0, 30.0, 0.0),
+            create_test_span("30", 60.0, 180.0, 10.0, 0.0),
+            create_test_span("continued", 10.0, 200.0, 40.0, 0.0),
+            create_test_span("Bob", 10.0, 220.0, 30.0, 0.0),
+            create_test_span("25", 60.0, 220.0, 10.0, 0.0),
+        ];
+
+        let row = TableRow {
+            cells: vec![prose_cell("Alice continued Bob"), prose_cell("30 25")],
+            is_header: false,
+        };
+
+        let row_cell_span_indices = vec![vec![vec![0, 2, 3], vec![1, 4]]];
+        let config = TableDetectionConfig::strict();
+
+        let result = split_rows_by_text_positions(vec![row], &row_cell_span_indices, &spans, &config);
+
+        let mut seen_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for r in &result {
+            for c in &r.cells {
+                for word in c.text.split_whitespace() {
+                    *seen_counts.entry(word).or_insert(0) += 1;
+                }
+            }
+        }
+        for expected in ["Alice", "30", "continued", "Bob", "25"] {
+            assert_eq!(
+                seen_counts.get(expected).copied().unwrap_or(0),
+                1,
+                "span text {expected:?} must appear exactly once across all output cells, got {:?}",
+                seen_counts.get(expected)
+            );
+        }
+    }
 }
