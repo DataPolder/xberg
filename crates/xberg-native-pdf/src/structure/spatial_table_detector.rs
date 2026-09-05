@@ -2821,10 +2821,26 @@ fn detect_tables_from_intersections(
 ) -> Vec<Table> {
     let groups = build_grid_from_lines(lines, config);
 
+    // The same V edges the grid was built from, so every band can be asked whether a
+    // column rule actually runs through it rather than only touching its corners. ~keep
+    let band_v_edges = {
+        let (_, mut v) = extract_edges(lines);
+        snap_and_merge(&mut v);
+        v
+    };
+
     let mut tables = Vec::new();
-    for (group_cells, xs, ys, num_cols) in &groups {
+    for (group_cells, xs, ys, num_cols, cells_are_intersections) in &groups {
         let Some((table_rows, row_cell_span_indices)) =
-            assign_spans_to_intersection_grid(group_cells, xs, ys, *num_cols, spans)
+            assign_spans_to_intersection_grid(
+                group_cells,
+                xs,
+                ys,
+                *num_cols,
+                spans,
+                &band_v_edges,
+                *cells_are_intersections,
+            )
         else {
             continue;
         };
@@ -2859,11 +2875,13 @@ fn detect_tables_from_intersections(
 /// Steps 1-4: extract edges, find intersections, build cells, and group them
 /// into per-table cell groups with their grid boundaries.
 ///
-/// Returns one `(group_cells, xs, ys, num_cols)` tuple per table group.
+/// Returns one `(group_cells, xs, ys, num_cols, cells_are_intersections)` tuple per
+/// table group. The last field says whether the cells came from real line crossings
+/// or from the projected extended grid. ~keep
 fn build_grid_from_lines(
     lines: &[crate::elements::PathContent],
     config: &TableDetectionConfig,
-) -> Vec<(Vec<IntersectionCell>, Vec<f32>, Vec<f32>, usize)> {
+) -> Vec<(Vec<IntersectionCell>, Vec<f32>, Vec<f32>, usize, bool)> {
     let (mut h_edges, mut v_edges) = extract_edges(lines);
     snap_and_merge(&mut h_edges);
     snap_and_merge(&mut v_edges);
@@ -2885,10 +2903,15 @@ fn build_grid_from_lines(
         }
     }
 
+    // Whether the cells below are real crossings or a projection. Only real
+    // crossings carry the per-band column evidence `assign_spans_to_intersection_grid`
+    // needs; see `band_column_groups` for what happens without it. ~keep
+    let mut cells_are_intersections = intersections.len() >= 4;
     let cells = if intersections.len() >= 4 {
         let c = build_cells_from_intersections(&intersections);
         if c.is_empty() {
             // Lines exist but don't form real intersection cells — try extended grid. ~keep
+            cells_are_intersections = false;
             build_extended_grid_cells(&h_edges, &v_edges)
         } else {
             c
@@ -2934,9 +2957,61 @@ fn build_grid_from_lines(
             continue;
         }
 
-        result.push((group_cells, xs, ys, num_cols));
+        result.push((group_cells, xs, ys, num_cols, cells_are_intersections));
     }
     result
+}
+
+/// Tolerance, in points, for accepting a V edge as spanning a band's full height.
+/// A rule drawn to a hair inside the band's own boundaries still separates it. ~keep
+const BAND_RULE_SPAN_TOL: f32 = 1.0;
+
+/// The column groups of one row band: consecutive grid columns that no drawn vertical
+/// rule separates, as `(first_col, last_col)` pairs.
+///
+/// `build_cells_from_intersections` accepts a cell as soon as its four corners are
+/// crossing points, which is not the same as its sides being drawn. Where a producer
+/// stacks ruled bands with an unruled strip between them — a section heading, a
+/// full-width note, a lead-in — the V rules of the bands above and below END on the
+/// strip's own H rules, so all four of the strip's corners exist and the strip is cut
+/// at column positions it does not have. Every line inside it that crosses one of
+/// those positions is then split into cells and rejoined with a cell separator, which
+/// is how `8.2.7 Geen warmwater (alleen bij toepassing indirect gestookte boiler)`
+/// arrives as three cells cut mid-word (xberg-io/xberg#1565).
+///
+/// A boundary therefore counts only when a V edge actually spans the band. A band no
+/// rule crosses is one full-width cell, which is also what makes its own column count
+/// available to `split_rows_by_text_positions`: the evidence bar there is already
+/// capped at the band's column count, but reads it from the table-wide row width, so
+/// a one-column strip is judged against a bar it can never meet.
+///
+/// Only meaningful for cells built from real crossings. The extended grid
+/// (`build_extended_grid_cells`) exists precisely because the H and V lines do NOT
+/// cross, so no V edge spans any band there and every row would collapse into a single
+/// cell; `cells_are_intersections` keeps that path on the plain per-column behaviour. ~keep
+fn band_column_groups(
+    xs: &[f32],
+    y_lo: f32,
+    y_hi: f32,
+    num_cols: usize,
+    v_edges: &[Edge],
+    cells_are_intersections: bool,
+) -> Vec<(usize, usize)> {
+    let boundary_is_drawn = |x: f32| -> bool {
+        v_edges.iter().any(|e| {
+            (e.coord - x).abs() <= SNAP_TOL && e.start <= y_lo + BAND_RULE_SPAN_TOL && e.end >= y_hi - BAND_RULE_SPAN_TOL
+        })
+    };
+
+    let mut groups = Vec::new();
+    let mut start = 0usize;
+    for c in 0..num_cols {
+        if c + 1 == num_cols || !cells_are_intersections || boundary_is_drawn(xs[c + 1]) {
+            groups.push((start, c));
+            start = c + 1;
+        }
+    }
+    groups
 }
 
 /// Assign text spans to grid cells and build table rows with per-cell span
@@ -2947,6 +3022,8 @@ fn assign_spans_to_intersection_grid(
     ys: &[f32],
     num_cols: usize,
     spans: &[TextSpan],
+    v_edges: &[Edge],
+    cells_are_intersections: bool,
 ) -> Option<(Vec<TableRow>, Vec<Vec<Vec<usize>>>)> {
     let num_rows = if ys.len() >= 2 {
         ys.len() - 1
@@ -2992,33 +3069,46 @@ fn assign_spans_to_intersection_grid(
     for &ri in &row_order {
         let mut row = TableRow::new(false);
         let mut cell_indices_for_row: Vec<Vec<usize>> = Vec::new();
-        for ci in 0..num_cols {
-            if !grid_has_cell[ri][ci] {
-                // Still emit empty cell so column count stays consistent. ~keep
-                row.cells.push(TableCell {
-                    text: String::new(),
-                    spans: Vec::new(),
-                    colspan: 1,
-                    rowspan: 1,
-                    mcids: Vec::new(),
-                    bbox: Some(crate::geometry::Rect::new(
-                        xs[ci],
-                        ys[ri],
-                        xs[ci + 1] - xs[ci],
-                        ys[ri + 1] - ys[ri],
-                    )),
-                    is_header: false,
-                });
-                cell_indices_for_row.push(Vec::new());
-                continue;
+        let column_groups = band_column_groups(
+            xs,
+            ys[ri],
+            ys[ri + 1],
+            num_cols,
+            v_edges,
+            cells_are_intersections,
+        );
+        for (first_col, last_col) in column_groups {
+            // One cell per group of columns no drawn rule separates: `colspan` on the
+            // grid's own column count, so a row still describes the same width. ~keep
+            let colspan = (last_col - first_col + 1) as u32;
+            let group_has_cell = (first_col..=last_col).any(|c| grid_has_cell[ri][c]);
+            let mut group_spans: Vec<usize> = Vec::new();
+            if group_has_cell {
+                for c in first_col..=last_col {
+                    group_spans.extend_from_slice(&grid_spans[ri][c]);
+                }
+                // Back to source order, which is reading order within the band: the
+                // per-column buckets would otherwise emit column by column. ~keep
+                group_spans.sort_unstable();
+                group_spans.dedup();
             }
-            let cell_text = extract_cell_text(&grid_spans[ri][ci], spans);
-            let mcids: Vec<u32> = grid_spans[ri][ci]
+            let cell_bbox = crate::geometry::Rect::new(
+                xs[first_col],
+                ys[ri],
+                xs[last_col + 1] - xs[first_col],
+                ys[ri + 1] - ys[ri],
+            );
+            let cell_text = if group_has_cell {
+                extract_cell_text(&group_spans, spans)
+            } else {
+                // Still emit the cell so the row keeps the band's full width. ~keep
+                String::new()
+            };
+            let mcids: Vec<u32> = group_spans
                 .iter()
                 .filter_map(|&idx| spans.get(idx).and_then(|s| s.mcid))
                 .collect();
-            let cell_bbox = crate::geometry::Rect::new(xs[ci], ys[ri], xs[ci + 1] - xs[ci], ys[ri + 1] - ys[ri]);
-            let cell_spans = grid_spans[ri][ci]
+            let cell_spans = group_spans
                 .iter()
                 .filter_map(|&idx| spans.get(idx).cloned())
                 .collect::<Vec<_>>();
@@ -3026,13 +3116,13 @@ fn assign_spans_to_intersection_grid(
             row.cells.push(TableCell {
                 text: cell_text,
                 spans: cell_spans,
-                colspan: 1,
+                colspan,
                 rowspan: 1,
                 mcids,
                 bbox: Some(cell_bbox),
                 is_header: false,
             });
-            cell_indices_for_row.push(grid_spans[ri][ci].clone());
+            cell_indices_for_row.push(group_spans);
         }
         table_rows.push(row);
         row_cell_span_indices.push(cell_indices_for_row);
@@ -4509,13 +4599,81 @@ mod tests {
         ];
 
         let (rows, _) =
-            assign_spans_to_intersection_grid(&group_cells, &[0.0, 40.0, 70.0, 100.0], &[0.0, 20.0], 3, &spans)
+            assign_spans_to_intersection_grid(&group_cells, &[0.0, 40.0, 70.0, 100.0], &[0.0, 20.0], 3, &spans, &[], false)
                 .expect("synthetic grid should be valid");
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].cells[0].text, "2731");
         assert_eq!(rows[0].cells[1].text, "832");
         assert_eq!(rows[0].cells[2].text, "Europe");
+    }
+
+    /// xberg-io/xberg#1565: a producer stacking ruled bands with an unruled strip between
+    /// them (a section heading, a full-width note) leaves all four of the strip's corners
+    /// as crossing points, because the V rules of the bands above and below end on the
+    /// strip's own H rules. The strip must not be cut at column positions no rule gives
+    /// it: a line crossing one of them comes back as several cells joined by a cell
+    /// separator, mid-word where the rule falls mid-word. ~keep
+    #[test]
+    fn unruled_band_is_one_full_width_cell() {
+        // Two bands stacked: y[0,20] is ruled into three columns, y[20,60] is a strip
+        // with only its own H rules. The four-corner rule invents cells in both. ~keep
+        let group_cells: Vec<IntersectionCell> = [(0.0, 40.0), (40.0, 70.0), (70.0, 100.0)]
+            .iter()
+            .flat_map(|&(x1, x2)| {
+                [
+                    IntersectionCell {
+                        x1,
+                        y1: 0.0,
+                        x2,
+                        y2: 20.0,
+                    },
+                    IntersectionCell {
+                        x1,
+                        y1: 20.0,
+                        x2,
+                        y2: 60.0,
+                    },
+                ]
+            })
+            .collect();
+        // Column rules exist only through the lower band. ~keep
+        let v_edges = [0.0, 40.0, 70.0, 100.0].map(|coord| Edge {
+            coord,
+            start: 0.0,
+            end: 20.0,
+        });
+        let spans = vec![
+            create_test_span("Symptom", 5.0, 5.0, 30.0, 10.0),
+            create_test_span("Ja", 45.0, 5.0, 20.0, 10.0),
+            create_test_span("Fix it", 75.0, 5.0, 20.0, 10.0),
+            // One heading line running the full width, straddling both rules. ~keep
+            create_test_span("8.2.7 Geen warmwater (indirect", 5.0, 35.0, 55.0, 10.0),
+            create_test_span("gestookte boiler)", 68.0, 35.0, 28.0, 10.0),
+        ];
+
+        let (rows, _) = assign_spans_to_intersection_grid(
+            &group_cells,
+            &[0.0, 40.0, 70.0, 100.0],
+            &[0.0, 20.0, 60.0],
+            3,
+            &spans,
+            &v_edges,
+            true,
+        )
+        .expect("synthetic grid should be valid");
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].cells.len(), 1, "the unruled strip is one cell, not three");
+        assert_eq!(rows[0].cells[0].colspan, 3);
+        assert_eq!(
+            rows[0].cells[0].text, "8.2.7 Geen warmwater (indirect gestookte boiler)",
+            "a full-width line must not be cut at column positions the band does not have"
+        );
+        assert_eq!(rows[1].cells.len(), 3, "the ruled band keeps its columns");
+        assert_eq!(rows[1].cells[0].text, "Symptom");
+        assert_eq!(rows[1].cells[1].text, "Ja");
+        assert_eq!(rows[1].cells[2].text, "Fix it");
     }
 
     #[test]
