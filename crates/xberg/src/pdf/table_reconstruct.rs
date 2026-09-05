@@ -43,6 +43,8 @@ const FOOTER_MIN_ALPHA_PERCENT: usize = 70;
 
 #[cfg(feature = "pdf")]
 use super::hierarchy::SegmentData;
+#[cfg(feature = "pdf")]
+use super::structure::lines::segments_are_touching;
 
 /// Convert a PDF `SegmentData` to an `HocrWord` for table reconstruction, adding
 /// `advance_offset`/`top_offset` to the segment's upright-frame position before
@@ -268,13 +270,74 @@ pub(crate) fn page_has_lifted_rotation_frame(segments: &[SegmentData], page_heig
 #[cfg(feature = "pdf")]
 pub(crate) fn segments_to_words(segments: &[SegmentData], page_height: f32) -> Vec<HocrWord> {
     let lifts = rotation_lifts_for_page(segments, page_height);
-    segments
+    let per_segment_words: Vec<Vec<HocrWord>> = segments
         .iter()
-        .flat_map(|seg| {
+        .map(|seg| {
             let (advance_offset, top_offset) = lift_for_rotation(&lifts, seg.rotation_degrees);
             split_segment_to_words_lifted(seg, page_height, advance_offset, top_offset)
         })
-        .collect()
+        .collect();
+    merge_touching_segment_boundaries(segments, per_segment_words)
+}
+
+/// Merges a touching word split across two adjacent segments (xberg-io/xberg#1566) into a
+/// single `HocrWord` before table-cell assignment, so `assign_words_to_cells`'s
+/// `cell_words.join(" ")` never re-inserts the space that `split_segment_to_words_lifted`
+/// dropped by construction. `HocrWord` is `u32`-rounded and carries no font size or baseline,
+/// so a sub-point gap like the reported case (0.069 pt) is not representable once words exist
+/// — the check must run here, on `SegmentData`, one segment boundary at a time.
+///
+/// Only the last word of one segment's group and the first word of the next segment's group
+/// can ever be a split-word boundary, since a single segment's own words were already produced
+/// by whitespace-splitting its own text.
+#[cfg(feature = "pdf")]
+fn merge_touching_segment_boundaries(
+    segments: &[SegmentData],
+    mut per_segment_words: Vec<Vec<HocrWord>>,
+) -> Vec<HocrWord> {
+    for boundary in 0..per_segment_words.len().saturating_sub(1) {
+        let is_touching = match (
+            per_segment_words[boundary].last(),
+            per_segment_words[boundary + 1].first(),
+        ) {
+            (Some(prev_word), Some(next_word)) => segments_are_touching(
+                &segments[boundary],
+                &prev_word.text,
+                &segments[boundary + 1],
+                &next_word.text,
+            ),
+            _ => false,
+        };
+        if !is_touching {
+            continue;
+        }
+        let prev_word = per_segment_words[boundary].pop().expect("checked Some above");
+        let next_word = per_segment_words[boundary + 1].remove(0);
+        per_segment_words[boundary + 1].insert(0, merge_hocr_words(prev_word, next_word));
+    }
+    per_segment_words.into_iter().flatten().collect()
+}
+
+/// Combines two `HocrWord`s that are one split word into a single word: text concatenated
+/// with no separator, bounding box the union of both, confidence the lower of the two.
+#[cfg(feature = "pdf")]
+fn merge_hocr_words(prev: HocrWord, next: HocrWord) -> HocrWord {
+    let left = prev.left.min(next.left);
+    let top = prev.top.min(next.top);
+    let right = (prev.left + prev.width).max(next.left + next.width);
+    let bottom = (prev.top + prev.height).max(next.top + next.height);
+
+    let mut text = prev.text;
+    text.push_str(&next.text);
+
+    HocrWord {
+        text,
+        left,
+        top,
+        width: right - left,
+        height: bottom - top,
+        confidence: prev.confidence.min(next.confidence),
+    }
 }
 
 /// Column-wise merge of several table rows into a single logical row.
@@ -2014,6 +2077,18 @@ mod tests {
         assert_eq!(words.len(), 2);
         assert_eq!(words[0].text, "Hello");
         assert_eq!(words[1].text, "World");
+    }
+
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn issue_1566_touching_table_segments_merge_into_one_word() {
+        let seg_a = make_seg("2 per ketel, pri", 287.864, 331.641, 46.631, 8.999996);
+        let mut seg_b = make_seg("js per meter", 334.564, 331.641, 41.161, 8.999996);
+        seg_b.is_bold = true;
+
+        let words = segments_to_words(&[seg_a, seg_b], 800.0);
+        let texts: Vec<&str> = words.iter().map(|word| word.text.as_str()).collect();
+        assert_eq!(texts, vec!["2", "per", "ketel,", "prijs", "per", "meter"]);
     }
 
     #[test]

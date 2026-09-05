@@ -180,6 +180,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a word split across two touching PDF spans being rejoined with a space, so `prijs`
+  extracted as `pri js`. The gap between the two spans measures 0.069 pt -- 0.008 em at 9 pt,
+  against a 2.5 pt space glyph -- on an identical baseline at an identical font size, so no gap
+  threshold produced the space: `segments_need_space` reached one of its unconditional
+  `return true` branches first. `SegmentData` keeps only `is_bold`/`is_italic`/`is_monospace`
+  and drops `font_name`, so a mid-word switch between two embedded subset fonts whose
+  `/FontDescriptor`s disagree on `ForceBold`, `ItalicAngle` or `FixedPitch` reads as a style
+  change carrying no geometric signal at all. That is why the defect never reproduced against
+  base-14 Helvetica, and why widening the gap to 2 pt changed nothing. A touching-spans guard
+  now runs before those branches: two segments on the same baseline, at the same font size,
+  with alphanumeric characters on both sides of the boundary and a gap under 0.025 em are one
+  word and are concatenated. The guard can only join, never split, and it never fires across an
+  explicitly drawn space. The table path needed the same test one stage earlier, in
+  `segments_to_words`, because `HocrWord` is integer-rounded and cannot represent a sub-point
+  gap by the time cell text is joined. Affects ordinary prose, not just tables: of 18 confirmed
+  cases, 14 were `NarrativeText`, 3 `ListItem` and 3 `Table`
+  ([#1566](https://github.com/xberg-io/xberg/issues/1566)).
 - Fixed PDF table reconstruction dropping early rows when data-start inference classified more
   than two leading rows as headers. The two-row header cap is retained, but surplus inferred
   header rows are now demoted to data in source order instead of being discarded
