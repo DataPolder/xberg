@@ -91,6 +91,18 @@ let package = Package(
         // link fails with undefined symbols from those crates.
         .linkedLibrary("c++", .when(platforms: [.macOS, .iOS])),
         .linkedLibrary("stdc++", .when(platforms: [.linux])),
+        // Same staticlib-doesn't-embed-native-deps reasoning again, for ONNX Runtime. The
+        // Linux feature set reaches `ort` through `paddle-ocr`, and `ort` is in link-time
+        // (system) mode -- no `download-binaries`, no `load-dynamic` -- so `OrtGetApiBase`
+        // must be resolved by the linker. `LD_LIBRARY_PATH`, which CI already sets, governs
+        // runtime loading only and cannot satisfy a link-time undefined symbol. CI stages
+        // `libonnxruntime.so*` into the same `target/release` directory `resolvedStaticLib`
+        // reads the archive from, so search that directory here. ~keep
+        .unsafeFlags(
+          ["-L\(rustTargetDir)/release", "-L\(rustTargetDir)/debug"],
+          .when(platforms: [.linux])
+        ),
+        .linkedLibrary("onnxruntime", .when(platforms: [.linux])),
         .linkedFramework("Security", .when(platforms: [.macOS, .iOS])),
         .linkedFramework("CoreFoundation", .when(platforms: [.macOS, .iOS])),
         .linkedFramework("SystemConfiguration", .when(platforms: [.macOS])),
