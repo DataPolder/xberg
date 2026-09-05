@@ -67,7 +67,7 @@ export class XbergLoader extends BaseDocumentLoader {
       result = batch ? await extractBatch(inputs, this.config ?? null) : await extract(inputs[0], this.config ?? null);
     } catch (error) {
       const source = sources[0] ?? "input";
-      throw new Error(`Failed to extract '${source}': ${errorMessage(error)}`);
+      throw new Error(`Failed to extract '${source}': ${errorMessage(error)}`, { cause: error });
     }
 
     return resultToDocuments(result as unknown as ResultEnvelope, sources, {

@@ -180,7 +180,7 @@ if ! {
   # asm that requires the fullfp16 target feature, which that runner's
   # baseline lacks ("instruction requires: fullfp16"). Apple Silicon
   # includes fullfp16 and runs the candle tests. ~keep
-  gliner_features=(--features candle,ort-dynamic)
+  gliner_features=(--features "candle,ort-dynamic")
   if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "aarch64" ]; then
     echo "Dropping the candle feature on Linux aarch64 (gemm-f16 needs fullfp16)"
     gliner_features=(--features ort-dynamic)

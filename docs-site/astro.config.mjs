@@ -75,7 +75,7 @@ export default defineConfig({
               {
                 label: "Reference",
                 description:
-                  "Per-language API docs, configuration schema, types, errors, formats, and CLI/MCP " + "reference.",
+                  "Per-language API docs, configuration schema, types, errors, formats, and CLI/MCP reference.",
                 paths: ["reference/**"],
               },
               {
