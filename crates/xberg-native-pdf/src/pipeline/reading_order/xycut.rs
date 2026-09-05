@@ -22,6 +22,11 @@
 //! Typical newspaper page: ~100 spans, < 5ms processing time
 //! Recursive depth: O(log n) for balanced columns
 
+// TODO(quality-debt): 4 cyclomatic-complexity and 13 size/complexity findings
+// in this file, currently excluded via the quality-debt baseline in alef.toml. Splitting
+// these needs compiler-in-the-loop verification, not a mechanical pass. Delete this
+// note and the file's baseline entry together once it goes green. Help wanted.
+
 use super::{ReadingOrderContext, ReadingOrderStrategy};
 use crate::error::Result;
 use crate::geometry::Rect;

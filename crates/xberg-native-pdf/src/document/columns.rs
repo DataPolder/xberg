@@ -4,6 +4,11 @@
 //! `document.rs` 1.2 MiB and tripped the 500 KiB file-safety limit. A child module's
 //! `impl` is the same inherent impl and sees the parent's private items unchanged. ~keep
 
+// TODO(quality-debt): 6 cyclomatic-complexity and 19 size/complexity findings
+// in this file, currently excluded via the quality-debt baseline in alef.toml. Splitting
+// these needs compiler-in-the-loop verification, not a mechanical pass. Delete this
+// note and the file's baseline entry together once it goes green. Help wanted.
+
 use super::*;
 
 impl PdfDocument {

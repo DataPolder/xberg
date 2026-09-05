@@ -13,6 +13,11 @@
     clippy::ptr_arg
 )]
 
+// TODO(quality-debt): 4 cyclomatic-complexity and 108 size/complexity findings
+// in this file, currently excluded via the quality-debt baseline in alef.toml. Splitting
+// these needs compiler-in-the-loop verification, not a mechanical pass. Delete this
+// note and the file's baseline entry together once it goes green. Help wanted.
+
 use crate::content::graphics_state::{GraphicsState, GraphicsStateStack, Matrix};
 use crate::content::operators::Operator;
 use crate::content::parser::parse_content_stream;

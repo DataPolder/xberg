@@ -1,5 +1,10 @@
 //! Heading classification for paragraphs using font-size clustering.
 
+// TODO(quality-debt): 4 cyclomatic-complexity and 12 size/complexity findings
+// in this file, currently excluded via the quality-debt baseline in alef.toml. Splitting
+// these needs compiler-in-the-loop verification, not a mechanical pass. Delete this
+// note and the file's baseline entry together once it goes green. Help wanted.
+
 use super::constants::{
     MAX_BOLD_HEADING_WORD_COUNT, MAX_HEADING_DISTANCE_MULTIPLIER, MAX_HEADING_WORD_COUNT, MIN_BLOCKS_FOR_FONT_HEADING,
     MIN_HEADING_FONT_GAP, MIN_HEADING_FONT_RATIO,
