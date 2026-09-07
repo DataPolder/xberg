@@ -2946,10 +2946,22 @@ fn build_grid_from_lines(
     (result, v_edges, cells_are_intersections)
 }
 
-/// Tolerance for judging whether a V edge spans a row band's full height. Reuses `SNAP_TOL`
-/// (the tolerance every other coordinate comparison in this grid already uses) rather than a
-/// fresh value, so this check isn't stricter or looser than the grid it operates on.
-const BAND_RULE_SPAN_TOL: f32 = SNAP_TOL;
+/// Tolerance for judging whether a V edge spans a row band's full height.
+///
+/// This is NOT `SNAP_TOL`, and the difference is measured rather than stylistic. `SNAP_TOL`
+/// (3.0) is the tolerance for deciding whether two coordinates are the *same* coordinate;
+/// this one decides whether an edge that stops short of a band's edge nevertheless runs
+/// through it, which is the opposite kind of question. At 3.0, a neighbouring band's vertical
+/// rule that terminates up to 3 pt inside the strip still counts as spanning it, so the strip
+/// is cut at a column position no rule gives it — the very defect this function exists to
+/// prevent.
+///
+/// Measured over the 860-PDF Data Polder corpus, 3.0 against 1.0: 17 Intergas installation
+/// manuals lose section headings out of a drawn troubleshooting grid and fall out of the index
+/// entirely on a hard numbering gap (`88399800.pdf` keeps 6 of its 11 `8.2.x` sections and is
+/// refused on `8.2.4 -> 8.2.7`). Nothing anywhere in the corpus is recovered by the looser
+/// value. 1.0 is roughly a hairline's width and is what the reported fix was measured with.
+const BAND_RULE_SPAN_TOL: f32 = 1.0;
 
 /// Group a row band's columns into contiguous runs that no V rule actually divides.
 ///
