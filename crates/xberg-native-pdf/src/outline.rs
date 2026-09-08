@@ -196,12 +196,38 @@ impl PdfDocument {
     /// # Ok::<(), xberg_native_pdf::error::Error>(())
     /// ```
     pub fn resolve_named_destination(&self, name: &str) -> Result<Option<usize>> {
+        self.resolve_named_destination_bytes(name.as_bytes())
+    }
+
+    /// Resolve a *named* destination given as raw bytes, to a 0-based page
+    /// index.
+    ///
+    /// Name-tree keys are byte strings compared lexically by byte
+    /// (ISO 32000-1 §7.9.6), and a `/Dest` name is one of those keys — not a
+    /// text string. A producer is free to store it in any encoding, and
+    /// Distiller writes UTF-16BE with a `FE FF` BOM. Those bytes do not
+    /// survive a trip through `String`, so [`Self::resolve_named_destination`]
+    /// cannot express such a key; this is the form that can.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use xberg_native_pdf::PdfDocument;
+    ///
+    /// let doc = PdfDocument::open("doc.pdf")?;
+    /// // UTF-16BE "A3", as Distiller writes it.
+    /// if let Some(page) = doc.resolve_named_destination_bytes(b"\xfe\xff\x00A\x003")? {
+    ///     println!("named destination -> page {page}");
+    /// }
+    /// # Ok::<(), xberg_native_pdf::error::Error>(())
+    /// ```
+    pub fn resolve_named_destination_bytes(&self, name: &[u8]) -> Result<Option<usize>> {
         let catalog = self.catalog()?;
         let Some(cat) = catalog.as_dict() else {
             return Ok(None);
         };
         let resolve = |r: crate::object::ObjectRef| self.load_object(r).ok();
-        let Some(dest) = lookup_named_dest(cat, name.as_bytes(), &resolve, 0) else {
+        let Some(dest) = lookup_named_dest(cat, name, &resolve, 0) else {
             return Ok(None);
         };
         // The found value is a dest array (or was already normalised
@@ -221,10 +247,16 @@ impl PdfDocument {
             // unresolved name for backward compatibility (the
             // `bookmarks` JSON still prints names when unresolvable). ~keep
             Object::String(name) => {
-                let s = String::from_utf8_lossy(name).to_string();
-                match self.resolve_named_destination(&s)? {
+                // Look the name up by its bytes. A `/Dest` string is a
+                // name-tree key, not a text string, so it must be compared
+                // byte-for-byte (ISO 32000-1 §7.9.6) — decoding it first would
+                // destroy a UTF-16BE name, whose `FE FF` BOM is not valid
+                // UTF-8. The lossy `String` is kept only for the
+                // `Destination::Named` fallback, where it is a display value
+                // for a genuinely unresolvable name rather than a key.
+                match self.resolve_named_destination_bytes(name)? {
                     Some(idx) => Ok(Some(Destination::PageIndex(idx))),
-                    None => Ok(Some(Destination::Named(s))),
+                    None => Ok(Some(Destination::Named(String::from_utf8_lossy(name).to_string()))),
                 }
             }
             Object::Name(name) => match self.resolve_named_destination(name)? {
