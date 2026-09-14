@@ -66,14 +66,43 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
         // test the grouper uses, applied to the boundary segments so both passes agree
         // on the same wrap. See #1467. ~keep
         let current_starts_section = starts_numbered_section(&current);
-        let boundary_is_heading_wrap = current
+        // Which wrap test applies depends on the heading's own shape, exactly as in
+        // the grouper: a heading set with a hanging indent is continued only by a
+        // line at its title's edge that does not outrun it, and the right-edge
+        // similarity is reserved for a heading with no indent to test. Without that,
+        // this pass undid the grouper's split on GH#1634's manuals -- `warmtebron`
+        // (ends x 135.4) and the run-in sub-heading `Werkingsprincipe` at the margin
+        // (ends x 117.0) share a right edge by coincidence, and the heading the
+        // grouper had just closed was re-joined to its body here. ~keep
+        let next_right_edge = next
             .lines
-            .last()
-            .and_then(|line| line.segments.last())
-            .zip(next.lines.first().and_then(|line| line.segments.first()))
-            .is_some_and(|(prev_segment, next_segment)| {
-                super::pipeline::heading_wraps_onto(prev_segment, next_segment)
-            });
+            .iter()
+            .filter_map(|line| line.segments.last())
+            .map(|segment| segment.upright_advance_extent().1)
+            .filter(|edge| edge.is_finite())
+            .fold(f32::NEG_INFINITY, f32::max);
+        let boundary_is_heading_wrap =
+            super::pipeline::HeadingRun::from_lines(current.lines.iter().map(|line| line.segments.as_slice()))
+                .zip(current.lines.last().and_then(|line| line.segments.last()))
+                .zip(next.lines.first().and_then(|line| line.segments.first()))
+                .is_some_and(|((run, prev_segment), next_segment)| {
+                    let next_first_line_right = next
+                        .lines
+                        .first()
+                        .map(|line| {
+                            line.segments
+                                .iter()
+                                .map(|segment| segment.upright_advance_extent().1)
+                                .filter(|edge| edge.is_finite())
+                                .fold(f32::NEG_INFINITY, f32::max)
+                        })
+                        .unwrap_or(f32::NEG_INFINITY);
+                    // GH#1650's margin rule is the grouper's to decide (`None`): here a
+                    // body-level pair at the margin already has GH#1605's own
+                    // lowercase-plus-fills-column exemption below, and a heading-level
+                    // pair never reaches this pass (`both_body`). ~keep
+                    run.continues_onto(prev_segment, next_segment, next_first_line_right, next_right_edge, None)
+                });
         // `heading_wraps_onto` alone cannot decide this. It compares the two lines'
         // RIGHT EDGES, but its own doc comment states the correct rule -- a wrapping
         // heading "fills its column before continuing below" -- and that is a property
@@ -95,13 +124,6 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
         // continuing below. That is a property of the heading's own line, measured
         // against the width of what would be merged onto it -- not of the continuation,
         // whose right edge is arbitrary. See [`super::pipeline::heading_fills_column`]. ~keep
-        let next_right_edge = next
-            .lines
-            .iter()
-            .filter_map(|line| line.segments.last())
-            .map(|segment| segment.upright_advance_extent().1)
-            .filter(|edge| edge.is_finite())
-            .fold(f32::NEG_INFINITY, f32::max);
         let heading_fills_column = current
             .lines
             .last()
@@ -733,6 +755,114 @@ mod tests {
             2,
             "GH#1605 negative control: unrelated capitalised text after a heading must NOT be absorbed"
         );
+    }
+
+    /// A paragraph of several segments on several lines, for the hanging-indent
+    /// shape: `(text, x, right edge, baseline)` per segment, grouped into lines by
+    /// baseline.
+    fn hanging_paragraph(segments: &[(&str, f32, f32, f32)]) -> PdfParagraph {
+        use crate::pdf::hierarchy::SegmentData;
+        let mut lines: Vec<super::super::types::PdfLine> = Vec::new();
+        for &(text, x, right_edge, baseline_y) in segments {
+            let segment = SegmentData {
+                text: text.to_string(),
+                x,
+                y: baseline_y,
+                width: right_edge - x,
+                height: 11.0,
+                font_size: 11.0,
+                is_bold: true,
+                is_italic: false,
+                is_monospace: false,
+                baseline_y,
+                rotation_degrees: 0.0,
+                assigned_role: None,
+            };
+            match lines.last_mut() {
+                Some(line) if (line.baseline_y - baseline_y).abs() < 0.5 => line.segments.push(segment),
+                _ => lines.push(super::super::types::PdfLine {
+                    segments: vec![segment],
+                    baseline_y,
+                    dominant_font_size: 11.0,
+                    is_bold: true,
+                    is_monospace: false,
+                }),
+            }
+        }
+        let word_count = PdfParagraph::compute_word_count("", &lines);
+        PdfParagraph {
+            text: String::new(),
+            lines,
+            dominant_font_size: 11.0,
+            heading_level: None,
+            is_bold: true,
+            is_list_item: false,
+            is_code_block: false,
+            is_formula: false,
+            is_page_furniture: false,
+            layout_class: None,
+            layout_region_path: None,
+            caption_for: None,
+            block_bbox: None,
+            word_count,
+        }
+    }
+
+    /// GH#1634, the installation-manual shape: the grouper closes the hanging
+    /// heading after its wrap `warmtebron`, and this pass must not re-join it to
+    /// the run-in sub-heading beneath -- which returns to the MARGIN, and only
+    /// happens to end within two font-sizes of the wrap's right edge.
+    #[test]
+    fn hanging_heading_is_not_rejoined_to_a_margin_line_with_a_similar_right_edge() {
+        let mut paragraphs = vec![
+            hanging_paragraph(&[
+                ("4.4.2", 48.2, 63.4, 775.2),
+                (
+                    "Opdeling CV-installatie in groepen bij aanwezigheid extra",
+                    83.6,
+                    329.4,
+                    775.2,
+                ),
+                ("warmtebron", 83.6, 137.8, 762.6),
+            ]),
+            hanging_paragraph(&[
+                ("Werkingsprincipe", 48.2, 119.3, 735.1),
+                ("Indien de kamerthermostaat het toestel uitschakelt", 48.2, 354.4, 720.6),
+            ]),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(
+            paragraphs.len(),
+            2,
+            "a line at the margin is not the continuation of a hanging-indent heading, \
+             whatever its right edge"
+        );
+        assert_eq!(
+            first_line_text(&paragraphs[1]).trim(),
+            "Werkingsprincipe",
+            "the sub-heading must open the second paragraph"
+        );
+    }
+
+    /// The same heading with its genuine wrap: the wrap resumes at the title's edge
+    /// and is shorter than the line it continues, so it must still be joined here
+    /// when the grouper has left it as its own paragraph.
+    #[test]
+    fn hanging_heading_is_still_rejoined_to_its_own_wrap() {
+        let mut paragraphs = vec![
+            hanging_paragraph(&[
+                ("4.4.2", 48.2, 63.4, 775.2),
+                (
+                    "Opdeling CV-installatie in groepen bij aanwezigheid extra",
+                    83.6,
+                    329.4,
+                    775.2,
+                ),
+            ]),
+            hanging_paragraph(&[("warmtebron", 83.6, 137.8, 762.6)]),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1, "the wrap at the title's edge is the heading's own");
     }
 
     /// GH#1609: body prose beginning lowercase under a COMPLETE numbered heading
