@@ -1679,7 +1679,276 @@ fn a_numbered_heading_followed_by_margin_aligned_body_still_splits() {
     );
 }
 
-/// GH#1637: `heading_wrap_chain_open`'s closing term (added by GH#1634 /
+/// GH#1634, page 1 of its reproducer: the layout that indents the WHOLE clause.
+/// Number in the margin, title to its right -- and the body's first line at
+/// exactly the title's left edge, same size, same weight, twelve points down.
+/// The left-edge rule alone read that body line as the title's wrap and welded
+/// the heading into its paragraph. What separates it from a wrap is the RIGHT
+/// edge: the body line runs 228 pt past the title it would be continuing.
+///
+/// Geometry from the reporter's tender page, verbatim (PDF user space):
+///
+/// ```text
+/// 3.1.7                                       x 104.4            y 304.9
+/// Innovatie/ontwikkelingen                    x 161.1  w 114.5   y 304.9
+/// Wat zijn de toekomstige ontwikkelingen ...  x 161.1  w 342.7   y 292.9
+/// gebied van het product (de komende 5 jaar)? x 161.1  w 206.5   y 280.9
+/// ```
+#[test]
+fn a_numbered_heading_followed_by_body_at_the_title_edge_still_splits() {
+    let segments = vec![
+        SegmentData {
+            font_size: 9.36,
+            ..column_seg("3.1.7", 104.4, 23.7, 304.9)
+        },
+        SegmentData {
+            font_size: 9.36,
+            ..column_seg("Innovatie/ontwikkelingen", 161.1, 114.5, 304.9)
+        },
+        SegmentData {
+            font_size: 9.36,
+            ..column_seg(
+                "Wat zijn de toekomstige ontwikkelingen en te verwachten innovaties op het gebied van het",
+                161.1,
+                342.7,
+                292.9,
+            )
+        },
+        SegmentData {
+            font_size: 9.36,
+            ..column_seg("gebied van het product (de komende 5 jaar)?", 161.1, 206.5, 280.9)
+        },
+    ];
+    let paragraphs = blocks_to_paragraphs(segments, &[], &[]);
+    assert_eq!(
+        paragraphs.len(),
+        2,
+        "a body line at the title's left edge that runs past the title's right edge is not its wrap"
+    );
+    assert_eq!(paragraph_segment_text(&paragraphs[0]), "3.1.7 Innovatie/ontwikkelingen");
+    assert!(paragraph_segment_text(&paragraphs[1]).starts_with("Wat zijn de toekomstige"));
+}
+
+/// GH#1634, page 3 of its reproducer: a heading that genuinely wraps (the short
+/// second line at the title's edge, as in GH#1615) followed by a run-in
+/// sub-heading and body at the MARGIN, same size, same weight. The wrap was
+/// joined correctly and then nothing closed the heading: `follows_section` was
+/// scoped to a single-visual-line element, and after the wrap this one is two.
+/// The heading must close after its LAST continuation.
+#[test]
+fn a_wrapped_numbered_heading_closes_after_its_last_continuation() {
+    let segments = vec![
+        SegmentData {
+            font_size: 9.36,
+            ..column_seg("4.8.3", 104.4, 23.7, 304.9)
+        },
+        SegmentData {
+            font_size: 9.36,
+            ..column_seg("Dakuitmonding combidoorvoer-verticaal en", 161.1, 178.0, 304.9)
+        },
+        SegmentData {
+            font_size: 9.36,
+            ..column_seg("dubbelpijpsdoorvoer-verticaal", 161.1, 127.0, 292.9)
+        },
+        SegmentData {
+            font_size: 9.36,
+            ..column_seg("Werkingsprincipe", 104.4, 72.0, 280.9)
+        },
+        SegmentData {
+            font_size: 9.36,
+            ..column_seg(
+                "Indien de kamerthermostaat het toestel uitschakelt doordat een andere warmtebron",
+                104.4,
+                360.0,
+                268.9,
+            )
+        },
+    ];
+    let paragraphs = blocks_to_paragraphs(segments, &[], &[]);
+    assert!(
+        paragraphs.len() >= 2,
+        "the heading must close after its wrap; got one element: {:?}",
+        paragraph_segment_text(&paragraphs[0])
+    );
+    assert_eq!(
+        paragraph_segment_text(&paragraphs[0]),
+        "4.8.3 Dakuitmonding combidoorvoer-verticaal en dubbelpijpsdoorvoer-verticaal"
+    );
+    assert!(paragraph_segment_text(&paragraphs[1]).starts_with("Werkingsprincipe"));
+}
+
+/// GH#1634, the installation-manual shape that the reproducer's page 3 does not
+/// carry: after the wrap `warmtebron` (x 83.6, ends x 135.4) the run-in
+/// sub-heading `Werkingsprincipe` returns to the margin (x 48.2) but ends at
+/// x 117.0 -- within two font-sizes of the wrap's right edge, so
+/// `heading_wraps_onto`'s right-edge similarity read it as one more
+/// continuation and the heading ran on into the body. On a hanging-indent
+/// heading the continuation must resume at the TITLE's edge; the right-edge
+/// rule is for headings that fill their column and have no indent to test.
+#[test]
+fn a_hanging_heading_is_not_continued_by_a_margin_line_with_a_similar_right_edge() {
+    let segments = vec![
+        SegmentData {
+            is_bold: true,
+            font_size: 11.3,
+            ..column_seg("4.4.2", 48.2, 20.2, 783.3)
+        },
+        SegmentData {
+            is_bold: true,
+            font_size: 11.3,
+            ..column_seg(
+                "Opdeling CV-installatie in groepen bij aanwezigheid extra",
+                83.6,
+                245.8,
+                783.3,
+            )
+        },
+        SegmentData {
+            is_bold: true,
+            font_size: 11.3,
+            ..column_seg("warmtebron", 83.6, 51.8, 770.7)
+        },
+        SegmentData {
+            is_bold: true,
+            font_size: 11.3,
+            ..column_seg("Werkingsprincipe", 48.2, 68.8, 742.4)
+        },
+        SegmentData {
+            is_bold: true,
+            font_size: 11.3,
+            ..column_seg(
+                "Indien de kamerthermostaat het toestel uitschakelt doordat een andere",
+                48.2,
+                306.2,
+                727.9,
+            )
+        },
+    ];
+    let paragraphs = blocks_to_paragraphs(segments, &[], &[]);
+    assert!(
+        paragraphs.len() >= 2,
+        "the heading must close after `warmtebron`; got one element: {:?}",
+        paragraph_segment_text(&paragraphs[0])
+    );
+    assert_eq!(
+        paragraph_segment_text(&paragraphs[0]),
+        "4.4.2 Opdeling CV-installatie in groepen bij aanwezigheid extra warmtebron"
+    );
+    assert!(paragraph_segment_text(&paragraphs[1]).starts_with("Werkingsprincipe"));
+}
+
+/// A scanned contract, OCR'd: the clause's first printed line arrives as several
+/// segments whose baselines jitter by a point (`Opdrachtgever, dan wel diens
+/// klant,` at 520.8, `is ` at 521.8, `de verwerkingsverantwoordelijke` at 521.8),
+/// which is past `INLINE_STYLE_BASELINE_TOLERANCE`, so each is a "new line" to
+/// the grouper. A segment that starts where the previous one ends is the rest
+/// of the same printed line, and the clause's genuine wrap at the title's edge
+/// is judged against that LINE's edges -- its first segment's left, its widest
+/// segment's right -- not against the last word's. The clause must stay whole.
+#[test]
+fn an_ocr_jittered_clause_line_stays_one_element_with_its_wrap() {
+    let segments = vec![
+        SegmentData {
+            font_size: 10.5,
+            ..column_seg("2.4", 98.9, 17.5, 520.8)
+        },
+        SegmentData {
+            font_size: 9.0,
+            ..column_seg("Opdrachtgever, dan wel diens klant,", 117.4, 150.5, 520.8)
+        },
+        SegmentData {
+            font_size: 8.5,
+            ..column_seg("is", 269.0, 8.5, 521.8)
+        },
+        SegmentData {
+            font_size: 9.0,
+            ..column_seg("de verwerkingsverantwoordelijke in de zin", 278.2, 172.6, 521.8)
+        },
+        SegmentData {
+            font_size: 9.0,
+            ..column_seg(
+                "van de Avg, heeft de zeggenschap over de verwerking van de",
+                116.2,
+                257.2,
+                509.6,
+            )
+        },
+        SegmentData {
+            font_size: 9.0,
+            ..column_seg("Persoonsgegevens vastgesteld.", 116.2, 144.0, 498.4)
+        },
+        SegmentData {
+            font_size: 10.5,
+            ..column_seg("2.5", 98.9, 17.5, 466.3)
+        },
+        SegmentData {
+            font_size: 9.0,
+            ..column_seg("Data Processor is verwerker in de zin van de Avg", 117.4, 200.0, 466.3)
+        },
+    ];
+    let paragraphs = blocks_to_paragraphs(segments, &[], &[]);
+    assert_eq!(
+        paragraphs.len(),
+        2,
+        "the jittered clause line and its wrap are one element, the next clause another: {:?}",
+        paragraphs.iter().map(paragraph_segment_text).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        paragraph_segment_text(&paragraphs[0]),
+        "2.4 Opdrachtgever, dan wel diens klant, is de verwerkingsverantwoordelijke in de zin van de Avg, \
+         heeft de zeggenschap over de verwerking van de Persoonsgegevens vastgesteld."
+    );
+}
+
+/// A title broken by hand on a 1990s manual: `4 INSTRUKTIES` on one line,
+/// `ELEKTROTECHNISCH INSTALLATEUR` on the next at the title's edge -- a second
+/// line that outruns its short first line by twelve font-sizes and still stops
+/// at less than half the column, while the body beneath it returns to the
+/// margin and runs to the column edge. Outrun alone would have called the
+/// second line body; it is the heading's own, and the body must still split.
+#[test]
+fn a_hand_broken_two_line_heading_stays_whole_and_closes() {
+    let segments = vec![
+        SegmentData {
+            font_size: 9.0,
+            ..column_seg("4", 48.0, 6.0, 800.0)
+        },
+        SegmentData {
+            font_size: 9.0,
+            ..column_seg("INSTRUKTIES", 62.0, 68.0, 800.0)
+        },
+        SegmentData {
+            font_size: 9.0,
+            ..column_seg("ELEKTROTECHNISCH INSTALLATEUR", 62.0, 178.0, 789.0)
+        },
+        SegmentData {
+            font_size: 9.0,
+            ..column_seg(
+                "De elektrische installatie moet voldoen aan de geldende voorschriften en",
+                48.0,
+                500.0,
+                772.0,
+            )
+        },
+        SegmentData {
+            font_size: 9.0,
+            ..column_seg("aan de aanwijzingen van het energiebedrijf.", 48.0, 260.0, 761.0)
+        },
+    ];
+    let paragraphs = blocks_to_paragraphs(segments, &[], &[]);
+    assert_eq!(
+        paragraphs.len(),
+        2,
+        "the two-line heading and the body: {:?}",
+        paragraphs.iter().map(paragraph_segment_text).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        paragraph_segment_text(&paragraphs[0]),
+        "4 INSTRUKTIES ELEKTROTECHNISCH INSTALLATEUR"
+    );
+}
+
+/// GH#1637: `heading_absorbed_one_wrap`'s closing term (added by GH#1634 /
 /// `8681d72ec`) still required `!heading_wraps_onto(prev, line)`, which compares
 /// RIGHT edges. A hanging-indent wrap's own last line is short by definition, and
 /// so is a run-in sub-heading at the margin beneath it -- when the two happen to
@@ -1902,6 +2171,60 @@ fn hanging_indent_numbered_heading_survives_its_own_leading() {
         paragraph_segment_text(title_paragraph),
         "Article 15 Termination of the agreement for breach",
         "GH#1650: crossed_gap must not cut a continuation follows_section already accepted"
+    );
+}
+
+/// The shape the GH#1650 gap exemption must NOT cover, from a coffee machine's
+/// user manual (`User_Manual_1500S_Classic_EN.pdf`): a hanging-number heading
+/// -- `3.14` at the margin, `Drip tray` indented -- with a warning label
+/// `Scalding hazard` two font-sizes below it, at the title's left edge, short,
+/// same size and weight. The title-edge rule accepts the label as a
+/// continuation (it neither outruns the title nor reaches the column edge),
+/// and until v1.2.3 the paragraph-gap term was what kept it out. Standing
+/// that term down at every accepted boundary welded 79 such labels into their
+/// headings on that one manual; a heading's own leading is 1.4 font-sizes on
+/// GH#1650's carrier, and a label a blank line below is not that. ~keep
+#[test]
+fn a_label_a_blank_line_below_a_hanging_heading_is_still_cut_by_the_gap() {
+    let segments = vec![
+        narrow_body_seg(
+            "Lead-in prose above the section, at the body's own pitch",
+            64.34,
+            230.0,
+            900.0,
+        ),
+        narrow_body_seg(
+            "continuing one more line before the heading begins",
+            64.34,
+            230.0,
+            889.44,
+        ),
+        heading_seg("3.14", 64.34, 22.0, 800.0),
+        heading_seg("Drip tray", 92.34, 52.0, 800.0),
+        heading_seg("Scalding hazard", 92.34, 88.0, 776.0),
+        narrow_body_seg(
+            "Empty the drip tray before it overflows; the water can be hot.",
+            64.34,
+            234.34,
+            765.44,
+        ),
+    ];
+    let gap_ys = compute_paragraph_gap_ys(&segments);
+    let paragraphs = segments_to_paragraphs(
+        segments,
+        &[(12.0, Some(1)), (8.0, None)],
+        &gap_ys,
+        &TextRepairWitnesses::default(),
+    );
+
+    let texts: Vec<String> = paragraphs.iter().map(paragraph_segment_text).collect();
+    assert!(
+        texts.iter().any(|t| t == "3.14 Drip tray"),
+        "the heading must close above the label two font-sizes below it: {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|t| t == "Scalding hazard"),
+        "the label must be its own element: {texts:?}"
     );
 }
 
