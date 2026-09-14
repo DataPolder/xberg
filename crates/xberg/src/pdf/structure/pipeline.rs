@@ -1793,6 +1793,61 @@ const HEADING_WRAP_INTERWORD_SPACE_FONT_FACTOR: f32 = 0.25;
 /// two-sided on purpose: an upper bound alone would let the body's own tighter
 /// pitch pass whenever the heading-to-body seam was used as the reference. ~keep
 const HEADING_CONTINUATION_RUN_PITCH_TOLERANCE_FACTOR: f32 = 0.25;
+/// How far, in font-sizes, a hanging-indent heading's continuation may reach past
+/// the right edge of the line it continues before it stops being a continuation.
+/// A wrap ends at or before the line it continues -- that line ran out of room --
+/// but ragged-right and OCR'd text is not exact: on a scanned contract the second
+/// line of a clause ends 50.7 pt (4.8 font-sizes) past the first, and that IS the
+/// clause's own wrap. The body lines this rule exists to refuse are nowhere near:
+/// 228 pt (24 font-sizes) past the title on the tender page, 338 pt (39) on the
+/// NDA. Eight is a long word's width, and the gap between the two populations is
+/// what makes it safe. ~keep
+const HEADING_CONTINUATION_MAX_OVERRUN_FONT_FACTOR: f32 = 8.0;
+/// How far, in font-sizes, two segments' baselines may differ and still be the same
+/// printed line for a heading run. `INLINE_STYLE_BASELINE_TOLERANCE` (0.5 pt) is
+/// the grouper's general notion of a visual line and is right for born-digital
+/// text; OCR'd text jitters by a point or so per word, and a heading run must not
+/// close on a jitter. A fifth of the font size is 2 pt at 10 pt -- twice the
+/// measured jitter, a tenth of a line pitch. ~keep
+const HEADING_LINE_BASELINE_JITTER_FONT_FACTOR: f32 = 0.2;
+/// How close to the column's right edge, in font-sizes, a line that OUTRUNS the
+/// title must reach to be called body rather than a heading's continuation. A
+/// body line under a short title runs to the column edge, but on a ragged right
+/// it may stop a word short of it: the tender page's to 503.8 of 503.8, the
+/// NDA's to 536.6 of 562.5 (3 font-sizes), a manual's `Controleer bij het
+/// monteren de diverse afdichtingen op` to 286.2 of 338.1 (4.7). Eight, a long
+/// word. ~keep
+const HEADING_BODY_COLUMN_EDGE_SLACK_FONT_FACTOR: f32 = 8.0;
+/// The same, for a line that does NOT outrun the title but opens with a capital
+/// -- the narrow-column shape, `Het toestel is …` under `5.5.1 Comfort Touch
+/// thermostaat (OpenTherm)`, 2.5 font-sizes short of the edge. Tighter, because a
+/// wrap that happens to open with a capital and to end near the edge is cut on
+/// this signal alone, and a scanned contract's short last line (`Persoonsgegevens
+/// vastgesteld.`, 6.4 short) must not be. ~keep
+const HEADING_BODY_CAPITAL_COLUMN_EDGE_SLACK_FONT_FACTOR: f32 = 4.0;
+/// How many segments ahead the grouper looks to estimate the column's right edge
+/// when judging a heading's continuation: the widest right edge among them. A
+/// body paragraph's lines reach the column edge within its first few lines, and
+/// on OCR'd text a line is a dozen segments. ~keep
+const HEADING_COLUMN_EDGE_LOOKAHEAD_SEGMENTS: usize = 24;
+/// How far below the candidate line, in font-sizes, a segment may sit and still
+/// count towards that column-edge estimate -- about ten lines. A page number at
+/// the foot of the page (`5` at x 563–567, forty lines down) is in reading order
+/// right after a short page's body and would otherwise set the "column edge" at
+/// the page edge, so that no body line ever reaches it. ~keep
+const HEADING_COLUMN_EDGE_LOOKAHEAD_FONT_SIZES: f32 = 12.0;
+/// How far apart, in font-sizes, two baselines of the SAME heading may be for
+/// the paragraph-gap term to stand down between them. A heading set larger than
+/// the body outruns the body's pitch by construction -- GH#1650's 12 pt title
+/// advances 16.8 pt over an 8 pt body's 10.56 pt, 1.4 font-sizes -- and that is
+/// the heading's own leading, not a paragraph break. A line the continuation
+/// rules accept that sits FURTHER below is something else: on a coffee
+/// machine's manual the warning label `Scalding hazard` stands two font-sizes
+/// under `3.14 Drip tray`, at the title's left edge, and the gap term is the
+/// only thing that keeps it out of the heading. Upstream's GH#1650 fix stands
+/// the term down at any accepted boundary and loses 79 headings on that one
+/// manual; this bounds it to the heading's own leading. ~keep
+const HEADING_OWN_LEADING_MAX_FONT_FACTOR: f32 = 1.6;
 
 /// Detect paragraph-break y-positions from horizontal whitespace bands.
 ///
@@ -1990,7 +2045,14 @@ fn blocks_to_paragraphs(
     let mut paragraphs: Vec<PdfParagraph> = Vec::new();
     let mut current_lines: Vec<&SegmentData> = Vec::new();
     let mut current_is_single_visual_line = true;
-    let mut prev_idx = 0usize;
+    // While the current element is a numbered section heading and nothing else
+    // yet -- it opened on a numbered-heading line, and every printed line added
+    // since was accepted as that heading's own wrap -- this holds the geometry
+    // of the heading's PRINTED lines, which is what a continuation is judged
+    // against. `follows_section` closes such an element at the first line that
+    // is NOT a continuation, however many lines the title took. `None` once the
+    // element carries anything else. See the term itself.
+    let mut heading_run: Option<HeadingRun> = None;
 
     for (line_idx, line) in lines.iter().enumerate() {
         let should_break = if current_lines.is_empty() {
@@ -2052,90 +2114,55 @@ fn blocks_to_paragraphs(
             // callout beneath it are otherwise identical on every signal this grouper
             // checks. `starts_section` (above) only fires while classifying the
             // heading's OWN line and cannot see forward to close it once it opens; this
-            // looks backward at `prev` instead. Restricting to `current_lines.len() ==
-            // 1` scopes the break to the line directly after the heading, so a
-            // paragraph that is already several lines long is untouched, and
-            // `heading_wraps_onto` exempts a heading that is itself still wrapping onto
-            // its next physical line rather than handing off to unrelated content. See
-            // #1467. ~keep
-            // GH#1634: `current_is_single_visual_line` also switches the closing
-            // term off once a genuine heading wrap has been absorbed, so a
-            // two-line heading was never closed and pulled the whole body in
-            // after it. A numbered heading that spans exactly one wrap is still
-            // a heading and must still close. ~keep
-            // GH#1740: closing used to require `visual_line_count(&current_lines) ==
-            // 2` -- a numbered heading was allowed to wrap once and never twice,
-            // because a THIRD line made the element no longer "a single visual
-            // line plus one wrap" and this term stopped applying, so
-            // `follows_section` closed the heading one line early regardless of
-            // whether the third line actually continued it. The count is dropped:
-            // this stays true for as long as `current_lines` is nothing but the
-            // heading's own first line and lines already accepted as its
-            // continuation, however many there have been, so the SAME per-line
-            // continuation test (`heading_continuation_accepted`, below) decides
-            // every subsequent line too, and `follows_section` closes at the
-            // first one that fails it. ~keep
-            let heading_wrap_chain_open = !current_is_single_visual_line
-                && current_lines
-                    .first()
-                    .is_some_and(|first| super::classify::is_numbered_section_heading(first.text.trim()));
-            // For a wrapped heading `prev` is the continuation line, whose own
-            // text carries no number -- so the numbered-heading test has to look
-            // at the paragraph's first segment instead, which
-            // `heading_wrap_chain_open` already does. ~keep
-            // GH#1637: `heading_wraps_onto` is a RIGHT-edge test and must stay
-            // scoped to the `current_is_single_visual_line` branch (#1467's
-            // no-indent heading, where a right edge is the only signal available).
-            // A hanging-indent heading that has absorbed a wrap already has a
-            // LEFT-edge answer from `heading_continuation_is_hanging_indent` below,
-            // and that answer is authoritative: a wrap's last line and a run-in
-            // sub-heading beneath it are both short by definition, so their right
-            // edges land within tolerance of each other by coincidence on real
-            // documents, not because the run-in continues the heading. Applying
-            // `heading_wraps_onto` beyond the first wrap let that coincidence
-            // override the correct left-edge answer and kept the heading open
-            // across the run-in and the body beneath it -- true at every wrap
-            // depth, not just the second line, so `heading_wraps_onto` stays
-            // scoped to `current_is_single_visual_line` after GH#1740 too. ~keep
-            // GH#1650: `heading_wraps_onto` and `heading_continuation_is_hanging_indent`
-            // are both blind to a no-indent heading whose title is set in the HEADING
-            // font: there is no indent to measure, and the wrap's short last line never
-            // matches the heading's own right edge. `heading_continuation_at_margin` is
-            // the third exemption -- it measures the line BEFORE the one being tested
-            // against the body column beneath the pair, not the continuation's own
-            // width, so a short last line cannot satisfy it by accident (see its own
-            // doc comment and GH#1650's page 4 control). GH#1740: that is also what
-            // lets it generalise to a heading's third line, fourth, and so on --
-            // `prev` is always the immediately preceding line, wrap or not, so the
-            // same "does the line before `line` fill the column" test applies
-            // unchanged at every step, and a heading's genuinely last line (always
-            // short, by definition) fails it and stops the chain. ~keep
-            let heading_continuation_accepted = current_lines.first().is_some_and(|heading_start| {
-                (current_is_single_visual_line
-                    && super::classify::is_numbered_section_heading(&visual_line_texts[prev_idx])
-                    && (heading_wraps_onto(prev, line)
-                        || heading_continuation_at_margin(heading_start, prev, line, &lines, line_idx)))
-                    || (heading_wrap_chain_open
-                        && heading_continuation_at_margin(heading_start, prev, line, &lines, line_idx))
-                    || heading_continuation_is_hanging_indent(heading_start, prev, line)
-            });
-            let follows_section = starts_new_line
-                && ((current_is_single_visual_line
-                    && super::classify::is_numbered_section_heading(&visual_line_texts[prev_idx])
-                    && !heading_continuation_accepted)
-                    || heading_wrap_chain_open)
-                && !heading_continuation_accepted;
+            // looks backward instead. It is scoped to an element that is still
+            // nothing but the heading -- `heading_run` -- so a paragraph that is
+            // already several lines long is untouched, and `HeadingRun::continues_onto`
+            // exempts a heading that is itself still wrapping onto its next physical
+            // line rather than handing off to unrelated content. See #1467. ~keep
+            //
+            // The scope used to be `current_is_single_visual_line`, which is the same
+            // thing for a one-line heading and wrong for a wrapped one: once the wrap
+            // had been absorbed the element was two lines, the term was off, and
+            // nothing closed the heading -- the run-in sub-heading and the whole body
+            // beneath it were pulled in after it whenever no font-size or weight step
+            // happened to break them (GH#1634, page 3 of its reproducer). A heading
+            // closes after its LAST continuation, not only after its first line. ~keep
+            //
+            // GH#1650: a heading with no hanging indent that is set in the HEADING
+            // font has neither an indent to measure nor a right edge its wrap's short
+            // last line could match, so the run also asks whether the line continues
+            // the heading at the MARGIN -- measured against the body column beneath
+            // the pair (`next_visual_line_right_edge`), not against the continuation's
+            // own width, which a short last line would satisfy trivially. ~keep
+            let heading_continues = starts_new_line
+                && heading_run.as_ref().is_some_and(|run| {
+                    let line_right = printed_line_right_edge(&lines, line_idx);
+                    run.continues_onto(
+                        prev,
+                        line,
+                        line_right,
+                        column_right_edge_ahead(&lines, line_idx, line_right),
+                        next_visual_line_right_edge(&lines, line_idx, (prev.upright_baseline() - line.upright_baseline()).abs()),
+                    )
+                });
+            let follows_section = starts_new_line && heading_run.is_some() && !heading_continues;
             // GH#1650: a heading set larger than the body outruns the body's own
             // leading by construction -- `compute_paragraph_gap_ys_in_shared_frame`'s
             // `body_leading` is the page's tightest pitch, and a 12pt heading at
             // 16.8pt leading is always going to exceed 1.5x an 8pt body's 10.56pt
             // pitch. `crossed_gap` cannot see that this is the heading's OWN pitch
-            // rather than a blank-line paragraph break, so a continuation the other
-            // two terms already accepted must not be re-cut here. See #1467 and
-            // #1615 for why a continuation `follows_section` rejects must still be
-            // able to cross a gap -- this exemption is scoped to exactly the same
-            // boundary `follows_section` accepts, not to headings in general. ~keep
-            let crossed_gap = !heading_continuation_accepted
+            // rather than a blank-line paragraph break, so a continuation the run
+            // has already accepted must not be re-cut here. See #1467 and #1615 for
+            // why a continuation the run rejects must still be able to cross a gap --
+            // this exemption is scoped to exactly the boundary the run accepts, not
+            // to headings in general -- and, tighter than upstream's, to an advance
+            // that can BE the heading's own leading
+            // (`HEADING_OWN_LEADING_MAX_FONT_FACTOR`): the title-edge rule accepts a
+            // short label at the title's edge whatever its distance, and a label a
+            // blank line below the heading is the gap term's to cut. ~keep
+            let within_heading_leading = (line.upright_baseline() - prev.upright_baseline()).abs()
+                <= HEADING_OWN_LEADING_MAX_FONT_FACTOR * prev.font_size.max(line.font_size).max(1.0);
+            let crossed_gap = !(heading_continues && within_heading_leading)
                 && paragraph_gap_ys.iter().any(|&gap_y| {
                     let previous_baseline = prev.upright_baseline();
                     let current_baseline = line.upright_baseline();
@@ -2164,11 +2191,33 @@ fn blocks_to_paragraphs(
             current_is_single_visual_line = true;
         }
         if let Some(first) = current_lines.first() {
-            current_is_single_visual_line &= line.has_same_rotation(first)
+            let same_visual_line = line.has_same_rotation(first)
                 && (line.upright_baseline() - first.upright_baseline()).abs() <= INLINE_STYLE_BASELINE_TOLERANCE;
+            current_is_single_visual_line &= same_visual_line;
+            // The run follows the segment: onto the same printed line, onto a line
+            // accepted as the heading's continuation, or it ends. (A line that was
+            // NOT accepted, with the run on, has already broken the element above via
+            // `follows_section`, so this element is empty by now and the branch below
+            // starts a fresh run for it if it is itself a heading.)
+            if let Some(run) = heading_run.as_mut() {
+                let prev = current_lines.last().unwrap();
+                let line_right = printed_line_right_edge(&lines, line_idx);
+                if !run.absorb(
+                    prev,
+                    line,
+                    line_right,
+                    column_right_edge_ahead(&lines, line_idx, line_right),
+                    next_visual_line_right_edge(&lines, line_idx, (prev.upright_baseline() - line.upright_baseline()).abs()),
+                ) {
+                    heading_run = None;
+                }
+            }
+        } else if super::classify::is_numbered_section_heading(&visual_line_texts[line_idx]) {
+            heading_run = Some(HeadingRun::open(line));
+        } else {
+            heading_run = None;
         }
         current_lines.push(line);
-        prev_idx = line_idx;
     }
 
     if !current_lines.is_empty()
@@ -2322,6 +2371,401 @@ pub(super) fn heading_wraps_onto(prev: &SegmentData, line: &SegmentData) -> bool
     (prev_end - line_end).abs() <= tolerance
 }
 
+/// The printed-line geometry of a numbered section heading that is still being
+/// assembled, and the one question the grouper and the merge pass both ask of it:
+/// does the next segment continue the heading, or hand off to something else?
+///
+/// Everything here is per PRINTED line, not per segment, because the two are not
+/// the same thing on real pages: a title arrives as a number segment and a title
+/// segment, an OCR'd line arrives as a dozen word segments with baselines that
+/// jitter by a point -- past `INLINE_STYLE_BASELINE_TOLERANCE`, so the grouper
+/// calls each of them a "new line" -- and the only edges that mean anything are
+/// the line's first segment's left and its widest segment's right. GH#1615's rule
+/// compared single segments and was right on its single-segment reproducer.
+///
+/// Which continuation test applies depends on the heading's own shape:
+///
+/// * A heading set with a HANGING INDENT (a segment on its first line starts
+///   materially right of the number) is continued only by a line that resumes
+///   at the title's left edge and does not outrun the line it continues. The
+///   first is GH#1615's rule; the second is what separates a wrap from a body
+///   line at the same edge -- a title wraps because its first line ran out of
+///   room, so its continuation ends at or before that line's right edge, while
+///   a body line runs on to the column edge (on GH#1634's tender page the body
+///   ends 228 pt past the title it would be continuing; the slack is
+///   [`HEADING_CONTINUATION_MAX_OVERRUN_FONT_FACTOR`]). The right-edge similarity of
+///   [`heading_wraps_onto`] must not stand in for that: it was written for a
+///   heading that FILLS its column before wrapping (#1467), and a wrap's short
+///   last line has no such edge to share. On GH#1634's manuals it fired by
+///   coincidence -- `warmtebron` (ends x 137.8) followed by the run-in sub-heading
+///   `Werkingsprincipe` at the margin (ends x 119.3, within two font-sizes) read
+///   as one more continuation, and the heading ran on into the body.
+/// * A heading without a hanging indent -- one segment at the margin, #1467's
+///   shape -- keeps the right-edge rule, and since GH#1650 has a second one: a
+///   line that resumes at the heading's own left edge, opens lowercase and keeps
+///   its font size and weight continues a heading line that FILLS its column,
+///   measured against the body beneath the pair. A heading set in the heading
+///   font wraps onto a short last line that no right edge can vouch for; see
+///   [`HeadingRun::continues_at_margin`].
+///
+/// And a segment that ABUTS the previous one on the same printed line -- starts
+/// where it ends, on a baseline within [`HEADING_LINE_BASELINE_JITTER_FONT_FACTOR`]
+/// of it -- continues the heading whatever else holds: it is the rest of the same
+/// line, not a new one, and only the baseline jitter of OCR'd text made it look
+/// otherwise. Measured on a scanned contract: `2.4 ` + `Opdrachtgever, dan wel
+/// diens klant,` (baseline 520.8) + `is ` (baseline 521.8, starting 1.1 pt after
+/// the previous segment's end) is one printed line. ~keep
+#[derive(Debug, Clone, Copy)]
+pub(super) struct HeadingRun {
+    /// Left edge of the heading's first segment -- the number, on a hanging layout.
+    heading_left: f32,
+    /// Left edge of the first segment on the first line that starts materially
+    /// right of `heading_left`: the title's edge, on a hanging layout. `None` while
+    /// no such segment has been seen, i.e. a heading with no hanging indent.
+    title_left: Option<f32>,
+    /// Left edge of the current printed line's first segment.
+    line_left: f32,
+    /// Right edge of the widest segment on the current printed line so far.
+    line_right: f32,
+    /// Font size the tolerances scale with: the largest seen on the run.
+    font_size: f32,
+    /// Printed lines accepted as the heading's continuation so far: `0` while
+    /// the run is still the heading's first line.
+    continuations: u32,
+}
+
+impl HeadingRun {
+    /// Open a run on the segment that starts a numbered heading.
+    pub(super) fn open(first: &SegmentData) -> Self {
+        let (left, right) = first.upright_advance_extent();
+        Self {
+            heading_left: left,
+            title_left: None,
+            line_left: left,
+            line_right: right,
+            font_size: first.font_size,
+            continuations: 0,
+        }
+    }
+
+    /// Build the run a finished paragraph would have been in: its first line for
+    /// the heading and title edges, its last line for the current line's edges.
+    /// For the merge pass, which sees paragraphs rather than segments.
+    pub(super) fn from_lines<'a>(mut lines: impl Iterator<Item = &'a [SegmentData]>) -> Option<Self> {
+        let first_line = lines.next()?;
+        let first = first_line.first()?;
+        let mut run = Self::open(first);
+        for segment in &first_line[1..] {
+            run.extend_line(segment);
+        }
+        for line in lines {
+            let mut segments = line.iter();
+            let first = segments.next()?;
+            run.new_line(first);
+            for segment in segments {
+                run.extend_line(segment);
+            }
+        }
+        Some(run)
+    }
+
+    fn tolerance(&self, other: &SegmentData) -> f32 {
+        HEADING_HANGING_INDENT_LEFT_EDGE_TOLERANCE_FONT_FACTOR * self.font_size.max(other.font_size).max(1.0)
+    }
+
+    fn extend_line(&mut self, segment: &SegmentData) {
+        let (left, right) = segment.upright_advance_extent();
+        if right.is_finite() {
+            self.line_right = self.line_right.max(right);
+        }
+        if segment.font_size.is_finite() {
+            self.font_size = self.font_size.max(segment.font_size);
+        }
+        if self.title_left.is_none() && left.is_finite() && left - self.heading_left > self.tolerance(segment) {
+            self.title_left = Some(left);
+        }
+    }
+
+    fn new_line(&mut self, first: &SegmentData) {
+        let (left, right) = first.upright_advance_extent();
+        self.line_left = left;
+        self.line_right = right;
+        self.continuations += 1;
+        if first.font_size.is_finite() {
+            self.font_size = self.font_size.max(first.font_size);
+        }
+    }
+
+    /// Whether `line` is the rest of `prev`'s printed line: it starts where `prev`
+    /// ends (within the inline overlap and gap the style-transition test allows)
+    /// on a baseline within the jitter tolerance.
+    fn abuts_on_the_same_printed_line(&self, prev: &SegmentData, line: &SegmentData) -> bool {
+        if !prev.has_same_rotation(line) {
+            return false;
+        }
+        let font_size = self.font_size.max(prev.font_size).max(line.font_size).max(1.0);
+        let baseline_delta = (line.upright_baseline() - prev.upright_baseline()).abs();
+        let (_, prev_end) = prev.upright_advance_extent();
+        let (line_start, _) = line.upright_advance_extent();
+        if !baseline_delta.is_finite() || !prev_end.is_finite() || !line_start.is_finite() {
+            return false;
+        }
+        let gap = line_start - prev_end;
+        baseline_delta <= HEADING_LINE_BASELINE_JITTER_FONT_FACTOR * font_size
+            && gap >= -(font_size * INLINE_STYLE_MAX_OVERLAP_FONT_FACTOR)
+            && gap <= font_size * INLINE_STYLE_MAX_FORWARD_GAP_FONT_FACTOR
+    }
+
+    /// Whether `line`, arriving as a new visual line after `prev`, continues this
+    /// heading. `column_right` is the best estimate of the column's right edge
+    /// around `line` -- the widest right edge among the lines that follow it --
+    /// and `beneath` the widest right edge of the visual line beneath `line`'s
+    /// heading run with that line's leading segment
+    /// ([`next_visual_line_right_edge`]), `None` when there is none or the caller
+    /// does not measure it (the merge pass; see
+    /// [`HeadingRun::continues_at_margin`]). See the
+    /// type-level doc for the cases.
+    ///
+    /// A body line is one that either outruns the line it would be continuing by
+    /// more than [`HEADING_CONTINUATION_MAX_OVERRUN_FONT_FACTOR`] while reaching
+    /// the column edge within [`HEADING_BODY_COLUMN_EDGE_SLACK_FONT_FACTOR`], or
+    /// opens with a capital while reaching it within the tighter
+    /// [`HEADING_BODY_CAPITAL_COLUMN_EDGE_SLACK_FONT_FACTOR`] -- and is not set in
+    /// capitals. No single signal separates the populations: OCR'd second lines
+    /// reach the edge and outrun their first by a few font-sizes, opening
+    /// lowercase (wraps); a body line under a title that nearly fills a narrow
+    /// column reaches the edge, outruns it by two, and opens with a capital
+    /// (`Het toestel is …` under `5.5.1 Comfort Touch thermostaat (OpenTherm)`,
+    /// body); a title broken by hand -- `4 INSTRUKTIES` / `ELEKTROTECHNISCH
+    /// INSTALLATEUR` -- outruns its short first line by twelve, reaches the
+    /// narrow column's edge and opens with a capital, and is a wrap on the one
+    /// signal body prose never carries: it is set in capitals. A mixed-case wrap
+    /// that opens with a capital and ends near the edge is cut after its first
+    /// line, which is the older, smaller fault. ~keep
+    pub(super) fn continues_onto(
+        &self,
+        prev: &SegmentData,
+        line: &SegmentData,
+        line_right: f32,
+        column_right: f32,
+        beneath: Option<(f32, &SegmentData)>,
+    ) -> bool {
+        if !prev.has_same_rotation(line) {
+            return false;
+        }
+        if self.abuts_on_the_same_printed_line(prev, line) {
+            return true;
+        }
+        let (line_left, _) = line.upright_advance_extent();
+        if !line_left.is_finite() || !line_right.is_finite() || !self.line_right.is_finite() {
+            return false;
+        }
+        match self.title_left {
+            Some(title_left) => {
+                let font_size = self.font_size.max(line.font_size).max(1.0);
+                let outruns = line_right > self.line_right + HEADING_CONTINUATION_MAX_OVERRUN_FONT_FACTOR * font_size;
+                let reaches_within =
+                    |slack: f32| column_right.is_finite() && line_right >= column_right - slack * font_size;
+                let opens_capitalised = line
+                    .text
+                    .chars()
+                    .find(|c| c.is_alphabetic())
+                    .is_none_or(|c| c.is_uppercase());
+                let letters: Vec<char> = line.text.chars().filter(|c| c.is_alphabetic()).collect();
+                let set_in_capitals = letters.len() >= 2 && letters.iter().all(|c| c.is_uppercase());
+                let is_body = !set_in_capitals
+                    && ((outruns && reaches_within(HEADING_BODY_COLUMN_EDGE_SLACK_FONT_FACTOR))
+                        || (opens_capitalised && reaches_within(HEADING_BODY_CAPITAL_COLUMN_EDGE_SLACK_FONT_FACTOR)));
+                ((line_left - title_left).abs() <= self.tolerance(line) && !is_body)
+                    || self.continues_at_margin(prev, line, line_right, beneath)
+            }
+            None => heading_wraps_onto(prev, line) || self.continues_at_margin(prev, line, line_right, beneath),
+        }
+    }
+
+    /// Whether `line` continues this heading at the page MARGIN: no hanging indent
+    /// (the shape the title-edge rule above covers), but the heading's own line
+    /// fills the text column measured against the body beneath the pair -- not
+    /// `line`'s own width, which a short last line would satisfy trivially -- and
+    /// the continuation resumes at the heading's own left edge, opens lowercase,
+    /// and keeps the heading's font size and weight.
+    ///
+    /// This is the exemption [`heading_wraps_onto`] (a RIGHT-edge test that a
+    /// short wrapped last line fails by construction) cannot give. See GH#1650,
+    /// where a numbered heading set in the HEADING font -- not the body font
+    /// GH#1605 already covers in the merge pass -- wraps at the margin and was cut
+    /// after its first line. GH#1609's control (a COMPLETE heading followed by
+    /// wider lowercase body prose) and GH#1650's own page-4 control (a complete
+    /// heading followed by an unrelated bold line) both stay split: neither
+    /// heading's own line reaches the column edge. Upstream's fix (`c50a6af27`)
+    /// is this test as a free function beside `follows_section`; here it lives on
+    /// the run so that [`HeadingRun::absorb`] accepts the same line the grouper
+    /// accepted and the heading still closes after its LAST continuation.
+    ///
+    /// Asked in both arms: a hanging heading's wrap may return to the NUMBER's
+    /// margin rather than the title's edge (an Elsevier `3.1.1. IL-38 reduces …`
+    /// / `microbial stimuli`, the number 25 pt left of its title), and the test
+    /// is against the heading's own left edge, as upstream's is.
+    ///
+    /// Past the first wrap only for a heading SET APART from body type -- bold or
+    /// italic, in the same style as the line it continues. The rule reads the
+    /// column beneath the pair and a lowercase opening, which every justified body
+    /// line after the first satisfies too: a paragraph that happens to start with
+    /// a version number (`3.1.9.7 (Heinrich-Heine-Universty …), we calculated …`,
+    /// a two-column journal article, regular body type) would otherwise be carried
+    /// on as a "heading" line after line and cut wherever the next sentence
+    /// happened to start, and a three-line piece of it then read as a numbered
+    /// section -- which is what upstream's GH#1740 generalisation (every wrap,
+    /// whatever the style) does on that article. GH#1740's own titles are set in
+    /// italic at the body's size (an Elsevier house style), and its bold control
+    /// in bold; both wrap twice and are held whole here. A regular-type heading
+    /// keeps the first-wrap scope upstream had before GH#1740. ~keep
+    ///
+    /// GH#1758's three loosenings are upstream's (`0b10554a3`), moved here from
+    /// the free function they were written on: a lowercase opener is measured with
+    /// [`heading_line_ran_out_of_room`] (did the next WORD fit?) rather than the
+    /// fixed slack; a capital opener is admitted when
+    /// [`heading_style_carries_capital_opener`] holds, and then only against the
+    /// strict [`heading_fills_column`]; and the column is read beneath the whole
+    /// heading run, floored at the heading's own right edge. The scope above still
+    /// applies first, so past the first wrap none of them reaches a regular-type
+    /// line. ~keep
+    fn continues_at_margin(
+        &self,
+        prev: &SegmentData,
+        line: &SegmentData,
+        line_right: f32,
+        beneath: Option<(f32, &SegmentData)>,
+    ) -> bool {
+        if self.continuations > 0 && !((line.is_bold || line.is_italic) && line.is_italic == prev.is_italic) {
+            return false;
+        }
+        let Some((beneath_right, beneath)) = beneath else {
+            return false;
+        };
+        if !prev.font_size.is_finite() || !line.font_size.is_finite() {
+            return false;
+        }
+        if (line.font_size - prev.font_size).abs() > HEADING_CONTINUATION_FONT_SIZE_TOLERANCE_PT
+            || line.is_bold != prev.is_bold
+        {
+            return false;
+        }
+        let (line_left, _) = line.upright_advance_extent();
+        if !self.heading_left.is_finite() || !line_left.is_finite() || !line_right.is_finite() {
+            return false;
+        }
+        let tolerance = self.tolerance(line);
+        if (line_left - self.heading_left).abs() > tolerance {
+            return false;
+        }
+        // GH#1758: the line beneath is only EVIDENCE of where the column ends, and a
+        // line narrower than the heading's own is no evidence at all -- the heading
+        // already proved the measure reaches at least that far. Upstream's floor,
+        // taken as is; see `next_visual_line_right_edge` for the stub it guards
+        // against. ~keep
+        let (_, prev_end) = prev.upright_advance_extent();
+        let column_right = if prev_end.is_finite() {
+            beneath_right.max(prev_end)
+        } else {
+            beneath_right
+        };
+        if line_right > column_right + tolerance {
+            return false;
+        }
+        if line.text.trim_start().chars().next().is_some_and(char::is_lowercase) {
+            return heading_line_ran_out_of_room(prev, line, column_right);
+        }
+        heading_style_carries_capital_opener(prev, line, beneath) && heading_fills_column(prev, column_right)
+    }
+
+    /// Take `line` into the run after it has been accepted (or judged to be on the
+    /// same printed line). Returns `false` when it continues nothing, in which
+    /// case the run is over.
+    fn absorb(
+        &mut self,
+        prev: &SegmentData,
+        line: &SegmentData,
+        line_right: f32,
+        column_right: f32,
+        beneath: Option<(f32, &SegmentData)>,
+    ) -> bool {
+        if self.abuts_on_the_same_printed_line(prev, line)
+            || (line.upright_baseline() - prev.upright_baseline()).abs() <= INLINE_STYLE_BASELINE_TOLERANCE
+        {
+            self.extend_line(line);
+            true
+        } else if self.continues_onto(prev, line, line_right, column_right, beneath) {
+            self.new_line(line);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// The right edge of the PRINTED line that starts at `lines[from]`: the widest
+/// right edge over it and every following segment that abuts its predecessor on
+/// the same baseline (within the jitter tolerance). A line arrives as several
+/// segments whenever a font or a ligature changes mid-line, and the first of them
+/// says nothing about how far the line reaches.
+fn printed_line_right_edge(lines: &[SegmentData], from: usize) -> f32 {
+    let mut right = f32::NEG_INFINITY;
+    let mut prev: Option<&SegmentData> = None;
+    for segment in &lines[from..] {
+        if let Some(prev) = prev {
+            let font_size = prev.font_size.max(segment.font_size).max(1.0);
+            let (_, prev_end) = prev.upright_advance_extent();
+            let (start, _) = segment.upright_advance_extent();
+            let gap = start - prev_end;
+            let same_line = segment.has_same_rotation(prev)
+                && (segment.upright_baseline() - prev.upright_baseline()).abs()
+                    <= HEADING_LINE_BASELINE_JITTER_FONT_FACTOR * font_size
+                && gap >= -(font_size * INLINE_STYLE_MAX_OVERLAP_FONT_FACTOR)
+                && gap <= font_size * INLINE_STYLE_MAX_FORWARD_GAP_FONT_FACTOR;
+            if !same_line {
+                break;
+            }
+        }
+        let (_, end) = segment.upright_advance_extent();
+        if end.is_finite() {
+            right = right.max(end);
+        }
+        prev = Some(segment);
+    }
+    right
+}
+
+/// The widest right edge among the segments that follow `lines[from]` -- the
+/// grouper's estimate of the column edge where a heading's would-be continuation
+/// sits, taken from what follows it rather than from the whole page. Only the
+/// next [`HEADING_COLUMN_EDGE_LOOKAHEAD_SEGMENTS`] segments count, only those
+/// within [`HEADING_COLUMN_EDGE_LOOKAHEAD_FONT_SIZES`] below the candidate's
+/// baseline, and only those that START left of where the candidate's own line
+/// ends -- so a two-column page's left column is measured against its own edge
+/// and not against the right column's, and a page number at the foot of the page
+/// does not stand in for the column.
+fn column_right_edge_ahead(lines: &[SegmentData], from: usize, line_right: f32) -> f32 {
+    let Some(candidate) = lines.get(from) else {
+        return f32::NEG_INFINITY;
+    };
+    let baseline = candidate.upright_baseline();
+    let reach = HEADING_COLUMN_EDGE_LOOKAHEAD_FONT_SIZES * candidate.font_size.max(1.0);
+    lines
+        .iter()
+        .skip(from)
+        .take(HEADING_COLUMN_EDGE_LOOKAHEAD_SEGMENTS)
+        .filter(|segment| segment.has_same_rotation(candidate))
+        .filter(|segment| {
+            let delta = baseline - segment.upright_baseline();
+            delta.is_finite() && (-1.0..=reach).contains(&delta)
+        })
+        .map(|segment| segment.upright_advance_extent())
+        .filter(|(left, right)| left.is_finite() && right.is_finite() && *left < line_right)
+        .map(|(_, right)| right)
+        .fold(f32::NEG_INFINITY, f32::max)
+}
+
 /// Whether the numbered-heading line `prev` reaches far enough right to have run
 /// out of room, which is the "fills its column" half of the wrap rule that
 /// [`heading_wraps_onto`]'s doc comment states but its code never measured.
@@ -2333,70 +2777,6 @@ pub(super) fn heading_wraps_onto(prev: &SegmentData, line: &SegmentData) -> bool
 /// heading stops hundreds of points short of the body prose it was being welded
 /// into. A lowercase opening alone cannot tell those apart -- both continue in
 /// lowercase -- which is why it must not be the whole test. See #1609. ~keep
-/// Whether `line` is the continuation of a numbered heading set with a HANGING
-/// INDENT: the number at the left margin, the title starting to its right, and a
-/// title too long for one line resuming at the title's own left edge.
-///
-/// Two things must hold, and the second alone is not enough. `heading_start` is the
-/// first segment of the heading's visual line and `prev` its last, so
-/// `prev` starting to the right of `heading_start` is what establishes that this
-/// heading HAS a hanging indent at all. Only then does `line` sharing `prev`'s left
-/// edge mean "the title continues" rather than "the next line happens to be at the
-/// same margin".
-///
-/// Measured on GH#1615's reproducer, where the wrap and the body that must NOT merge
-/// are identical on every other signal this grouper checks -- same font, same weight,
-/// same line pitch:
-///
-/// ```text
-/// 5.7.3                                     x 48.24            the number, at the margin
-/// Roof terminal combined duct vertical and  x 83.64  y 774.96  the title, indented 35.4pt
-/// twin pipe duct vertical                   x 83.64  y 762.24  the wrap -- aligns with the title
-/// Appliance category: C33                   x 48.24  y 745.08  the body -- returns to the margin
-/// ```
-///
-/// This is why the right-edge test in [`heading_wraps_onto`] cannot stand alone: a
-/// wrap's LAST line is short by definition -- being short is what makes it the last
-/// line -- so its right edge never matches the line it continues, and every two-line
-/// heading looked like a heading handing off to unrelated content.
-///
-/// The hanging-indent requirement is what keeps #1467 working: there the heading is a
-/// single segment at the margin and the callout beneath it is at the same margin, so
-/// `heading_start` and `prev` coincide, no indent is established, and the pair still
-/// splits. `starts_section` is evaluated independently of all this, so a following
-/// line that is itself a numbered heading breaks regardless. ~keep
-pub(super) fn heading_continuation_is_hanging_indent(
-    heading_start: &SegmentData,
-    prev: &SegmentData,
-    line: &SegmentData,
-) -> bool {
-    if !prev.has_same_rotation(line) || !prev.has_same_rotation(heading_start) {
-        return false;
-    }
-    if !prev.font_size.is_finite() || !line.font_size.is_finite() {
-        return false;
-    }
-    let (heading_left, _) = heading_start.upright_advance_extent();
-    let (prev_left, _) = prev.upright_advance_extent();
-    let (line_left, _) = line.upright_advance_extent();
-    if !heading_left.is_finite() || !prev_left.is_finite() || !line_left.is_finite() {
-        return false;
-    }
-    let tolerance =
-        HEADING_HANGING_INDENT_LEFT_EDGE_TOLERANCE_FONT_FACTOR * prev.font_size.max(line.font_size).max(1.0);
-    if prev_left - heading_left <= tolerance || (prev_left - line_left).abs() > tolerance {
-        return false;
-    }
-    // GH#1634: left edges alone cannot tell a wrapped heading from a body
-    // indented to the title's edge -- number in the margin, title and body
-    // alike at one edge, which is how contracts, tenders and many installation
-    // manuals are set. A line only wraps when the line before it ran out of
-    // room, so require that too: a heading that stops well short of the
-    // following line's width did not wrap, it ended. ~keep
-    let (_, line_end) = line.upright_advance_extent();
-    line_end.is_finite() && heading_fills_column(prev, line_end)
-}
-
 pub(super) fn heading_fills_column(prev: &SegmentData, next_right_edge: f32) -> bool {
     if !prev.font_size.is_finite() || !next_right_edge.is_finite() {
         return false;
@@ -2584,85 +2964,6 @@ fn continues_heading_run(
     }
     let advance = (previous_baseline - candidate.upright_baseline()).abs();
     (advance - heading_pitch).abs() <= HEADING_CONTINUATION_RUN_PITCH_TOLERANCE_FACTOR * heading_pitch
-}
-
-/// Whether `line` continues the numbered heading `prev`/`heading_start` at the
-/// page MARGIN: no hanging indent (the shape `heading_continuation_is_hanging_indent`
-/// covers), but the heading's own line fills the text column measured against
-/// the body beneath the pair -- not `line`'s own width, which a short last line
-/// would satisfy trivially -- the continuation resumes at the heading's own left
-/// edge, opens lowercase, and keeps the heading's font size and weight.
-///
-/// This is the third `follows_section` exemption, alongside `heading_wraps_onto`
-/// (a RIGHT-edge test that a short wrapped last line fails by construction) and
-/// `heading_continuation_is_hanging_indent` (which requires an indent this shape
-/// does not have). See GH#1650, where a numbered heading set in the HEADING font
-/// -- not the body font GH#1605 already covers -- wraps at the margin and is cut
-/// after its first line. GH#1609's control (a COMPLETE heading followed by wider
-/// lowercase body prose) and GH#1650's own page-4 control (a complete heading
-/// followed by an unrelated bold line) both stay split: neither heading's own
-/// line reaches the column edge. ~keep
-///
-/// GH#1758 loosens the two tests the reporter's nine real titles fail. A lowercase
-/// opener is now measured with [`heading_line_ran_out_of_room`], which asks whether
-/// the next WORD fitted rather than trusting a fixed slack. A capital opener, which
-/// was refused outright, is admitted only when
-/// [`heading_style_carries_capital_opener`] holds -- and then only against the
-/// strict [`heading_fills_column`], never the word-fit relaxation, so the two
-/// loosenings cannot compound on one boundary. ~keep
-fn heading_continuation_at_margin(
-    heading_start: &SegmentData,
-    prev: &SegmentData,
-    line: &SegmentData,
-    lines: &[SegmentData],
-    line_idx: usize,
-) -> bool {
-    if !prev.has_same_rotation(line) || !prev.has_same_rotation(heading_start) {
-        return false;
-    }
-    if !prev.font_size.is_finite() || !line.font_size.is_finite() {
-        return false;
-    }
-    if (line.font_size - prev.font_size).abs() > HEADING_CONTINUATION_FONT_SIZE_TOLERANCE_PT
-        || line.is_bold != prev.is_bold
-    {
-        return false;
-    }
-    let (heading_left, _) = heading_start.upright_advance_extent();
-    let (line_left, line_end) = line.upright_advance_extent();
-    if !heading_left.is_finite() || !line_left.is_finite() || !line_end.is_finite() {
-        return false;
-    }
-    let tolerance =
-        HEADING_HANGING_INDENT_LEFT_EDGE_TOLERANCE_FONT_FACTOR * prev.font_size.max(line.font_size).max(1.0);
-    if (line_left - heading_left).abs() > tolerance {
-        return false;
-    }
-    let heading_pitch = (prev.upright_baseline() - line.upright_baseline()).abs();
-    let Some((line_beneath_edge, beneath)) = next_visual_line_right_edge(lines, line_idx, heading_pitch) else {
-        return false;
-    };
-    // GH#1758: the line beneath is only EVIDENCE of where the column ends, and a line
-    // narrower than the heading's own is no evidence at all -- the heading already
-    // proved the measure reaches at least that far. Floored here rather than inside
-    // `heading_fills_column`, which the merge pass shares and which must keep
-    // measuring GH#1605's boundary exactly as it does today. Without the floor a stub
-    // beneath a long run (x 69.9 against a 375.2 measure, measured on
-    // `test_documents/pdf/an_introduction_to_statistical_learning_...`) rejects the
-    // run's own middle line through the overflow guard below. ~keep
-    let (_, prev_end) = prev.upright_advance_extent();
-    let column_right_edge = if prev_end.is_finite() {
-        line_beneath_edge.max(prev_end)
-    } else {
-        line_beneath_edge
-    };
-    if line_end > column_right_edge + tolerance {
-        return false;
-    }
-    if line.text.trim_start().chars().next().is_some_and(char::is_lowercase) {
-        return heading_line_ran_out_of_room(prev, line, column_right_edge);
-    }
-    heading_style_carries_capital_opener(prev, line, beneath) && heading_fills_column(prev, column_right_edge)
 }
 
 /// Whether a continuation opening with a CAPITAL still reads as the heading's own
