@@ -18,17 +18,23 @@ const CELL_SYMBOLS: &[char] = &[
     '\u{a2}', '\u{a3}', '\u{a5}', '\u{20ac}', '%', '*',
 ];
 
-/// Drop the marks Tesseract reads off the edge of a shaded table row, before table
-/// reconstruction (xberg-io/xberg#1858).
+/// Which words survive the filter on the marks Tesseract reads off the edge of a shaded table row,
+/// in the same order and the same length as `words` (xberg-io/xberg#1858).
 ///
-/// Such a mark (a tall `=`, a thin dash with a comma) sits in the gap between two values, and the cell merge
-/// then joins both values into one cell. A word is a mark when all three tests hold: its text
-/// has no letter and no digit and is not a lone cell symbol, its height is far from the median
+/// Such a mark (a tall `=`, a thin dash with a comma) sits in the gap between two values, and the
+/// cell merge then joins both values into one cell. A word is a mark when all three tests hold: its
+/// text has no letter and no digit and is not a lone cell symbol, its height is far from the median
 /// height of its row, and its confidence is low. The text test keeps real content whose box went
 /// wrong, such as a name read at twice its row's height or a nil dash. Rows are the ones table
-/// reconstruction itself detects. ~keep
-pub(crate) fn drop_shading_marks(words: Vec<HocrWord>, row_threshold_ratio: f64) -> Vec<HocrWord> {
-    let row_positions = detect_rows(&words, row_threshold_ratio);
+/// reconstruction itself detects.
+///
+/// A mask rather than a filtered list because a caller holding a second vector parallel to `words`
+/// must filter both on one decision -- filtering one desynchronises the indices -- and because such
+/// a caller wants the decision made against the boxes Tesseract actually read: a later pass may
+/// normalise a word's box onto its row's band and erase the very height anomaly this keys on
+/// (GH#1834 against GH#1858). ~keep
+pub(crate) fn shading_mark_keep_mask(words: &[HocrWord], row_threshold_ratio: f64) -> Vec<bool> {
+    let row_positions = detect_rows(words, row_threshold_ratio);
     let rows: Vec<Option<usize>> = words.iter().map(|word| find_row_index(&row_positions, word)).collect();
 
     let mut row_heights: Vec<Vec<u32>> = vec![Vec::new(); row_positions.len()];
@@ -40,10 +46,9 @@ pub(crate) fn drop_shading_marks(words: Vec<HocrWord>, row_threshold_ratio: f64)
     let row_medians: Vec<u32> = row_heights.into_iter().map(median_height).collect();
 
     words
-        .into_iter()
+        .iter()
         .zip(rows)
-        .filter(|(word, row)| !row.is_some_and(|row| is_shading_mark(word, row_medians[row])))
-        .map(|(word, _)| word)
+        .map(|(word, row)| !row.is_some_and(|row| is_shading_mark(word, row_medians[row])))
         .collect()
 }
 
@@ -66,6 +71,17 @@ fn is_mark_text(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The mask applied, which is what every case below asserts on.
+    fn drop_shading_marks(words: Vec<HocrWord>, row_threshold_ratio: f64) -> Vec<HocrWord> {
+        let keep = shading_mark_keep_mask(&words, row_threshold_ratio);
+        words
+            .into_iter()
+            .zip(keep)
+            .filter(|(_, keep)| *keep)
+            .map(|(word, _)| word)
+            .collect()
+    }
 
     fn word(text: &str, left: u32, top: u32, height: u32, confidence: f64) -> HocrWord {
         HocrWord {
