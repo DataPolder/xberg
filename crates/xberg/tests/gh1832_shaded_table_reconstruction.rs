@@ -281,6 +281,29 @@ fn values_glued_by_the_shading_underscore_marks_fill_cells_of_their_own() {
     );
 }
 
+/// No cell that holds a value keeps an underscore mark. The positive twin: a value the page
+/// prints in every column still reads whole.
+#[test]
+fn no_value_cell_keeps_the_shading_underscore_marks() {
+    for psm in [3, 11] {
+        let table = first_table(psm, false).unwrap_or_else(|| panic!("PSM {psm} must produce a table"));
+        let marked: Vec<&String> = table
+            .cells
+            .iter()
+            .flatten()
+            .filter(|cell| cell.contains('_') && cell.chars().any(|ch| ch.is_ascii_digit()))
+            .collect();
+        assert!(
+            marked.is_empty(),
+            "PSM {psm}: value cells keep underscore marks: {marked:?}"
+        );
+        assert!(
+            table.cells.iter().flatten().any(|cell| cell.trim() == "3,250"),
+            "PSM {psm}: a plainly printed value must still read whole"
+        );
+    }
+}
+
 /// Measurement harness for the rest of the cluster -- GH#1833 (values glue across the shading's
 /// underscore marks) and GH#1834 (a label's tail becomes its own row); GH#1832's split header is
 /// fixed and gated above. This prints the full grid and the per-cell misses at four
