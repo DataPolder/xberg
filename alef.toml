@@ -600,7 +600,7 @@ traineddata = "traineddata"
 "tools/benchmark-harness/baselines/initial_baseline.json" = ["file-too-long"]
 "tools/benchmark-harness/guardrails.json" = ["file-too-long"]
 # --- quality-debt baseline (generated) ---
-# 504 size/complexity findings across 198 files that predate these metrics, listed per file
+# 490 size/complexity findings across 184 files that predate these metrics, listed per file
 # rather than switching the rules off, so the metrics still fire on every file NOT listed
 # here -- new code stays covered, and each path below is one discrete unit of work.
 #
@@ -621,7 +621,6 @@ traineddata = "traineddata"
 "crates/xberg-candle-ocr/src/models/paddleocr_vl/model.rs" = ["file-too-long", "function-too-long", "nesting-too-deep"]
 "crates/xberg-cli/src/commands/overrides/mod.rs" = ["type-too-long"]
 "crates/xberg-cli/src/main.rs" = ["file-too-long", "function-too-long", "type-too-long"]
-"crates/xberg-cli/tests/commands_test.rs" = ["file-too-long"]
 "crates/xberg-native-pdf/src/content/operators.rs" = ["file-too-long", "type-too-long"]
 "crates/xberg-native-pdf/src/content/parser.rs" = ["cyclomatic-complexity", "file-too-long", "function-too-long"]
 "crates/xberg-native-pdf/src/converters/text_post_processor.rs" = [
@@ -786,22 +785,9 @@ traineddata = "traineddata"
 "crates/xberg-native-pdf/src/text/bidi.rs" = ["cyclomatic-complexity", "file-too-long"]
 "crates/xberg-native-pdf/src/xfa/parser.rs" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep"]
 "crates/xberg-native-pdf/src/xref.rs" = ["cyclomatic-complexity", "file-too-long", "function-too-long"]
-"crates/xberg-native-pdf/tests/extraction_api_regression.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_46_round2_qa_pass.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_46_round3_qa_pass.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_46_round4_qa_pass.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_ocg_ink_filtering.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_render_ocg_filtering.rs" = ["file-too-long"]
 "crates/xberg-native-pdf/tests/test_render_output_intent.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_render_resolution_pipeline_qa_wave2.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_render_resolution_pipeline_qa_wave3.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_render_resolution_pipeline_qa_wave4.rs" = ["file-too-long"]
 "crates/xberg-native-pdf/tests/test_separation_rendering.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_struct_actualtext_probes.rs" = ["file-too-long"]
 "crates/xberg-native-pdf/tests/test_transparency_flattening_audit.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_transparency_flattening_qa_round2.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_vertical_writing_mode_qa_probes.rs" = ["file-too-long"]
-"crates/xberg-native-pdf/tests/test_word_boundary_detection.rs" = ["file-too-long"]
 "crates/xberg-paddle-ocr/src/ocr_lite.rs" = ["too-many-parameters"]
 "crates/xberg-pdfium-render/src/bindgen/pdfium_7678.rs" = ["file-too-long"]
 "crates/xberg-pdfium-render/src/bindings.rs" = ["file-too-long", "too-many-parameters", "type-too-long"]
