@@ -1453,6 +1453,23 @@ sources = [
 features = [
   "full",
   "pdf",
+  # GH#1863 reverses the decision recorded on `[crates.ffi].extra_features` below, for the
+  # bindings that inherit THIS array (python, node, ruby, php, elixir) only. That note keeps
+  # `pdf-pdfium` declare-only because the engine dlopen()s libpdfium at run time, so
+  # compiling it in hands a consumer a backend that fails with MissingDependency unless they
+  # install the library; leaving it out instead fails with "rebuild with --features
+  # pdf-pdfium", which is the better message of the two. The trade is real and is being taken
+  # the other way now because these five bindings ship prebuilt artifacts nobody can rebuild:
+  # `PdfBackend::Pdfium` is documented in every one of their generated API references, so the
+  # good error message was being paid for with an API surface that advertises a value no
+  # published wheel, addon or gem can honour. The install guide now names
+  # PDFIUM_DYNAMIC_LIB_PATH, which is what made the MissingDependency path actionable enough
+  # to accept. The feature compiles xberg-pdfium-render in and links nothing
+  # (crates/xberg-pdfium-render/build.rs is a no-op without PDFIUM_STATIC_LIB_PATH /
+  # PDFIUM_DYNAMIC_LIB_PATH); reported cost is +182 KB on an abi3 wheel. It does NOT reach
+  # the Windows or Intel-macOS artifacts, which build from the `windows-target` /
+  # `macos-intel-target` aggregates, nor wasm/android/ios, which cannot dlopen at all. ~keep
+  "pdf-pdfium",
   "ocr",
   "paddle-ocr",
   "paddle-ocr-types",
@@ -1975,7 +1992,10 @@ visitor_callbacks = false
 # zig/java/C consumers who build libxberg_ffi themselves a documented opt-in at
 # zero cost to everyone else. `extra_features` exists only on `[crates.ffi]`
 # and `[crates.wasm]`, so the other bindings have no declare-only key and
-# cannot be given the same opt-in without an alef change.
+# cannot be given the same opt-in without an alef change. That absence is why
+# GH#1863 enabled the feature outright in the shared `[[crates]].features` array
+# instead; this declare-only entry still stands for FFI, whose consumers build
+# libxberg_ffi themselves.
 #
 # `ocr-wasm` appears in emitted `any(feature = "ocr", feature = "ocr-wasm")`
 # gates. Alef declares every discovered gate and otherwise enables it by default,
