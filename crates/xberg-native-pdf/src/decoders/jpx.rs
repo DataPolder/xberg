@@ -69,12 +69,112 @@ fn alpha_is_droppable(codestream_says_alpha: bool, num_components: usize, declar
         && declared_components.is_none_or(|declared| usize::from(declared) != num_components)
 }
 
+/// `SOC`, the marker that opens every JPEG 2000 codestream (ISO/IEC 15444-1 A.4.1). ~keep
+const SOC_MARKER: [u8; 2] = [0xFF, 0x4F];
+/// `SOC` immediately followed by `SIZ` (`0xFF51`), which A.5.1 requires of every codestream: the
+/// two are checked together because a `SIZ` anywhere else is not the one A.5.1 describes. ~keep
+const SOC_THEN_SIZ: [u8; 4] = [0xFF, 0x4F, 0xFF, 0x51];
+/// `jp2c`, the Contiguous Codestream box that holds the codestream in a JP2 file (ISO/IEC 15444-1
+/// Annex I.4.2). ~keep
+const JP2C_BOX_TYPE: [u8; 4] = *b"jp2c";
+/// ISO/IEC 15444-1 Table A-9: within the `SIZ` segment the fields ahead of `Csiz` are all
+/// fixed-width -- `Lsiz`(2) `Rsiz`(2) `Xsiz`(4) `Ysiz`(4) `XOsiz`(4) `YOsiz`(4) `XTsiz`(4)
+/// `YTsiz`(4) `XTOsiz`(4) `YTOsiz`(4) -- so `Csiz` sits 38 bytes past the `SIZ` marker and 40
+/// bytes past the start of the codestream, and `Lsiz` is exactly `38 + 3 x Csiz`. ~keep
+const CSIZ_OFFSET_IN_CODESTREAM: usize = 40;
+const SIZ_BYTES_BEFORE_COMPONENTS: u16 = 38;
+const SIZ_BYTES_PER_COMPONENT: u16 = 3;
+
+/// The component count (`Csiz`) the codestream's own `SIZ` marker segment declares.
+///
+/// This reads the header rather than asking hayro-jpeg2000, because hayro's answer for a bare
+/// codestream is synthesised from the count rather than read from it -- see [`alpha_is_droppable`].
+/// ISO/IEC 15444-1 A.5.1 fixes both where `Csiz` lives and that `Lsiz == 38 + 3 x Csiz`; that
+/// identity is checked as a cross-brace, so a header whose length field disagrees with its own
+/// component count is rejected rather than guessed at. A JP2-boxed file (Annex I.4) is handled by
+/// walking its top-level boxes to the `jp2c` box that contains the codestream. Every failure --
+/// a missing or misplaced marker, a truncated header, an inconsistent `Lsiz`, a count that cannot
+/// be a PDF image's component count -- returns `None`, so a caller changes nothing. ~keep
+fn codestream_component_count(bytes: &[u8]) -> Option<u8> {
+    let codestream = locate_codestream(bytes)?;
+    if !codestream.starts_with(&SOC_THEN_SIZ) {
+        return None;
+    }
+    let lsiz = u16::from_be_bytes(codestream.get(4..6)?.try_into().ok()?);
+    let csiz_end = CSIZ_OFFSET_IN_CODESTREAM + 2;
+    let csiz = u16::from_be_bytes(codestream.get(CSIZ_OFFSET_IN_CODESTREAM..csiz_end)?.try_into().ok()?);
+    let expected_lsiz = SIZ_BYTES_BEFORE_COMPONENTS.checked_add(SIZ_BYTES_PER_COMPONENT.checked_mul(csiz)?)?;
+    if lsiz != expected_lsiz {
+        return None;
+    }
+    u8::try_from(csiz).ok().filter(|&n| n > 0)
+}
+
+/// The codestream within `bytes`: `bytes` itself when it is bare, otherwise the contents of the
+/// `jp2c` box.
+///
+/// ISO/IEC 15444-1 Annex I.4: a JP2 box is `LBox`(4) `TBox`(4) `DBox`, where `LBox == 1` means the
+/// real length follows as a 64-bit `XLBox` and `LBox == 0` means the box runs to end of file. Only
+/// top-level boxes are walked -- `jp2c` is always one. ~keep
+fn locate_codestream(bytes: &[u8]) -> Option<&[u8]> {
+    if bytes.starts_with(&SOC_MARKER) {
+        return Some(bytes);
+    }
+    let mut offset = 0usize;
+    // `checked_add` rather than `offset + 8 <= len`: a 64-bit `XLBox` is attacker-controlled and
+    // can advance `offset` to anywhere in the usize range. ~keep
+    while offset.checked_add(8).is_some_and(|end| end <= bytes.len()) {
+        let lbox = u32::from_be_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?);
+        let box_type = bytes.get(offset + 4..offset + 8)?;
+        let (header_len, box_len) = match lbox {
+            1 => {
+                let xlbox = u64::from_be_bytes(bytes.get(offset + 8..offset + 16)?.try_into().ok()?);
+                (16usize, usize::try_from(xlbox).ok()?)
+            }
+            0 => (8usize, bytes.len() - offset),
+            len => (8usize, usize::try_from(len).ok()?),
+        };
+        if box_len < header_len {
+            return None;
+        }
+        if box_type == JP2C_BOX_TYPE {
+            return bytes.get(offset + header_len..);
+        }
+        offset = offset.checked_add(box_len)?;
+    }
+    None
+}
+
+/// The component count to treat as declared when the image dictionary named no `/ColorSpace` at all
+/// -- legal for `/JPXDecode` per ISO 32000-1 Table 89, and the one case where §7.4.9's authoritative
+/// entry is absent (GH#1883).
+///
+/// Only a BARE codestream is answered. JPEG 2000 types a component as opacity in the JP2 channel
+/// definition box (`cdef`, ISO/IEC 15444-1 I.5.3.6); a bare codestream carries no boxes, so nothing
+/// in it can mark a component as alpha and all `Csiz` of its components are colour components.
+/// hayro's `has_alpha` there is invented from the count, as documented on [`alpha_is_droppable`],
+/// and taking `Csiz` instead is what keeps a bare CMYK image's K plane. A JP2-boxed stream does
+/// carry `colr`/`cdef`, so hayro's alpha answer for it is grounded in the file and must not be
+/// overridden -- `None` leaves that answer in force. ~keep
+fn undeclared_component_count(bytes: &[u8]) -> Option<u8> {
+    if !bytes.starts_with(&SOC_MARKER) {
+        return None;
+    }
+    codestream_component_count(bytes)
+}
+
 /// `declared_components` is how many colour components the image dictionary's `/ColorSpace`
 /// implies, when it named one, and `None` when it did not. ISO 32000-1 §7.4.9 makes that entry
-/// authoritative over anything in the JPEG 2000 data, and it is the only way to tell a
-/// 4-component CMYK codestream from an RGBA one -- see the alpha decision below. ~keep
+/// authoritative over anything in the JPEG 2000 data, and for a JP2-boxed stream it is the only way
+/// to tell a 4-component CMYK codestream from an RGBA one -- see the alpha decision below. When it
+/// is `None`, [`undeclared_component_count`] supplies the codestream's own `Csiz` in its place for
+/// the one shape where that is sound. ~keep
 pub fn decode_jpx(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxImage> {
     use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
+
+    // Nothing declared a count, so fall back to the codestream's own `SIZ` header where that is
+    // meaningful. See [`undeclared_component_count`]. ~keep
+    let declared_components = declared_components.or_else(|| undeclared_component_count(bytes));
 
     let image = Image::new(bytes, &DecodeSettings::default())
         .map_err(|e| Error::UnsupportedFilter(format!("JPXDecode: JPEG 2000 decode failed: {e:?}")))?;
@@ -234,30 +334,45 @@ mod tests {
         }
     }
 
-    /// GH#1850: a bare CMYK codestream must keep its K plane when the image dictionary declares
-    /// four components.
+    /// GH#1883: a bare CMYK codestream must keep its K plane whether or not the image dictionary
+    /// declares a colour space. ISO 32000-1 Table 89 lets a `/JPXDecode` image omit `/ColorSpace`,
+    /// and the count then has to come from the codestream's own `SIZ` header.
     ///
-    /// The first assertion is a NEGATIVE CONTROL that pins the upstream misread rather than a
-    /// behaviour we want: with no declared count, hayro-jpeg2000 infers `Srgb` from the component
-    /// count, takes its non-strict `actual == num_channels + 1 && !has_alpha` repair arm, and calls
-    /// the fourth channel alpha -- so we report 3 and drop K. If that first assertion ever starts
-    /// failing, upstream has fixed it and this whole workaround can go. ~keep
+    /// The first assertion is the NEGATIVE CONTROL, and it pins the upstream misread *directly*
+    /// rather than through its consequence: hayro-jpeg2000 reports an alpha channel on a bare
+    /// codestream, which has no `cdef` box able to declare one. It has to be asserted on `Image`
+    /// because the workaround now yields four components either way, so the decoder's output no
+    /// longer distinguishes a fixed upstream from a broken one. When this assertion fails, upstream
+    /// has stopped inventing the channel and `undeclared_component_count` can go. ~keep
     #[test]
-    fn a_bare_cmyk_codestream_keeps_four_components_when_the_dictionary_declares_four() {
-        let misread = decode_jpx(CMYK_QUADRANTS_J2K, None).expect("bare CMYK codestream must decode");
-        assert_eq!(
-            misread.num_components, 3,
-            "negative control: undeclared, hayro reports RGB+alpha and the K plane is dropped"
+    fn a_bare_cmyk_codestream_keeps_four_components_whether_or_not_the_dictionary_declares_them() {
+        let raw = hayro_jpeg2000::Image::new(CMYK_QUADRANTS_J2K, &hayro_jpeg2000::DecodeSettings::default())
+            .expect("bare CMYK codestream must parse");
+        assert!(
+            raw.has_alpha(),
+            "negative control: upstream still invents an alpha channel for a bare codestream, which \
+             carries no cdef box to declare one -- if this fails, undeclared_component_count can go"
         );
 
-        let correct =
+        let undeclared = decode_jpx(CMYK_QUADRANTS_J2K, None).expect("bare CMYK codestream must decode");
+        assert_eq!(
+            undeclared.num_components, 4,
+            "with no declared colour space the Csiz of 4 must stand and the K plane must survive"
+        );
+        assert_eq!(
+            undeclared.samples.len(),
+            16 * 16 * 4,
+            "all four planes must be present, 16x16 image"
+        );
+
+        let declared =
             decode_jpx(CMYK_QUADRANTS_J2K, Some(4)).expect("bare CMYK codestream must decode with a declared count");
         assert_eq!(
-            correct.num_components, 4,
+            declared.num_components, 4,
             "a declared 4 must suppress the phantom alpha and keep all four planes"
         );
         assert_eq!(
-            correct.samples.len(),
+            declared.samples.len(),
             16 * 16 * 4,
             "all four planes must be present, 16x16 image"
         );
@@ -280,22 +395,40 @@ mod tests {
     /// GH#1850: an alpha channel is a component like any other in the codestream, so counting
     /// components raw described a colour space the image does not have. Four components were
     /// mapped to DeviceCMYK by the caller, and two were rejected outright, dropping the image.
+    ///
+    /// Only the JP2-boxed fixture belongs here. Its `cdef` box declares the fourth channel opaque
+    /// (ISO/IEC 15444-1 I.5.3.6), so hayro's alpha answer is read from the file and is the one to
+    /// honour. The bare variant has no such box -- see
+    /// [`a_bare_four_component_codestream_with_nothing_declared_is_read_as_cmyk`]. ~keep
     #[test]
     fn rgba_codestream_reports_three_colour_components() {
-        for (label, bytes) in [("jp2", RGBA_JP2), ("j2k", RGBA_J2K)] {
-            let img = decode_jpx(bytes, None).unwrap_or_else(|e| panic!("{label} must decode: {e:?}"));
-            assert_eq!(
-                img.num_components, 3,
-                "{label}: the alpha channel must not be counted as a colour component"
-            );
-            assert_eq!(
-                img.samples.len(),
-                16 * 16 * 3,
-                "{label}: samples must be RGB-interleaved"
-            );
-            // Pixel (0,0) is the opaque half; alpha must be gone, not shifted into a channel.
-            assert_eq!(&img.samples[..3], &[200, 100, 50], "{label}: first pixel must stay RGB");
-        }
+        let img = decode_jpx(RGBA_JP2, None).unwrap_or_else(|e| panic!("jp2 must decode: {e:?}"));
+        assert_eq!(
+            img.num_components, 3,
+            "the alpha channel must not be counted as a colour component"
+        );
+        assert_eq!(img.samples.len(), 16 * 16 * 3, "samples must be RGB-interleaved");
+        // Pixel (0,0) is the opaque half; alpha must be gone, not shifted into a channel.
+        assert_eq!(&img.samples[..3], &[200, 100, 50], "first pixel must stay RGB");
+    }
+
+    /// The cost of the GH#1883 rule, asserted rather than left implicit: a bare four-component
+    /// codestream that is really RGBA, in a PDF whose dictionary declares no `/ColorSpace`, is now
+    /// read as CMYK. Nothing can separate it from a bare CMYK codestream -- both reach hayro as
+    /// four components with no `cdef` box, and hayro invents the same `Srgb` + alpha answer for
+    /// each. A PDF carries transparency in `/SMask`, not in the codestream, so resolving the
+    /// ambiguity towards four colour components loses a prepress image's K plane in neither
+    /// direction while costing only the alpha of a stream that should not have relied on it.
+    /// The same fixture under a declared `/DeviceRGB` still drops its alpha -- see
+    /// [`a_declared_count_that_disagrees_does_not_suppress_a_real_alpha_channel`]. ~keep
+    #[test]
+    fn a_bare_four_component_codestream_with_nothing_declared_is_read_as_cmyk() {
+        let img = decode_jpx(RGBA_J2K, None).expect("bare four-component codestream must decode");
+        assert_eq!(
+            img.num_components, 4,
+            "a bare codestream cannot type a channel as alpha, so all four Csiz components are colour"
+        );
+        assert_eq!(img.samples.len(), 16 * 16 * 4, "all four planes must be interleaved");
     }
 
     /// The two-component case the decoder rejected, so the image never reached the page at all.
@@ -305,6 +438,73 @@ mod tests {
         assert_eq!(img.num_components, 1, "alpha must not be counted as a colour component");
         assert_eq!(img.samples.len(), 16 * 16, "samples must be one channel per pixel");
         assert_eq!(img.samples[0], 180, "the left half's grey value must survive");
+    }
+
+    /// The `SIZ` reader against every JPEG 2000 fixture in the tree, bare and JP2-boxed, with the
+    /// expected `Csiz` taken from each fixture's construction. This is the assertion that the
+    /// Annex A.5.1 offsets are right; the decode tests above only see the consequence. ~keep
+    #[test]
+    fn codestream_component_count_reads_csiz_from_bare_and_jp2_boxed_streams() {
+        for (label, bytes, expected) in [
+            ("bare cmyk j2k", CMYK_QUADRANTS_J2K, 4u8),
+            ("bare rgba j2k", RGBA_J2K, 4),
+            ("boxed rgba jp2", RGBA_JP2, 4),
+            ("boxed grey+alpha jp2", GREY_ALPHA_JP2, 2),
+            ("boxed grey jp2", SAMPLE_JP2, 1),
+        ] {
+            assert_eq!(
+                super::codestream_component_count(bytes),
+                Some(expected),
+                "{label}: Csiz must be read from the SIZ marker segment"
+            );
+        }
+    }
+
+    /// Only a bare stream is answered, because only a bare stream has no `cdef` box that could
+    /// have typed a channel as alpha. A JP2-boxed stream must defer to hayro. ~keep
+    #[test]
+    fn undeclared_component_count_answers_only_for_a_bare_codestream() {
+        assert_eq!(super::undeclared_component_count(CMYK_QUADRANTS_J2K), Some(4));
+        assert_eq!(super::undeclared_component_count(RGBA_J2K), Some(4));
+        assert_eq!(
+            super::undeclared_component_count(RGBA_JP2),
+            None,
+            "a JP2-boxed stream carries colr/cdef, so its alpha answer must not be overridden"
+        );
+    }
+
+    /// Fail closed: every way the header can fail to be where ISO/IEC 15444-1 A.5.1 says must
+    /// return `None` so the caller changes nothing, rather than reading a neighbouring field as a
+    /// component count. ~keep
+    #[test]
+    fn codestream_component_count_fails_closed_on_a_malformed_header() {
+        assert_eq!(super::codestream_component_count(&[]), None, "empty input");
+        assert_eq!(
+            super::codestream_component_count(&CMYK_QUADRANTS_J2K[..41]),
+            None,
+            "truncated one byte inside Csiz"
+        );
+        assert_eq!(
+            super::codestream_component_count(b"not a jpeg 2000 stream at all, forty-two bytes long"),
+            None,
+            "neither a SOC marker nor a JP2 box structure"
+        );
+
+        let mut no_siz = CMYK_QUADRANTS_J2K.to_vec();
+        no_siz[3] = 0x52;
+        assert_eq!(
+            super::codestream_component_count(&no_siz),
+            None,
+            "SOC not followed immediately by SIZ"
+        );
+
+        let mut bad_lsiz = CMYK_QUADRANTS_J2K.to_vec();
+        bad_lsiz[5] = bad_lsiz[5].wrapping_add(1);
+        assert_eq!(
+            super::codestream_component_count(&bad_lsiz),
+            None,
+            "Lsiz must equal 38 + 3 x Csiz or the header is not trusted"
+        );
     }
 
     /// The narrowing helper on its own, so a failure above points at the decoder rather than

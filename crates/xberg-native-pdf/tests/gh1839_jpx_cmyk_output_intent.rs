@@ -19,10 +19,13 @@ use xberg_native_pdf::extractors::ColorSpace;
 /// count off the codestream to pick a colour space: for `component_infos.len() >= 3` it always
 /// assumes `Enumerated::Srgb`, then reconciles the mismatch (4 actual vs. 3 assumed) by treating
 /// the fourth channel as alpha rather than as the fourth process colour -- so this raw
-/// codestream decodes as 3-component RGB, never CMYK, regardless of what it was built to
-/// contain. `wrap_as_cmyk_jp2` below is required to reach the CMYK arm at all: it adds the
-/// minimal JP2 box structure carrying an explicit `/colr` box (`EnumCS = 12`, ISO 15444-1
-/// Annex I.5.3.3), which routes through `jp2::parse` instead and is read as declared. ~keep
+/// codestream decodes as 3-component RGB, never CMYK, on hayro's own reading of it.
+/// `wrap_as_cmyk_jp2` below adds the minimal JP2 box structure carrying an explicit `/colr` box
+/// (`EnumCS = 12`, ISO 15444-1 Annex I.5.3.3), which routes through `jp2::parse` instead and is
+/// read as declared. GH#1883 has since made the bare form reach four components here too, by
+/// reading `Csiz` off the codestream when the dictionary declares nothing -- so the wrapper is no
+/// longer the *only* route to the CMYK arm, but it is the one that exercises `colr`, and keeping it
+/// means this test's subject stays the OutputIntent lookup rather than the `Csiz` fallback. ~keep
 const CMYK_QUADRANTS_J2K: &[u8] = include_bytes!("fixtures/jpx/gh1855_cmyk_quadrants.j2k");
 
 /// Wrap a raw J2K codestream in the minimal JP2 box structure `hayro-jpeg2000` requires to

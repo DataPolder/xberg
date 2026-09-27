@@ -1368,7 +1368,7 @@ pub fn extract_image_from_xobject(
     let data = if is_jbig2 {
         decode_jbig2_image(xobject, obj_ref, dict, doc, width, height)?
     } else if is_jpx {
-        let jpx_data = decode_jpx_image(xobject, obj_ref, doc, &color_space)?;
+        let jpx_data = decode_jpx_image(xobject, obj_ref, doc, &color_space, jpx_color_space_is_placeholder)?;
         // The placeholder colour space set above (dict named no /ColorSpace)
         // was never the real one; replace it with what the codestream
         // actually decoded to, so downstream consumers of `color_space` (the
@@ -2722,6 +2722,7 @@ fn decode_jpx_image(
     obj_ref: Option<ObjectRef>,
     doc: Option<&crate::document::PdfDocument>,
     color_space: &ColorSpace,
+    color_space_is_placeholder: bool,
 ) -> Result<ImageData> {
     let codestream: Vec<u8> = if let (Some(d), Some(ref_id)) = (doc.as_ref(), obj_ref) {
         d.decode_stream_with_encryption(xobject, ref_id)?
@@ -2733,8 +2734,18 @@ fn decode_jpx_image(
     // it is load-bearing rather than informational: for a BARE codestream hayro-jpeg2000 infers
     // `Srgb` from the component count and then treats a 4th channel as alpha, so a CMYK image
     // reports 3 colour components and loses its K plane unless the declared count contradicts it
-    // (GH#1850). `Pattern` reports 0 components and is filtered out as meaningless here. ~keep
-    let declared_components = u8::try_from(color_space.components()).ok().filter(|&n| n > 0);
+    // (GH#1850). `Pattern` reports 0 components and is filtered out as meaningless here.
+    //
+    // When the dictionary named no `/ColorSpace` at all, §7.4.9's authoritative entry does not
+    // exist and `color_space` is the `/DeviceRGB` placeholder resolve_image_xobject_metadata
+    // installed to let the rest of extraction run. Passing its 3 would assert a count the document
+    // never made, and for a bare four-component codestream that assertion is what dropped the K
+    // plane (GH#1883). `None` sends the decoder to the codestream's own `SIZ` header instead. ~keep
+    let declared_components = if color_space_is_placeholder {
+        None
+    } else {
+        u8::try_from(color_space.components()).ok().filter(|&n| n > 0)
+    };
     let img = crate::decoders::jpx::decode_jpx(&codestream, declared_components)?;
     let format = match img.num_components {
         1 => PixelFormat::Grayscale,
