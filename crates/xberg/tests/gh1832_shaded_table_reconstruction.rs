@@ -447,6 +447,45 @@ fn measure_shaded_table_reconstruction() {
     }
 }
 
+/// Per-fill-kind absolute counts for GH#1837, in a form a shell harness can grep and compare:
+/// one line per (psm, shaded, kind) carrying `labels <found>/<expected>` and
+/// `values <correct>/<possible>`.
+///
+/// Labels are reported separately from values because the loss GH#1837 measures is a *label*
+/// loss: when a shaded row's label no longer matches, `correct_values_by_kind` cannot find the
+/// row at all and its six values score 0 for a reason that has nothing to do with the values.
+/// A pooled total is deliberately not printed -- the published 98/98 and 103/106 pooled figures
+/// are flat because the dark/mid loss is offset by a light/plain gain, which is exactly how this
+/// defect stayed hidden.
+///
+/// Ignored because it is a report, not a gate. Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "GH#1837 per-fill-kind measurement; run with --ignored --nocapture"]
+fn measure_1837_labels_by_fill_kind() {
+    for psm in [3, 11] {
+        for shaded in [false, true] {
+            let Some(table) = first_table(psm, shaded) else {
+                println!("GH1837 psm={psm} shaded={shaded} NOTABLE");
+                continue;
+            };
+            println!(
+                "GH1837 psm={psm} shaded={shaded} GRID rows={} cols={}",
+                table.cells.len(),
+                table.cells.first().map_or(0, Vec::len)
+            );
+            for score in correct_values_by_kind(&table) {
+                let expected_labels = score.of / 6;
+                let found_labels = expected_labels - score.rows_absent.len();
+                println!(
+                    "GH1837 psm={psm} shaded={shaded} {} labels {found_labels}/{expected_labels} \
+                     values {}/{} absent {:?}",
+                    score.kind, score.correct, score.of, score.rows_absent
+                );
+            }
+        }
+    }
+}
+
 /// The absolute count of DARK-fill ground-truth values landing in the correct cell, at PSM 11,
 /// with `normalize_shaded_rows` off vs on. Requires the table to survive with its full row count
 /// first (mirrors `the_scanned_table_is_not_discarded_over_a_phantom_column`): a `0 of 18` from a
