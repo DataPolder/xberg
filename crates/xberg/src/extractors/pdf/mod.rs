@@ -5385,6 +5385,67 @@ mod tests {
         );
     }
 
+    /// GH#1892: `numeric_repair` on the whole-document route (`force_ocr` -> `run_ocr_with_layout`
+    /// -> `extract_with_ocr`), which had no repair call at all while the `force_ocr_pages` route
+    /// repaired from the same flag.
+    ///
+    /// ~keep This asserts the *wiring*, which the unit tests on
+    /// `apply_numeric_repair_to_whole_document_ocr` cannot: those call the helper directly and pass
+    /// identically with both call sites deleted. The `numeric_repair: false` control is what makes
+    /// the positive assertion mean something -- without it, a fixture whose number the repair never
+    /// touched would read the same as a working repair.
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[tokio::test]
+    #[serial]
+    async fn force_ocr_route_applies_numeric_repair() {
+        use crate::core::config::OcrConfig;
+
+        const BACKEND_NAME: &str = "pdf-1892-force-ocr-numeric-repair";
+        const OCR_TEXT: &str = "Total operating revenue 1172 dollars";
+        let _backend = register_mock_ocr_backend(BACKEND_NAME, OCR_TEXT);
+
+        let config_for = |numeric_repair: bool| ExtractionConfig {
+            use_cache: false,
+            force_ocr: true,
+            ocr: Some(OcrConfig {
+                backend: BACKEND_NAME.to_string(),
+                numeric_repair,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let plain_content = |config: ExtractionConfig| async move {
+            let internal = PdfExtractor::new()
+                .extract_content(SCANNED_HELLO_PDF, "application/pdf", &config)
+                .await
+                .expect("force-OCR extraction of the scanned fixture must succeed");
+            crate::extraction::derive::derive_extraction_result(
+                internal,
+                false,
+                crate::core::config::OutputFormat::Plain,
+            )
+            .content
+        };
+
+        let unrepaired = plain_content(config_for(false)).await;
+        let repaired = plain_content(config_for(true)).await;
+
+        assert!(
+            unrepaired.contains("1172"),
+            "control: with the flag off the mock's bare number must survive, or this test measures \
+             nothing: {unrepaired:?}"
+        );
+        assert!(
+            repaired.contains("1,172"),
+            "force_ocr takes the whole-document route, so `numeric_repair` must reach it: {repaired:?}"
+        );
+        assert!(
+            !repaired.contains("1172"),
+            "and the bare form must be replaced, not merely accompanied: {repaired:?}"
+        );
+    }
+
     /// xberg#1665: the render batch peak scales with the configured thread budget alone, with
     /// no notion of `security_limits.max_content_size`. A 4-page batch of Letter (612x792pt)
     /// pages at the default 150 dpi estimates to about 4 x 20.3MB = 81MB; with
