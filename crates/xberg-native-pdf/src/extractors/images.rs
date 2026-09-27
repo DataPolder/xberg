@@ -1335,8 +1335,8 @@ pub fn extract_image_from_xobject(
     }
 
     let ImageXObjectMetadata {
-        width,
-        height,
+        mut width,
+        mut height,
         bits_per_component,
         mut color_space,
         resolved_color_space,
@@ -1368,7 +1368,21 @@ pub fn extract_image_from_xobject(
     let data = if is_jbig2 {
         decode_jbig2_image(xobject, obj_ref, dict, doc, width, height)?
     } else if is_jpx {
-        let jpx_data = decode_jpx_image(xobject, obj_ref, doc, &color_space, jpx_color_space_is_placeholder)?;
+        let (jpx_data, jpx_width, jpx_height) = decode_jpx_image(
+            xobject,
+            obj_ref,
+            doc,
+            &color_space,
+            jpx_color_space_is_placeholder,
+            width,
+            height,
+        )?;
+        // The codestream's size is authoritative for a /JPXDecode image (ISO 32000-1 §7.4.9,
+        // GH#1900); decode_jpx_image already warned if it disagreed with the dictionary's
+        // declared /Width and /Height. Adopt it unconditionally so the pixel buffer -- always
+        // sized to the codestream -- matches the dimensions `PdfImage` reports. ~keep
+        width = jpx_width;
+        height = jpx_height;
         // The placeholder colour space set above (dict named no /ColorSpace)
         // was never the real one; replace it with what the codestream
         // actually decoded to, so downstream consumers of `color_space` (the
@@ -2717,13 +2731,19 @@ fn pack_image_mask_rows(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8
 /// `JpxDecoder` is a pass-through, so `decode_stream_*` yields the raw JPEG 2000
 /// codestream, which `hayro-jpeg2000` (`decoders::jpx::decode_jpx`) decodes to
 /// 8-bit component-interleaved samples.
+///
+/// Returns the decoded pixels alongside the width and height the codestream itself declares,
+/// which the caller must use in place of `declared_width`/`declared_height` -- see the size check
+/// below (GH#1900).
 fn decode_jpx_image(
     xobject: &crate::object::Object,
     obj_ref: Option<ObjectRef>,
     doc: Option<&crate::document::PdfDocument>,
     color_space: &ColorSpace,
     color_space_is_placeholder: bool,
-) -> Result<ImageData> {
+    declared_width: u32,
+    declared_height: u32,
+) -> Result<(ImageData, u32, u32)> {
     let codestream: Vec<u8> = if let (Some(d), Some(ref_id)) = (doc.as_ref(), obj_ref) {
         d.decode_stream_with_encryption(xobject, ref_id)?
     } else {
@@ -2747,6 +2767,30 @@ fn decode_jpx_image(
         u8::try_from(color_space.components()).ok().filter(|&n| n > 0)
     };
     let img = crate::decoders::jpx::decode_jpx(&codestream, declared_components)?;
+
+    // ISO 32000-1 §7.4.9 says /Width and /Height are informative for a /JPXDecode image -- the
+    // codestream is authoritative for its own size, unlike the component count above, which has no
+    // codestream-only answer once a `/ColorSpace` is declared. A mismatch used to reach `PdfImage`
+    // as the DICTIONARY'S size paired with a buffer sized for the CODESTREAM'S: a consumer that
+    // trusts `width * height * components` either read a scrambled prefix at the wrong stride or
+    // rejected the buffer outright as the wrong length, and neither recorded why (GH#1900).
+    // Returning the codestream's own size keeps the two in agreement for every consumer. ~keep
+    if img.width != declared_width || img.height != declared_height {
+        let msg = format!(
+            "SPEC NOTE: /JPXDecode image dictionary declares {declared_width}x{declared_height}, but \
+             its codestream's SIZ marker segment declares {}x{}. ISO 32000-1:2008 Section 7.4.9 treats \
+             /Width and /Height as informative for JPEG 2000, so the codestream's size is used.",
+            img.width, img.height
+        );
+        tracing::warn!("{}", msg);
+        crate::extractors::warnings::push_global_warning(crate::extractors::warnings::Warning {
+            category: crate::extractors::warnings::WarningCategory::JpxSizeMismatch,
+            page: None,
+            message: msg,
+            spec_section: Some("7.4.9"),
+        });
+    }
+
     let format = match img.num_components {
         1 => PixelFormat::Grayscale,
         3 => PixelFormat::RGB,
@@ -2758,10 +2802,14 @@ fn decode_jpx_image(
         }
     };
 
-    Ok(ImageData::Raw {
-        pixels: img.samples,
-        format,
-    })
+    Ok((
+        ImageData::Raw {
+            pixels: img.samples,
+            format,
+        },
+        img.width,
+        img.height,
+    ))
 }
 
 /// Expand an inline image's abbreviated dictionary (ISO 32000-1 §8.9.7 Table 91)

@@ -33,6 +33,12 @@ pub struct JpxImage {
     /// `width * height * num_components` bytes, component-interleaved (row-major).
     pub samples: Vec<u8>,
     pub num_components: u8,
+    /// The codestream's own image width (`Xsiz - XOsiz`), authoritative over a `/JPXDecode`
+    /// dictionary's `/Width` per ISO 32000-1 §7.4.9 (GH#1900). ~keep
+    pub width: u32,
+    /// The codestream's own image height (`Ysiz - YOsiz`), authoritative over `/Height` for the
+    /// same reason as `width`. ~keep
+    pub height: u32,
 }
 
 /// Decode a JP2/J2K codestream to interleaved 8-bit-per-component samples.
@@ -209,6 +215,8 @@ pub fn decode_jpx(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxIm
         return Ok(JpxImage {
             samples,
             num_components: colour_components as u8,
+            width,
+            height,
         });
     }
 
@@ -264,6 +272,8 @@ fn decode_subsampled(
     Ok(JpxImage {
         samples,
         num_components: colour_components as u8,
+        width,
+        height,
     })
 }
 
