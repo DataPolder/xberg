@@ -51,9 +51,14 @@
 //!   anything here; a four-component JPX on a `/DeviceCMYK` image paints
 //!   the process plates, and a three-component one is skipped for the same
 //!   no-ink-intent reason any RGB image is.
-//! - **Indexed images** (`[/Indexed …]`): expanded to RGB upstream and
-//!   therefore skipped by separation routing for now. Indexed CMYK
-//!   palettes would need a separate `expand_indexed_to_cmyk` path.
+//! - **Indexed images** (`[/Indexed base …]`): classified by `base`, which is
+//!   where an Indexed image's ink intent actually lives (ISO 32000-1
+//!   §7.4.5). When `base` carries ink intent (CMYK, Separation, DeviceN),
+//!   the palette lookup's own base-space bytes route to the plates directly
+//!   -- not the RGB `extract_image_from_xobject` produces for on-screen
+//!   display, which would misattribute every palette entry's ink. A
+//!   non-JPX-coded image only; a JPX-coded Indexed image's index plane is
+//!   not yet routed here (GH#1898).
 //!
 //! ICC profiles (per-image and document `/OutputIntents`) and TRC /
 //! BG / UCR functions are **not** consulted when routing image samples
@@ -909,6 +914,19 @@ fn classify_resolved(
             }
         }
         "ICCBased" => classify_iccbased_by_component_count(arr, doc),
+        "Indexed" => {
+            // `[/Indexed base hival lookup]`: an Indexed space carries no ink
+            // intent of its own -- it inherits its base's (ISO 32000-1
+            // §7.4.5), so classify by `base` exactly as the Pattern arm
+            // above recurses into its underlying space. (GH#1898) ~keep
+            match arr.get(1) {
+                Some(base) => {
+                    let resolved = doc.resolve_object(base).unwrap_or_else(|_| base.clone());
+                    classify_resolved(&resolved, color_spaces, resources, doc)
+                }
+                None => ResolvedSpace::Unknown,
+            }
+        }
         _ => ResolvedSpace::Unknown,
     }
 }
@@ -2680,11 +2698,13 @@ fn blit_image_plane_to_plate(
 /// - DeviceCMYK / ICCBased(N=4) images → C/M/Y/K plates
 /// - Separation images → the named spot plate
 /// - DeviceN images → per-channel routing by colorant name
+/// - Indexed images whose base carries ink intent → the base's own plates,
+///   via the base-space palette lookup (GH#1898); JPX-coded excepted
 /// - Image masks (`/ImageMask true`) → paint the current fill colour through
 ///   the 1-bit stencil (delegates to `tint_for_ink` for spot/process logic)
 ///
-/// Out of scope, dropped silently for now: RGB/Gray images, indexed images,
-/// inline images. See module-level Limitations.
+/// Out of scope, dropped silently for now: RGB/Gray images, JPX-coded
+/// Indexed images, inline images. See module-level Limitations.
 #[allow(clippy::too_many_arguments)]
 fn paint_image_to_plates(
     pixmaps: &mut [Pixmap],
@@ -2747,6 +2767,54 @@ fn paint_image_to_plates(
              source colour space has no subtractive-ink intent"
         );
         return Ok(());
+    }
+
+    // An `/Indexed` image's ink intent lives in its BASE colour space (ISO
+    // 32000-1 §7.4.5) -- `resolved_space` above already reflects that base.
+    // Route the palette lookup's own base-space bytes straight to the
+    // plates, bypassing `extract_image_from_xobject`'s RGB expansion below
+    // entirely: that expansion is for on-screen display, and handing its RGB
+    // to plate routing would misattribute every palette entry's ink.
+    // (GH#1898) ~keep
+    match crate::extractors::images::decode_indexed_image_in_base_space(
+        Some(ctx.doc),
+        xobject,
+        obj_ref,
+        Some(color_spaces),
+    ) {
+        Ok(Some(indexed)) => {
+            if indexed.width == 0 || indexed.height == 0 {
+                return Ok(());
+            }
+            route_image_samples_to_plates(
+                pixmaps,
+                dict,
+                &indexed.samples,
+                indexed.base_fmt.bytes_per_pixel(),
+                indexed.width as usize,
+                indexed.height as usize,
+                // An Indexed image's own /Decode remaps its INDEX values
+                // (§8.9.5.2), not the base-space channels this buffer now
+                // holds, so it does not apply here -- treat it as already
+                // folded in to skip the base-channel /Decode read below. ~keep
+                true,
+                &resolved_space,
+                gs_stack,
+                base_transform,
+                clip,
+                target_inks,
+            );
+            return Ok(());
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(
+                error_code = error.telemetry_code(),
+                error_offset = ?error.telemetry_offset(),
+                "skipping Indexed image XObject on separation plates"
+            );
+            return Ok(());
+        }
     }
 
     let pdf_image = match extract_image_from_xobject(Some(ctx.doc), xobject, obj_ref, Some(color_spaces)) {
@@ -2842,11 +2910,53 @@ fn paint_image_to_plates(
     };
     let _ = color_state;
 
+    route_image_samples_to_plates(
+        pixmaps,
+        dict,
+        &samples,
+        stride,
+        w,
+        h,
+        decode_pre_applied,
+        &resolved_space,
+        gs_stack,
+        base_transform,
+        clip,
+        target_inks,
+    );
+    Ok(())
+}
+
+/// Apply `/Decode` (unless the caller says it is already folded into
+/// `samples`) and blit each requested ink's channel from an image's
+/// interleaved raw samples onto its plate.
+///
+/// Shared by [`paint_image_to_plates`]'s direct-extraction path and its
+/// `/Indexed` base-space path (GH#1898), so both apply `/Decode` and blit
+/// identically once their samples are in the resolved colour space's own
+/// component order.
+#[allow(clippy::too_many_arguments)]
+fn route_image_samples_to_plates(
+    pixmaps: &mut [Pixmap],
+    dict: &HashMap<String, Object>,
+    samples: &[u8],
+    stride: usize,
+    w: usize,
+    h: usize,
+    decode_pre_applied: bool,
+    resolved_space: &ResolvedSpace,
+    gs_stack: &GraphicsStateStack,
+    base_transform: Transform,
+    clip: Option<&Mask>,
+    target_inks: &[&str],
+) {
+    let pixel_count = w * h;
+
     // §8.9.5.2: /Decode maps raw sample values into the colour space's range.
     // For per-plate routing the colour space is treated as identity, so the
     // only effect that matters is inversion (`/Decode [1 0]` on a Separation
     // image, etc.). Default identity is `[0 1]` per channel. Only consulted
-    // for sample sources the extractor has not already mapped. ~keep
+    // for sample sources the caller has not already mapped. ~keep
     let decode = if decode_pre_applied {
         None
     } else {
@@ -2857,13 +2967,13 @@ fn paint_image_to_plates(
     let transform = combine_transforms(base_transform, &gs.ctm);
 
     for (i, &ink) in target_inks.iter().enumerate() {
-        let Some(channel_idx) = image_channel_for_ink(&resolved_space, ink) else {
+        let Some(channel_idx) = image_channel_for_ink(resolved_space, ink) else {
             continue;
         };
         if channel_idx >= stride {
             continue;
         }
-        let mut plane = extract_image_channel(&samples, pixel_count, stride, channel_idx);
+        let mut plane = extract_image_channel(samples, pixel_count, stride, channel_idx);
         if let Some(decode_pairs) = decode.as_ref()
             && let Some(&(dmin, dmax)) = decode_pairs.get(channel_idx)
         {
@@ -2871,7 +2981,6 @@ fn paint_image_to_plates(
         }
         blit_image_plane_to_plate(&mut pixmaps[i], &plane, w as u32, h as u32, transform, clip);
     }
-    Ok(())
 }
 
 /// Expand a 1-bpc packed bitmap into one byte per pixel (0 or 255).

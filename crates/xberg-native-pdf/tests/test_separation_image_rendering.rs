@@ -792,3 +792,78 @@ fn jpx_cmyk_image_routes_channels_to_process_plates() {
         "plates stay untouched outside the image bbox"
     );
 }
+
+/// GH#1898: the separation classifier had no arm for `/Indexed`, so an
+/// Indexed image always resolved to `Unknown` and was skipped before
+/// extraction, whatever ink intent its base colour space carried.
+///
+/// Build a single-page PDF with a 2x2 `/Indexed /DeviceCMYK` image whose
+/// palette's only entry (index 0, `hival` 1) is pure cyan; every pixel's raw
+/// sample is index 0. The palette stream is a separate indirect object, the
+/// same pattern `test_indexed_palette_starts_with_cr.rs` uses.
+fn build_pdf_with_indexed_cmyk_image(indices: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let content = b"q\n50 0 0 50 25 25 cm\n/Im1 Do\nQ\n";
+    // hival=1 needs (1+1)*4 = 8 palette bytes: index 0 = pure cyan
+    // CMYK(255,0,0,0), index 1 is unused by this fixture. ~keep
+    let palette: [u8; 8] = [255, 0, 0, 0, 0, 0, 0, 0];
+
+    let mut buf = Vec::new();
+    let mut offsets = Vec::new();
+    buf.extend_from_slice(b"%PDF-1.4\n");
+
+    offsets.push(buf.len());
+    buf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    offsets.push(buf.len());
+    buf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+    offsets.push(buf.len());
+    buf.extend_from_slice(
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] \
+           /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >>\nendobj\n",
+    );
+    offsets.push(buf.len());
+    let hdr = format!("4 0 obj\n<< /Length {} >>\nstream\n", content.len());
+    buf.extend_from_slice(hdr.as_bytes());
+    buf.extend_from_slice(content);
+    buf.extend_from_slice(b"\nendstream\nendobj\n");
+    offsets.push(buf.len());
+    let img_hdr = format!(
+        "5 0 obj\n<< /Type /XObject /Subtype /Image /Width {w} /Height {h} \
+         /ColorSpace 6 0 R /BitsPerComponent 8 /Length {len} >>\nstream\n",
+        w = width,
+        h = height,
+        len = indices.len()
+    );
+    buf.extend_from_slice(img_hdr.as_bytes());
+    buf.extend_from_slice(indices);
+    buf.extend_from_slice(b"\nendstream\nendobj\n");
+    offsets.push(buf.len());
+    buf.extend_from_slice(b"6 0 obj\n[/Indexed /DeviceCMYK 1 7 0 R]\nendobj\n");
+    offsets.push(buf.len());
+    let pal_hdr = format!("7 0 obj\n<< /Length {} >>\nstream\n", palette.len());
+    buf.extend_from_slice(pal_hdr.as_bytes());
+    buf.extend_from_slice(&palette);
+    buf.extend_from_slice(b"\nendstream\nendobj\n");
+    finalize_pdf(buf, offsets)
+}
+
+#[test]
+fn indexed_cmyk_image_routes_base_ink_to_cyan_plate() {
+    // 2x2 image, every raw sample is palette index 0 = pure cyan CMYK(255,0,0,0). ~keep
+    let indices: Vec<u8> = vec![0, 0, 0, 0];
+    let doc = PdfDocument::from_bytes(build_pdf_with_indexed_cmyk_image(&indices, 2, 2)).expect("parse");
+    let plates = render_separations(&doc, 0, 72).expect("render");
+
+    let cyan = plate(&plates, "Cyan");
+    assert!(
+        sample(cyan, 50, 50) > 200,
+        "an /Indexed /DeviceCMYK image's pure-cyan palette entry must reach the \
+         Cyan plate; got {}",
+        sample(cyan, 50, 50)
+    );
+    let magenta = plate(&plates, "Magenta");
+    assert_eq!(
+        sample(magenta, 50, 50),
+        0,
+        "the palette entry carries no magenta; the Magenta plate must stay untouched"
+    );
+}

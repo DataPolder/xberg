@@ -1921,7 +1921,7 @@ fn expand_indexed_to_rgb_with_transform(params: IndexedExpandParams<'_>) -> Resu
     let w = params.width as usize;
     let h = params.height as usize;
     let n = params.base_fmt.bytes_per_pixel();
-    let (bytes_per_row, output_bytes) = indexed_expand_geometry(w, h, bpc)?;
+    let (bytes_per_row, output_bytes) = indexed_expand_geometry(w, h, bpc, 3)?;
     validate_indexed_input_len(params.raw, bytes_per_row, h)?;
 
     let mut out = Vec::with_capacity(output_bytes);
@@ -1929,10 +1929,12 @@ fn expand_indexed_to_rgb_with_transform(params: IndexedExpandParams<'_>) -> Resu
     Ok(out)
 }
 
-/// Row-byte stride and total RGB output size for an Indexed image of size
-/// `w × h` at `bpc` bits per index, with the same overflow and 256 MiB
-/// output-size guard [`expand_indexed_to_rgb_with_transform`] always applied.
-fn indexed_expand_geometry(w: usize, h: usize, bpc: u8) -> Result<(usize, usize)> {
+/// Row-byte stride for an Indexed image of size `w × h` at `bpc` bits per
+/// index, and the total output size for `n` bytes per decoded pixel, with the
+/// same overflow and 256 MiB output-size guard [`expand_indexed_to_rgb_with_transform`]
+/// always applied. `n` is 3 for the RGB expansion; [`expand_indexed_to_base_samples`]
+/// passes its base colour space's own byte count instead. (GH#1898)
+fn indexed_expand_geometry(w: usize, h: usize, bpc: u8, n: usize) -> Result<(usize, usize)> {
     /// Hard cap on the decoded output buffer size (256 MiB). Legitimate
     /// Indexed images in real PDFs are several orders of magnitude below
     /// this — the cap only fires on pathological / adversarial inputs
@@ -1945,9 +1947,9 @@ fn indexed_expand_geometry(w: usize, h: usize, bpc: u8) -> Result<(usize, usize)
         ))
     })?;
 
-    let output_bytes = w.checked_mul(h).and_then(|v| v.checked_mul(3)).ok_or_else(|| {
+    let output_bytes = w.checked_mul(h).and_then(|v| v.checked_mul(n)).ok_or_else(|| {
         Error::Image(format!(
-            "Indexed image output size overflow: {w} × {h} × 3 exceeds usize"
+            "Indexed image output size overflow: {w} × {h} × {n} exceeds usize"
         ))
     })?;
 
@@ -2069,6 +2071,143 @@ fn decode_indexed_pixels(
             }
         }
     }
+}
+
+/// Expand an Indexed image's packed index stream into its base colour
+/// space's own bytes per pixel — a straight palette lookup with no RGB
+/// conversion — for separation-plate routing. `extract_image_from_xobject`
+/// always expands an Indexed image to RGB for on-screen display, which would
+/// misattribute a CMYK/Separation/DeviceN base's ink if handed to plate
+/// routing directly (GH#1898). Shares bpc validation, row geometry, and
+/// out-of-range handling with [`expand_indexed_to_rgb_with_transform`]; the
+/// only difference is the per-pixel output width (`base_fmt.bytes_per_pixel()`
+/// instead of a fixed 3) and that the looked-up bytes are copied verbatim.
+pub(crate) fn expand_indexed_to_base_samples(
+    raw: &[u8],
+    palette: &[u8],
+    base_fmt: PixelFormat,
+    width: u32,
+    height: u32,
+    bpc: u8,
+) -> Result<Vec<u8>> {
+    if !matches!(bpc, 1 | 2 | 4 | 8) {
+        return Err(Error::Image(format!(
+            "Indexed image has invalid /BitsPerComponent {bpc} \
+             (PDF spec requires 1, 2, 4, or 8)"
+        )));
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let n = base_fmt.bytes_per_pixel();
+    let (bytes_per_row, output_bytes) = indexed_expand_geometry(w, h, bpc, n)?;
+    validate_indexed_input_len(raw, bytes_per_row, h)?;
+
+    let mut out = Vec::with_capacity(output_bytes);
+    for y in 0..h {
+        let row_start = y * bytes_per_row;
+        let row_end = (row_start + bytes_per_row).min(raw.len());
+        let row: &[u8] = if row_start < raw.len() {
+            &raw[row_start..row_end]
+        } else {
+            &[]
+        };
+        for x in 0..w {
+            let idx = read_indexed_pixel(row, x, bpc);
+            let off = idx * n;
+            if off + n > palette.len() {
+                out.resize(out.len() + n, 0);
+                continue;
+            }
+            out.extend_from_slice(&palette[off..off + n]);
+        }
+    }
+    Ok(out)
+}
+
+/// An `/Indexed` image XObject's palette-expanded samples in its BASE colour
+/// space (e.g. raw C/M/Y/K bytes for an `/Indexed /DeviceCMYK` image), for a
+/// caller that routes ink to separation plates rather than rendering to
+/// screen.
+pub(crate) struct IndexedBaseSamples {
+    pub samples: Vec<u8>,
+    pub base_fmt: PixelFormat,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Decode an `/Indexed` image XObject's samples in its base colour space,
+/// bypassing the RGB conversion [`extract_image_from_xobject`] performs for
+/// on-screen rendering.
+///
+/// ISO 32000-1 §7.4.5 puts an Indexed image's ink intent in its base colour
+/// space; separation-plate routing needs the base's own component bytes, and
+/// converting to RGB first (as the extractor does for display) would throw
+/// that intent away before routing ever sees it. (GH#1898)
+///
+/// Returns `Ok(None)` when the XObject's colour space is not `/Indexed`, or
+/// when its stream is JBIG2-, JPX-, DCT- or CCITT-coded — each of those
+/// decodes through its own dedicated path in `extract_image_from_xobject`
+/// (a JPX Indexed image's index plane, in particular, decodes through
+/// hayro-jpeg2000's codestream path per GH#1889) and never reaches the raw
+/// index bytes this function expects.
+pub(crate) fn decode_indexed_image_in_base_space(
+    doc: Option<&crate::document::PdfDocument>,
+    xobject: &crate::object::Object,
+    obj_ref: Option<ObjectRef>,
+    color_space_map: Option<&std::collections::HashMap<String, crate::object::Object>>,
+) -> Result<Option<IndexedBaseSamples>> {
+    let dict = xobject
+        .as_dict()
+        .ok_or_else(|| Error::Image("XObject is not a stream".to_string()))?;
+
+    let ImageXObjectMetadata {
+        width,
+        height,
+        bits_per_component,
+        indexed_resolution,
+        is_jbig2,
+        is_jpx,
+        is_jpeg_only,
+        is_jpeg_chain,
+        is_ccitt,
+        ..
+    } = resolve_image_xobject_metadata(doc, dict, color_space_map)?;
+
+    let Some(ir) = indexed_resolution else {
+        return Ok(None);
+    };
+    // `extract_image_from_xobject` only reaches the palette-expansion branch
+    // this mirrors when none of these codecs claims the stream first --
+    // JBIG2, JPX, DCT and CCITT each take their own decode branch there and
+    // never consult `indexed_resolution` at all, however the dictionary's
+    // `/ColorSpace` reads. Match that fallthrough exactly so this function
+    // never treats an encoded stream's bytes as a raw index plane. ~keep
+    if is_jbig2 || is_jpx || is_jpeg_only || is_jpeg_chain || is_ccitt {
+        return Ok(None);
+    }
+
+    let expected_size = expected_image_filter_output_size(
+        dict,
+        width,
+        height,
+        ColorSpace::Indexed.components(),
+        bits_per_component,
+    )?;
+    let decoded_data = decode_dimension_bounded_image_stream(doc, xobject, obj_ref, expected_size)?;
+    let samples = expand_indexed_to_base_samples(
+        &decoded_data,
+        &ir.palette,
+        ir.base_fmt,
+        width,
+        height,
+        bits_per_component,
+    )?;
+    Ok(Some(IndexedBaseSamples {
+        samples,
+        base_fmt: ir.base_fmt,
+        width,
+        height,
+    }))
 }
 
 /// Convert a single DeviceCMYK pixel to RGB.
