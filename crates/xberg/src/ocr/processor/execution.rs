@@ -513,7 +513,11 @@ impl TableRegion {
     /// relies on. ~keep
     fn drop_shading_marks(&mut self, row_threshold_ratio: f64) {
         let keep = shading_mark_keep_mask(&self.read_boxes, row_threshold_ratio);
-        debug_assert_eq!(self.words.len(), self.read_boxes.len(), "TableRegion vectors must stay parallel");
+        debug_assert_eq!(
+            self.words.len(),
+            self.read_boxes.len(),
+            "TableRegion vectors must stay parallel"
+        );
         self.words = std::mem::take(&mut self.words)
             .into_iter()
             .zip(&keep)
@@ -3075,7 +3079,11 @@ mod tests {
         region.drop_shading_marks(0.5);
 
         assert_eq!(region.words.len(), MIN_TABLE_CANDIDATE_WORDS - 1, "the mark is dropped");
-        assert_eq!(region.read_boxes.len(), region.words.len(), "both vectors stay parallel");
+        assert_eq!(
+            region.read_boxes.len(),
+            region.words.len(),
+            "both vectors stay parallel"
+        );
         assert!(region.words.iter().all(|word| word.text != "="));
     }
 
@@ -3113,7 +3121,11 @@ mod tests {
             "the mark must be dropped on its read box, not its normalised one: {:?}",
             region.words.iter().map(|word| word.text.as_str()).collect::<Vec<_>>()
         );
-        assert_eq!(region.read_boxes.len(), region.words.len(), "both vectors stay parallel");
+        assert_eq!(
+            region.read_boxes.len(),
+            region.words.len(),
+            "both vectors stay parallel"
+        );
     }
 
     #[test]
@@ -3652,7 +3664,14 @@ mod tests {
     /// `use_cache: false` call) that has no equivalent before this change, so there is
     /// nothing "unfixed" to run it against — the bypass plumbing this proves either exists
     /// or the test cannot be written.
+    // `#[serial]`: this test resolves tessdata through the default (no-override) path, which
+    // reads the process-global `XBERG_CACHE_DIR`/`TESSDATA_PREFIX` env vars that
+    // `tesseract_backend::tests` mutates with `std::env::set_var` under its own `#[serial]`
+    // tests. Joining the same lock group prevents this test from resolving a directory that
+    // mutation is deleting mid-scan (an uncaught C++ `filesystem_error` aborting the whole
+    // test process, not a logic bug in the code under test). ~keep
     #[test]
+    #[serial]
     fn process_image_with_cache_does_not_read_or_write_the_cache_when_use_cache_is_false() {
         let api = match xberg_tesseract::TesseractAPI::new() {
             Ok(api) => api,
