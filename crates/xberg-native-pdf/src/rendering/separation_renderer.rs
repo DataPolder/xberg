@@ -3160,13 +3160,17 @@ fn paint_image_mask_to_plates(
         };
         let gray = (tint.clamp(0.0, 1.0) * 255.0).round() as u8;
 
-        // Build an RGBA buffer where R=G=B=gray and A=stencil_byte. SourceOver
-        // composites this against the destination so opaque-stencil pixels
-        // replace the plate value with `gray`; transparent-stencil pixels
-        // leave the plate untouched. ~keep
+        // Build a premultiplied RGBA buffer, grey `gray` at opacity `stencil_byte`, which is
+        // the form a tiny_skia pixmap holds. SourceOver composites this against the
+        // destination so opaque-stencil pixels replace the plate value with `gray`;
+        // transparent-stencil pixels leave the plate untouched. Unpremultiplied, a
+        // transparent pixel would add `gray` to the plate under it. ~keep
         let mut rgba = Vec::with_capacity(pixel_count * 4);
         for &alpha in &stencil[..pixel_count] {
-            rgba.extend_from_slice(&[gray, gray, gray, alpha]);
+            let v = tiny_skia::ColorU8::from_rgba(gray, gray, gray, alpha)
+                .premultiply()
+                .red();
+            rgba.extend_from_slice(&[v, v, v, alpha]);
         }
         let Some(size) = tiny_skia::IntSize::from_wh(w as u32, h as u32) else {
             continue;
