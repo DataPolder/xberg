@@ -803,8 +803,6 @@ fn decode_array_inverts_1bpc(decode: Option<&crate::object::Object>) -> bool {
     matches!((as_num(&arr[0]), as_num(&arr[1])), (Some(lo), Some(hi)) if lo > hi)
 }
 
-/// Per-component `(Dmin, Dmax)` pairs from a `/Decode` array, or `None` when
-/// the array is absent or does not hold `2 × ncomp` numbers.
 /// The number of inks a `/DeviceN` colour space names (ISO 32000-1 §8.6.6.5,
 /// `[/DeviceN names alternate tint]`), or `None` for any other space.
 ///
@@ -822,6 +820,8 @@ fn devicen_ink_count(cs_obj: &crate::object::Object) -> Option<usize> {
     }
 }
 
+/// Per-component `(Dmin, Dmax)` pairs from a `/Decode` array, or `None` when
+/// the array is absent or does not hold `2 × ncomp` numbers.
 fn decode_ranges(decode: Option<&crate::object::Object>, ncomp: usize) -> Option<Vec<(f32, f32)>> {
     let arr = decode.and_then(|o| o.as_array())?;
     if arr.len() != ncomp * 2 {
