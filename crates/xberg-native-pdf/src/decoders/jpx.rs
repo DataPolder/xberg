@@ -29,6 +29,7 @@ impl super::StreamDecoder for JpxDecoder {
 }
 
 /// A decoded JPEG 2000 image: interleaved 8-bit samples plus component count.
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct JpxImage {
     /// `width * height * num_components` bytes, component-interleaved (row-major).
@@ -308,7 +309,9 @@ pub fn decode_jpx(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxIm
 }
 
 /// Decode the palette indices of a JPEG 2000 image whose dictionary names an `/Indexed` colour
-/// space, one byte per pixel, for the caller to look up in the dictionary's own palette.
+/// space, one byte per pixel, for the caller to look up in the dictionary's own palette. The
+/// result is a one-component [`JpxImage`] at the codestream's own size, which the caller uses in
+/// place of the dictionary's `/Width` and `/Height` as [`decode_jpx`]'s callers do (GH#1900).
 ///
 /// ISO 32000-1 §7.4.9 says a `/ColorSpace` entry overrides any colour specification in the
 /// JPEG 2000 data, and a `pclr` palette box is one: pdf.js decodes such an image with the
@@ -323,7 +326,7 @@ pub fn decode_jpx(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxIm
 /// and clears its alpha flag, even when a second component is the image's opacity. So the channel
 /// count, not the component count, says whether the image is an index plane; any component after
 /// the first is opacity and is dropped, as [`decode_jpx`] drops it for every other image. ~keep
-pub fn decode_jpx_indices(bytes: &[u8], highest_index: u8) -> Result<Vec<u8>> {
+pub fn decode_jpx_indices(bytes: &[u8], highest_index: u8) -> Result<JpxImage> {
     use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
 
     let settings = DecodeSettings {
@@ -358,7 +361,13 @@ pub fn decode_jpx_indices(bytes: &[u8], highest_index: u8) -> Result<Vec<u8>> {
             "JPXDecode: clamped out-of-range palette indices to the palette"
         );
     }
-    Ok(indices)
+    Ok(JpxImage {
+        samples: indices,
+        num_components: 1,
+        width: image.width(),
+        height: image.height(),
+        opacity: None,
+    })
 }
 
 /// Round each index sample and clamp it to `0..=highest_index`, and count the samples the clamp
@@ -503,8 +512,7 @@ mod tests {
     #[test]
     fn a_lossy_palette_codestream_fails_when_the_decoder_resolves_its_palette() {
         let err = decode_jpx(PALETTE_CMYK_JP2, Some(1))
-            .err()
-            .expect("negative control: the codestream palette lookup must fail on out-of-range indices");
+            .expect_err("negative control: the codestream palette lookup must fail on out-of-range indices");
         assert!(
             format!("{err:?}").contains("PaletteResolutionFailed"),
             "unexpected failure: {err:?}"
@@ -513,7 +521,9 @@ mod tests {
 
     #[test]
     fn a_lossy_palette_codestream_decodes_to_clamped_indices() {
-        let indices = decode_jpx_indices(PALETTE_CMYK_JP2, u8::MAX).expect("GH#1885: the index plane must decode");
+        let indices = decode_jpx_indices(PALETTE_CMYK_JP2, u8::MAX)
+            .expect("GH#1885: the index plane must decode")
+            .samples;
         assert_eq!(indices.len(), 120 * 40, "one index byte per pixel");
         assert_eq!(indices[0], 255, "the top-left pixel is paper");
         assert!(indices.contains(&0), "the ink index must survive the clamp");
@@ -547,7 +557,7 @@ mod tests {
             "control failed: the plane must hold samples that round up"
         );
 
-        let indices = decode_jpx_indices(PALETTE_CMYK_JP2, u8::MAX).expect("indices");
+        let indices = decode_jpx_indices(PALETTE_CMYK_JP2, u8::MAX).expect("indices").samples;
         for (&v, &index) in plane.iter().zip(&indices) {
             let expected = if v.round() < 0.0 {
                 0
@@ -583,7 +593,9 @@ mod tests {
             16,
             "control failed: the fixture must be a 16-bit plane"
         );
-        let indices = decode_jpx_indices(INDICES_16BIT_JP2, u8::MAX).expect("a 16-bit index plane must decode");
+        let indices = decode_jpx_indices(INDICES_16BIT_JP2, u8::MAX)
+            .expect("a 16-bit index plane must decode")
+            .samples;
         assert_eq!(indices.len(), 16 * 16);
         assert_eq!((indices[0], indices[15]), (3, 200), "the indices must not be rescaled");
     }
@@ -632,7 +644,9 @@ mod tests {
     /// Without a palette box the index plane is the codestream's only component, unchanged.
     #[test]
     fn a_plain_codestream_decodes_to_its_own_samples_as_indices() {
-        let indices = decode_jpx_indices(INDICES_GREY_JP2, u8::MAX).expect("a plain index codestream must decode");
+        let indices = decode_jpx_indices(INDICES_GREY_JP2, u8::MAX)
+            .expect("a plain index codestream must decode")
+            .samples;
         let grey = decode_jpx(INDICES_GREY_JP2, None).expect("the same codestream as greyscale");
         assert_eq!(indices, grey.samples);
         assert!(
@@ -645,7 +659,9 @@ mod tests {
     /// be palette indices, so that image is refused rather than read through its first plane.
     #[test]
     fn index_decoding_drops_alpha_and_refuses_colour_codestreams() {
-        let grey = decode_jpx_indices(GREY_ALPHA_JP2, u8::MAX).expect("grey plus alpha has one index component");
+        let grey = decode_jpx_indices(GREY_ALPHA_JP2, u8::MAX)
+            .expect("grey plus alpha has one index component")
+            .samples;
         assert_eq!(grey.len(), 16 * 16);
         assert_eq!(grey[0], 180, "the left half's index must survive");
 
@@ -657,8 +673,12 @@ mod tests {
     /// plane after it is dropped, not counted as a second index component.
     #[test]
     fn a_palette_codestream_with_an_opacity_channel_decodes_its_index_plane() {
-        let indices = decode_jpx_indices(PALETTE_ALPHA_JP2, u8::MAX).expect("the index plane must decode");
-        let plain = decode_jpx_indices(INDICES_GREY_JP2, u8::MAX).expect("the same picture without alpha");
+        let indices = decode_jpx_indices(PALETTE_ALPHA_JP2, u8::MAX)
+            .expect("the index plane must decode")
+            .samples;
+        let plain = decode_jpx_indices(INDICES_GREY_JP2, u8::MAX)
+            .expect("the same picture without alpha")
+            .samples;
         assert_eq!(
             indices, plain,
             "the indices must be the plane's, not the opacity plane's"
@@ -669,12 +689,16 @@ mod tests {
     /// index past the palette black.
     #[test]
     fn lossy_indices_clamp_to_the_highest_palette_index() {
-        let unclamped = decode_jpx_indices(HIVAL15_LOSSY_JP2, u8::MAX).expect("the index plane must decode");
+        let unclamped = decode_jpx_indices(HIVAL15_LOSSY_JP2, u8::MAX)
+            .expect("the index plane must decode")
+            .samples;
         assert!(
             unclamped.iter().any(|&i| i > 15),
             "control failed: the fixture must ring past index 15"
         );
-        let indices = decode_jpx_indices(HIVAL15_LOSSY_JP2, 15).expect("the index plane must decode");
+        let indices = decode_jpx_indices(HIVAL15_LOSSY_JP2, 15)
+            .expect("the index plane must decode")
+            .samples;
         assert_eq!(
             indices.iter().max(),
             Some(&15),

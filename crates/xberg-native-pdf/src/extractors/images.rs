@@ -3077,7 +3077,6 @@ fn decode_jpx_image(
     declared_size: (u32, u32),
     indexed: Option<&IndexedResolution>,
 ) -> Result<JpxDecoded> {
-    let (declared_width, declared_height) = declared_size;
     let codestream: Vec<u8> = if let (Some(d), Some(ref_id)) = (doc.as_ref(), obj_ref) {
         d.decode_stream_with_encryption(xobject, ref_id)?
     } else {
@@ -3085,28 +3084,28 @@ fn decode_jpx_image(
     };
 
     // ISO 32000-1 §7.4.9 puts the `/Indexed` palette in charge, so any `pclr` palette in the
-    // codestream is not applied; the caller looks the indices up. (GH#1885) ~keep
-    if let Some(ir) = indexed {
+    // codestream is not applied; the caller looks the indices up. (GH#1885) An image with no
+    // `/Indexed` whose codestream carries its own palette decodes to indices the same way, and
+    // that palette is returned for the lookup. (GH#1903) ~keep
+    let codestream_palette = if indexed.is_some() {
+        None
+    } else {
+        codestream_palette_resolution(&codestream, color_space, color_space_is_placeholder)
+    };
+    if let Some(highest_index) = indexed
+        .or(codestream_palette.as_ref())
+        .map(IndexedResolution::highest_index)
+    {
+        let indices = crate::decoders::jpx::decode_jpx_indices(&codestream, highest_index)?;
+        warn_on_jpx_size_mismatch(declared_size, (indices.width, indices.height));
         return Ok(JpxDecoded {
             data: ImageData::Raw {
-                pixels: crate::decoders::jpx::decode_jpx_indices(&codestream, ir.highest_index())?,
+                pixels: indices.samples,
                 format: PixelFormat::Grayscale,
             },
-            width: declared_width,
-            height: declared_height,
-            palette: None,
-            opacity: None,
-        });
-    }
-    if let Some(palette) = codestream_palette_resolution(&codestream, color_space, color_space_is_placeholder) {
-        return Ok(JpxDecoded {
-            data: ImageData::Raw {
-                pixels: crate::decoders::jpx::decode_jpx_indices(&codestream, palette.highest_index())?,
-                format: PixelFormat::Grayscale,
-            },
-            width: declared_width,
-            height: declared_height,
-            palette: Some(palette),
+            width: indices.width,
+            height: indices.height,
+            palette: codestream_palette,
             opacity: None,
         });
     }
@@ -3135,21 +3134,7 @@ fn decode_jpx_image(
     // trusts `width * height * components` either read a scrambled prefix at the wrong stride or
     // rejected the buffer outright as the wrong length, and neither recorded why (GH#1900).
     // Returning the codestream's own size keeps the two in agreement for every consumer. ~keep
-    if img.width != declared_width || img.height != declared_height {
-        let msg = format!(
-            "SPEC NOTE: /JPXDecode image dictionary declares {declared_width}x{declared_height}, but \
-             its codestream's SIZ marker segment declares {}x{}. ISO 32000-1:2008 Section 7.4.9 treats \
-             /Width and /Height as informative for JPEG 2000, so the codestream's size is used.",
-            img.width, img.height
-        );
-        tracing::warn!("{}", msg);
-        crate::extractors::warnings::push_global_warning(crate::extractors::warnings::Warning {
-            category: crate::extractors::warnings::WarningCategory::JpxSizeMismatch,
-            page: None,
-            message: msg,
-            spec_section: Some("7.4.9"),
-        });
-    }
+    warn_on_jpx_size_mismatch(declared_size, (img.width, img.height));
 
     let format = match img.num_components {
         1 => PixelFormat::Grayscale,
@@ -3172,6 +3157,27 @@ fn decode_jpx_image(
         palette: None,
         opacity: img.opacity,
     })
+}
+
+/// Record a `JpxSizeMismatch` warning when a `/JPXDecode` image's dictionary declares a size other
+/// than its codestream's. The codestream's size is the one used (ISO 32000-1 §7.4.9, GH#1900).
+fn warn_on_jpx_size_mismatch(declared: (u32, u32), codestream: (u32, u32)) {
+    if declared == codestream {
+        return;
+    }
+    let ((declared_width, declared_height), (width, height)) = (declared, codestream);
+    let msg = format!(
+        "SPEC NOTE: /JPXDecode image dictionary declares {declared_width}x{declared_height}, but \
+         its codestream's SIZ marker segment declares {width}x{height}. ISO 32000-1:2008 Section 7.4.9 \
+         treats /Width and /Height as informative for JPEG 2000, so the codestream's size is used."
+    );
+    tracing::warn!("{}", msg);
+    crate::extractors::warnings::push_global_warning(crate::extractors::warnings::Warning {
+        category: crate::extractors::warnings::WarningCategory::JpxSizeMismatch,
+        page: None,
+        message: msg,
+        spec_section: Some("7.4.9"),
+    });
 }
 
 /// A decoded `/JPXDecode` image: its samples, the codestream's own size, the codestream's
