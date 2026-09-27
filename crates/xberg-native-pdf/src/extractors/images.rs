@@ -2735,7 +2735,7 @@ fn decode_jpx_image(
     // reports 3 colour components and loses its K plane unless the declared count contradicts it
     // (GH#1850). `Pattern` reports 0 components and is filtered out as meaningless here. ~keep
     let declared_components = u8::try_from(color_space.components()).ok().filter(|&n| n > 0);
-    let img = crate::decoders::jpx::decode_jpx_with_declared_components(&codestream, declared_components)?;
+    let img = crate::decoders::jpx::decode_jpx(&codestream, declared_components)?;
     let format = match img.num_components {
         1 => PixelFormat::Grayscale,
         3 => PixelFormat::RGB,

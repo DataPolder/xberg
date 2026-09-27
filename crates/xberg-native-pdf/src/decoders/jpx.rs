@@ -42,17 +42,11 @@ pub struct JpxImage {
 /// Components are assumed to share the image dimensions (no chroma subsampling) —
 /// the common case for PDF image XObjects; a subsampled component is rejected with a
 /// typed error rather than producing misaligned output.
-pub fn decode_jpx(bytes: &[u8]) -> Result<JpxImage> {
-    decode_jpx_with_declared_components(bytes, None)
-}
-
-/// As [`decode_jpx`], but told how many colour components the image dictionary's
-/// `/ColorSpace` implies, when it named one.
-///
-/// ISO 32000-1 §7.4.9 makes that entry authoritative over anything in the JPEG 2000 data,
-/// and it is the only way to tell a 4-component CMYK codestream from an RGBA one. See the
-/// alpha decision below for why that matters. ~keep
-pub fn decode_jpx_with_declared_components(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxImage> {
+/// `declared_components` is how many colour components the image dictionary's `/ColorSpace`
+/// implies, when it named one, and `None` when it did not. ISO 32000-1 §7.4.9 makes that entry
+/// authoritative over anything in the JPEG 2000 data, and it is the only way to tell a
+/// 4-component CMYK codestream from an RGBA one -- see the alpha decision below. ~keep
+pub fn decode_jpx(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxImage> {
     use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
 
     let image = Image::new(bytes, &DecodeSettings::default())
@@ -182,7 +176,7 @@ fn upsample_nearest_u8(sub: &[f32], sw: usize, sh: usize, fw: usize, fh: usize) 
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_jpx, decode_jpx_with_declared_components, upsample_nearest_u8};
+    use super::{decode_jpx, upsample_nearest_u8};
 
     /// Grayscale JP2 codestream from the minimal repro (816x1056 DeviceGray).
     const SAMPLE_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/sample_gray.jp2");
@@ -210,13 +204,13 @@ mod tests {
     /// failing, upstream has fixed it and this whole workaround can go. ~keep
     #[test]
     fn a_bare_cmyk_codestream_keeps_four_components_when_the_dictionary_declares_four() {
-        let misread = decode_jpx(CMYK_QUADRANTS_J2K).expect("bare CMYK codestream must decode");
+        let misread = decode_jpx(CMYK_QUADRANTS_J2K, None).expect("bare CMYK codestream must decode");
         assert_eq!(
             misread.num_components, 3,
             "negative control: undeclared, hayro reports RGB+alpha and the K plane is dropped"
         );
 
-        let correct = decode_jpx_with_declared_components(CMYK_QUADRANTS_J2K, Some(4))
+        let correct = decode_jpx(CMYK_QUADRANTS_J2K, Some(4))
             .expect("bare CMYK codestream must decode with a declared count");
         assert_eq!(
             correct.num_components, 4,
@@ -235,7 +229,7 @@ mod tests {
     #[test]
     fn a_declared_count_that_disagrees_does_not_suppress_a_real_alpha_channel() {
         for (label, bytes) in [("jp2", RGBA_JP2), ("j2k", RGBA_J2K)] {
-            let img = decode_jpx_with_declared_components(bytes, Some(3))
+            let img = decode_jpx(bytes, Some(3))
                 .unwrap_or_else(|e| panic!("{label} must decode: {e:?}"));
             assert_eq!(
                 img.num_components, 3,
@@ -250,7 +244,7 @@ mod tests {
     #[test]
     fn rgba_codestream_reports_three_colour_components() {
         for (label, bytes) in [("jp2", RGBA_JP2), ("j2k", RGBA_J2K)] {
-            let img = decode_jpx(bytes).unwrap_or_else(|e| panic!("{label} must decode: {e:?}"));
+            let img = decode_jpx(bytes, None).unwrap_or_else(|e| panic!("{label} must decode: {e:?}"));
             assert_eq!(
                 img.num_components, 3,
                 "{label}: the alpha channel must not be counted as a colour component"
@@ -268,7 +262,7 @@ mod tests {
     /// The two-component case the decoder rejected, so the image never reached the page at all.
     #[test]
     fn grey_plus_alpha_codestream_decodes_as_single_channel_grey() {
-        let img = decode_jpx(GREY_ALPHA_JP2).expect("grey+alpha must decode rather than be dropped");
+        let img = decode_jpx(GREY_ALPHA_JP2, None).expect("grey+alpha must decode rather than be dropped");
         assert_eq!(img.num_components, 1, "alpha must not be counted as a colour component");
         assert_eq!(img.samples.len(), 16 * 16, "samples must be one channel per pixel");
         assert_eq!(img.samples[0], 180, "the left half's grey value must survive");
@@ -308,7 +302,7 @@ mod tests {
 
     #[test]
     fn decode_jpx_grayscale() {
-        let img = decode_jpx(SAMPLE_JP2).expect("decode JP2 codestream");
+        let img = decode_jpx(SAMPLE_JP2, None).expect("decode JP2 codestream");
 
         assert_eq!(img.num_components, 1);
         assert_eq!(img.samples.len(), 816 * 1056);
