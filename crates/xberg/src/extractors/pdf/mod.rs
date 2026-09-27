@@ -6366,6 +6366,71 @@ mod tests {
     #[cfg(feature = "pdf")]
     const ENCRYPTED_THREE_PAGE_PDF_PASSWORD: &str = "xberg-test-fake-password-1451";
 
+    /// An obviously-fake literal that is not this fixture's password, and is not empty.
+    #[cfg(feature = "pdf")]
+    const WRONG_PDF_PASSWORD: &str = "xberg-test-fake-wrong-password-1879";
+
+    /// `PdfDocument::authenticate` reports a rejected password as `Ok(false)`, not as an `Err`,
+    /// so `open_pdf_document` -- which mapped the error and dropped the bool -- accepted every
+    /// wrong password. That is why no `pdf_page_count` fixture could prove a binding forwards
+    /// its password argument: the page tree reads unauthenticated, and authentication itself
+    /// never failed either. The extraction path (`open_bytes_with_passwords`) always read the
+    /// bool and is unaffected. GH#1879.
+    #[test]
+    #[cfg(feature = "pdf")]
+    fn should_reject_a_wrong_pdf_password_rather_than_ignore_it() {
+        use base64::Engine as _;
+
+        let content = base64::engine::general_purpose::STANDARD
+            .decode(ENCRYPTED_THREE_PAGE_PDF_BASE64)
+            .expect("fixture must be valid base64");
+
+        let error = crate::pdf_page_count(&content, Some(WRONG_PDF_PASSWORD))
+            .expect_err("a wrong non-empty user password must not authenticate");
+        assert!(
+            error.to_string().contains("authenticate"),
+            "the error must name authentication as the cause: {error}"
+        );
+
+        assert_eq!(
+            crate::pdf_page_count(&content, Some(ENCRYPTED_THREE_PAGE_PDF_PASSWORD))
+                .expect("the correct user password must authenticate"),
+            3,
+            "the correct password must still open the document"
+        );
+        assert_eq!(
+            crate::pdf_page_count(&content, None).expect("an unauthenticated page-tree read must still succeed"),
+            3,
+            "the page tree is structure, not encrypted data, so omitting the password is not an error"
+        );
+    }
+
+    /// The corpus fixture whose user password is empty is still the right document for a
+    /// binding-level wrong-password test: the empty password authenticates, and any non-empty
+    /// password is rejected. So the e2e fixture needs no new corpus object. GH#1879.
+    #[test]
+    #[cfg(feature = "pdf")]
+    fn should_reject_a_non_empty_password_on_a_pdf_whose_user_password_is_empty() {
+        let Some(content) = crate::utils::read_test_fixture("pdf/password_protected.pdf") else {
+            return;
+        };
+
+        assert_eq!(
+            crate::pdf_page_count(&content, None).expect("an encrypted page tree reads without a password"),
+            2
+        );
+        assert_eq!(
+            crate::pdf_page_count(&content, Some("")).expect("the empty user password authenticates"),
+            2
+        );
+        let error = crate::pdf_page_count(&content, Some(WRONG_PDF_PASSWORD))
+            .expect_err("a non-empty password is neither the user nor the owner password");
+        assert!(
+            error.to_string().contains("authenticate"),
+            "the error must name authentication as the cause: {error}"
+        );
+    }
+
     /// An encrypted document is subject to `max_pages` like any other. This is a
     /// characterization test, NOT a regression test — it passes against the pre-fix code
     /// too, and it is kept because the behaviour is worth pinning, not because it catches

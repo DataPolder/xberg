@@ -923,10 +923,19 @@ pub(crate) fn open_pdf_document(pdf_bytes: &[u8], password: Option<&str>) -> Res
     })?;
 
     if let Some(pwd) = password {
-        doc.authenticate(pwd.as_bytes()).map_err(|e| XbergError::Parsing {
+        // `authenticate` reports a rejected password as `Ok(false)`, not as an `Err`, so the
+        // bool is the only signal that the password was wrong. Dropping it accepted every
+        // wrong password silently. ~keep
+        let authenticated = doc.authenticate(pwd.as_bytes()).map_err(|e| XbergError::Parsing {
             message: format!("Failed to authenticate PDF: {e}"),
             source: None,
         })?;
+        if !authenticated {
+            return Err(XbergError::Parsing {
+                message: "Failed to authenticate PDF: the supplied password was rejected".to_string(),
+                source: None,
+            });
+        }
     }
 
     Ok(doc)
