@@ -3820,7 +3820,28 @@ impl PageRenderer {
                 // raw component samples all fall within their [min,max] range is
                 // made fully transparent. ~keep
                 let ncomp = pdf_image.color_space().components();
-                if !pdf_image.samples_are_raw() {
+                if *pdf_image.color_space() == crate::extractors::images::ColorSpace::Indexed {
+                    // An Indexed image's colour-key range is stated in its raw
+                    // INDEX space (ncomp=1), not the palette-expanded RGB
+                    // `samples_are_raw` tracks -- that flag is always false here
+                    // once the palette lookup runs, which used to make this
+                    // masking unreachable. The extractor keeps the index plane
+                    // alongside the RGB precisely so this can read it. (GH#1899) ~keep
+                    match (pdf_image.raw_indexed_samples(), parse_color_key_mask(mask_array, ncomp)) {
+                        (Some(indices), Some(ranges)) => {
+                            apply_color_key_mask_to_indices(indices, &ranges, &mut rgba_image);
+                        }
+                        (None, _) => {
+                            tracing::warn!(
+                                "Skipping colour-key /Mask: no raw index plane recorded for this \
+                                 Indexed image (JPX-coded Indexed images are not yet covered)"
+                            );
+                        }
+                        (_, None) => {
+                            tracing::warn!("Ignoring malformed color-key /Mask array (ncomp={})", ncomp);
+                        }
+                    }
+                } else if !pdf_image.samples_are_raw() {
                     // The extractor mapped a non-default /Decode into the
                     // stored samples, so they are no longer in the space the
                     // /Mask ranges are expressed in. Masking them here would
@@ -8785,6 +8806,29 @@ fn apply_color_key_mask(
         for x in 0..w {
             let base = (y * w + x) * ncomp;
             if color_key_pixel_masked(&pixels[base..base + ncomp], ranges) {
+                rgba.get_pixel_mut(x as u32, y as u32)[3] = 0;
+            }
+        }
+    }
+}
+
+/// Apply a colour-key `/Mask` to an `/Indexed` image's raw index plane (one
+/// byte per pixel -- ISO 32000-1 §8.9.6.4 gives an Indexed colour space
+/// exactly one component), zeroing alpha for every pixel whose index falls in
+/// the masked range. Reads the index the extractor kept alongside the
+/// palette-expanded RGB `apply_color_key_mask` reads, because the mask's
+/// range is stated in index space, not in that RGB. (GH#1899)
+fn apply_color_key_mask_to_indices(indices: &[u8], ranges: &[(u32, u32)], rgba: &mut image::RgbaImage) {
+    let w = rgba.width() as usize;
+    let h = rgba.height() as usize;
+    if indices.len() < w * h {
+        tracing::warn!("color-key /Mask: index buffer too small, skipping");
+        return;
+    }
+    for y in 0..h {
+        for x in 0..w {
+            let idx = indices[y * w + x];
+            if color_key_pixel_masked(std::slice::from_ref(&idx), ranges) {
                 rgba.get_pixel_mut(x as u32, y as u32)[3] = 0;
             }
         }

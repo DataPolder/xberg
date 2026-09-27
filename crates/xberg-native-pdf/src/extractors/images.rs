@@ -75,6 +75,17 @@ pub struct PdfImage {
     /// owed (e.g. a `/Decode [1 0]` inversion) on every sub-byte image.
     #[serde(skip)]
     decode_folded_in: bool,
+    /// For an `/Indexed` image, the raw index stream unpacked to one byte per
+    /// pixel (values `0..=2^bpc-1`), kept alongside the palette-expanded RGB
+    /// `data` holds for display. A colour-key `/Mask` on an Indexed image
+    /// states its range in this index space (ISO 32000-1 §8.9.6.4), not in
+    /// the expanded RGB `samples_are_raw` tracks — so that flag alone cannot
+    /// tell a consumer whether masking is possible. `None` for every other
+    /// colour space, and for a JPX-coded Indexed image (GH#1889 decodes its
+    /// index plane through a separate codestream path this field does not
+    /// cover). (GH#1899) ~keep
+    #[serde(skip)]
+    raw_indexed_samples: Option<Vec<u8>>,
 }
 
 impl PdfImage {
@@ -94,6 +105,7 @@ impl PdfImage {
             rendering_intent: crate::color::RenderingIntent::default(),
             samples_are_raw: true,
             decode_folded_in: false,
+            raw_indexed_samples: None,
         }
     }
 
@@ -122,6 +134,19 @@ impl PdfImage {
         self.decode_folded_in = folded;
     }
 
+    /// The raw index stream of an `/Indexed` image, one byte per pixel, kept
+    /// beside the palette-expanded RGB `data()` holds for display. `None` for
+    /// every non-Indexed image and for a JPX-coded Indexed image. See the
+    /// field docs. (GH#1899)
+    pub(crate) fn raw_indexed_samples(&self) -> Option<&[u8]> {
+        self.raw_indexed_samples.as_deref()
+    }
+
+    /// Record an `/Indexed` image's raw index plane.
+    pub(crate) fn set_raw_indexed_samples(&mut self, samples: Vec<u8>) {
+        self.raw_indexed_samples = Some(samples);
+    }
+
     /// Create a new PDF image with spatial metadata.
     pub fn with_spatial(
         width: u32,
@@ -147,6 +172,7 @@ impl PdfImage {
             rendering_intent: crate::color::RenderingIntent::default(),
             samples_are_raw: true,
             decode_folded_in: false,
+            raw_indexed_samples: None,
         }
     }
 
@@ -194,6 +220,7 @@ impl PdfImage {
             rendering_intent: crate::color::RenderingIntent::default(),
             samples_are_raw: true,
             decode_folded_in: false,
+            raw_indexed_samples: None,
         }
     }
 
@@ -1365,6 +1392,9 @@ pub fn extract_image_from_xobject(
     // below leave the raw space without applying /Decode, and a consumer that
     // applies it itself (plate routing) must still do so for those. ~keep
     let mut decode_folded_in = false;
+    // Populated only for a non-JPX /Indexed image, whose raw index plane a
+    // colour-key /Mask needs (GH#1899); see `raw_indexed_samples` field docs. ~keep
+    let mut raw_indexed_samples: Option<Vec<u8>> = None;
     let data = if is_jbig2 {
         decode_jbig2_image(xobject, obj_ref, dict, doc, width, height)?
     } else if is_jpx {
@@ -1457,6 +1487,14 @@ pub fn extract_image_from_xobject(
             // Palette lookup replaces index samples with RGB, so the buffer
             // is no longer in the space the dictionary's entries describe. ~keep
             samples_are_raw = false;
+            // A colour-key /Mask on this image states its range in the raw
+            // index space, not the RGB above, so keep it too. (GH#1899) ~keep
+            raw_indexed_samples = Some(unpack_indexed_indices(
+                &decoded_data,
+                width,
+                height,
+                bits_per_component,
+            )?);
             ImageData::Raw {
                 pixels: expanded,
                 format: PixelFormat::RGB,
@@ -1580,6 +1618,9 @@ pub fn extract_image_from_xobject(
     let mut image = PdfImage::new(width, height, color_space, effective_bpc, data);
     image.set_samples_are_raw(samples_are_raw);
     image.set_decode_folded_in(decode_folded_in);
+    if let Some(indices) = raw_indexed_samples {
+        image.set_raw_indexed_samples(indices);
+    }
 
     // Attach the ICC profile if we found one — prefer the direct ICCBased
     // profile, then fall back to an Indexed base's profile so the CMM has
@@ -2071,6 +2112,39 @@ fn decode_indexed_pixels(
             }
         }
     }
+}
+
+/// Unpack an Indexed image's packed index stream to one byte per pixel
+/// (values `0..=2^bpc-1`), with no palette lookup. Used for colour-key
+/// `/Mask` on an Indexed image, whose range is stated in this raw index space
+/// rather than the palette-expanded RGB `expand_indexed_to_rgb_with_transform`
+/// produces for display (ISO 32000-1 §8.9.6.4). (GH#1899)
+fn unpack_indexed_indices(raw: &[u8], width: u32, height: u32, bpc: u8) -> Result<Vec<u8>> {
+    if !matches!(bpc, 1 | 2 | 4 | 8) {
+        return Err(Error::Image(format!(
+            "Indexed image has invalid /BitsPerComponent {bpc} \
+             (PDF spec requires 1, 2, 4, or 8)"
+        )));
+    }
+    let w = width as usize;
+    let h = height as usize;
+    let (bytes_per_row, output_bytes) = indexed_expand_geometry(w, h, bpc, 1)?;
+    validate_indexed_input_len(raw, bytes_per_row, h)?;
+
+    let mut out = Vec::with_capacity(output_bytes);
+    for y in 0..h {
+        let row_start = y * bytes_per_row;
+        let row_end = (row_start + bytes_per_row).min(raw.len());
+        let row: &[u8] = if row_start < raw.len() {
+            &raw[row_start..row_end]
+        } else {
+            &[]
+        };
+        for x in 0..w {
+            out.push(read_indexed_pixel(row, x, bpc) as u8);
+        }
+    }
+    Ok(out)
 }
 
 /// Expand an Indexed image's packed index stream into its base colour
