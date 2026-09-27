@@ -37,6 +37,7 @@ include = [
   "/tests/fixtures/jpx/gh1885_indices_grey.jp2",
   "/tests/fixtures/jpx/gh1885_palette_alpha.jp2",
   "/tests/fixtures/jpx/gh1885_hival15_lossy.jp2",
+  "/tests/fixtures/jpx/gh1885_indices_16bit.jp2",
   "/tests/fixtures/encrypted_needs_password.pdf",
   "/tests/fixtures/encrypted_cid_truetype.pdf",
   "/tests/fixtures/encrypted_objstm.pdf",

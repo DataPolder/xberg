@@ -173,9 +173,9 @@ fn a_palette_jpeg2000_page_renders_its_ink() {
 
     let ink = rendered_ink(pdf_with_jpx_image(PALETTE_CMYK_JP2, &cmyk_grey_palette()));
     assert!(
-        ink * 2 > control,
+        ink.abs_diff(control) * 10 <= control,
         "the palette image painted {ink} dark pixels against {control} for the greyscale control; \
-         the image was skipped and the page rendered blank"
+         the lossy picture must stay within a tenth of the lossless one"
     );
 }
 

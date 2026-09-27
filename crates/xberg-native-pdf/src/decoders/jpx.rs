@@ -265,11 +265,35 @@ pub fn decode_jpx_indices(bytes: &[u8], highest_index: u8) -> Result<Vec<u8>> {
             "JPXDecode: an /Indexed JPEG 2000 image needs one index component, found {index_components}"
         )));
     }
-    Ok(indices
-        .samples()
+    let (indices, clamped) = clamp_indices(indices.samples(), highest_index);
+    if clamped > 0 {
+        tracing::warn!(
+            clamped,
+            total = indices.len(),
+            highest_index,
+            "JPXDecode: clamped out-of-range palette indices to the palette"
+        );
+    }
+    Ok(indices)
+}
+
+/// Round each index sample and clamp it to `0..=highest_index`, and count the samples the clamp
+/// moved. hayro-jpeg2000 hands back each component's samples at the codestream's own scale, not
+/// normalised to 8 bits, so this reads a 16-bit index plane correctly too. ~keep
+fn clamp_indices(samples: &[f32], highest_index: u8) -> (Vec<u8>, usize) {
+    let highest = f32::from(highest_index);
+    let mut clamped = 0;
+    let indices = samples
         .iter()
-        .map(|&v| v.round().clamp(0.0, f32::from(highest_index)) as u8)
-        .collect())
+        .map(|&v| {
+            let rounded = v.round();
+            if !(0.0..=highest).contains(&rounded) {
+                clamped += 1;
+            }
+            rounded.clamp(0.0, highest) as u8
+        })
+        .collect();
+    (indices, clamped)
 }
 
 /// The chroma-subsampled path (WS1.7), separated so [`decode_jpx`] stays readable.
@@ -410,10 +434,10 @@ mod tests {
         assert!(indices.contains(&0), "the ink index must survive the clamp");
     }
 
-    /// hayro-jpeg2000's own 8-bit view of the unresolved plane is the reference for an 8-bit index
-    /// plane: each index must round to the nearest level as that view does, not truncate.
+    /// The unresolved plane really rings outside `0..=255`; each such sample must land on the
+    /// nearest end of the palette, and every in-range sample must round, not truncate.
     #[test]
-    fn lossy_indices_round_like_the_decoders_own_8_bit_view() {
+    fn lossy_indices_round_and_clamp_samples_outside_the_palette() {
         use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
         let settings = DecodeSettings {
             resolve_palette_indices: false,
@@ -421,11 +445,103 @@ mod tests {
         };
         let image = Image::new(PALETTE_CMYK_JP2, &settings).expect("the index plane must parse");
         let mut ctx = DecoderContext::default();
-        let reference = image.decode(&mut ctx).expect("the index plane must decode").data_u8();
-        assert_eq!(
-            decode_jpx_indices(PALETTE_CMYK_JP2, u8::MAX).expect("indices"),
-            reference
+        let decoded = image.decode(&mut ctx).expect("the index plane must decode");
+        let plane = decoded.components()[0].samples();
+        let below = plane.iter().filter(|&&v| v.round() < 0.0).count();
+        let above = plane.iter().filter(|&&v| v.round() > 255.0).count();
+        assert!(
+            below > 0 && above > 0,
+            "control failed: the lossy plane must ring past both ends, got {below} below and {above} above"
         );
+        let rounds_up = plane
+            .iter()
+            .filter(|&&v| (0.0..255.0).contains(&v) && v.fract() > 0.5)
+            .count();
+        assert!(
+            rounds_up > 0,
+            "control failed: the plane must hold samples that round up"
+        );
+
+        let indices = decode_jpx_indices(PALETTE_CMYK_JP2, u8::MAX).expect("indices");
+        for (&v, &index) in plane.iter().zip(&indices) {
+            let expected = if v.round() < 0.0 {
+                0
+            } else if v.round() > 255.0 {
+                255
+            } else {
+                v.round() as u8
+            };
+            assert_eq!(index, expected, "sample {v} must map to index {expected}");
+        }
+        assert_eq!(
+            super::clamp_indices(plane, u8::MAX).1,
+            below + above,
+            "every repaired sample is counted"
+        );
+    }
+
+    /// hayro-jpeg2000 returns a 16-bit plane's samples unscaled, so a 16-bit index plane reads
+    /// its indices directly rather than as a fraction of 65535. The fixture is a lossless 16x16
+    /// greyscale JP2, index 3 on the left half and index 200 on the right. ~keep
+    #[test]
+    fn a_16_bit_index_plane_reads_its_indices_unscaled() {
+        const INDICES_16BIT_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1885_indices_16bit.jp2");
+        let settings = hayro_jpeg2000::DecodeSettings {
+            resolve_palette_indices: false,
+            ..hayro_jpeg2000::DecodeSettings::default()
+        };
+        let image = hayro_jpeg2000::Image::new(INDICES_16BIT_JP2, &settings).expect("the fixture must parse");
+        let mut ctx = hayro_jpeg2000::DecoderContext::default();
+        let decoded = image.decode(&mut ctx).expect("the fixture must decode");
+        assert_eq!(
+            decoded.components()[0].bit_depth(),
+            16,
+            "control failed: the fixture must be a 16-bit plane"
+        );
+        let indices = decode_jpx_indices(INDICES_16BIT_JP2, u8::MAX).expect("a 16-bit index plane must decode");
+        assert_eq!(indices.len(), 16 * 16);
+        assert_eq!((indices[0], indices[15]), (3, 200), "the indices must not be rescaled");
+    }
+
+    /// Decoding a plane the clamp had to repair logs one warning; a clean plane logs none.
+    #[test]
+    fn a_repaired_index_plane_logs_one_warning() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        struct WarnCount(Arc<AtomicUsize>);
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for WarnCount {
+            fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+                if *event.metadata().level() == tracing::Level::WARN {
+                    self.0.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        }
+        let warnings = |bytes: &[u8]| {
+            // ~keep tracing-core treats a lone live dispatcher as the only one, so a test on another
+            // thread that reaches the warning first caches it as "never" from its own empty
+            // subscriber. A second live dispatcher makes that registration ask this one as well.
+            let _second = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+            let count = Arc::new(AtomicUsize::new(0));
+            let subscriber = tracing_subscriber::registry().with(WarnCount(Arc::clone(&count)));
+            tracing::subscriber::with_default(subscriber, || decode_jpx_indices(bytes, u8::MAX).expect("indices"));
+            count.load(Ordering::SeqCst)
+        };
+        assert_eq!(warnings(PALETTE_CMYK_JP2), 1, "the lossy plane needs the clamp");
+        assert_eq!(
+            warnings(INDICES_GREY_JP2),
+            0,
+            "control: a lossless plane needs no repair"
+        );
+    }
+
+    /// Every sample the clamp moves is counted, so the decoder can warn with the count.
+    #[test]
+    fn clamp_indices_counts_the_samples_it_repairs() {
+        let (indices, clamped) = super::clamp_indices(&[-0.6, -0.4, 4.5, 15.4, 15.6, 300.0], 15);
+        assert_eq!(indices, vec![0, 0, 5, 15, 15, 15]);
+        assert_eq!(clamped, 3, "-0.6, 15.6 and 300.0 fall outside 0..=15");
     }
 
     /// Without a palette box the index plane is the codestream's only component, unchanged.
