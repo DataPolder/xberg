@@ -3895,6 +3895,11 @@ impl PageRenderer {
             }
         }
 
+        // A tiny_skia pixmap holds premultiplied RGBA, and the decoded image and every mask
+        // applied above are straight alpha. Unconverted, a transparent pixel keeps its colour and
+        // adds it to the page under it. ~keep
+        premultiply_rgba(&mut rgba_image);
+
         let src_w = rgba_image.width();
         let src_h = rgba_image.height();
 
@@ -8763,6 +8768,15 @@ fn color_key_pixel_masked(components: &[u8], ranges: &[(u32, u32)]) -> bool {
         .iter()
         .zip(ranges.iter())
         .all(|(&c, &(lo, hi))| (c as u32) >= lo && (c as u32) <= hi)
+}
+
+/// Convert a straight-alpha RGBA image to the premultiplied form a tiny_skia pixmap holds.
+fn premultiply_rgba(rgba: &mut image::RgbaImage) {
+    for pixel in rgba.pixels_mut().filter(|pixel| pixel[3] != u8::MAX) {
+        let [r, g, b, a] = pixel.0;
+        let premultiplied = tiny_skia::ColorU8::from_rgba(r, g, b, a).premultiply();
+        pixel.0 = [premultiplied.red(), premultiplied.green(), premultiplied.blue(), a];
+    }
 }
 
 /// Apply a colour-key `/Mask` to an already-decoded RGBA image by zeroing the
