@@ -98,6 +98,91 @@ pub(super) fn numeric_repair_enabled(config: &ExtractionConfig) -> bool {
         .is_some_and(|ocr| ocr.numeric_repair && ocr_content_is_repairable_prose(ocr))
 }
 
+/// GH#1789's numeric-token repair, applied to every string representation of an OCR'd page that
+/// `merge_structured_ocr_pages_into_internal_document` carries into the final document.
+///
+/// The flat per-page strings (`ocr_results`) are all a Plain-format extraction renders. Every other
+/// renderer rebuilds each OCR'd page from these per-page documents instead
+/// (`extractors::pdf::select_pdf_document`), so a repair confined to the flat string is discarded
+/// for exactly the output formats that carry tables (GH#1840). Same argument already written down
+/// for the standalone-image route on
+/// `extractors::image::apply_numeric_repair_to_standalone_image_ocr`.
+///
+/// `Table::columns` is repaired alongside `cells` because it is a copy of the header row, stamped
+/// by `assign_deterministic_table_ids` inside the document-global heuristic's own
+/// `extract_document_structure_from_segments` call -- repairing `cells` alone would leave the two
+/// disagreeing. `prebuilt_ocr_elements` is deliberately not repaired: those are the backend's raw
+/// per-word boxes, and inserting a separator into one word's text would put it out of step with the
+/// box measured for it. ~keep
+///
+/// ~keep Must run *after* the document-global heading/list block, not beside the flat-string
+/// repair: that block rebuilds every page still in the map from `ocr_page_paragraphs` and would
+/// discard anything written into `elements` earlier.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+pub(super) fn apply_numeric_repair_to_structured_ocr_pages(
+    structured_ocr_pages: &mut ahash::AHashMap<u32, crate::types::internal::InternalDocument>,
+) {
+    for page_document in structured_ocr_pages.values_mut() {
+        for element in &mut page_document.elements {
+            repair_numeric_tokens_in_element(element);
+        }
+        for table in &mut page_document.tables {
+            repair_numeric_tokens_in_table(table);
+        }
+    }
+}
+
+/// Repair one element's text without letting a byte-range annotation slide off the words it marks.
+///
+/// ~keep `repair_ocr_numeric_tokens` changes byte lengths and reports no offset map, so an
+/// annotation covering only part of the text cannot be re-anchored across it; such an element keeps
+/// its unrepaired text rather than silently mismarking. A whole-text span is exact, and is the shape
+/// `pdf::structure::assembly` emits for an OCR paragraph (`para.is_bold`, and a Caption's italic).
+/// The standalone-image route's equivalent has no such guard because its OCR elements carry no
+/// annotations at all (see `extractors::image`); these do.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn repair_numeric_tokens_in_element(element: &mut crate::types::internal::InternalElement) {
+    let Cow::Owned(repaired) = repair_ocr_numeric_tokens(&element.text) else {
+        return;
+    };
+    let original_len = element.text.len() as u32;
+    if element
+        .annotations
+        .iter()
+        .any(|annotation| annotation.start != 0 || annotation.end != original_len)
+    {
+        return;
+    }
+    let repaired_len = repaired.len() as u32;
+    for annotation in &mut element.annotations {
+        annotation.end = repaired_len;
+    }
+    element.text = repaired;
+}
+
+/// Repair every string a reconstructed OCR table carries: the cells, the header-row copy in
+/// `columns`, and the `markdown` baked from the cells.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn repair_numeric_tokens_in_table(table: &mut crate::types::Table) {
+    for row in &mut table.cells {
+        for cell in row.iter_mut() {
+            if let Cow::Owned(repaired) = repair_ocr_numeric_tokens(cell.as_str()) {
+                *cell = repaired;
+            }
+        }
+    }
+    if let Some(columns) = table.columns.as_mut() {
+        for column in columns.iter_mut() {
+            if let Cow::Owned(repaired) = repair_ocr_numeric_tokens(column.as_str()) {
+                *column = repaired;
+            }
+        }
+    }
+    if let Cow::Owned(repaired) = repair_ocr_numeric_tokens(&table.markdown) {
+        table.markdown = repaired;
+    }
+}
+
 /// Build mixed text from native extraction and per-page OCR results.
 ///
 /// For each page boundary, if the page is in `ocr_page_numbers` (1-indexed),
@@ -1104,6 +1189,20 @@ pub(crate) async fn extract_mixed_ocr_native(
             };
             structured_ocr_pages.insert(*page_number, new_page_doc);
         }
+    }
+
+    // GH#1840: the flat-string repair above only reaches the rendered output for Plain format.
+    // Every other renderer rebuilds each OCR'd page from `structured_ocr_pages`
+    // (`select_pdf_document` -> `merge_structured_ocr_pages_into_internal_document`), and the block
+    // above has just rebuilt every page in that map from `ocr_page_paragraphs`, so this has to run
+    // here rather than beside the repair at the top. ~keep
+    // GH#1840: the flat-string repair above only reaches the rendered output for Plain format.
+    // Every other renderer rebuilds each OCR'd page from `structured_ocr_pages`
+    // (`select_pdf_document` -> `merge_structured_ocr_pages_into_internal_document`), and the block
+    // above has just rebuilt every page in that map from `ocr_page_paragraphs`, so this has to run
+    // here rather than beside the repair at the top. ~keep
+    if numeric_repair_enabled(config) {
+        apply_numeric_repair_to_structured_ocr_pages(&mut structured_ocr_pages);
     }
 
     let result = apply_ocr_page_replacements(native_text, boundaries, &accepted_replacements);

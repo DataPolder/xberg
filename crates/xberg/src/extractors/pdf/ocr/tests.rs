@@ -8352,6 +8352,155 @@ Name: ___
         );
     }
 
+    /// GH#1840: `numeric_repair` reached only the flat per-page strings on this route, and every
+    /// renderer but Plain rebuilds each OCR'd page from `structured_ocr_pages` instead. The one
+    /// mock registration drives two extractions so the flag itself is the discriminator: with it
+    /// off the bare token must survive, with it on it must be grouped. That also makes this the
+    /// ordering gate -- placing the repair beside the flat-string one, before the document-global
+    /// heading block, leaves the `numeric_repair: true` assertion failing, because that block
+    /// rebuilds every page's elements from `ocr_page_paragraphs`.
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn should_repair_numeric_tokens_in_structured_ocr_pages_when_numeric_repair_is_enabled() {
+        use crate::core::config::OcrConfig;
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::{ExtractedDocument, PageBoundary};
+        use std::sync::Arc;
+
+        const BACKEND: &str = "numeric-repair-structured-mock";
+        const BODY_WITH_MISREAD: &str = "Operating revenue for the period totalled 1172 units in all";
+
+        struct NumericMockBackend;
+
+        fn body_document() -> crate::types::internal::InternalDocument {
+            let mut doc = crate::types::internal::InternalDocument::new("test");
+            doc.push_element(ocr_font_block("ANNUAL REPORT OVERVIEW", "28", 10.0, 50.0));
+            doc.push_element(ocr_font_block(BODY_WITH_MISREAD, "11", 60.0, 90.0));
+            doc.push_element(ocr_font_block(
+                "This document summarizes the annual results for the reporting period in detail.",
+                "11",
+                100.0,
+                130.0,
+            ));
+            doc.push_element(ocr_font_block(
+                "Additional narrative text follows describing the broader context for readers.",
+                "11",
+                140.0,
+                170.0,
+            ));
+            doc
+        }
+
+        #[async_trait::async_trait]
+        impl OcrBackend for NumericMockBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                Ok(ExtractedDocument {
+                    content: format!(
+                        "ANNUAL REPORT OVERVIEW {BODY_WITH_MISREAD} with enough words to avoid \
+                         the recognition-noise gate"
+                    ),
+                    ocr_internal_document: Some(body_document()),
+                    ..Default::default()
+                })
+            }
+            fn supports_document_processing(&self) -> bool {
+                false
+            }
+        }
+
+        impl Plugin for NumericMockBackend {
+            fn name(&self) -> &str {
+                BACKEND
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        crate::plugins::register_ocr_backend(Arc::new(NumericMockBackend)).unwrap();
+
+        let pdf = build_minimal_two_page_pdf(612.0, 792.0);
+        let page1_text = "page one native text";
+        let page2_text = "page two native text";
+        let native_text = format!("{page1_text}\n{page2_text}");
+        let boundaries = vec![
+            PageBoundary {
+                byte_start: 0,
+                byte_end: page1_text.len(),
+                page_number: 1,
+            },
+            PageBoundary {
+                byte_start: page1_text.len() + 1,
+                byte_end: native_text.len(),
+                page_number: 2,
+            },
+        ];
+
+        async fn structured_text_for(
+            numeric_repair: bool,
+            native_text: &str,
+            boundaries: &[PageBoundary],
+            pdf: &[u8],
+        ) -> String {
+            let config = ExtractionConfig {
+                ocr: Some(OcrConfig {
+                    backend: BACKEND.to_string(),
+                    numeric_repair,
+                    ..Default::default()
+                }),
+                output_format: crate::core::config::OutputFormat::Markdown,
+                pdf_options: Some(pdf_config_with_disabled_page_margins()),
+                ..Default::default()
+            };
+            let result = extract_mixed_ocr_native(native_text, boundaries, &[1, 2], pdf, &config, None)
+                .await
+                .expect("extract_mixed_ocr_native must succeed");
+            let structured_pages = result.2;
+            assert!(
+                !structured_pages.is_empty(),
+                "no structured OCR page survived, so the numeric assertions below would be vacuous"
+            );
+            structured_pages
+                .values()
+                .flat_map(|doc| doc.elements.iter().map(|element| element.text.clone()))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        let disabled = structured_text_for(false, &native_text, &boundaries, &pdf).await;
+        let enabled = structured_text_for(true, &native_text, &boundaries, &pdf).await;
+
+        crate::plugins::unregister_ocr_backend(BACKEND).unwrap();
+
+        // The control: with the flag off the bare token must still be there, proving the assertion
+        // below is driven by `numeric_repair` and not by the fixture or the heuristic.
+        assert!(
+            disabled.contains("1172"),
+            "expected the unrepaired token with numeric_repair off; got:\n{disabled}"
+        );
+        assert!(
+            enabled.contains("1,172"),
+            "numeric_repair must reach structured_ocr_pages, not just the flat page strings; got:\n{enabled}"
+        );
+        assert!(
+            !enabled.contains("1172"),
+            "no unrepaired copy of the token may survive in the structured pages; got:\n{enabled}"
+        );
+    }
+
     /// Same defect, pipeline route: `run_ocr_pipeline_for_page` drives each OCR'd page
     /// through `extract_with_ocr_for_page` with exactly one detached image per call
     /// (`std::slice::from_ref`), so even though that function's heuristic call site

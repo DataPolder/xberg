@@ -341,3 +341,87 @@ fn numeric_repair_enabled_is_false_for_a_markup_renderer() {
     assert!(numeric_repair_enabled(&with_format("markdown")));
     assert!(numeric_repair_enabled(&with_format("text")));
 }
+
+/// GH#1840: the three string representations `merge_structured_ocr_pages_into_internal_document`
+/// carries forward -- element text, table cells (and the `markdown` baked from them), and the
+/// header-row copy in `columns`, which the document-global heuristic stamps via
+/// `assign_deterministic_table_ids`. Repairing `cells` alone would leave `columns` disagreeing.
+#[test]
+fn apply_numeric_repair_to_structured_ocr_pages_repairs_elements_tables_and_header_columns() {
+    use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
+
+    let mut page = InternalDocument::new("test");
+    page.push_element(InternalElement::text(ElementKind::Paragraph, "Total: 1172 units", 0));
+    page.tables.push(crate::types::Table {
+        cells: vec![
+            vec!["Year 2019".to_string(), "Amount".to_string()],
+            vec!["Services".to_string(), "1172".to_string()],
+        ],
+        markdown: "| Year 2019 | Amount |\n| --- | --- |\n| Services | 1172 |".to_string(),
+        columns: Some(vec!["Year 2019".to_string(), "Amount".to_string()]),
+        page_number: 1,
+        ..Default::default()
+    });
+    let mut structured: ahash::AHashMap<u32, InternalDocument> = ahash::AHashMap::new();
+    structured.insert(1, page);
+
+    apply_numeric_repair_to_structured_ocr_pages(&mut structured);
+
+    let page = structured.get(&1).expect("page 1 must survive the repair");
+    assert_eq!(page.elements[0].text, "Total: 1,172 units");
+    assert_eq!(page.tables[0].cells[1][1], "1,172");
+    assert_eq!(page.tables[0].cells[0][0], "Year 2,019");
+    assert_eq!(
+        page.tables[0].columns.as_deref(),
+        Some(["Year 2,019".to_string(), "Amount".to_string()].as_slice()),
+        "the header-row copy must move with cells[0], or the two disagree"
+    );
+    assert_eq!(
+        page.tables[0].markdown,
+        "| Year 2,019 | Amount |\n| --- | --- |\n| Services | 1,172 |"
+    );
+}
+
+/// A whole-text annotation is exact to re-anchor across the repair; a partial-range one is not,
+/// because `repair_ocr_numeric_tokens` reports no offset map. Documents both halves of that rule,
+/// including that the partial-range element keeps its *unrepaired* text on purpose.
+#[test]
+fn numeric_repair_re_anchors_a_whole_text_annotation_and_skips_a_partial_one() {
+    use crate::types::document_structure::{AnnotationKind, TextAnnotation};
+    use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
+
+    let mut whole = InternalElement::text(ElementKind::Paragraph, "Total: 1172 units", 0);
+    whole.annotations = vec![TextAnnotation {
+        start: 0,
+        end: "Total: 1172 units".len() as u32,
+        kind: AnnotationKind::Bold,
+    }];
+    let mut partial = InternalElement::text(ElementKind::Paragraph, "Total: 1172 units", 0);
+    partial.annotations = vec![TextAnnotation {
+        start: 0,
+        end: 5,
+        kind: AnnotationKind::Bold,
+    }];
+
+    let mut page = InternalDocument::new("test");
+    page.push_element(whole);
+    page.push_element(partial);
+    let mut structured: ahash::AHashMap<u32, InternalDocument> = ahash::AHashMap::new();
+    structured.insert(1, page);
+
+    apply_numeric_repair_to_structured_ocr_pages(&mut structured);
+
+    let page = structured.get(&1).expect("page 1 must survive the repair");
+    assert_eq!(page.elements[0].text, "Total: 1,172 units");
+    assert_eq!(
+        page.elements[0].annotations[0].end,
+        "Total: 1,172 units".len() as u32,
+        "a whole-text span must be extended to the repaired length, not left short"
+    );
+    assert_eq!(
+        page.elements[1].text, "Total: 1172 units",
+        "an element with a partial-range annotation keeps its unrepaired text rather than having \
+         its formatting slide off the words it marks"
+    );
+    assert_eq!(page.elements[1].annotations[0].end, 5);
+}
