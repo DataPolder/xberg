@@ -554,3 +554,48 @@ fn dark_fill_rows_do_not_lose_more_values_than_measured_when_shaded_normalisatio
          if this rose, GH#1837 moved -- re-measure per fill kind and raise the floor"
     );
 }
+
+/// The UNCONFIGURED path: OCR on, no `tesseract_config` at all.
+///
+/// Every other measurement in this file builds a `TesseractConfig`, which means none of them can
+/// see a change whose whole point is what happens when the caller supplies none — the default
+/// segmentation mode (GH#1786), the default preprocessing decision (GH#1894), the table-region
+/// re-pass (GH#1897). A change gated on "the caller chose nothing" is invisible to a harness that
+/// always chooses, and a suite that stays green tells you nothing about it either way.
+///
+/// Measured on this build: **103** of 138, identical at `3f77bd2e90` and with GH#1894 applied --
+/// this fixture is not dark enough to fail the pixel test GH#1894 bypasses, so it does not
+/// exercise that change. Recording the number anyway, because the next change to this path needs
+/// a baseline that was actually run rather than assumed.
+///
+/// Run with `--ignored --nocapture`; it prints an absolute count, never a ratio, per the method
+/// this file documents above. ~keep
+#[test]
+#[ignore = "measurement for the unconfigured OCR path; run with --ignored --nocapture"]
+fn measure_unconfigured_ocr_path() {
+    let config = ExtractionConfig {
+        force_ocr: true,
+        use_cache: false,
+        ocr: Some(OcrConfig {
+            backend: "tesseract".to_string(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let document = extract_bytes_document_blocking(SCANNED_TABLE, "application/pdf", &config)
+        .expect("forced OCR of the scanned table must succeed");
+    let Some(table) = document.tables.into_iter().next() else {
+        println!("UNCONFIGURED: no table at all, 0 of {} values", GROUND_TRUTH.len() * 6);
+        return;
+    };
+    let (correct, misses) = correct_values_in_place(&table);
+    println!(
+        "UNCONFIGURED: {correct} of {} values in place, {} rows x {} cols",
+        GROUND_TRUTH.len() * 6,
+        table.cells.len(),
+        table.cells.first().map_or(0, Vec::len)
+    );
+    for miss in misses.iter().take(12) {
+        println!("  MISS {miss}");
+    }
+}
