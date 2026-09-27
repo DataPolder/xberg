@@ -342,6 +342,77 @@ fn numeric_repair_enabled_is_false_for_a_markup_renderer() {
     assert!(numeric_repair_enabled(&with_format("text")));
 }
 
+/// GH#1892: the whole-document OCR route (`force_ocr`, the near-empty `Auto` fallback) carries a
+/// flat string, one `InternalDocument`, and a separate table list. All three reach the user
+/// depending on the output format, so all three must be repaired -- this route repaired none of
+/// them while the mixed route repaired its equivalents, from the same `numeric_repair: true`.
+#[test]
+fn apply_numeric_repair_to_whole_document_ocr_repairs_the_text_the_document_and_the_tables() {
+    use crate::types::internal::{ElementKind, InternalDocument, InternalElement};
+
+    fn table_with_total() -> crate::types::Table {
+        crate::types::Table {
+            cells: vec![
+                vec!["Item".to_string(), "Amount".to_string()],
+                vec!["Services".to_string(), "1172".to_string()],
+            ],
+            markdown: "| Item | Amount |\n| --- | --- |\n| Services | 1172 |".to_string(),
+            columns: Some(vec!["Item".to_string(), "Amount".to_string()]),
+            page_number: 1,
+            ..Default::default()
+        }
+    }
+
+    let mut text = "Total: 1172 units".to_string();
+    let mut document = InternalDocument::new("test");
+    document.push_element(InternalElement::text(ElementKind::Paragraph, "Total: 1172 units", 0));
+    document.tables.push(table_with_total());
+    let mut tables = vec![table_with_total()];
+
+    apply_numeric_repair_to_whole_document_ocr(&mut text, Some(&mut document), &mut tables);
+
+    assert_eq!(text, "Total: 1,172 units", "the flat text is what Plain renders");
+    assert_eq!(
+        document.elements[0].text, "Total: 1,172 units",
+        "the document is what every structured renderer rebuilds the page from"
+    );
+    assert_eq!(
+        document.tables[0].cells[1][1], "1,172",
+        "a table carried on the document must be repaired too"
+    );
+    assert_eq!(
+        document.tables[0].markdown,
+        "| Item | Amount |\n| --- | --- |\n| Services | 1,172 |"
+    );
+    assert_eq!(
+        tables[0].cells[1][1], "1,172",
+        "and so must the separately returned table list, which is a different object by this point"
+    );
+    assert_eq!(
+        tables[0].markdown,
+        "| Item | Amount |\n| --- | --- |\n| Services | 1,172 |"
+    );
+}
+
+/// GH#1892: `None` for the document must not be mistaken for "nothing to do" -- the flat text and
+/// the table list still reach the user on a route that produced no `InternalDocument`.
+#[test]
+fn apply_numeric_repair_to_whole_document_ocr_repairs_text_and_tables_without_a_document() {
+    let mut text = "Total: 1172 units".to_string();
+    let mut tables = vec![crate::types::Table {
+        cells: vec![vec!["1172".to_string()]],
+        markdown: "| 1172 |".to_string(),
+        page_number: 1,
+        ..Default::default()
+    }];
+
+    apply_numeric_repair_to_whole_document_ocr(&mut text, None, &mut tables);
+
+    assert_eq!(text, "Total: 1,172 units");
+    assert_eq!(tables[0].cells[0][0], "1,172");
+    assert_eq!(tables[0].markdown, "| 1,172 |");
+}
+
 /// GH#1840: the three string representations `merge_structured_ocr_pages_into_internal_document`
 /// carries forward -- element text, table cells (and the `markdown` baked from them), and the
 /// header-row copy in `columns`, which the document-global heuristic stamps via

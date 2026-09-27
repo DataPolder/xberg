@@ -91,7 +91,7 @@ use crate::core::config::OcrQualityThresholds;
 /// markup, and the separator rule re-punctuates its bare coordinate integers (GH#1836). See
 /// [`ocr_content_is_repairable_prose`].
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-pub(super) fn numeric_repair_enabled(config: &ExtractionConfig) -> bool {
+pub(crate) fn numeric_repair_enabled(config: &ExtractionConfig) -> bool {
     config
         .ocr
         .as_ref()
@@ -132,6 +132,44 @@ pub(super) fn apply_numeric_repair_to_structured_ocr_pages(
     }
 }
 
+/// GH#1789's numeric-token repair for the whole-document OCR route.
+///
+/// The counterpart of [`apply_numeric_repair_to_structured_ocr_pages`] for the route `force_ocr`,
+/// the near-empty `Auto` fallback, and the OCR gate's whole-document fallback all take
+/// (`extractors::pdf::run_ocr_with_layout`). That route yields one document rather than a per-page
+/// map and had no repair at all, so `{numeric_repair: true, force_ocr_pages: [1, 2]}` repaired those
+/// pages while `{numeric_repair: true, force_ocr: true}` repaired nothing, from the same flag.
+/// GH#1892.
+///
+/// `document.tables` and `tables` are repaired separately because they are separate objects by the
+/// time this runs, not two views of one: `run_ocr_with_layout` returns the table list alongside the
+/// document and `select_pdf_document` can carry either forward.
+///
+/// ~keep Must run BEFORE formula recognition, not after: `recognize_pdf_formula_regions` rewrites
+/// formula regions into LaTeX, and the separator rule re-punctuates bare integers in markup exactly
+/// as it does in an hOCR `bbox` (GH#1836).
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+pub(crate) fn apply_numeric_repair_to_whole_document_ocr(
+    text: &mut String,
+    document: Option<&mut crate::types::internal::InternalDocument>,
+    tables: &mut [crate::types::Table],
+) {
+    if let Cow::Owned(repaired) = repair_ocr_numeric_tokens(text) {
+        *text = repaired;
+    }
+    if let Some(document) = document {
+        for element in &mut document.elements {
+            repair_numeric_tokens_in_element(element);
+        }
+        for table in &mut document.tables {
+            repair_numeric_tokens_in_table(table);
+        }
+    }
+    for table in tables {
+        repair_numeric_tokens_in_table(table);
+    }
+}
+
 /// Repair one element's text without letting a byte-range annotation slide off the words it marks.
 ///
 /// ~keep `repair_ocr_numeric_tokens` changes byte lengths and reports no offset map, so an
@@ -140,7 +178,10 @@ pub(super) fn apply_numeric_repair_to_structured_ocr_pages(
 /// `pdf::structure::assembly` emits for an OCR paragraph (`para.is_bold`, and a Caption's italic).
 /// The standalone-image route's equivalent has no such guard because its OCR elements carry no
 /// annotations at all (see `extractors::image`); these do.
-#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+// ~keep cfg widened from `all(any(ocr, ocr-pipeline), pdf)` to the union of its call sites'
+// cfgs: `apply_numeric_repair_to_whole_document_ocr` is reached from `run_ocr_with_layout`, which
+// is gated on `any(ocr, ocr-pipeline)` alone.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn repair_numeric_tokens_in_element(element: &mut crate::types::internal::InternalElement) {
     let Cow::Owned(repaired) = repair_ocr_numeric_tokens(&element.text) else {
         return;
@@ -162,7 +203,8 @@ fn repair_numeric_tokens_in_element(element: &mut crate::types::internal::Intern
 
 /// Repair every string a reconstructed OCR table carries: the cells, the header-row copy in
 /// `columns`, and the `markdown` baked from the cells.
-#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+// ~keep cfg widened for the same reason as `repair_numeric_tokens_in_element` above.
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn repair_numeric_tokens_in_table(table: &mut crate::types::Table) {
     for row in &mut table.cells {
         for cell in row.iter_mut() {

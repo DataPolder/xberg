@@ -1121,10 +1121,10 @@ async fn run_ocr_with_layout(
 
     if let Some(pipeline) = ocr_config.effective_pipeline() {
         let (
-            text,
-            ocr_tables,
+            mut text,
+            mut ocr_tables,
             ocr_elements,
-            pipeline_doc,
+            mut pipeline_doc,
             llm_usage,
             ocr_pts,
             pipeline_rasters,
@@ -1144,6 +1144,12 @@ async fn run_ocr_with_layout(
             path,
         ))
         .await?;
+        // GH#1892: the whole-document route repaired nothing, so `numeric_repair` was honoured for
+        // `force_ocr_pages` and silently ignored for `force_ocr` under one identical flag. Placed
+        // ahead of formula recognition on purpose -- see the function's own doc comment. ~keep
+        if ocr::numeric_repair_enabled(config) {
+            ocr::apply_numeric_repair_to_whole_document_ocr(&mut text, pipeline_doc.as_mut(), &mut ocr_tables);
+        }
         #[cfg(feature = "formula-recognition")]
         let (mut pipeline_doc, mut pipeline_formulas) = (pipeline_doc, pipeline_formulas);
         #[cfg(feature = "formula-recognition")]
@@ -1176,11 +1182,11 @@ async fn run_ocr_with_layout(
     }
 
     let (
-        text,
+        mut text,
         _mean_conf,
-        ocr_tables,
+        mut ocr_tables,
         ocr_elements,
-        ocr_doc,
+        mut ocr_doc,
         llm_usage,
         ocr_pts,
         ocr_rasters,
@@ -1199,6 +1205,11 @@ async fn run_ocr_with_layout(
         path,
     ))
     .await?;
+    // GH#1892: same repair as the pipeline branch above -- this is the other half of the
+    // whole-document route, the one `force_ocr` and the near-empty `Auto` fallback reach. ~keep
+    if ocr::numeric_repair_enabled(config) {
+        ocr::apply_numeric_repair_to_whole_document_ocr(&mut text, ocr_doc.as_mut(), &mut ocr_tables);
+    }
     #[cfg(feature = "formula-recognition")]
     let (mut ocr_doc, mut formulas) = (ocr_doc, formulas);
     #[cfg(feature = "formula-recognition")]
