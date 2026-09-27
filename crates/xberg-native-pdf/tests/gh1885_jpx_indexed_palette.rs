@@ -54,16 +54,17 @@ fn pdf_with_jpx_image(codestream: &[u8], color_space: &str) -> Vec<u8> {
 
 /// [`pdf_with_jpx_image`] with the dictionary's `/BitsPerComponent` set to `bpc`.
 fn pdf_with_jpx_image_at_depth(codestream: &[u8], color_space: &str, bpc: u8) -> Vec<u8> {
-    pdf_with_jpx_image_and_profile(codestream, color_space, bpc, None)
+    pdf_with_jpx_image_and_profile(codestream, color_space, bpc, None, "")
 }
 
 /// [`pdf_with_jpx_image_at_depth`] plus, when `icc_profile` is given, a four-component ICC profile
-/// stream as object `6 0 R` for `color_space` to name.
+/// stream as object `6 0 R` for `color_space` to name, and `extra` appended to the image dictionary.
 fn pdf_with_jpx_image_and_profile(
     codestream: &[u8],
     color_space: &str,
     bpc: u8,
     icc_profile: Option<&[u8]>,
+    extra: &str,
 ) -> Vec<u8> {
     let content = format!("q\n{WIDTH} 0 0 {HEIGHT} 0 0 cm\n/Im1 Do\nQ\n");
     let mut buf: Vec<u8> = b"%PDF-1.5\n".to_vec();
@@ -93,7 +94,7 @@ fn pdf_with_jpx_image_and_profile(
     buf.extend_from_slice(
         format!(
             "5 0 obj\n<< /Type /XObject /Subtype /Image /Width {WIDTH} /Height {HEIGHT} \
-             /BitsPerComponent {bpc} /ColorSpace {color_space} /Filter /JPXDecode /Length {} >>\nstream\n",
+             /BitsPerComponent {bpc} /ColorSpace {color_space} /Filter /JPXDecode {extra} /Length {} >>\nstream\n",
             codestream.len()
         )
         .as_bytes(),
@@ -323,7 +324,13 @@ fn an_iccbased_cmyk_base_looks_the_palette_up_through_its_profile() {
     );
 
     let lookup = cmyk_grey_palette().replace("/DeviceCMYK", "[/ICCBased 6 0 R]");
-    let rgb = extracted_rgb(pdf_with_jpx_image_and_profile(INDICES_GREY_JP2, &lookup, 8, Some(&icc)));
+    let rgb = extracted_rgb(pdf_with_jpx_image_and_profile(
+        INDICES_GREY_JP2,
+        &lookup,
+        8,
+        Some(&icc),
+        "",
+    ));
     let first = [rgb[0], rgb[1], rgb[2]];
     assert!(
         first.iter().all(|&c| (64..=192).contains(&c)),
@@ -332,5 +339,28 @@ fn an_iccbased_cmyk_base_looks_the_palette_up_through_its_profile() {
     assert!(
         rgb.chunks(3).all(|px| px == first),
         "every palette entry must go through the profile, so every pixel is the same grey"
+    );
+}
+
+/// A colour-key `/Mask` on an `/Indexed` JPEG 2000 image names index ranges, so the ink at index
+/// 0 is masked out and the page shows paper where the text was.
+#[test]
+fn a_colour_key_mask_on_an_indexed_jpeg2000_image_hides_its_masked_indices() {
+    let control = rendered_ink(pdf_with_jpx_image(INDICES_GREY_JP2, &cmyk_grey_palette()));
+    assert!(
+        control > 100,
+        "control failed: the unmasked image painted only {control} dark pixels"
+    );
+
+    let masked = rendered_ink(pdf_with_jpx_image_and_profile(
+        INDICES_GREY_JP2,
+        &cmyk_grey_palette(),
+        8,
+        None,
+        "/Mask [0 127]",
+    ));
+    assert_eq!(
+        masked, 0,
+        "every dark index is inside the mask range, so no ink may be painted"
     );
 }

@@ -81,9 +81,8 @@ pub struct PdfImage {
     /// states its range in this index space (ISO 32000-1 §8.9.6.4), not in
     /// the expanded RGB `samples_are_raw` tracks — so that flag alone cannot
     /// tell a consumer whether masking is possible. `None` for every other
-    /// colour space, and for a JPX-coded Indexed image (GH#1889 decodes its
-    /// index plane through a separate codestream path this field does not
-    /// cover). (GH#1899) ~keep
+    /// colour space. A JPX-coded Indexed image keeps its decoded index plane
+    /// here only when it carries a colour-key `/Mask`. (GH#1899, GH#1885) ~keep
     #[serde(skip)]
     raw_indexed_samples: Option<Vec<u8>>,
     /// The raw samples, one byte per component per pixel in the declared bit depth, kept only
@@ -1420,8 +1419,8 @@ pub fn extract_image_from_xobject(
     // below leave the raw space without applying /Decode, and a consumer that
     // applies it itself (plate routing) must still do so for those. ~keep
     let mut decode_folded_in = false;
-    // Populated only for a non-JPX /Indexed image, whose raw index plane a
-    // colour-key /Mask needs (GH#1899); see `raw_indexed_samples` field docs. ~keep
+    // Populated only for an /Indexed image, whose raw index plane a colour-key
+    // /Mask needs (GH#1899); see `raw_indexed_samples` field docs. ~keep
     let mut raw_indexed_samples: Option<Vec<u8>> = None;
     // A colour-key /Mask is tested against the raw samples, so they are kept wherever unpacking
     // below moves the stored samples out of that space. (GH#1904) ~keep
@@ -1473,6 +1472,11 @@ pub fn extract_image_from_xobject(
         {
             samples_are_raw = false;
             stored_bpc = 8;
+            // A colour-key /Mask on an /Indexed image states its range in these indices, not in
+            // the RGB below. (GH#1885) ~keep
+            if has_color_key_mask && indexed_resolution.is_some() {
+                raw_indexed_samples = Some(indices.clone());
+            }
             // The expansion is RGB whatever the palette's own space was, so an image that named
             // no `/Indexed` now reports the space its samples are in. ~keep
             if codestream_palette.is_some() {
