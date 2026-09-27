@@ -223,6 +223,55 @@ pub fn decode_jpx(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxIm
     decode_subsampled(comps, width, height, colour_components)
 }
 
+/// Decode the palette indices of a JPEG 2000 image whose dictionary names an `/Indexed` colour
+/// space, one byte per pixel, for the caller to look up in the dictionary's own palette.
+///
+/// ISO 32000-1 §7.4.9 says a `/ColorSpace` entry overrides any colour specification in the
+/// JPEG 2000 data, and a `pclr` palette box is one: pdf.js decodes such an image with the
+/// codestream palette switched off for the same reason. It is also the only way these images
+/// decode at all. A lossily coded index plane rings around every edge, so samples land a little
+/// outside `0..=255`; hayro-jpeg2000 0.4 looks each one up unclamped and fails the whole image
+/// with `PaletteResolutionFailed`. Rounding and clamping to `highest_index`, the last entry the
+/// dictionary's palette holds, maps that ringing to the nearest real index instead. ~keep
+///
+/// The index plane is the first component. hayro-jpeg2000 reports the colour channels it found,
+/// and with palette resolution off it reports an image carrying a `pclr` box as one grey channel
+/// and clears its alpha flag, even when a second component is the image's opacity. So the channel
+/// count, not the component count, says whether the image is an index plane; any component after
+/// the first is opacity and is dropped, as [`decode_jpx`] drops it for every other image. ~keep
+pub fn decode_jpx_indices(bytes: &[u8], highest_index: u8) -> Result<Vec<u8>> {
+    use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
+
+    let settings = DecodeSettings {
+        resolve_palette_indices: false,
+        ..DecodeSettings::default()
+    };
+    let image = Image::new(bytes, &settings)
+        .map_err(|e| Error::UnsupportedFilter(format!("JPXDecode: JPEG 2000 decode failed: {e:?}")))?;
+
+    let mut ctx = DecoderContext::default();
+    let decoded = image
+        .decode(&mut ctx)
+        .map_err(|e| Error::UnsupportedFilter(format!("JPXDecode: JPEG 2000 decode failed: {e:?}")))?;
+
+    let index_components = image.color_space().num_channels();
+    let [indices, ..] = decoded.components() else {
+        return Err(Error::UnsupportedFilter(
+            "JPXDecode: JPEG 2000 image has no components".to_string(),
+        ));
+    };
+    if index_components != 1 {
+        return Err(Error::UnsupportedFilter(format!(
+            "JPXDecode: an /Indexed JPEG 2000 image needs one index component, found {index_components}"
+        )));
+    }
+    Ok(indices
+        .samples()
+        .iter()
+        .map(|&v| v.round().clamp(0.0, f32::from(highest_index)) as u8)
+        .collect())
+}
+
 /// The chroma-subsampled path (WS1.7), separated so [`decode_jpx`] stays readable.
 ///
 /// hayro-jpeg2000 0.4 does not expose per-component dimensions, so only the unambiguous 2x2 (4:2:0)
@@ -304,7 +353,7 @@ fn upsample_nearest_u8(sub: &[f32], sw: usize, sh: usize, fw: usize, fh: usize) 
 
 #[cfg(test)]
 mod tests {
-    use super::{alpha_is_droppable, decode_jpx, upsample_nearest_u8};
+    use super::{alpha_is_droppable, decode_jpx, decode_jpx_indices, upsample_nearest_u8};
 
     /// Grayscale JP2 codestream from the minimal repro (816x1056 DeviceGray).
     const SAMPLE_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/sample_gray.jp2");
@@ -321,6 +370,117 @@ mod tests {
     /// A BARE 4-component CMYK codestream, 16x16, no JP2 container and so no `colr` box to
     /// declare CMYK. This is the shape hayro-jpeg2000 misreads as RGB + alpha. ~keep
     const CMYK_QUADRANTS_J2K: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1855_cmyk_quadrants.j2k");
+
+    /// GH#1885 fixtures, 120x40, dark text (index 0) on paper (index 255), generated with Pillow's
+    /// OpenJPEG encoder. `PALETTE_CMYK_JP2` is one 8-bit index component coded lossily (9/7
+    /// irreversible, rate 4) in a JP2 container carrying a `colr` box naming CMYK, a 256-entry
+    /// four-column `pclr` box (entry `i` is CMYK `(0, 0, 0, 255 - i)`) and a `cmap` box routing the
+    /// component through all four columns. The lossy coding leaves index samples outside
+    /// `0..=255` near the glyph edges. `INDICES_GREY_JP2` is the same picture coded losslessly as
+    /// a plain greyscale JP2 with no palette box. ~keep
+    const PALETTE_CMYK_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1885_palette_cmyk.jp2");
+    const INDICES_GREY_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1885_indices_grey.jp2");
+    /// The same picture as one index component plus an opaque alpha component. The `pclr` box routes
+    /// the first through the same four-column CMYK palette, and the `cmap` and `cdef` boxes route the
+    /// second direct as opacity. With palette resolution off, hayro-jpeg2000 reports this as one
+    /// grey channel with no alpha. ~keep
+    const PALETTE_ALPHA_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1885_palette_alpha.jp2");
+    /// A lossily coded index plane for a 16-entry palette, ink at index 0 and paper at 15, in a plain
+    /// greyscale JP2. The lossy coding rings samples up to 16, one past the last palette entry. ~keep
+    const HIVAL15_LOSSY_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1885_hival15_lossy.jp2");
+
+    /// NEGATIVE CONTROL pinning the upstream failure: resolving the codestream palette fails the
+    /// whole image. If this ever passes, hayro-jpeg2000 clamps out-of-range indices itself. ~keep
+    #[test]
+    fn a_lossy_palette_codestream_fails_when_the_decoder_resolves_its_palette() {
+        let err = decode_jpx(PALETTE_CMYK_JP2, Some(1))
+            .err()
+            .expect("negative control: the codestream palette lookup must fail on out-of-range indices");
+        assert!(
+            format!("{err:?}").contains("PaletteResolutionFailed"),
+            "unexpected failure: {err:?}"
+        );
+    }
+
+    #[test]
+    fn a_lossy_palette_codestream_decodes_to_clamped_indices() {
+        let indices = decode_jpx_indices(PALETTE_CMYK_JP2, u8::MAX).expect("GH#1885: the index plane must decode");
+        assert_eq!(indices.len(), 120 * 40, "one index byte per pixel");
+        assert_eq!(indices[0], 255, "the top-left pixel is paper");
+        assert!(indices.contains(&0), "the ink index must survive the clamp");
+    }
+
+    /// hayro-jpeg2000's own 8-bit view of the unresolved plane is the reference for an 8-bit index
+    /// plane: each index must round to the nearest level as that view does, not truncate.
+    #[test]
+    fn lossy_indices_round_like_the_decoders_own_8_bit_view() {
+        use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
+        let settings = DecodeSettings {
+            resolve_palette_indices: false,
+            ..DecodeSettings::default()
+        };
+        let image = Image::new(PALETTE_CMYK_JP2, &settings).expect("the index plane must parse");
+        let mut ctx = DecoderContext::default();
+        let reference = image.decode(&mut ctx).expect("the index plane must decode").data_u8();
+        assert_eq!(
+            decode_jpx_indices(PALETTE_CMYK_JP2, u8::MAX).expect("indices"),
+            reference
+        );
+    }
+
+    /// Without a palette box the index plane is the codestream's only component, unchanged.
+    #[test]
+    fn a_plain_codestream_decodes_to_its_own_samples_as_indices() {
+        let indices = decode_jpx_indices(INDICES_GREY_JP2, u8::MAX).expect("a plain index codestream must decode");
+        let grey = decode_jpx(INDICES_GREY_JP2, None).expect("the same codestream as greyscale");
+        assert_eq!(indices, grey.samples);
+        assert!(
+            indices.contains(&0) && indices.contains(&255),
+            "the fixture must hold ink and paper"
+        );
+    }
+
+    /// An alpha channel is dropped as it is for any other image; three colour components cannot
+    /// be palette indices, so that image is refused rather than read through its first plane.
+    #[test]
+    fn index_decoding_drops_alpha_and_refuses_colour_codestreams() {
+        let grey = decode_jpx_indices(GREY_ALPHA_JP2, u8::MAX).expect("grey plus alpha has one index component");
+        assert_eq!(grey.len(), 16 * 16);
+        assert_eq!(grey[0], 180, "the left half's index must survive");
+
+        let err = decode_jpx_indices(RGBA_JP2, u8::MAX).expect_err("an RGBA codestream has three components");
+        assert!(format!("{err:?}").contains("found 3"), "unexpected failure: {err:?}");
+    }
+
+    /// A palette box plus an opacity channel: the index plane is the first component and the opacity
+    /// plane after it is dropped, not counted as a second index component.
+    #[test]
+    fn a_palette_codestream_with_an_opacity_channel_decodes_its_index_plane() {
+        let indices = decode_jpx_indices(PALETTE_ALPHA_JP2, u8::MAX).expect("the index plane must decode");
+        let plain = decode_jpx_indices(INDICES_GREY_JP2, u8::MAX).expect("the same picture without alpha");
+        assert_eq!(
+            indices, plain,
+            "the indices must be the plane's, not the opacity plane's"
+        );
+    }
+
+    /// Ringing past a short palette clamps to its last entry, not to 255: the expander paints an
+    /// index past the palette black.
+    #[test]
+    fn lossy_indices_clamp_to_the_highest_palette_index() {
+        let unclamped = decode_jpx_indices(HIVAL15_LOSSY_JP2, u8::MAX).expect("the index plane must decode");
+        assert!(
+            unclamped.iter().any(|&i| i > 15),
+            "control failed: the fixture must ring past index 15"
+        );
+        let indices = decode_jpx_indices(HIVAL15_LOSSY_JP2, 15).expect("the index plane must decode");
+        assert_eq!(
+            indices.iter().max(),
+            Some(&15),
+            "no index may pass the palette's last entry"
+        );
+        assert!(indices.contains(&0), "the ink index must survive the clamp");
+    }
 
     /// The alpha decision in isolation, so the truth table is readable without decoding anything.
     /// The third row is the GH#1850 case: a declared count equal to the actual one means every
