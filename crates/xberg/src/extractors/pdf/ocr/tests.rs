@@ -6766,6 +6766,79 @@ Name: ___
     /// the resulting element bbox matches what a digital (non-OCR) page would produce
     /// for the same physical position — PDF points, origin bottom-left — not raw
     /// Tesseract raster pixels.
+    /// GH#1895: a table's bbox must be converted from the frame the backend actually read, which
+    /// is the resampled processed image and not the page render. Preprocessing lifts a sub-300 dpi
+    /// render up to `target_dpi`, so dividing by the render's size overstates every table box by
+    /// that ratio and pushes it off the page. The element boxes were already resolved this way;
+    /// only the tables were not.
+    ///
+    /// The second half is the pre-fix answer, asserted so this cannot pass by accident: with the
+    /// render's 850x1100 the same rect would come out at x1 = 1008pt on a 612pt page and
+    /// y0 = -504pt. ~keep
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn build_mixed_ocr_page_document_scales_a_table_by_the_processed_frame_not_the_render() {
+        use crate::types::extraction::BoundingBox;
+
+        let mut metadata = crate::types::Metadata::default();
+        metadata.additional.insert(
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            serde_json::json!(1700),
+        );
+        metadata.additional.insert(
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
+            serde_json::json!(2200),
+        );
+
+        let table = crate::types::Table {
+            bounding_box: Some(BoundingBox {
+                x0: 200.0,
+                y0: 400.0,
+                x1: 1400.0,
+                y1: 1800.0,
+            }),
+            ..Default::default()
+        };
+        // No page text: a flat text paragraph would be assembled into a fresh document, and
+        // `assemble_internal_document` does not carry a table that overlaps no paragraph. The
+        // table is the whole subject here, so the page carries only the table. ~keep
+        let mut result = crate::types::ExtractedDocument {
+            content: String::new(),
+            tables: vec![table],
+            metadata,
+            ..Default::default()
+        };
+
+        // A 850x1100px render of a 612x792pt page, resampled to 1700x2200 before recognition.
+        let (page_doc, _paragraphs) = build_mixed_ocr_page_document(
+            &mut result,
+            &crate::core::config::OcrConfig::default(),
+            1,
+            850,
+            1100,
+            612.0,
+            792.0,
+            disabled_page_margins(),
+        )
+        .expect("a result carrying a table must produce a page document");
+
+        let bbox = page_doc
+            .tables
+            .first()
+            .expect("the backend table must reach the page document")
+            .bounding_box
+            .expect("the table must keep its bounding box");
+        // scale = 612/1700 = 792/2200 = 0.36, y flipped about the 792pt page height.
+        assert!((bbox.x0 - 72.0).abs() < 1e-6, "x0 = {}", bbox.x0);
+        assert!((bbox.x1 - 504.0).abs() < 1e-6, "x1 = {}", bbox.x1);
+        assert!((bbox.y0 - 144.0).abs() < 1e-6, "y0 = {}", bbox.y0);
+        assert!((bbox.y1 - 648.0).abs() < 1e-6, "y1 = {}", bbox.y1);
+        assert!(
+            bbox.x1 <= 612.0 && bbox.y0 >= 0.0,
+            "the table must lie inside the page: {bbox:?}"
+        );
+    }
+
     #[cfg(feature = "pdf")]
     #[test]
     fn build_mixed_ocr_page_document_rescales_element_bbox_into_page_points() {

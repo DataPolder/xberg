@@ -260,10 +260,10 @@ pub(super) fn undo_auto_rotate_point(
 /// `OCR_ORIENTATION_DEGREES_METADATA_KEY` /
 /// `OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY` / `..._HEIGHT_...`). Their
 /// `ocr_internal_document` bboxes are built directly from that rotated raster
-/// and are never mapped back — every other caller of this document, including
-/// `rescale_ocr_bboxes_to_page_points` below, assumes bboxes are in the
-/// *original* `render_width`/`render_height` raster (the one the caller
-/// rendered and passed to the backend), which after a 90/270 correction has
+/// and are never mapped back — every other caller of this document assumes
+/// bboxes are in the raster the backend actually read (which
+/// `rescale_ocr_bboxes_to_page_points`'s callers resolve via
+/// [`resolved_ocr_layout_dimensions`]), which after a 90/270 correction has
 /// different — swapped — dimensions than the rotated one the bboxes are
 /// actually in. Left uncorrected, the pixel->point rescale divides by the wrong
 /// axis and both position and reading order come out wrong.
@@ -382,11 +382,17 @@ pub(super) fn build_mixed_ocr_page_document(
         None => flat_ocr_page_document(&result.content),
     };
     undo_auto_rotate_document_bboxes(&mut doc, &result.metadata, image_width_px, image_height_px);
+    // ~keep The pixel frame is the backend's PROCESSED image, not the page render: preprocessing
+    // resamples a sub-300 dpi render up to `target_dpi` before recognition, so the boxes come back
+    // in the resampled frame and dividing by the render's size makes them too large by exactly that
+    // ratio -- a table on a 150 dpi render landed at twice its size, off the page (GH#1895). These
+    // are the same dimensions `public_ocr_elements_for_pdf_page` above already resolves for the
+    // element boxes, which is why elements were right and tables were not.
     rescale_ocr_bboxes_to_page_points(
         Some(&mut doc),
         &mut backend_tables,
-        image_width_px,
-        image_height_px,
+        element_layout_width,
+        element_layout_height,
         page_width_pt,
         page_height_pt,
     );
