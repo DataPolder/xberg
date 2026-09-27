@@ -153,6 +153,33 @@ pub(crate) fn extract_spans_from_page(
     Ok((spans, reordered_sparse_columns))
 }
 
+/// Whether the text pass must hand out per-page byte offsets, independent of whether the
+/// caller asked to collect `PageContent` itself.
+///
+/// Some OCR routes replace only *some* pages rather than the whole document, and those routes
+/// need the boundaries this predicate gates:
+///
+/// - `force_ocr_pages` non-empty and an `ocr` block both already required boundaries before
+///   GH#1752.
+/// - `ocr_near_empty_fallback == Some(true)` and `ocr_scanned_page_quality_gate == Some(true)`
+///   now also require them, even without an `ocr` block. Before this widening, a caller who set
+///   either flag alone got no boundaries at all: `extractors/pdf/mod.rs` skips
+///   `extract_mixed_ocr_native` entirely without them, the per-page text-quality gate collapses
+///   to one document-wide verdict, and a single flagged page escalates to whole-document OCR --
+///   the cost inversion GH#1752 exists to fix.
+///
+/// Deliberately does *not* check `ocr_embedded_images` (irrelevant to page boundaries -- it
+/// gates whether embedded image bytes are read, not page-text offsets) or whether an automatic
+/// OCR backend is registered: being wrong in the "too eager" direction here just tracks
+/// boundaries nobody ends up using, which is silent-safe, while being wrong "too narrow" is the
+/// bug this function fixes. ~keep
+pub(crate) fn page_boundaries_required(config: &ExtractionConfig) -> bool {
+    config.force_ocr_pages.as_ref().is_some_and(|pages| !pages.is_empty())
+        || config.ocr.is_some()
+        || config.ocr_near_empty_fallback == Some(true)
+        || config.ocr_scanned_page_quality_gate == Some(true)
+}
+
 /// Extract text from a xberg_native_pdf document with optional page boundary tracking.
 ///
 /// Mirrors the signature and behaviour of `extract_text_from_pdf_document`.
@@ -160,10 +187,10 @@ pub(crate) fn extract_spans_from_page(
 /// When `page_config` is `Some`, tracks byte offsets and optionally collects
 /// per-page `PageContent` entries.
 ///
-/// When `page_config` is `None` but `extraction_config` requires per-page boundaries
-/// (i.e. `force_ocr_pages` is set or an `ocr` config is present for quality evaluation),
-/// boundary tracking is enabled automatically with a default `PageConfig` so that the
-/// mixed-OCR and quality-threshold codepaths receive the offsets they need.
+/// When `page_config` is `None` but `extraction_config` requires per-page boundaries, per
+/// [`page_boundaries_required`], boundary tracking is enabled automatically with a default
+/// `PageConfig` so that the mixed-OCR and quality-threshold codepaths receive the offsets they
+/// need.
 ///
 /// Otherwise the fast path is used (no per-page tracking).
 pub(crate) fn extract_text_from_native_document(
@@ -172,8 +199,7 @@ pub(crate) fn extract_text_from_native_document(
     extraction_config: Option<&ExtractionConfig>,
     margins: PageMarginFractions,
 ) -> Result<PdfTextExtractionResult> {
-    let needs_boundaries =
-        extraction_config.is_some_and(|c| c.force_ocr_pages.as_ref().is_some_and(|p| !p.is_empty()) || c.ocr.is_some());
+    let needs_boundaries = extraction_config.is_some_and(page_boundaries_required);
 
     if let Some(config) = page_config {
         extract_text_with_tracking(doc, config, margins)
@@ -6955,6 +6981,113 @@ mod tests {
         assert!(
             outside < MIN_DENSE_COLUMN_SPLIT_LINES,
             "the population floor must reject a vacuous agreement"
+        );
+    }
+
+    /// GH#1752: `page_boundaries_required` must widen boundary tracking to the two per-page OCR
+    /// settings without changing behaviour for any caller that leaves them unset. This is the
+    /// load-bearing assertion for that: with both settings at their default `None`, boundary
+    /// tracking must stay off, because `None == Some(true)` is always false and the widened
+    /// predicate must reduce byte-for-byte to the pre-GH#1752 predicate (`force_ocr_pages`
+    /// non-empty or `ocr.is_some()`).
+    #[test]
+    fn page_boundaries_required_default_config_stays_on_the_fast_path() {
+        let pdf = build_paged_text_pdf(2, 3);
+        let mut doc = NativeDocument::open_bytes(&pdf).expect("fixture must open");
+        let margins = PageMarginFractions::default();
+        let config = ExtractionConfig::default();
+
+        let (_, boundaries, _, _) =
+            extract_text_from_native_document(&mut doc, None, Some(&config), margins).expect("extraction must succeed");
+
+        assert!(
+            boundaries.is_none(),
+            "a default config must stay on the fast path with no boundaries -- this is what \
+             proves the widening is byte-identical to the pre-GH#1752 predicate at defaults"
+        );
+    }
+
+    #[test]
+    fn page_boundaries_required_ocr_block_alone_enables_boundaries() {
+        let pdf = build_paged_text_pdf(2, 3);
+        let mut doc = NativeDocument::open_bytes(&pdf).expect("fixture must open");
+        let margins = PageMarginFractions::default();
+        let config = ExtractionConfig {
+            ocr: Some(crate::core::config::OcrConfig::default()),
+            ..ExtractionConfig::default()
+        };
+
+        let (_, boundaries, _, _) =
+            extract_text_from_native_document(&mut doc, None, Some(&config), margins).expect("extraction must succeed");
+
+        assert!(
+            boundaries.is_some(),
+            "an `ocr` block alone must enable boundary tracking"
+        );
+    }
+
+    /// GH#1752: the actual regression this ticket fixes -- before the widening, this configuration
+    /// left `needs_boundaries` `false` because the old predicate only checked `config.ocr.is_some()`.
+    #[test]
+    fn page_boundaries_required_near_empty_fallback_alone_enables_boundaries() {
+        let pdf = build_paged_text_pdf(2, 3);
+        let mut doc = NativeDocument::open_bytes(&pdf).expect("fixture must open");
+        let margins = PageMarginFractions::default();
+        let config = ExtractionConfig {
+            ocr_near_empty_fallback: Some(true),
+            ..ExtractionConfig::default()
+        };
+
+        let (_, boundaries, _, _) =
+            extract_text_from_native_document(&mut doc, None, Some(&config), margins).expect("extraction must succeed");
+
+        assert!(
+            boundaries.is_some(),
+            "ocr_near_empty_fallback = Some(true) without an `ocr` block must still enable \
+             boundary tracking (GH#1752)"
+        );
+    }
+
+    /// GH#1752: same regression as above, for the sibling setting.
+    #[test]
+    fn page_boundaries_required_scanned_page_quality_gate_alone_enables_boundaries() {
+        let pdf = build_paged_text_pdf(2, 3);
+        let mut doc = NativeDocument::open_bytes(&pdf).expect("fixture must open");
+        let margins = PageMarginFractions::default();
+        let config = ExtractionConfig {
+            ocr_scanned_page_quality_gate: Some(true),
+            ..ExtractionConfig::default()
+        };
+
+        let (_, boundaries, _, _) =
+            extract_text_from_native_document(&mut doc, None, Some(&config), margins).expect("extraction must succeed");
+
+        assert!(
+            boundaries.is_some(),
+            "ocr_scanned_page_quality_gate = Some(true) without an `ocr` block must still \
+             enable boundary tracking (GH#1752)"
+        );
+    }
+
+    #[test]
+    fn page_boundaries_required_ocr_block_wins_even_with_settings_explicitly_off() {
+        let pdf = build_paged_text_pdf(2, 3);
+        let mut doc = NativeDocument::open_bytes(&pdf).expect("fixture must open");
+        let margins = PageMarginFractions::default();
+        let config = ExtractionConfig {
+            ocr: Some(crate::core::config::OcrConfig::default()),
+            ocr_near_empty_fallback: Some(false),
+            ocr_scanned_page_quality_gate: Some(false),
+            ..ExtractionConfig::default()
+        };
+
+        let (_, boundaries, _, _) =
+            extract_text_from_native_document(&mut doc, None, Some(&config), margins).expect("extraction must succeed");
+
+        assert!(
+            boundaries.is_some(),
+            "an `ocr` block alone is still sufficient; Some(false) on the sibling settings \
+             does not take anything away"
         );
     }
 }
