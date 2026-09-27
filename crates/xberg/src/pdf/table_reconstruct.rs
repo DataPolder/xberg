@@ -1669,7 +1669,7 @@ const STRADDLE_ROW_THRESHOLD_RATIO: f64 = 0.5;
 /// Fraction of (column boundary, row) pairs crossed by a word's bounding box.
 ///
 /// A column boundary is the *start* of the next column, not the midpoint
-/// between two column positions. [`crate::table_core::detect_columns`] returns
+/// between two column positions. [`crate::table_core::reconstruct_table_with_columns`] returns
 /// each column's **median left edge**, so a midpoint between two such medians
 /// falls inside the left column's own text rather than in the gutter, and any
 /// word wider than half the column pitch straddles it — flagging legitimate

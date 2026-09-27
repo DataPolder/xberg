@@ -53,49 +53,186 @@ impl HocrWord {
     }
 }
 
-/// Detect column positions from word x-coordinates.
+/// The symbols a table cell prints on their own: a nil dash, a bracket, a currency sign, a percent
+/// sign, a footnote asterisk. Alone, each is cell content rather than a stray mark. ~keep
+const CELL_SYMBOLS: &[char] = &[
+    '-', '\u{2010}', '\u{2011}', '\u{2012}', '\u{2013}', '\u{2014}', '\u{2212}', '(', ')', '[', ']', '{', '}', '$',
+    '\u{a2}', '\u{a3}', '\u{a5}', '\u{20ac}', '%', '*',
+];
+
+/// Whether `text` is one of [`CELL_SYMBOLS`] standing alone.
+pub(crate) fn is_lone_cell_symbol(text: &str) -> bool {
+    let mut chars = text.chars();
+    matches!((chars.next(), chars.next()), (Some(symbol), None) if CELL_SYMBOLS.contains(&symbol))
+}
+
+/// Whether `text` reads as a value: it holds a digit and no letter.
+#[cfg(feature = "ocr")]
+pub(crate) fn is_value(text: &[char]) -> bool {
+    chars_read_as_value(text.iter().copied())
+}
+
+/// The same test as `is_value` over a string's characters, without materialising them.
+pub(crate) fn text_is_value(text: &str) -> bool {
+    chars_read_as_value(text.chars())
+}
+
+/// The one implementation behind `is_value` and [`text_is_value`], which differ only in how the
+/// caller holds the text — the underscore-mark cut works in `&[char]`, column detection in `&str`.
+/// ~keep
+fn chars_read_as_value(chars: impl Iterator<Item = char>) -> bool {
+    let mut has_digit = false;
+    for character in chars {
+        if character.is_alphabetic() {
+            return false;
+        }
+        has_digit = has_digit || character.is_ascii_digit();
+    }
+    has_digit
+}
+
+/// Whether `text` prints a value in a table cell: a number by [`text_is_value`], or one of the
+/// symbols a cell prints alone ([`is_lone_cell_symbol`]) — the nil dash of an empty amount, or the
+/// bracket or currency sign OCR split off the front of one.
 ///
-/// Groups words by approximate x-position (within `column_threshold` pixels)
-/// and returns the median x-position for each detected column, sorted left to right.
-pub(crate) fn detect_columns(words: &[HocrWord], column_threshold: u32) -> Vec<u32> {
+/// This is the same notion of cell content the shading-mark filter tests for (`is_mark_text`, which
+/// rejects a word as a mark when it is either of these), reused rather than restated. ~keep
+pub(crate) fn is_cell_value_text(text: &str) -> bool {
+    let text = text.trim();
+    text_is_value(text) || is_lone_cell_symbol(text)
+}
+
+/// One detected column: the x-position reported to callers, and the left edges membership is
+/// decided against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ColumnTrack {
+    /// Median left edge of the column's tokens, and the leftmost of them once tracks are folded.
+    ///
+    /// This, and only this, is what [`reconstruct_table_with_columns`] reports: every downstream
+    /// consumer of a column position — the OCR blank-quantity retry's crop bounds, the native-PDF
+    /// borderless-table whitespace check, `merge_disjoint_numeric_columns` — reads it as a left
+    /// edge in page pixels. ~keep
+    left: u32,
+    /// Median right edge of the column's tokens (the rightmost once folded).
+    right: u32,
+    /// Whether every one of the column's tokens is a value ([`is_cell_value_text`]), which is what
+    /// makes it eligible to fold into an adjacent value column.
+    right_aligned: bool,
+    /// The median left edge of each track this column was folded from, one entry when it was not
+    /// folded at all.
+    ///
+    /// Membership is still decided on a left edge — the nearest of these — rather than on the
+    /// merged column's own left edge. Folding is about how many columns the grid has, not about
+    /// which column a word belongs to, and the two must be kept apart: a folded column's `left` is
+    /// its leftmost track's, so measuring membership against it alone would move every short value
+    /// to whichever neighbour's left edge now sits closer, and take a header word with it. Measured
+    /// on the GH#1832 fixture, deciding membership on the merged edge split the header `Year 2`
+    /// across two cells; deciding it on the merged column's right edge instead did that *and*
+    /// shifted every data value one cell right, dropping ground-truth cell agreement from 138 to
+    /// 24. Keeping each track's own left edge leaves membership exactly as it was before the
+    /// fold. ~keep
+    lefts: Vec<u32>,
+}
+
+impl ColumnTrack {
+    /// A column anchored on `left`, for the direct-assignment test seam that has only a position.
+    #[cfg(test)]
+    fn left_aligned(left: u32) -> Self {
+        Self {
+            left,
+            right: left,
+            right_aligned: false,
+            lefts: vec![left],
+        }
+    }
+
+    /// Distance from `word` to this column: to the nearest of the left edges of the tracks it was
+    /// folded from. See [`ColumnTrack::lefts`].
+    fn distance_to(&self, word: &HocrWord) -> u32 {
+        self.lefts
+            .iter()
+            .map(|left| left.abs_diff(word.left))
+            .min()
+            .unwrap_or_else(|| self.left.abs_diff(word.left))
+    }
+}
+
+/// Detect columns from word x-coordinates, each carrying the left edges membership is decided
+/// against and the median left edge callers report as its position.
+///
+/// Groups words by left edge within `column_threshold`, then folds adjacent all-value columns whose
+/// right edges coincide within the same threshold — see [`fold_right_aligned_tracks`].
+pub(crate) fn detect_columns(words: &[HocrWord], column_threshold: u32) -> Vec<ColumnTrack> {
     if words.is_empty() {
         return Vec::new();
     }
 
-    let mut position_groups: Vec<Vec<u32>> = Vec::new();
+    let mut groups: Vec<Vec<&HocrWord>> = Vec::new();
 
     for word in words {
-        let x_pos = word.left;
-
         let mut found_group = false;
-        for group in &mut position_groups {
-            if let Some(&first_pos) = group.first()
-                && x_pos.abs_diff(first_pos) <= column_threshold
+        for group in &mut groups {
+            if let Some(first) = group.first()
+                && word.left.abs_diff(first.left) <= column_threshold
             {
-                group.push(x_pos);
+                group.push(word);
                 found_group = true;
                 break;
             }
         }
 
         if !found_group {
-            position_groups.push(vec![x_pos]);
+            groups.push(vec![word]);
         }
     }
 
-    let mut columns: Vec<u32> = position_groups
-        .iter()
-        .filter(|group| !group.is_empty())
-        .map(|group| {
-            let mut sorted = group.clone();
-            sorted.sort_unstable();
-            let mid = sorted.len() / 2;
-            sorted[mid]
-        })
-        .collect();
-
-    columns.sort_unstable();
+    let mut columns: Vec<ColumnTrack> = groups.iter().map(|group| column_track(group.as_slice())).collect();
+    columns.sort_by_key(|column| column.left);
+    fold_right_aligned_tracks(&mut columns, column_threshold);
     columns
+}
+
+/// The column one group of tokens forms.
+fn column_track(group: &[&HocrWord]) -> ColumnTrack {
+    let left = median_of(group.iter().map(|word| word.left).collect());
+    ColumnTrack {
+        left,
+        right: median_of(group.iter().map(|word| word.left.saturating_add(word.width)).collect()),
+        right_aligned: group.iter().all(|word| is_cell_value_text(&word.text)),
+        lefts: vec![left],
+    }
+}
+
+/// Fold adjacent columns that are one right-aligned value column split by digit-count drift
+/// (xberg-io/xberg#1886).
+///
+/// An amount column is right-aligned, so its tokens' left edges spread with digit count: `5`, `73`
+/// and `1,234,567` share a right edge and differ on the left by far more than
+/// `column_threshold` at 300 dpi. Left-edge grouping alone mints two or three columns from one,
+/// and the residue after `merge_disjoint_numeric_columns` re-merges the disjoint cases is lost
+/// content: a dropped nil-dash column, a sparse row's interior cells, a value in the label cell.
+///
+/// Raising `column_threshold` is not the alternative — it merges genuinely narrow neighbouring
+/// columns (the GH#1649 `DEPOSIT` case). Both sides must be all-value, so a text column and a
+/// column holding any label are never folded: that keeps a right-aligned column's header word,
+/// which is clustered on its left edge like all text, in the same column as its data instead of
+/// splitting off into a header-only track. ~keep
+fn fold_right_aligned_tracks(columns: &mut Vec<ColumnTrack>, column_threshold: u32) {
+    let mut index = 0;
+    while index + 1 < columns.len() {
+        let foldable = columns[index].right_aligned
+            && columns[index + 1].right_aligned
+            && columns[index].right.abs_diff(columns[index + 1].right) <= column_threshold;
+        if foldable {
+            let next = columns.remove(index + 1);
+            let current = &mut columns[index];
+            current.left = current.left.min(next.left);
+            current.right = current.right.max(next.right);
+            current.lefts.extend(next.lefts);
+        } else {
+            index += 1;
+        }
+    }
 }
 
 /// Compute the median word height. Returns 0 for an empty slice.
@@ -106,13 +243,13 @@ pub(crate) fn detect_columns(words: &[HocrWord], column_threshold: u32) -> Vec<u
 /// always computed from the same statistic, rather than duplicating the
 /// sort-and-index in more than one place.
 pub(crate) fn median_word_height(words: &[HocrWord]) -> u32 {
-    median_height(words.iter().map(|w| w.height).collect())
+    median_of(words.iter().map(|w| w.height).collect())
 }
 
-/// The median of `heights` (the upper one of an even count), or 0 when there are none.
-pub(crate) fn median_height(mut heights: Vec<u32>) -> u32 {
-    heights.sort_unstable();
-    heights.get(heights.len() / 2).copied().unwrap_or(0)
+/// The median of `values` (the upper one of an even count), or 0 when there are none.
+pub(crate) fn median_of(mut values: Vec<u32>) -> u32 {
+    values.sort_unstable();
+    values.get(values.len() / 2).copied().unwrap_or(0)
 }
 
 /// Detect row positions from word y-coordinates.
@@ -175,14 +312,13 @@ pub(crate) fn find_row_index(row_positions: &[u32], word: &HocrWord) -> Option<u
         .map(|(idx, _)| idx)
 }
 
-/// Find which column a word belongs to based on its x-position.
-fn find_column_index(col_positions: &[u32], word: &HocrWord) -> Option<usize> {
-    let x_pos = word.left;
-
-    col_positions
+/// Find which column a word belongs to, by the nearest left edge of the tracks it was folded from
+/// ([`ColumnTrack::distance_to`]).
+fn find_column_index(columns: &[ColumnTrack], word: &HocrWord) -> Option<usize> {
+    columns
         .iter()
         .enumerate()
-        .min_by_key(|&(_, col_x)| col_x.abs_diff(x_pos))
+        .min_by_key(|&(_, column)| column.distance_to(word))
         .map(|(idx, _)| idx)
 }
 
@@ -441,13 +577,14 @@ pub(crate) fn reconstruct_table_with_columns(
     let row_positions = detect_rows(words, row_threshold_ratio);
     let groups = group_words_into_cell_tokens(words, &row_positions);
     let cell_tokens: Vec<HocrWord> = groups.iter().map(|(token, _)| token.clone()).collect();
-    let mut col_positions = detect_columns(&cell_tokens, column_threshold);
+    let columns = detect_columns(&cell_tokens, column_threshold);
 
-    if col_positions.is_empty() || row_positions.is_empty() {
+    if columns.is_empty() || row_positions.is_empty() {
         return (Vec::new(), Vec::new());
     }
 
-    let mut result = assign_grouped_words_to_cells(&groups, &row_positions, &col_positions);
+    let mut result = assign_grouped_words_to_cells(&groups, &row_positions, &columns);
+    let mut col_positions: Vec<u32> = columns.iter().map(|column| column.left).collect();
     merge_header_fragments_by_geometry(&mut result, &mut col_positions);
 
     let non_empty_cols = non_empty_column_mask(&result);
@@ -665,15 +802,14 @@ fn order_cell_words_in_reading_order(mut cell_words: Vec<&HocrWord>) -> Vec<&Hoc
 /// assigns a whole merged cell cluster to one column at a time (xberg-io/xberg#1649). ~keep
 #[cfg(test)]
 fn assign_words_to_cells(words: &[HocrWord], row_positions: &[u32], col_positions: &[u32]) -> Vec<Vec<String>> {
+    let columns: Vec<ColumnTrack> = col_positions.iter().copied().map(ColumnTrack::left_aligned).collect();
     let num_rows = row_positions.len();
-    let num_cols = col_positions.len();
+    let num_cols = columns.len();
     let mut table: Vec<Vec<Vec<&HocrWord>>> = vec![vec![vec![]; num_cols]; num_rows];
 
     for word in words {
-        if let (Some(r), Some(c)) = (
-            find_row_index(row_positions, word),
-            find_column_index(col_positions, word),
-        ) && r < num_rows
+        if let (Some(r), Some(c)) = (find_row_index(row_positions, word), find_column_index(&columns, word))
+            && r < num_rows
             && c < num_cols
         {
             table[r][c].push(word);
@@ -691,10 +827,10 @@ fn assign_words_to_cells(words: &[HocrWord], row_positions: &[u32], col_position
 fn assign_grouped_words_to_cells<'a>(
     groups: &[(HocrWord, Vec<&'a HocrWord>)],
     row_positions: &[u32],
-    col_positions: &[u32],
+    columns: &[ColumnTrack],
 ) -> Vec<Vec<String>> {
     let num_rows = row_positions.len();
-    let num_cols = col_positions.len();
+    let num_cols = columns.len();
     let mut table: Vec<Vec<Vec<&'a HocrWord>>> = vec![vec![vec![]; num_cols]; num_rows];
 
     for (token, members) in groups {
@@ -713,13 +849,13 @@ fn assign_grouped_words_to_cells<'a>(
             // Keep independent per-word placement here so `merge_header_fragments_by_geometry`
             // can still reconcile that split; only data rows get whole-cluster placement. ~keep
             for word in members {
-                if let Some(col) = find_column_index(col_positions, word)
+                if let Some(col) = find_column_index(columns, word)
                     && col < num_cols
                 {
                     table[row][col].push(word);
                 }
             }
-        } else if let Some(col) = find_column_index(col_positions, token)
+        } else if let Some(col) = find_column_index(columns, token)
             && col < num_cols
         {
             table[row][col].extend(members.iter().copied());
@@ -1067,18 +1203,18 @@ mod tests {
     }
 
     #[test]
-    fn median_height_takes_the_middle_of_an_odd_count() {
-        assert_eq!(median_height(vec![50, 10, 30]), 30);
+    fn median_of_takes_the_middle_of_an_odd_count() {
+        assert_eq!(median_of(vec![50, 10, 30]), 30);
     }
 
     #[test]
-    fn median_height_takes_the_upper_middle_of_an_even_count() {
-        assert_eq!(median_height(vec![40, 10, 30, 20]), 30);
+    fn median_of_takes_the_upper_middle_of_an_even_count() {
+        assert_eq!(median_of(vec![40, 10, 30, 20]), 30);
     }
 
     #[test]
-    fn median_height_of_no_heights_is_zero() {
-        assert_eq!(median_height(Vec::new()), 0);
+    fn median_of_no_values_is_zero() {
+        assert_eq!(median_of(Vec::new()), 0);
         assert_eq!(median_word_height(&[]), 0);
     }
 
@@ -2080,5 +2216,94 @@ mod tests {
             vec!["Debit".to_string(), "-".to_string(), "Credit".to_string()],
             "an isolated punctuation cell with no genuine neighbour must not glue to the preceding word"
         );
+    }
+
+    /// xberg-io/xberg#1886: a right-aligned amount column's tokens share a right edge and spread on
+    /// the left with digit count, so left-edge grouping alone mints more than one column from it --
+    /// here `5`/`73`/`-` (lefts 460-490) against `1,234,567` (left 340), 140px apart at a 50px
+    /// threshold. Every one of the column's cells must land in one column, including the nil dash.
+    ///
+    /// TEST HONESTY: without the fold this is a 3-column grid -- `["Alpha", "", "5"]`,
+    /// `["Beta", "", "73"]`, `["Gamma", "1,234,567", ""]`, `["Delta", "", "\u{2014}"]` -- and
+    /// `column_positions` reads `[0, 340, 480]`.
+    #[test]
+    fn issue_1886_right_aligned_amount_column_stays_one_column() {
+        let words = vec![
+            word("Alpha", 0, 0, 100, 30),
+            word("5", 480, 0, 20, 30),
+            word("Beta", 0, 60, 100, 30),
+            word("73", 460, 60, 40, 30),
+            word("Gamma", 0, 120, 100, 30),
+            word("1,234,567", 340, 120, 160, 30),
+            word("Delta", 0, 180, 100, 30),
+            word("\u{2014}", 490, 180, 10, 30),
+        ];
+
+        let (table, column_positions) = reconstruct_table_with_columns(&words, 50, 0.5);
+
+        assert_eq!(
+            table,
+            vec![
+                vec!["Alpha".to_string(), "5".to_string()],
+                vec!["Beta".to_string(), "73".to_string()],
+                vec!["Gamma".to_string(), "1,234,567".to_string()],
+                vec!["Delta".to_string(), "\u{2014}".to_string()],
+            ]
+        );
+        assert_eq!(
+            column_positions,
+            vec![0, 340],
+            "the folded column keeps a left edge in page pixels, the unit every consumer reads"
+        );
+    }
+
+    /// The right-edge rule applies to value tokens only (xberg-io/xberg#1886): two left-aligned text
+    /// cells of very different widths ("Alpha" 40px, "Alphabetical" 300px) share a left edge and
+    /// differ by 260px on the right, so clustering them by their right edge would split one label
+    /// column in two.
+    #[test]
+    fn issue_1886_text_tokens_of_different_widths_keep_clustering_by_their_left_edge() {
+        let words = vec![
+            word("Alpha", 100, 0, 40, 20),
+            word("X", 600, 0, 40, 20),
+            word("Alphabetical", 100, 60, 300, 20),
+            word("Y", 600, 60, 40, 20),
+        ];
+
+        let (table, column_positions) = reconstruct_table_with_columns(&words, 50, 0.5);
+
+        assert_eq!(
+            table,
+            vec![
+                vec!["Alpha".to_string(), "X".to_string()],
+                vec!["Alphabetical".to_string(), "Y".to_string()],
+            ]
+        );
+        assert_eq!(column_positions, vec![100, 600]);
+    }
+
+    /// Precision guard for the fold (xberg-io/xberg#1886): two genuinely distinct narrow value
+    /// columns whose right edges are 60px apart stay separate at a 50px threshold. The fold reuses
+    /// `column_threshold` rather than widening it, because widening merges real neighbouring
+    /// columns (the GH#1649 `DEPOSIT` case).
+    #[test]
+    fn issue_1886_value_columns_further_apart_than_the_threshold_are_not_folded() {
+        let words = vec![
+            word("1", 0, 0, 20, 20),
+            word("2", 60, 0, 20, 20),
+            word("3", 0, 60, 20, 20),
+            word("4", 60, 60, 20, 20),
+        ];
+
+        let (table, column_positions) = reconstruct_table_with_columns(&words, 50, 0.5);
+
+        assert_eq!(
+            table,
+            vec![
+                vec!["1".to_string(), "2".to_string()],
+                vec!["3".to_string(), "4".to_string()],
+            ]
+        );
+        assert_eq!(column_positions, vec![0, 60]);
     }
 }

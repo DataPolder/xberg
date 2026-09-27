@@ -1,6 +1,6 @@
 use super::super::error::OcrError;
 use super::super::utils::{TSV_MIN_FIELDS, TSV_WORD_LEVEL};
-use crate::table_core::{HocrWord, median_word_height};
+use crate::table_core::{HocrWord, is_value, median_word_height};
 use std::collections::HashMap;
 use std::ops::Range;
 use xberg_tesseract::WordSymbols;
@@ -218,10 +218,6 @@ fn underscore_mark_runs(chars: &[char]) -> Vec<Range<usize>> {
         })
         .map(|(_, run)| run)
         .collect()
-}
-
-pub(super) fn is_value(text: &[char]) -> bool {
-    text.iter().any(char::is_ascii_digit) && !text.iter().any(|ch| ch.is_alphabetic())
 }
 
 /// The horizontal extent of each character of `word`, from the symbols Tesseract reported for it,

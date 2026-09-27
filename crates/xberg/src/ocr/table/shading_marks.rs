@@ -1,5 +1,4 @@
-use super::tsv_parser::is_value;
-use crate::table_core::{HocrWord, detect_rows, find_row_index, median_height};
+use crate::table_core::{HocrWord, detect_rows, find_row_index, is_lone_cell_symbol, is_value, median_of};
 
 /// A word under this share of its row's median height is thin enough to be a mark. ~keep
 const THIN_MARK_HEIGHT_RATIO: f64 = 0.25;
@@ -10,13 +9,6 @@ const TALL_MARK_HEIGHT_RATIO: f64 = 1.8;
 /// Tesseract's word confidence (0 to 100) under which a word of mark height is a mark. The marks
 /// measured on a shaded table read at 0 to 32. ~keep
 const MARK_MAX_CONFIDENCE: f64 = 35.0;
-
-/// The symbols a table cell prints on their own: a nil dash, a bracket, a currency sign, a percent
-/// sign, a footnote asterisk. Alone, each is cell content at any height and confidence. ~keep
-const CELL_SYMBOLS: &[char] = &[
-    '-', '\u{2010}', '\u{2011}', '\u{2012}', '\u{2013}', '\u{2014}', '\u{2212}', '(', ')', '[', ']', '{', '}', '$',
-    '\u{a2}', '\u{a3}', '\u{a5}', '\u{20ac}', '%', '*',
-];
 
 /// Which words survive the filter on the marks Tesseract reads off the edge of a shaded table row,
 /// in the same order and the same length as `words` (xberg-io/xberg#1858).
@@ -43,7 +35,7 @@ pub(crate) fn shading_mark_keep_mask(words: &[HocrWord], row_threshold_ratio: f6
             row_heights[row].push(word.height);
         }
     }
-    let row_medians: Vec<u32> = row_heights.into_iter().map(median_height).collect();
+    let row_medians: Vec<u32> = row_heights.into_iter().map(median_of).collect();
 
     words
         .iter()
@@ -64,8 +56,7 @@ fn is_shading_mark(word: &HocrWord, row_median_height: u32) -> bool {
 /// mark cut uses (#1833), and it is not a lone cell symbol. ~keep
 fn is_mark_text(text: &str) -> bool {
     let chars: Vec<char> = text.chars().collect();
-    let is_cell_symbol = matches!(chars.as_slice(), [symbol] if CELL_SYMBOLS.contains(symbol));
-    !chars.iter().any(|ch| ch.is_alphabetic()) && !is_value(&chars) && !is_cell_symbol
+    !chars.iter().any(|ch| ch.is_alphabetic()) && !is_value(&chars) && !is_lone_cell_symbol(text)
 }
 
 #[cfg(test)]
