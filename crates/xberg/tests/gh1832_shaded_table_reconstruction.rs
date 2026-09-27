@@ -132,11 +132,10 @@ const GROUND_TRUTH: &[[&str; 7]] = &[
 ];
 
 fn config_with_psm(psm: i32, shaded: bool) -> ExtractionConfig {
-    let mut preprocessing = xberg::types::ImagePreprocessingConfig {
+    let preprocessing = xberg::types::ImagePreprocessingConfig {
         normalize_shaded_rows: shaded,
         ..Default::default()
     };
-    preprocessing.normalize_shaded_rows = shaded;
     ExtractionConfig {
         force_ocr: true,
         use_cache: false,
@@ -507,8 +506,12 @@ fn dark_fill_rows_do_not_lose_more_values_than_measured_when_shaded_normalisatio
         off >= FLOOR_OFF,
         "dark-fill rows, option off: {off} of 18 (floor {FLOOR_OFF})"
     );
-    assert!(
-        on >= FLOOR_ON,
-        "dark-fill rows, option on: {on} of 18 (floor {FLOOR_ON})"
+    // Equality, not `>=`: `on >= 0` is a tautology on `usize`, so the `>=` form asserted
+    // nothing at all. Pinning the exact measured 0 makes an IMPROVEMENT fail too, which is
+    // what forces the re-measure this floor's own rationale asks for (GH#1837). ~keep
+    assert_eq!(
+        on, FLOOR_ON,
+        "dark-fill rows, option on: {on} of 18 (pinned at the measured {FLOOR_ON}); \
+         if this rose, GH#1837 moved -- re-measure per fill kind and raise the floor"
     );
 }
