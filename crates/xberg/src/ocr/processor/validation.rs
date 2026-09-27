@@ -140,6 +140,25 @@ pub(crate) fn resolve_tessdata_path_in(
     }
 }
 
+/// The first candidate directory that already holds a `.traineddata` for every one of
+/// `languages`, or `None` when none does.
+///
+/// [`resolve_tessdata_path_in`] without the fall-through that creates a cache directory and
+/// downloads the missing packs. A capability probe must not be able to reach the network:
+/// `OcrBackend::supports_language_for` answers a question about this machine, and asking it
+/// about a language this machine has never seen would otherwise start a download. Shares
+/// [`tessdata_search_dirs`] with the real resolver so the two still agree on priority order.
+/// GH#1891. ~keep
+pub(crate) fn existing_tessdata_dir_for(
+    languages: &[String],
+    override_path: Option<&Path>,
+    tessdata_env: &TessdataEnv,
+) -> Option<String> {
+    tessdata_search_dirs(override_path, tessdata_env)
+        .into_iter()
+        .find(|dir| all_languages_exist(dir, languages).unwrap_or(false))
+}
+
 /// Candidate tessdata directories in the resolver's priority order:
 /// `override_path` (`OcrConfig.tessdata_path`), `TESSDATA_PREFIX`,
 /// `XBERG_CACHE_DIR/tessdata`, the xberg cache base, then system paths.
