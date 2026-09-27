@@ -183,6 +183,92 @@ fn correct_values_in_place(table: &xberg::types::Table) -> (usize, Vec<String>) 
     (correct, misses)
 }
 
+/// The eight shaded rows of `shaded_table_scan.pdf`, by fill kind. Determined from the fixture's
+/// own pixels (the fixture has no generator in this repo -- vendored from closed PR #1824): the
+/// page's single JPX image decoded to grayscale, each band's row-median taken over the central
+/// 6/8 of the width, mirroring `ocr::shaded_rows::find_shaded_bands`. Measured medians, of 255 --
+/// DARK 74/76/76, MID 148/149, LIGHT 165/165/167. Only the DARK rows fall below
+/// `DARK_ROW_GRAY_THRESHOLD` (110) and so only they reach `invert_dark_bands`; that is what makes
+/// them a separate population for GH#1837's measurement. ~keep
+const DARK_FILL_ROW_LABELS: &[&str] = &["TOTAL PRODUCE", "TOTAL GOODS", "CLOSING STOCK BALANCE"];
+/// White text on a mid-grey fill (row-median 148-149). Main's `normalize_shaded_rows` doc comment
+/// records these as regressing 12 -> 6 under the option; 2 rows x 6 year columns = 12. GH#1837. ~keep
+const MID_FILL_ROW_LABELS: &[&str] = &["TOTAL NON GOODS", "NET CHANGE (DEFICIT)"];
+/// Dark text on a light-grey fill (row-median 165-167); the three labels
+/// `gh1785_shaded_row_normalization.rs` counts on its own, different fixture. GH#1837. ~keep
+const LIGHT_FILL_ROW_LABELS: &[&str] = &["SUBTOTAL FRUIT", "SUBTOTAL DAIRY", "SUBTOTAL OTHER GOODS"];
+
+/// One row-kind's positional scoring result: correct values, values possible (rows * 6), and the
+/// labels whose row is entirely absent from the reconstructed table.
+struct KindScore {
+    kind: &'static str,
+    correct: usize,
+    of: usize,
+    rows_absent: Vec<&'static str>,
+}
+
+/// [`correct_values_in_place`], partitioned by row-fill kind (DARK / MID / LIGHT / PLAIN) so a
+/// page-wide total cannot hide a trade between kinds -- exactly the blindness that let the
+/// published 98/98/102/102 pooled totals show zero page-wide change while GH#1837 and main's own
+/// doc comment each claim a kind-specific loss. PLAIN is every ground-truth label in none of the
+/// three shaded-kind lists above.
+fn correct_values_by_kind(table: &xberg::types::Table) -> [KindScore; 4] {
+    let mut scores = [
+        KindScore {
+            kind: "DARK",
+            correct: 0,
+            of: 0,
+            rows_absent: Vec::new(),
+        },
+        KindScore {
+            kind: "MID",
+            correct: 0,
+            of: 0,
+            rows_absent: Vec::new(),
+        },
+        KindScore {
+            kind: "LIGHT",
+            correct: 0,
+            of: 0,
+            rows_absent: Vec::new(),
+        },
+        KindScore {
+            kind: "PLAIN",
+            correct: 0,
+            of: 0,
+            rows_absent: Vec::new(),
+        },
+    ];
+    for truth in GROUND_TRUTH {
+        let label = truth[0];
+        let index = if DARK_FILL_ROW_LABELS.contains(&label) {
+            0
+        } else if MID_FILL_ROW_LABELS.contains(&label) {
+            1
+        } else if LIGHT_FILL_ROW_LABELS.contains(&label) {
+            2
+        } else {
+            3
+        };
+        let score = &mut scores[index];
+        score.of += 6;
+        let Some(row) = table
+            .cells
+            .iter()
+            .find(|row| row.first().is_some_and(|cell| cell.trim() == label))
+        else {
+            score.rows_absent.push(label);
+            continue;
+        };
+        for (offset, expected) in truth[1..].iter().enumerate() {
+            if row.get(offset + 1).is_some_and(|actual| actual.trim() == *expected) {
+                score.correct += 1;
+            }
+        }
+    }
+    scores
+}
+
 /// Extract once and return the first reconstructed table, or `None` if the page produced none.
 fn first_table(psm: i32, shaded: bool) -> Option<xberg::types::Table> {
     let document = extract_bytes_document_blocking(SCANNED_TABLE, "application/pdf", &config_with_psm(psm, shaded))
@@ -346,6 +432,12 @@ fn measure_shaded_table_reconstruction() {
                 table.cells.len(),
                 table.cells.first().map_or(0, Vec::len)
             );
+            for score in correct_values_by_kind(&table) {
+                println!(
+                    "  KIND {} psm={psm} shaded={shaded}: {} of {} (rows absent: {:?})",
+                    score.kind, score.correct, score.of, score.rows_absent
+                );
+            }
             for row in &table.cells {
                 println!("  {row:?}");
             }
@@ -354,4 +446,69 @@ fn measure_shaded_table_reconstruction() {
             }
         }
     }
+}
+
+/// The absolute count of DARK-fill ground-truth values landing in the correct cell, at PSM 11,
+/// with `normalize_shaded_rows` off vs on. Requires the table to survive with its full row count
+/// first (mirrors `the_scanned_table_is_not_discarded_over_a_phantom_column`): a `0 of 18` from a
+/// table discarded wholesale (the GH#1797 shape) renders identically to a genuine dark-row loss,
+/// so a short table panics here instead of silently scoring 0.
+fn dark_fill_correct_values(psm: i32, shaded: bool) -> usize {
+    let table = first_table(psm, shaded).unwrap_or_else(|| panic!("PSM {psm} shaded={shaded} must produce a table"));
+    assert!(
+        table.cells.len() >= 20,
+        "PSM {psm} shaded={shaded}: table has only {} rows, short of the 23-row grid -- \
+         a discarded table would score 0 of 18 here for the wrong reason",
+        table.cells.len()
+    );
+    correct_values_by_kind(&table)
+        .into_iter()
+        .find(|score| score.kind == "DARK")
+        .expect("DARK is always present in correct_values_by_kind's fixed-size result")
+        .correct
+}
+
+/// GH#1837: the claim that `normalize_shaded_rows` lowers dark-fill row values. Nothing in this
+/// repo asserted a dark-row value before this test: `gh1785_shaded_row_normalization.rs` counts
+/// only the three LIGHT-fill labels on a different fixture, and `shaded_rows.rs`'s own unit tests
+/// assert pixel polarity on a synthetic page, not values read.
+///
+/// A four-arm measurement (option off/on, crossed with `invert_dark_bands` present/removed)
+/// found the claim understated: turning the option on does not cost 6 of the 18 dark-fill values
+/// as the issue reported, it costs all 18 -- every one of the three dark-fill rows' *labels*
+/// stops matching, at both PSM 3 and PSM 11, so `correct_values_by_kind` cannot even find the row
+/// to score its values. `A3` (option off, `invert_dark_bands` removed) reproduced `A1` (option
+/// off, HEAD) exactly at both PSMs and in every row kind, proving the build/edit that isolated
+/// `invert_dark_bands` actually took effect. `A4` (option on, `invert_dark_bands` removed)
+/// recovered 12 of 18 at PSM 3 and 6 of 18 at PSM 11 with no measured loss on MID, LIGHT or PLAIN
+/// rows -- evidence that `invert_dark_bands`, not shaded-row normalization generally, is the
+/// mechanism, but not evidence that removing it alone is a complete fix (it does not restore the
+/// third dark row at either PSM). See xberg-io/xberg#1837.
+///
+/// FLOOR_OFF and FLOOR_ON are the measured PSM-11 values (this measurement, one run, one
+/// fixture); FLOOR_ON pins the current shipped total loss rather than "a floor above 0" because
+/// 0 is what was measured -- there is no room to set it lower without hiding a further
+/// regression, and no headroom above 0 to require without asserting a fix this test does not
+/// make. Update both only alongside a re-run of the four-arm measurement, quoting the new counts.
+#[test]
+fn dark_fill_rows_do_not_lose_more_values_than_measured_when_shaded_normalisation_is_enabled() {
+    const PSM: i32 = 11;
+    /// Measured 18 of 18 at PSM 11 with normalize_shaded_rows = false, 2026-09-27. ~keep
+    const FLOOR_OFF: usize = 18;
+    /// Measured 0 of 18 at PSM 11 with normalize_shaded_rows = true, 2026-09-27 -- the current
+    /// shipped behavior already loses every dark-fill value; this floor cannot be set above the
+    /// measured 0 without asserting a fix that has not been made. ~keep
+    const FLOOR_ON: usize = 0;
+
+    let off = dark_fill_correct_values(PSM, false);
+    let on = dark_fill_correct_values(PSM, true);
+
+    assert!(
+        off >= FLOOR_OFF,
+        "dark-fill rows, option off: {off} of 18 (floor {FLOOR_OFF})"
+    );
+    assert!(
+        on >= FLOOR_ON,
+        "dark-fill rows, option on: {on} of 18 (floor {FLOOR_ON})"
+    );
 }
