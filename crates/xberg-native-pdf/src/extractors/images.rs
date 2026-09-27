@@ -1341,7 +1341,7 @@ pub fn extract_image_from_xobject(
         mut color_space,
         resolved_color_space,
         indexed_resolution,
-        direct_icc_profile,
+        mut direct_icc_profile,
         rendering_intent,
         is_jbig2,
         is_jpx,
@@ -1380,6 +1380,15 @@ pub fn extract_image_from_xobject(
                 PixelFormat::RGB => ColorSpace::DeviceRGB,
                 PixelFormat::CMYK => ColorSpace::DeviceCMYK,
             };
+            // The ICC decision above ran against the placeholder, and `/DeviceRGB` takes
+            // neither its ICCBased arm nor its DeviceCMYK one -- so the §14.11.5 OutputIntent
+            // fallback was never consulted for a codestream that turns out to be
+            // four-component, and the image reached its consumers with no profile at all.
+            // Redo that one decision now the real colour space is known. Nothing is
+            // overwritten: the placeholder provably yields `None`. (GH#1839) ~keep
+            if color_space == ColorSpace::DeviceCMYK {
+                direct_icc_profile = doc.and_then(|d| d.output_intent_cmyk_profile());
+            }
         }
         jpx_data
     } else if is_jpeg_only || is_jpeg_chain {
