@@ -648,13 +648,12 @@ fn inject_unrepresented_form_field_elements(doc: &mut InternalDocument, form_fie
 ///
 /// Runs unconditionally (using the default `OcrQualityThresholds` when `config.ocr` is `None`)
 /// so `ScannedPages` and the metadata field both see the signal regardless of whether the
-/// caller configured OCR explicitly. When no explicit `ocr` config is present, `Auto` itself
-/// will not act on the signal (`apply_flagged_pages` still requires it below, per #1338's
-/// "explicit OCR config" rule) so a deduped warning is pushed instead, keeping the defect
-/// visible rather than silently discarded. `ocr_near_empty_fallback: Some(true)` opts back
-/// into that branch without an `ocr` block (GH#1752), so the warning is suppressed there --
-/// it would otherwise tell the caller the pages were dropped on the floor while `Auto` was
-/// in fact about to route them. ~keep
+/// caller configured OCR explicitly. Whenever `Auto` will not act on the signal, a deduped
+/// warning is pushed instead, keeping the defect visible rather than silently discarded; when
+/// it will, the warning is suppressed, since it would otherwise tell the caller the pages were
+/// dropped on the floor while `Auto` was in fact about to route them. That "will it run"
+/// question is answered by `near_empty_ocr_fallback_applies` and nothing else -- see the
+/// comment on the warning below for why a second derivation of it is not acceptable. ~keep
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn record_implausible_text_pages(
     config: &ExtractionConfig,
@@ -710,16 +709,24 @@ fn record_implausible_text_pages(
     merged.dedup();
     pdf_metadata.pdf_specific.scanned_pages = Some(merged);
 
-    if config.ocr.is_none() && config.ocr_near_empty_fallback != Some(true) {
+    // GH#1890: this must call the routing predicate, never re-derive it. The earlier
+    // `config.ocr.is_none() && ocr_near_empty_fallback != Some(true)` agreed with
+    // `near_empty_ocr_fallback_applies` only until GH#1752 added `Some(false)`: with an `ocr`
+    // block and the fallback switched off, the `else if` in `extract_core_native` that gates the
+    // routing does not run AND that condition suppressed this warning, so the caller got garbage
+    // text with no diagnostic at all. `Some(true)` with no `ocr` block and no registered automatic
+    // backend diverged the same way. ~keep
+    if !near_empty_ocr_fallback_applies(config, native_text) {
         crate::core::diagnostics::push_warning_deduped(
             warnings,
             crate::types::ProcessingWarning {
                 source: std::borrow::Cow::Borrowed("ocr"),
                 message: std::borrow::Cow::Owned(format!(
                     "Page(s) {implausible_pages:?} do not read as any real detectable language, \
-                     suggesting a wrong glyph-to-Unicode mapping (issue #1696); no explicit `ocr` \
-                     config was provided, so they were not automatically routed to OCR. Set `ocr` \
-                     to route these pages to OCR."
+                     suggesting a wrong glyph-to-Unicode mapping (issue #1696), but the automatic \
+                     OCR fallback does not run for this extraction, so they were not routed to \
+                     OCR. Set `ocr`, and leave `ocr_near_empty_fallback` unset or set it to \
+                     `true`, to route these pages to OCR."
                 )),
             },
         );
@@ -6123,6 +6130,68 @@ mod tests {
 
         assert!(!near_empty_ocr_fallback_applies(&config, ""));
         assert!(!near_empty_ocr_fallback_applies(&config, "real native text"));
+    }
+
+    /// GH#1890. `record_implausible_text_pages` warns that implausible pages were not routed to
+    /// OCR; the `else if` in `extract_core_native` decides whether they actually are. Those
+    /// are one fact, and the warning used to re-derive it, which made them disagree for two
+    /// configurations. This is an oracle test, not a table of expectations: it compares the
+    /// observable warning against `near_empty_ocr_fallback_applies` itself, so any future
+    /// divergence fails here regardless of which side moved. `#[serial]` because the predicate's
+    /// `Some(true)`-without-a-block arm consults the process-global OCR backend registry that the
+    /// mock-backend tests in this module mutate. ~keep
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[test]
+    #[serial]
+    fn the_unrouted_implausible_page_warning_tracks_the_routing_predicate() {
+        use crate::core::config::OcrConfig;
+
+        let implausible = rot_ascii_letters(WRONG_MAPPING_PROSE, 3);
+        let boundaries = vec![crate::types::PageBoundary {
+            page_number: 1,
+            byte_start: 0,
+            byte_end: implausible.len(),
+        }];
+
+        for ocr_block in [None, Some(OcrConfig::default())] {
+            for near_empty_fallback in [None, Some(true), Some(false)] {
+                let config = ExtractionConfig {
+                    ocr: ocr_block.clone(),
+                    ocr_near_empty_fallback: near_empty_fallback,
+                    ..Default::default()
+                };
+                let mut pdf_metadata = scanned_pages_metadata(Some(1), Vec::new());
+                let mut warnings = Vec::new();
+
+                let branch_runs = near_empty_ocr_fallback_applies(&config, &implausible);
+                record_implausible_text_pages(
+                    &config,
+                    &mut pdf_metadata,
+                    &implausible,
+                    Some(&boundaries),
+                    &mut warnings,
+                );
+
+                assert_eq!(
+                    pdf_metadata.pdf_specific.implausible_text_pages,
+                    Some(vec![1]),
+                    "the ROT-3 page must be flagged as implausible, or this case asserts nothing \
+                     (ocr_block: {}, ocr_near_empty_fallback: {near_empty_fallback:?})",
+                    ocr_block.is_some()
+                );
+
+                let warned = warnings
+                    .iter()
+                    .any(|warning| warning.message.contains("do not read as any real detectable language"));
+                assert_eq!(
+                    warned, !branch_runs,
+                    "the not-routed-to-OCR warning must be emitted exactly when the automatic OCR \
+                     branch will not run, and suppressed exactly when it will (ocr_block: {}, \
+                     ocr_near_empty_fallback: {near_empty_fallback:?}, branch_runs: {branch_runs})",
+                    ocr_block.is_some()
+                );
+            }
+        }
     }
 
     #[tokio::test]
