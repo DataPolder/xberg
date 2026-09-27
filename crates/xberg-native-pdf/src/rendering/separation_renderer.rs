@@ -57,8 +57,8 @@
 //!   the palette lookup's own base-space bytes route to the plates directly
 //!   -- not the RGB `extract_image_from_xobject` produces for on-screen
 //!   display, which would misattribute every palette entry's ink. A
-//!   non-JPX-coded image only; a JPX-coded Indexed image's index plane is
-//!   not yet routed here (GH#1898).
+//!   JPX-coded Indexed image's index plane is looked up the same way
+//!   (GH#1916).
 //!
 //! ICC profiles (per-image and document `/OutputIntents`) and TRC /
 //! BG / UCR functions are **not** consulted when routing image samples
@@ -2699,12 +2699,11 @@ fn blit_image_plane_to_plate(
 /// - Separation images → the named spot plate
 /// - DeviceN images → per-channel routing by colorant name
 /// - Indexed images whose base carries ink intent → the base's own plates,
-///   via the base-space palette lookup (GH#1898); JPX-coded excepted
+///   via the base-space palette lookup (GH#1898), JPX-coded included (GH#1916)
 /// - Image masks (`/ImageMask true`) → paint the current fill colour through
 ///   the 1-bit stencil (delegates to `tint_for_ink` for spot/process logic)
 ///
-/// Out of scope, dropped silently for now: RGB/Gray images, JPX-coded
-/// Indexed images, inline images. See module-level Limitations.
+/// Out of scope, dropped silently for now: RGB/Gray images, inline images. See module-level Limitations.
 #[allow(clippy::too_many_arguments)]
 fn paint_image_to_plates(
     pixmaps: &mut [Pixmap],

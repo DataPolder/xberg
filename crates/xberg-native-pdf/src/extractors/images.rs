@@ -2337,11 +2337,11 @@ pub(crate) struct IndexedBaseSamples {
 /// that intent away before routing ever sees it. (GH#1898)
 ///
 /// Returns `Ok(None)` when the XObject's colour space is not `/Indexed`, or
-/// when its stream is JBIG2-, JPX-, DCT- or CCITT-coded — each of those
-/// decodes through its own dedicated path in `extract_image_from_xobject`
-/// (a JPX Indexed image's index plane, in particular, decodes through
-/// hayro-jpeg2000's codestream path per GH#1889) and never reaches the raw
-/// index bytes this function expects.
+/// when its stream is JBIG2-, DCT- or CCITT-coded — each of those decodes
+/// through its own dedicated path in `extract_image_from_xobject` and never
+/// reaches the raw index bytes this function expects. A JPX-coded stream
+/// decodes to its index plane at the codestream's own size and is looked up
+/// here like any other. (GH#1916)
 pub(crate) fn decode_indexed_image_in_base_space(
     doc: Option<&crate::document::PdfDocument>,
     xobject: &crate::object::Object,
@@ -2356,9 +2356,11 @@ pub(crate) fn decode_indexed_image_in_base_space(
         width,
         height,
         bits_per_component,
+        color_space,
         indexed_resolution,
         is_jbig2,
         is_jpx,
+        jpx_color_space_is_placeholder,
         is_jpeg_only,
         is_jpeg_chain,
         is_ccitt,
@@ -2368,13 +2370,38 @@ pub(crate) fn decode_indexed_image_in_base_space(
     let Some(ir) = indexed_resolution else {
         return Ok(None);
     };
+    // A JPEG 2000 index plane is one byte per pixel at the codestream's own size, whatever the
+    // dictionary's /Width, /Height and /BitsPerComponent say (ISO 32000-1 §7.4.9). (GH#1916) ~keep
+    if is_jpx {
+        let JpxDecoded {
+            data, width, height, ..
+        } = decode_jpx_image(
+            xobject,
+            obj_ref,
+            doc,
+            &color_space,
+            jpx_color_space_is_placeholder,
+            (width, height),
+            Some(&ir),
+        )?;
+        let ImageData::Raw { pixels: indices, .. } = data else {
+            return Ok(None);
+        };
+        let samples = expand_indexed_to_base_samples(&indices, &ir.palette, ir.base_fmt, width, height, 8)?;
+        return Ok(Some(IndexedBaseSamples {
+            samples,
+            base_fmt: ir.base_fmt,
+            width,
+            height,
+        }));
+    }
     // `extract_image_from_xobject` only reaches the palette-expansion branch
     // this mirrors when none of these codecs claims the stream first --
-    // JBIG2, JPX, DCT and CCITT each take their own decode branch there and
+    // JBIG2, DCT and CCITT each take their own decode branch there and
     // never consult `indexed_resolution` at all, however the dictionary's
     // `/ColorSpace` reads. Match that fallthrough exactly so this function
     // never treats an encoded stream's bytes as a raw index plane. ~keep
-    if is_jbig2 || is_jpx || is_jpeg_only || is_jpeg_chain || is_ccitt {
+    if is_jbig2 || is_jpeg_only || is_jpeg_chain || is_ccitt {
         return Ok(None);
     }
 

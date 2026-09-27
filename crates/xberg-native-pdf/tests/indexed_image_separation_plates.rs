@@ -4,6 +4,9 @@
 use xberg_native_pdf::document::PdfDocument;
 use xberg_native_pdf::rendering::{SeparationPlate, render_separations};
 
+/// 120x40, dark text (index 0) on paper (index 255), a losslessly coded index plane.
+const INDICES_JP2: &[u8] = include_bytes!("fixtures/jpx/gh1885_indices_grey.jp2");
+
 /// Pure cyan then pure magenta, as `/DeviceCMYK` entries.
 const CYAN_MAGENTA: &str = "<FF000000 00FF0000>";
 
@@ -157,4 +160,34 @@ fn a_decode_array_maps_the_indices_not_the_palette_entries() {
         "the half tint entry paints half ink, got {left}"
     );
     assert!(right > 200, "the full tint entry paints full ink, got {right}");
+}
+
+/// A JPEG 2000 index plane is looked up in the palette like any other index stream. (GH#1916)
+#[test]
+fn an_indexed_cmyk_jpeg2000_image_paints_the_process_plates() {
+    // Entry 0 (the text) is pure cyan; every other entry is pure magenta (the paper).
+    let mut palette = String::from("<FF000000");
+    for _ in 1..256 {
+        palette.push_str(" 00FF0000");
+    }
+    palette.push('>');
+    let cs = format!("[/Indexed /DeviceCMYK 255 {palette}]");
+    let image = Image {
+        color_space: &cs,
+        extra: "/Filter /JPXDecode",
+        width: 120,
+        height: 40,
+        bpc: 8,
+        data: INDICES_JP2,
+    };
+    let plates = plates(build(&image, "", &[]));
+    let cyan = plate(&plates, "Cyan");
+    let magenta = plate(&plates, "Magenta");
+    let text = cyan.data.iter().filter(|&&v| v > 200).count();
+    let paper = magenta.data.iter().filter(|&&v| v > 200).count();
+    assert!(text > 0, "the text pixels paint the cyan plate");
+    assert!(
+        paper > text,
+        "the paper paints the magenta plate, got {paper} against {text}"
+    );
 }
