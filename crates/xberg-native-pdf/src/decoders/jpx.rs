@@ -811,6 +811,42 @@ mod tests {
         assert_eq!(img.samples[0], 180, "the left half's grey value must survive");
     }
 
+    /// An 8x8 bare codestream: a lossless grey plane at full resolution, `16 * x + 2 * y`, and an
+    /// opacity plane coded 2x2 subsampled, 4x4 samples of `17 * i`. ~keep
+    const SUBSAMPLED_GREY_ALPHA_J2K: &[u8] =
+        include_bytes!("../../tests/fixtures/jpx/gh1902_subsampled_grey_alpha.j2k");
+
+    /// GH#1902: an opacity plane coded subsampled still reaches `/SMaskInData` at full resolution.
+    /// hayro-jpeg2000 0.4 upsamples every component to the image size itself, so the image takes
+    /// the full-resolution path and not [`decode_subsampled`]. If the first assertion ever fails,
+    /// hayro started returning planes at their coded size and the subsampled path is live. ~keep
+    #[test]
+    fn a_subsampled_opacity_plane_is_returned_at_full_resolution() {
+        use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
+        let image = Image::new(SUBSAMPLED_GREY_ALPHA_J2K, &DecodeSettings::default()).expect("fixture parses");
+        let mut ctx = DecoderContext::default();
+        let decoded = image.decode(&mut ctx).expect("fixture decodes");
+        let lens: Vec<usize> = decoded.components().iter().map(|c| c.samples().len()).collect();
+        assert_eq!(
+            lens,
+            vec![64, 64],
+            "hayro-jpeg2000 upsamples the subsampled plane itself"
+        );
+
+        let img = decode_jpx(SUBSAMPLED_GREY_ALPHA_J2K, Some(1)).expect("subsampled grey+alpha must decode");
+        assert_eq!(img.num_components, 1, "the opacity plane is not a colour component");
+        let grey: Vec<u8> = (0..8u8).flat_map(|y| (0..8u8).map(move |x| 16 * x + 2 * y)).collect();
+        assert_eq!(img.samples, grey, "the grey plane must be read as coded");
+        let opacity: Vec<u8> = (0..8usize)
+            .flat_map(|y| (0..8usize).map(move |x| 17 * (y / 2 * 4 + x / 2) as u8))
+            .collect();
+        assert_eq!(
+            img.opacity,
+            Some(opacity),
+            "the opacity plane must be upsampled, not dropped"
+        );
+    }
+
     /// The `SIZ` reader against every JPEG 2000 fixture in the tree, bare and JP2-boxed, with the
     /// expected `Csiz` taken from each fixture's construction. This is the assertion that the
     /// Annex A.5.1 offsets are right; the decode tests above only see the consequence. ~keep
@@ -822,6 +858,7 @@ mod tests {
             ("boxed rgba jp2", RGBA_JP2, 4),
             ("boxed grey+alpha jp2", GREY_ALPHA_JP2, 2),
             ("boxed grey jp2", SAMPLE_JP2, 1),
+            ("bare subsampled grey+alpha j2k", SUBSAMPLED_GREY_ALPHA_J2K, 2),
         ] {
             assert_eq!(
                 super::codestream_component_count(bytes),
