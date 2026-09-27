@@ -85,6 +85,11 @@ fn native_two_column_pdf_uses_column_block_reading_order() {
     assert_eq!(normalized_content(&ExtractionConfig::default()), expected);
 }
 
+// `pdf_options.reading_order` is rejected by config validation without `layout-detection`
+// ("requires the layout-detection feature"), so on a `pdf`-only build this test cannot pass --
+// it is the only test in the file that sets the option, which is why the file-level
+// `#![cfg(feature = "pdf")]` is not enough for it. ~keep
+#[cfg(feature = "layout-detection")]
 #[test]
 fn explicit_reading_order_uses_column_block_reading_order() {
     let config = ExtractionConfig {
