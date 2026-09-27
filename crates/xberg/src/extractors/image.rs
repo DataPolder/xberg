@@ -79,8 +79,12 @@ const NORMALIZED_PNG_ENCODE_BYTES_PER_PIXEL: u64 = 4;
 #[cfg(feature = "ocr-pipeline")]
 const NORMALIZED_PNG_ENCODE_FIXED_BYTES: u64 = 256 * 1024;
 
-#[cfg(all(feature = "layout-detection", feature = "ocr"))]
-const MAX_OCR_COORDINATE_SCALE_RELATIVE_DIFFERENCE: f64 = 0.01;
+// ~keep The cfg is the union of both call sites': `whole_image_ocr_coordinate_transform` here
+// (`layout-detection` + `ocr`) and `pdf::ocr::document::ocr_render_scale_is_trustworthy`
+// (`layout-detection` + `ocr`/`ocr-wasm`). One constant, because the two routes must apply the
+// same bar to the same question.
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+pub(crate) const MAX_OCR_COORDINATE_SCALE_RELATIVE_DIFFERENCE: f64 = 0.01;
 
 #[cfg(any(test, all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm"))))]
 fn internal_document_text(doc: &InternalDocument) -> String {

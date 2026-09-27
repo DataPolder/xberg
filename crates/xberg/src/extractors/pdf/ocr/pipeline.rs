@@ -2338,54 +2338,72 @@ pub(super) async fn extract_with_ocr_for_page(
                     ocr_render_width,
                     ocr_render_height,
                 );
+                // ~keep A `None` transform means the word boxes cannot be placed in the raster
+                // TATR crops from. Running TATR anyway loses every word to the cell-overlap
+                // filter and publishes a table holding none of the page's values, so skip the
+                // table and let the words stay in the page's paragraph stream
+                // (xberg-io/xberg#1813).
+                if render_ocr_elements.is_none() && !elements.is_empty() {
+                    crate::core::diagnostics::push_warning_deduped(
+                        &mut backend_page_warnings,
+                        crate::types::ProcessingWarning {
+                            source: std::borrow::Cow::Borrowed("ocr"),
+                            message: std::borrow::Cow::Borrowed(
+                                "OCR word geometry could not be mapped onto the rendered page, so layout-based table \
+                                 recognition was skipped for a page; its text is reported as paragraphs instead.",
+                            ),
+                        },
+                    );
+                }
 
-                let recognized_tables =
-                    if let (Some(scaled_det), true) = (render_scaled_detection, tatr_model.is_some()) {
-                        let rgb = if let Some(ref slice) = batch_slice {
-                            let default_security_limits = crate::extractors::security::SecurityLimits::default();
-                            let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
-                            crate::extraction::image_decode::clone_dynamic_image_to_rgb8_with_security_limits(
-                                &slice[offset],
-                                security_limits,
-                            )?
-                        } else {
-                            let png_data = &encoded_batch[offset].1;
-                            let default_security_limits = crate::extractors::security::SecurityLimits::default();
-                            let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
-                            crate::extraction::image_decode::decode_standard_rgb8_with_security_limits(
-                                png_data,
-                                security_limits,
-                            )
-                            .map_err(|e| crate::XbergError::Parsing {
-                                message: format!("Failed to decode PNG for TATR: {}", e),
-                                source: None,
-                            })?
-                        };
-                        let mut model = tatr_model.take().expect("checked tatr_model.is_some() above");
-                        // #1812: TATR inference is synchronous ONNX Runtime CPU work with no await
-                        // points; running it inline would occupy a tokio worker thread for the
-                        // call's full duration on every table-bearing page. Route through
-                        // `spawn_blocking` and hand the lease back through the join so the next
-                        // page reuses it instead of it sitting checked out on a parked task. ~keep
-                        let (model, outcome) = tokio::task::spawn_blocking(move || {
-                            let outcome = crate::ocr::layout_assembly::recognize_page_tables_with_fallback(
-                                &rgb,
-                                &scaled_det,
-                                &render_ocr_elements,
-                                &mut model,
-                            );
-                            (model, outcome)
-                        })
-                        .await
-                        .map_err(|e| crate::XbergError::Plugin {
-                            message: format!("TATR table recognition panicked: {}", e),
-                            plugin_name: "layout".to_string(),
-                        })?;
-                        tatr_model = Some(model);
-                        outcome
+                let recognized_tables = if let (Some(scaled_det), Some(render_ocr_elements), true) =
+                    (render_scaled_detection, render_ocr_elements, tatr_model.is_some())
+                {
+                    let rgb = if let Some(ref slice) = batch_slice {
+                        let default_security_limits = crate::extractors::security::SecurityLimits::default();
+                        let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+                        crate::extraction::image_decode::clone_dynamic_image_to_rgb8_with_security_limits(
+                            &slice[offset],
+                            security_limits,
+                        )?
                     } else {
-                        crate::ocr::layout_assembly::RecognizedTablesOutcome::default()
+                        let png_data = &encoded_batch[offset].1;
+                        let default_security_limits = crate::extractors::security::SecurityLimits::default();
+                        let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
+                        crate::extraction::image_decode::decode_standard_rgb8_with_security_limits(
+                            png_data,
+                            security_limits,
+                        )
+                        .map_err(|e| crate::XbergError::Parsing {
+                            message: format!("Failed to decode PNG for TATR: {}", e),
+                            source: None,
+                        })?
                     };
+                    let mut model = tatr_model.take().expect("checked tatr_model.is_some() above");
+                    // #1812: TATR inference is synchronous ONNX Runtime CPU work with no await
+                    // points; running it inline would occupy a tokio worker thread for the
+                    // call's full duration on every table-bearing page. Route through
+                    // `spawn_blocking` and hand the lease back through the join so the next
+                    // page reuses it instead of it sitting checked out on a parked task. ~keep
+                    let (model, outcome) = tokio::task::spawn_blocking(move || {
+                        let outcome = crate::ocr::layout_assembly::recognize_page_tables_with_fallback(
+                            &rgb,
+                            &scaled_det,
+                            &render_ocr_elements,
+                            &mut model,
+                        );
+                        (model, outcome)
+                    })
+                    .await
+                    .map_err(|e| crate::XbergError::Plugin {
+                        message: format!("TATR table recognition panicked: {}", e),
+                        plugin_name: "layout".to_string(),
+                    })?;
+                    tatr_model = Some(model);
+                    outcome
+                } else {
+                    crate::ocr::layout_assembly::RecognizedTablesOutcome::default()
+                };
 
                 for rt in &recognized_tables.tables {
                     if !rt.markdown.is_empty() {

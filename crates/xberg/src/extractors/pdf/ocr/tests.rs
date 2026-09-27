@@ -6091,7 +6091,8 @@ Name: ___
                 ..Default::default()
             };
 
-            let transformed = transform_ocr_elements_to_render_space(&[element], &metadata, 100, 200);
+            let transformed = transform_ocr_elements_to_render_space(&[element], &metadata, 100, 200)
+                .expect("a usable orientation and a 1:1 scale must produce a transform");
 
             assert_eq!(
                 transformed[0].geometry,
@@ -6106,9 +6107,13 @@ Name: ___
         }
     }
 
+    /// GH#1813: an unusable orientation must report that no transform exists, not hand back
+    /// untransformed geometry. The old passthrough was silent and destructive -- the caller fed
+    /// those processed-space boxes to TATR against a render-space crop, the cell-overlap filter
+    /// dropped every one, and the region published a table with none of the page's values.
     #[cfg(feature = "layout-detection")]
     #[test]
-    fn invalid_ocr_element_metadata_preserves_original_geometry() {
+    fn invalid_ocr_element_metadata_reports_no_usable_transform() {
         let metadata = rotated_ocr_metadata(200, 400, 45);
         let element = crate::types::OcrElement {
             text: "heading".to_string(),
@@ -6121,9 +6126,76 @@ Name: ___
             ..Default::default()
         };
 
-        let transformed = transform_ocr_elements_to_render_space(std::slice::from_ref(&element), &metadata, 100, 200);
+        assert!(
+            transform_ocr_elements_to_render_space(std::slice::from_ref(&element), &metadata, 100, 200).is_none(),
+            "auto_rotated with an unusable orientation must not yield a transform"
+        );
+    }
 
-        assert_eq!(transformed[0].geometry, element.geometry);
+    /// GH#1813: absent processed dimensions and an aspect-ratio mismatch are both "these are not
+    /// the same raster", and neither may be answered with untransformed geometry. The absent-dims
+    /// case is the one the PDF route hit in practice; the mismatch case is the bar the
+    /// standalone-image route already applied and this route did not.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn untrustworthy_processed_dimensions_report_no_usable_transform() {
+        let element = crate::types::OcrElement {
+            text: "heading".to_string(),
+            geometry: crate::types::OcrBoundingGeometry::Rectangle {
+                left: 20,
+                top: 40,
+                width: 60,
+                height: 80,
+            },
+            ..Default::default()
+        };
+
+        assert!(
+            transform_ocr_elements_to_render_space(
+                std::slice::from_ref(&element),
+                &crate::types::Metadata::default(),
+                100,
+                200
+            )
+            .is_none(),
+            "a backend that reported no processed dimensions must not yield a transform"
+        );
+
+        let mut mismatched = crate::types::Metadata::default();
+        mismatched.additional.insert(
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            serde_json::json!(200),
+        );
+        mismatched.additional.insert(
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
+            serde_json::json!(200),
+        );
+        assert!(
+            transform_ocr_elements_to_render_space(std::slice::from_ref(&element), &mismatched, 100, 200).is_none(),
+            "a 0.5x/1.0x scale pair is not one raster scaled to another, so no transform exists"
+        );
+
+        let mut uniform = crate::types::Metadata::default();
+        uniform.additional.insert(
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            serde_json::json!(200),
+        );
+        uniform.additional.insert(
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
+            serde_json::json!(400),
+        );
+        let transformed = transform_ocr_elements_to_render_space(std::slice::from_ref(&element), &uniform, 100, 200)
+            .expect("a uniform 0.5x downscale is exactly what this transform exists to apply");
+        assert_eq!(
+            transformed[0].geometry,
+            crate::types::OcrBoundingGeometry::Rectangle {
+                left: 10,
+                top: 20,
+                width: 30,
+                height: 40,
+            },
+            "Tesseract's 300 dpi word boxes must land inside the render raster the table crop comes from"
+        );
     }
 
     // ---------------------------------------------------------------------

@@ -1494,16 +1494,44 @@ pub(super) fn transform_ocr_geometry_to_render(
         }
     }
 }
+/// Whether a processed-image pixel space and a render raster can be related by a scale at all.
+///
+/// ~keep A >1% divergence between the two axes' scale factors means the two rasters are not the
+/// same page, so no per-axis scale maps one onto the other; the same bar the standalone-image
+/// route applies in `extractors::image::whole_image_ocr_coordinate_transform`, and the tolerance
+/// is that route's constant so the two cannot drift apart.
+#[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
+fn ocr_render_scale_is_trustworthy(processed_dimensions: (u32, u32), render_dimensions: (u32, u32)) -> bool {
+    let (processed_width, processed_height) = processed_dimensions;
+    let (render_width, render_height) = render_dimensions;
+    if processed_width == 0 || processed_height == 0 || render_width == 0 || render_height == 0 {
+        return false;
+    }
+    let scale_x = f64::from(render_width) / f64::from(processed_width);
+    let scale_y = f64::from(render_height) / f64::from(processed_height);
+    (scale_x - scale_y).abs() / scale_x.max(scale_y)
+        <= crate::extractors::image::MAX_OCR_COORDINATE_SCALE_RELATIVE_DIFFERENCE
+}
+/// Map OCR elements from the backend's processed-image pixel space into the render raster's, or
+/// report that the two spaces cannot be related.
+///
+/// ~keep Returns `None` -- never untransformed elements -- when the backend reported no processed
+/// dimensions, auto-rotated without a usable orientation, or reported a raster that is not a
+/// scaled copy of the render raster. Handing back untransformed elements was silent and
+/// destructive: Tesseract normalizes to `target_dpi` (300) against a ~150 dpi page render, so
+/// every word box sat ~2x outside the render-space table bbox, `select_table_elements`'
+/// `MIN_CELL_ELEMENT_IOW` test dropped all of them, and the region published a table holding none
+/// of the page's values. PaddleOCR records its processed dims as the unresized raster, which is
+/// why the same route was sound there (xberg-io/xberg#1813). The caller must skip TATR on `None`
+/// rather than run it on elements in the wrong space.
 #[cfg(all(feature = "layout-detection", any(feature = "ocr", feature = "ocr-wasm")))]
 pub(super) fn transform_ocr_elements_to_render_space(
     elements: &[crate::types::OcrElement],
     metadata: &crate::types::Metadata,
     render_width: u32,
     render_height: u32,
-) -> Vec<crate::types::OcrElement> {
-    let Some((final_width, final_height)) = processed_ocr_layout_dimensions(metadata) else {
-        return elements.to_vec();
-    };
+) -> Option<Vec<crate::types::OcrElement>> {
+    let (final_width, final_height) = processed_ocr_layout_dimensions(metadata)?;
     let auto_rotated = metadata
         .additional
         .get(OCR_AUTO_ROTATED_METADATA_KEY)
@@ -1511,7 +1539,7 @@ pub(super) fn transform_ocr_elements_to_render_space(
         .unwrap_or(false);
     let correction_degrees = resolved_ocr_correction_degrees(metadata);
     if auto_rotated && correction_degrees.is_none() {
-        return elements.to_vec();
+        return None;
     }
     let correction_degrees = correction_degrees.unwrap_or(0);
     let pre_rotation_dimensions = if matches!(correction_degrees, 90 | 270) {
@@ -1519,19 +1547,24 @@ pub(super) fn transform_ocr_elements_to_render_space(
     } else {
         (final_width, final_height)
     };
-    elements
-        .iter()
-        .cloned()
-        .map(|mut element| {
-            element.geometry = transform_ocr_geometry_to_render(
-                &element.geometry,
-                correction_degrees,
-                pre_rotation_dimensions,
-                (render_width, render_height),
-            );
-            element
-        })
-        .collect()
+    if !ocr_render_scale_is_trustworthy(pre_rotation_dimensions, (render_width, render_height)) {
+        return None;
+    }
+    Some(
+        elements
+            .iter()
+            .cloned()
+            .map(|mut element| {
+                element.geometry = transform_ocr_geometry_to_render(
+                    &element.geometry,
+                    correction_degrees,
+                    pre_rotation_dimensions,
+                    (render_width, render_height),
+                );
+                element
+            })
+            .collect(),
+    )
 }
 
 /// Scale factor from OCR raster pixels to PDF points for one page, used to convert
