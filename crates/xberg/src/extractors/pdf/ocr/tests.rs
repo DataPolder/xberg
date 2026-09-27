@@ -6599,6 +6599,64 @@ Name: ___
         assert!(bbox.y0 < bbox.y1, "bottom-left origin: y0 (bottom) must be < y1 (top)");
     }
 
+    /// GH#1813 — a backend table's rect is in the pixel space the backend OCR'd, not the render
+    /// raster's. Tesseract normalizes a 150 dpi page render to `target_dpi` (300 by default), so
+    /// the two differ by ~2x on the default config and the force-OCR route must resolve the pixel
+    /// frame from the result metadata the way the formula path already does.
+    ///
+    /// Composes the two halves the call site composes. Asserting the render-dims answer as well
+    /// pins the magnitude of the defect: it is a 2x error in both axes, not a rounding difference.
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[test]
+    fn backend_table_bbox_uses_the_processed_pixel_frame_not_the_render_raster() {
+        use crate::types::extraction::BoundingBox;
+
+        let mut metadata = crate::types::Metadata::default();
+        metadata.additional.insert(
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_WIDTH_METADATA_KEY.into(),
+            serde_json::json!(1700),
+        );
+        metadata.additional.insert(
+            crate::ocr_metadata_keys::OCR_PROCESSED_IMAGE_HEIGHT_METADATA_KEY.into(),
+            serde_json::json!(2200),
+        );
+        let pixel_rect = BoundingBox {
+            x0: 100.0,
+            y0: 200.0,
+            x1: 300.0,
+            y1: 400.0,
+        };
+
+        assert_eq!(
+            resolved_ocr_layout_dimensions(&metadata, 850, 1100),
+            (1700, 2200),
+            "the processed dims in the metadata must win over the render raster"
+        );
+
+        let mut processed_frame = [ocr_table("| a | b |", 0)];
+        processed_frame[0].bounding_box = Some(pixel_rect);
+        let (px_w, px_h) = resolved_ocr_layout_dimensions(&metadata, 850, 1100);
+        rescale_ocr_bboxes_to_page_points(None, &mut processed_frame, px_w, px_h, 612.0, 792.0);
+        let correct = processed_frame[0].bounding_box.expect("bbox must survive rescale");
+        assert_eq!((correct.x0, correct.x1), (36.0, 108.0));
+        assert_eq!((correct.y0, correct.y1), (648.0, 720.0));
+
+        let mut render_frame = [ocr_table("| a | b |", 0)];
+        render_frame[0].bounding_box = Some(pixel_rect);
+        rescale_ocr_bboxes_to_page_points(None, &mut render_frame, 850, 1100, 612.0, 792.0);
+        let wrong = render_frame[0].bounding_box.expect("bbox must survive rescale");
+        assert_eq!(
+            (wrong.x0, wrong.x1),
+            (72.0, 216.0),
+            "the pre-fix render-dims path doubles the horizontal extent"
+        );
+        assert_eq!(
+            (wrong.y0, wrong.y1),
+            (504.0, 648.0),
+            "and puts the table a quarter of a page away vertically"
+        );
+    }
+
     /// #1423 — zero raster dimensions (e.g. a synthetic document with no rendered page
     /// behind it) must leave bboxes untouched rather than dividing by zero or
     /// fabricating a scale factor.
