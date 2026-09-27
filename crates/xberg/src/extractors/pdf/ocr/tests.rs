@@ -6017,6 +6017,43 @@ Name: ___
         assert_eq!((bbox.x1, bbox.y1, bbox.x2, bbox.y2), (20.0, 70.0, 60.0, 90.0));
     }
 
+    /// GH#1813: the force-OCR PDF route gated TATR on `layout_detections.is_some()` alone, so a
+    /// user who set `table_model = "disabled"` still got TATR tables. `TableModel::` was read only
+    /// on the native route and for standalone images.
+    #[cfg(feature = "layout-detection")]
+    #[test]
+    fn disabled_table_model_turns_off_tatr_on_the_force_ocr_route() {
+        use crate::core::config::layout::{LayoutDetectionConfig, TableModel};
+
+        let disabled = crate::core::config::ExtractionConfig {
+            layout: Some(LayoutDetectionConfig {
+                table_model: TableModel::Disabled,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(
+            !pdf_ocr_table_recognition_enabled(&disabled),
+            "table_model = \"disabled\" must stop the route from checking out a TATR model"
+        );
+
+        let tatr = crate::core::config::ExtractionConfig {
+            layout: Some(LayoutDetectionConfig {
+                table_model: TableModel::Tatr,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(
+            pdf_ocr_table_recognition_enabled(&tatr),
+            "the default TATR model must still run, or this gate would disable the feature outright"
+        );
+        assert!(
+            pdf_ocr_table_recognition_enabled(&crate::core::config::ExtractionConfig::default()),
+            "no layout config at all must keep today's behaviour rather than read as disabled"
+        );
+    }
+
     #[cfg(feature = "layout-detection")]
     #[test]
     fn invalid_rotation_metadata_preserves_dimension_only_fallback() {

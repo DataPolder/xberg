@@ -98,6 +98,24 @@ pub(crate) fn numeric_repair_enabled(config: &ExtractionConfig) -> bool {
         .is_some_and(|ocr| ocr.numeric_repair && ocr_content_is_repairable_prose(ocr))
 }
 
+/// Whether the force-OCR PDF route may run TATR table recognition.
+///
+/// ~keep `TableModel::Disabled` is the only value that turns it off here. The SLANet variants are
+/// wired only on the native PDF route (`pdf::structure::pipeline`), so treating them as "not TATR"
+/// on this route would remove table recognition outright rather than substitute a model. Before
+/// this the route gated on `layout_detections.is_some()` alone, and `table_model = "disabled"` was
+/// silently ignored on every force-OCR extraction (xberg-io/xberg#1813).
+// ~keep The cfg is the single call site's: the `tatr_model` checkout inside
+// `extract_with_ocr_for_page` (`any(ocr, ocr-pipeline)`) under its `layout-detection` gate.
+// `layout-detection` alone would leave this dead on the `formula-recognition,pdf` leg.
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "layout-detection"))]
+pub(super) fn pdf_ocr_table_recognition_enabled(config: &ExtractionConfig) -> bool {
+    config
+        .layout
+        .as_ref()
+        .is_none_or(|layout| layout.table_model != crate::core::config::layout::TableModel::Disabled)
+}
+
 /// GH#1789's numeric-token repair, applied to every string representation of an OCR'd page that
 /// `merge_structured_ocr_pages_into_internal_document` carries into the final document.
 ///
@@ -1748,7 +1766,7 @@ pub(super) async fn extract_with_ocr_for_page(
     // through `spawn_blocking`, mirroring the boundary already used for the RT-DETR layout
     // engine in `layout_runner::run_layout_for_pdf_pages_async`. ~keep
     #[cfg(feature = "layout-detection")]
-    let mut tatr_model = if layout_detections.is_some() {
+    let mut tatr_model = if layout_detections.is_some() && pdf_ocr_table_recognition_enabled(config) {
         let tatr_acceleration = config.resolved_layout_acceleration().cloned();
         let tatr_thread_budget = crate::core::config::concurrency::resolve_thread_budget(config.concurrency.as_ref());
         tokio::task::spawn_blocking(move || {
