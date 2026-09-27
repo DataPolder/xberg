@@ -4093,9 +4093,20 @@ pub(super) fn retain_ocr_formulas_for_accepted_pages(
 /// reads, and a scanned page OCR'd as an image already got that mode (#1786). A page that is
 /// not a scan keeps the engine default, so forced OCR of a vector page is unchanged.
 ///
-/// A no-op when there is nothing to say (`page_rotation_degrees == 0`, no known DPI and no
-/// whole-page PSM to apply) so such pages never pay a config clone. Backends that don't
-/// recognise either key ignore it, per `OcrConfig.backend_options`'s documented contract.
+/// `whole_page_raster` is also stamped into `backend_options` as
+/// [`KNOWN_FULL_PAGE_SCAN_BACKEND_OPTION`] when the backend is Tesseract, so
+/// `config_to_tesseract` can make the page take Tesseract's default preprocessing
+/// unconditionally rather than deferring to a pixel-brightness heuristic tuned for callers with
+/// no scan-detection signal of their own (GH#1894). Gated the same way `apply_whole_image_psm`
+/// is: only Tesseract's `config_to_tesseract` reads it, so another backend's config is not
+/// cloned just to carry a hint nothing on that route consumes.
+///
+/// A no-op when there is nothing to say (`page_rotation_degrees == 0`, no known DPI, and either
+/// the page is not a whole-page scan or the backend is not Tesseract) so such pages never pay a
+/// config clone. Backends that don't recognise a key ignore it, per
+/// `OcrConfig.backend_options`'s documented contract.
+///
+/// [`KNOWN_FULL_PAGE_SCAN_BACKEND_OPTION`]: crate::core::config::ocr::KNOWN_FULL_PAGE_SCAN_BACKEND_OPTION
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 pub(super) fn ocr_config_with_page_rotation_hint(
     config: &crate::core::config::ocr::OcrConfig,
@@ -4104,10 +4115,9 @@ pub(super) fn ocr_config_with_page_rotation_hint(
     whole_page_raster: bool,
 ) -> Cow<'_, crate::core::config::ocr::OcrConfig> {
     let source_dpi = source_dpi.and_then(serde_json::Number::from_f64);
-    let apply_whole_image_psm = whole_page_raster
-        && config.backend == "tesseract"
-        && config.tesseract_config.as_ref().and_then(|c| c.psm).is_none();
-    if page_rotation_degrees == 0 && source_dpi.is_none() && !apply_whole_image_psm {
+    let is_tesseract_scan = whole_page_raster && config.backend == "tesseract";
+    let apply_whole_image_psm = is_tesseract_scan && config.tesseract_config.as_ref().and_then(|c| c.psm).is_none();
+    if page_rotation_degrees == 0 && source_dpi.is_none() && !is_tesseract_scan {
         return Cow::Borrowed(config);
     }
     let mut config = config.clone();
@@ -4129,6 +4139,12 @@ pub(super) fn ocr_config_with_page_rotation_hint(
             obj.insert(
                 crate::core::config::ocr::SOURCE_DPI_BACKEND_OPTION.to_string(),
                 serde_json::Value::Number(source_dpi),
+            );
+        }
+        if is_tesseract_scan {
+            obj.insert(
+                crate::core::config::ocr::KNOWN_FULL_PAGE_SCAN_BACKEND_OPTION.to_string(),
+                serde_json::Value::Bool(true),
             );
         }
     }

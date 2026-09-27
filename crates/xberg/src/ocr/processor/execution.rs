@@ -908,6 +908,16 @@ struct PreparedOcrImage {
 /// Both branches below honour it: the unpreprocessed branch reports it verbatim instead of the
 /// [`RAW_IMAGE_SOURCE_DPI`] assumption, and the preprocessed branch feeds it to DPI normalization
 /// so the resize scales from the real resolution.
+///
+/// `known_full_page_scan` is the PDF OCR route's own scan-detection density check result, when
+/// the caller knows it (`TesseractConfig::known_full_page_scan`); `false` for every caller that
+/// does not, including bare images handed in by a user. When `true`, the default preprocessing
+/// path is taken unconditionally instead of deferring to [`should_apply_default_preprocessing`]'s
+/// pixel-brightness heuristic -- a known scan page must not skip the default resample,
+/// binarisation and deskew just because shaded table rows or a grey background read as dark
+/// (GH#1894). The heuristic remains the only signal for a caller with no scan-detection result of
+/// its own.
+#[allow(clippy::too_many_arguments)]
 fn prepare_ocr_image(
     rgb_data: Vec<u8>,
     width: u32,
@@ -916,9 +926,10 @@ fn prepare_ocr_image(
     images_config: Option<&crate::core::config::ImageExtractionConfig>,
     ci_debug_enabled: bool,
     known_source_dpi: Option<f64>,
+    known_full_page_scan: bool,
 ) -> PreparedOcrImage {
     let Some(preprocessing) = preprocessing else {
-        if should_apply_default_preprocessing(&rgb_data, width, height) {
+        if known_full_page_scan || should_apply_default_preprocessing(&rgb_data, width, height) {
             return prepare_preprocessed_ocr_image(
                 rgb_data,
                 width,
@@ -1725,6 +1736,7 @@ pub(super) fn perform_ocr(
         images_config,
         ci_debug_enabled,
         known_source_dpi,
+        config.known_full_page_scan,
     );
     #[cfg_attr(not(auto_rotate), allow(unused_mut))]
     let mut image_data = prepared_image.data;
@@ -4165,13 +4177,60 @@ mod tests {
     fn test_prepare_ocr_image_without_config_preserves_shadowed_rgb() {
         let rgb_data = vec![0, 1, 2, 3, 4, 5];
 
-        let prepared = prepare_ocr_image(rgb_data.clone(), 2, 1, None, None, false, None);
+        let prepared = prepare_ocr_image(rgb_data.clone(), 2, 1, None, None, false, None, false);
 
         assert_eq!(prepared.data, rgb_data);
         assert_eq!(prepared.width, 2);
         assert_eq!(prepared.height, 1);
         assert_eq!(prepared.source_dpi, RAW_IMAGE_SOURCE_DPI);
         assert!(!prepared.apply_pix_preprocessing);
+    }
+
+    /// GH#1894: a page the PDF OCR route already knows is a whole-page scan must take the
+    /// default preprocessing regardless of how dark the raster reads, rather than being judged
+    /// by `should_apply_default_preprocessing`'s pixel-brightness heuristic. This all-black
+    /// fixture fails that heuristic outright (mean luminance 0.0), so the only thing that can
+    /// route it through preprocessing is `known_full_page_scan`.
+    ///
+    /// Negative control (flip `true` to `false` on the call below): fails with
+    /// `assertion failed: prepared.apply_pix_preprocessing` — proving the pixel test alone
+    /// would have rejected this fixture, which is exactly the GH#1894 defect.
+    #[test]
+    fn should_apply_default_preprocessing_for_a_known_scan_page_however_dark() {
+        const SAMPLE_PIXEL_COUNT: usize = 16;
+        let rgb_data = vec![0u8; SAMPLE_PIXEL_COUNT * RGB_CHANNEL_COUNT];
+        assert!(
+            !should_apply_default_preprocessing(&rgb_data, SAMPLE_PIXEL_COUNT as u32, 1),
+            "fixture must fail the pixel-brightness heuristic on its own"
+        );
+
+        let prepared = prepare_ocr_image(rgb_data, SAMPLE_PIXEL_COUNT as u32, 1, None, None, false, None, true);
+
+        assert!(
+            prepared.apply_pix_preprocessing,
+            "a known scan page must take default preprocessing even when the pixels read as dark"
+        );
+    }
+
+    /// Control for the test above: the identical dark fixture with no scan-detection signal
+    /// (`known_full_page_scan: false`, the value every non-PDF caller passes) must keep the
+    /// pre-GH#1894 behaviour and skip preprocessing, so bare images handed to the standalone
+    /// image extractor are unaffected by this fix.
+    ///
+    /// Negative control (flip `false` to `true` on the call below): fails with
+    /// `assertion failed: !prepared.apply_pix_preprocessing` — proving this test actually
+    /// distinguishes the two code paths rather than passing regardless of the flag.
+    #[test]
+    fn should_keep_pixel_test_for_a_dark_image_with_no_scan_signal() {
+        const SAMPLE_PIXEL_COUNT: usize = 16;
+        let rgb_data = vec![0u8; SAMPLE_PIXEL_COUNT * RGB_CHANNEL_COUNT];
+
+        let prepared = prepare_ocr_image(rgb_data, SAMPLE_PIXEL_COUNT as u32, 1, None, None, false, None, false);
+
+        assert!(
+            !prepared.apply_pix_preprocessing,
+            "a bare dark image with no scan signal must still be judged by pixel brightness"
+        );
     }
 
     #[test]
@@ -4268,6 +4327,7 @@ mod tests {
             None,
             false,
             Some(300.0),
+            false,
         );
 
         assert!(!prepared.apply_pix_preprocessing);
@@ -4297,6 +4357,7 @@ mod tests {
                 None,
                 false,
                 Some(300.0),
+                false,
             );
 
             assert!(
@@ -4342,6 +4403,7 @@ mod tests {
             None,
             false,
             Some(300.0),
+            false,
         );
         assert!(
             !prepared.apply_pix_preprocessing,
@@ -4372,6 +4434,7 @@ mod tests {
             None,
             false,
             Some(300.0),
+            false,
         );
         assert!(!prepared.apply_pix_preprocessing, "a solid blob is not text structure");
         assert_eq!(prepared.data, rgb_data);
@@ -4401,6 +4464,7 @@ mod tests {
             None,
             false,
             Some(300.0),
+            false,
         );
         assert!(
             prepared.apply_pix_preprocessing,
@@ -4440,6 +4504,7 @@ mod tests {
             None,
             false,
             Some(300.0),
+            false,
         );
         assert!(
             !prepared.apply_pix_preprocessing,
@@ -4480,7 +4545,7 @@ mod tests {
         const HEIGHT: u32 = 4;
         let rgb_data = vec![u8::MAX; WIDTH as usize * HEIGHT as usize * RGB_CHANNEL_COUNT];
 
-        let prepared = prepare_ocr_image(rgb_data, WIDTH, HEIGHT, None, None, false, None);
+        let prepared = prepare_ocr_image(rgb_data, WIDTH, HEIGHT, None, None, false, None, false);
 
         assert!(prepared.apply_pix_preprocessing);
         let preprocessing = prepared
@@ -4511,7 +4576,7 @@ mod tests {
             ..Default::default()
         };
 
-        let prepared = prepare_ocr_image(rgb_data, 2, 2, Some(&preprocessing), None, false, None);
+        let prepared = prepare_ocr_image(rgb_data, 2, 2, Some(&preprocessing), None, false, None, false);
 
         assert!(prepared.apply_pix_preprocessing);
         assert_eq!(prepared.preprocessing.unwrap().target_dpi, 72);
@@ -4607,6 +4672,7 @@ mod tests {
             None,
             false,
             Some(KNOWN_RENDER_DPI),
+            false,
         );
 
         assert_eq!(
@@ -4646,6 +4712,7 @@ mod tests {
             None,
             false,
             None,
+            false,
         );
 
         assert_eq!(
@@ -4667,7 +4734,7 @@ mod tests {
     fn should_default_to_72_dpi_for_unpreprocessed_raw_image_without_known_dpi() {
         let rgb_data = vec![0, 1, 2, 3, 4, 5];
 
-        let prepared = prepare_ocr_image(rgb_data.clone(), 2, 1, None, None, false, None);
+        let prepared = prepare_ocr_image(rgb_data.clone(), 2, 1, None, None, false, None, false);
 
         assert_eq!(prepared.data, rgb_data, "the raster must pass through untouched");
         assert_eq!(prepared.source_dpi, RAW_IMAGE_SOURCE_DPI);
@@ -4684,7 +4751,7 @@ mod tests {
         const KNOWN_RENDER_DPI: f64 = 150.0;
         let rgb_data = vec![0, 1, 2, 3, 4, 5];
 
-        let prepared = prepare_ocr_image(rgb_data, 2, 1, None, None, false, Some(KNOWN_RENDER_DPI));
+        let prepared = prepare_ocr_image(rgb_data, 2, 1, None, None, false, Some(KNOWN_RENDER_DPI), false);
 
         assert_eq!(prepared.source_dpi, 150);
         assert!(!prepared.apply_pix_preprocessing);
@@ -4831,6 +4898,7 @@ mod tests {
                 Some(&images_config),
                 false,
                 known_source_dpi,
+                false,
             );
 
             assert_eq!(prepared.width, TEST_IMAGE_SIDE);
@@ -4861,6 +4929,7 @@ mod tests {
                 Some(&images_config),
                 false,
                 known_source_dpi,
+                false,
             );
 
             assert_eq!(
@@ -4888,6 +4957,7 @@ mod tests {
                 Some(&images_config),
                 false,
                 known_source_dpi,
+                false,
             );
 
             let metadata = prepared

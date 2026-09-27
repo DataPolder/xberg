@@ -140,6 +140,7 @@ impl TesseractBackend {
         internal.security_limits = config.security_limits.clone();
         internal.tessdata_path = config.tessdata_path.clone();
         internal.source_dpi = Self::source_dpi_from_backend_options(config);
+        internal.known_full_page_scan = Self::known_full_page_scan_from_backend_options(config);
         if let Some(use_cache) = Self::use_cache_from_backend_options(config) {
             internal.use_cache = use_cache;
         }
@@ -173,6 +174,20 @@ impl TesseractBackend {
         // override before resizing (GH#1630), and two readers of one option that validate it
         // independently are the drift shape GH#1621 was caused by. ~keep
         crate::extraction::image::explicit_source_dpi_from_ocr_config(config)
+    }
+
+    /// Read the PDF OCR route's scan-detection signal out of `backend_options` (GH#1894).
+    ///
+    /// An absent or non-boolean value is "not a known scan", matching every non-PDF caller
+    /// (standalone image OCR, direct API callers), which never stamp this key and must keep
+    /// deciding preprocessing from the pixel-brightness heuristic.
+    fn known_full_page_scan_from_backend_options(config: &OcrConfig) -> bool {
+        config
+            .backend_options
+            .as_ref()
+            .and_then(|options| options.get(crate::core::config::ocr::KNOWN_FULL_PAGE_SCAN_BACKEND_OPTION))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
     }
 
     /// Get cached available languages, lazily querying Tesseract if needed.
@@ -1733,6 +1748,40 @@ mod tests {
                 "hint {hint} must be treated as unknown"
             );
         }
+    }
+
+    /// GH#1894: the PDF OCR route's own scan-detection signal must reach the internal config so
+    /// `prepare_ocr_image` can bypass the pixel-brightness heuristic for a page it already knows
+    /// is a whole-page scan.
+    ///
+    /// Negative control (delete the `backend_options` line, leaving `..Default::default()`):
+    /// fails with `assertion failed: backend.config_to_tesseract(&ocr_config).known_full_page_scan`
+    /// — proving this test actually reads the hint rather than the field's own default.
+    #[test]
+    fn should_read_known_full_page_scan_hint_from_backend_options() {
+        let backend = TesseractBackend::new();
+        let ocr_config = OcrConfig {
+            backend: "tesseract".to_string(),
+            backend_options: Some(serde_json::json!({ "known_full_page_scan": true })),
+            ..Default::default()
+        };
+
+        assert!(backend.config_to_tesseract(&ocr_config).known_full_page_scan);
+    }
+
+    /// Callers that never stamp the hint — standalone image OCR, plugin callers, direct API
+    /// callers — must keep the pre-GH#1894 behaviour of judging every image by pixel brightness.
+    ///
+    /// Fails on unfixed code by not compiling (the field does not exist).
+    #[test]
+    fn should_default_known_full_page_scan_to_false_when_no_hint_is_supplied() {
+        let backend = TesseractBackend::new();
+        let ocr_config = OcrConfig {
+            backend: "tesseract".to_string(),
+            ..Default::default()
+        };
+
+        assert!(!backend.config_to_tesseract(&ocr_config).known_full_page_scan);
     }
 
     #[test]

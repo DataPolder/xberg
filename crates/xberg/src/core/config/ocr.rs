@@ -545,6 +545,24 @@ pub(crate) const SOURCE_DPI_BACKEND_OPTION: &str = "source_dpi";
 #[allow(dead_code)]
 pub(crate) const PAGE_ROTATION_DEGREES_BACKEND_OPTION: &str = "page_rotation_degrees";
 
+/// [`OcrConfig::backend_options`] key carrying whether the PDF OCR route's scan-detection density
+/// check classified this page as a whole-page raster scan.
+///
+/// Stamped per page alongside [`SOURCE_DPI_BACKEND_OPTION`] (see
+/// `crate::extractors::pdf::ocr::pipeline::ocr_config_with_page_rotation_hint`), which is the only
+/// caller that can know it: it already runs `crate::pdf::scan_detect::full_page_raster_density`
+/// per page to decide the default Tesseract PSM. `config_to_tesseract` reads this to make a known
+/// scan page take Tesseract's default OCR preprocessing (resample, binarisation, deskew)
+/// unconditionally, however dark the raster is -- the pixel-brightness heuristic
+/// (`should_apply_default_preprocessing`) is tuned for a caller with no other signal and misses a
+/// scanned page with shaded rows or a grey background (GH#1894). A bare image handed to the
+/// standalone image extractor carries no such signal and keeps the pixel test.
+///
+/// Declared here rather than as a literal at each end so the producer and the consumer
+/// (`ocr::tesseract_backend::TesseractBackend::config_to_tesseract`) cannot drift apart.
+#[allow(dead_code)]
+pub(crate) const KNOWN_FULL_PAGE_SCAN_BACKEND_OPTION: &str = "known_full_page_scan";
+
 fn default_priority() -> u32 {
     100
 }

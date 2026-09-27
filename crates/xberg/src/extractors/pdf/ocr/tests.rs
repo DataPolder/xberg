@@ -7356,6 +7356,51 @@ Name: ___
         );
     }
 
+    /// GH#1894: the scan-detection density check's result must reach `backend_options` so
+    /// `TesseractBackend::config_to_tesseract` can make the page take default preprocessing
+    /// unconditionally, however dark the raster reads.
+    ///
+    /// Negative control (flip the trailing `true` to `false`): fails with
+    /// `left: None, right: Some(true)` -- proving this assertion actually reads the stamped
+    /// hint rather than passing regardless of `whole_page_raster`.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn should_stamp_known_full_page_scan_hint_for_a_tesseract_scan_page() {
+        let config = crate::core::config::ocr::OcrConfig::default();
+
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, true);
+
+        assert_eq!(
+            hinted
+                .backend_options
+                .as_ref()
+                .and_then(|opts| opts.get("known_full_page_scan"))
+                .and_then(serde_json::Value::as_bool),
+            Some(true),
+            "a whole-page scan must stamp the hint config_to_tesseract reads"
+        );
+    }
+
+    /// A page that is not a whole-page scan must not carry the hint at all: an absent key, not a
+    /// `false` one, is `config_to_tesseract`'s definition of "unknown" (see
+    /// `known_full_page_scan_from_backend_options`).
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn should_not_stamp_known_full_page_scan_hint_for_a_non_scan_page() {
+        let config = crate::core::config::ocr::OcrConfig::default();
+
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, false);
+
+        assert!(
+            hinted
+                .backend_options
+                .as_ref()
+                .and_then(|opts| opts.get("known_full_page_scan"))
+                .is_none(),
+            "a non-scan page must not carry the hint"
+        );
+    }
+
     /// #1828: `whole_page_raster_for_ocr_page` is the one place that decides whether a page is
     /// a scan for the whole-image PSM hint, called from both the non-layout OCR routes (which
     /// pass an open `lazy_pdf_render_state`) and the layout-detection route (which does not,
@@ -7394,6 +7439,10 @@ Name: ___
 
     /// The caller's own `psm` always wins, and a page that is not a scan keeps the engine default
     /// (no `tesseract_config` materialised at all).
+    ///
+    /// The explicit-psm case still clones (GH#1894): the scan page's `known_full_page_scan` hint
+    /// has nothing to do with PSM and must reach `backend_options` regardless of whether the
+    /// caller already chose a segmentation mode.
     #[cfg(feature = "pdf")]
     #[test]
     fn should_keep_an_explicit_psm_and_leave_a_vector_page_on_the_engine_default() {
@@ -7406,9 +7455,14 @@ Name: ___
         };
         let hinted = ocr_config_with_page_rotation_hint(&explicit, 0, None, true);
         assert_eq!(hinted.tesseract_config.as_ref().and_then(|c| c.psm), Some(6));
-        assert!(
-            matches!(hinted, Cow::Borrowed(_)),
-            "an explicit psm leaves nothing to apply"
+        assert_eq!(
+            hinted
+                .backend_options
+                .as_ref()
+                .and_then(|opts| opts.get("known_full_page_scan"))
+                .and_then(serde_json::Value::as_bool),
+            Some(true),
+            "a known scan page must carry the hint even when psm is already explicit"
         );
 
         let config = crate::core::config::ocr::OcrConfig::default();
