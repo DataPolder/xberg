@@ -93,6 +93,10 @@ pub struct PdfImage {
     /// indices in `raw_indexed_samples`. ~keep
     #[serde(skip)]
     color_key_samples: Option<Vec<u8>>,
+    /// The JPEG 2000 opacity channel, one byte per pixel, kept only when `/SMaskInData` is 1 or 2
+    /// and the image has no `/SMask`: the renderer then uses it as the soft mask. (GH#1902) ~keep
+    #[serde(skip)]
+    soft_mask_in_data: Option<Vec<u8>>,
 }
 
 impl PdfImage {
@@ -114,6 +118,7 @@ impl PdfImage {
             decode_folded_in: false,
             raw_indexed_samples: None,
             color_key_samples: None,
+            soft_mask_in_data: None,
         }
     }
 
@@ -161,6 +166,11 @@ impl PdfImage {
         self.color_key_samples.as_deref()
     }
 
+    /// The opacity channel a JPEG 2000 image carries as its soft mask (`/SMaskInData`).
+    pub(crate) fn soft_mask_in_data(&self) -> Option<&[u8]> {
+        self.soft_mask_in_data.as_deref()
+    }
+
     /// Create a new PDF image with spatial metadata.
     pub fn with_spatial(
         width: u32,
@@ -188,6 +198,7 @@ impl PdfImage {
             decode_folded_in: false,
             raw_indexed_samples: None,
             color_key_samples: None,
+            soft_mask_in_data: None,
         }
     }
 
@@ -237,6 +248,7 @@ impl PdfImage {
             decode_folded_in: false,
             raw_indexed_samples: None,
             color_key_samples: None,
+            soft_mask_in_data: None,
         }
     }
 
@@ -1415,6 +1427,18 @@ pub fn extract_image_from_xobject(
     // below moves the stored samples out of that space. (GH#1904) ~keep
     let has_color_key_mask = matches!(dict.get("Mask"), Some(crate::object::Object::Array(_)));
     let mut color_key_samples = None;
+    // With `/SMaskInData` 1 or 2 and no `/SMask`, the JPEG 2000 opacity channel is the image's soft
+    // mask (ISO 32000-1 Table 89). A `/SMask` entry takes precedence. (GH#1902) ~keep
+    let soft_mask_in_data = is_jpx
+        && dict.get("SMask").is_none()
+        && matches!(
+            dict.get("SMaskInData").and_then(|obj| match (doc, obj.as_reference()) {
+                (Some(d), Some(r)) => d.load_object(r).ok().and_then(|o| o.as_integer()),
+                _ => obj.as_integer(),
+            }),
+            Some(1 | 2)
+        );
+    let mut jpx_opacity = None;
     let data = if is_jbig2 {
         decode_jbig2_image(xobject, obj_ref, dict, doc, width, height)?
     } else if is_jpx {
@@ -1423,6 +1447,7 @@ pub fn extract_image_from_xobject(
             width: jpx_width,
             height: jpx_height,
             palette: codestream_palette,
+            opacity,
         } = decode_jpx_image(
             xobject,
             obj_ref,
@@ -1438,6 +1463,7 @@ pub fn extract_image_from_xobject(
         // sized to the codestream -- matches the dimensions `PdfImage` reports. ~keep
         width = jpx_width;
         height = jpx_height;
+        jpx_opacity = opacity;
         // An `/Indexed` image decodes to one index byte per pixel, looked up in the
         // dictionary's palette exactly as any other codec's index stream is below. (GH#1885)
         // An image with no `/Indexed` whose codestream carries its own palette is looked up in
@@ -1663,6 +1689,7 @@ pub fn extract_image_from_xobject(
         image.set_raw_indexed_samples(indices);
     }
     image.color_key_samples = color_key_samples;
+    image.soft_mask_in_data = jpx_opacity.filter(|_| soft_mask_in_data);
 
     // Attach the ICC profile if we found one — prefer the direct ICCBased
     // profile, then fall back to an Indexed base's profile so the CMM has
@@ -3068,6 +3095,7 @@ fn decode_jpx_image(
             width: declared_width,
             height: declared_height,
             palette: None,
+            opacity: None,
         });
     }
     if let Some(palette) = codestream_palette_resolution(&codestream, color_space, color_space_is_placeholder) {
@@ -3079,6 +3107,7 @@ fn decode_jpx_image(
             width: declared_width,
             height: declared_height,
             palette: Some(palette),
+            opacity: None,
         });
     }
     // ISO 32000-1 §7.4.9 makes the XObject's `/ColorSpace` authoritative over the codestream, and
@@ -3141,16 +3170,18 @@ fn decode_jpx_image(
         width: img.width,
         height: img.height,
         palette: None,
+        opacity: img.opacity,
     })
 }
 
-/// A decoded `/JPXDecode` image: its samples, the codestream's own size, and the codestream's
-/// palette when the samples are indices into it.
+/// A decoded `/JPXDecode` image: its samples, the codestream's own size, the codestream's
+/// palette when the samples are indices into it, and its opacity channel when it carries one.
 struct JpxDecoded {
     data: ImageData,
     width: u32,
     height: u32,
     palette: Option<IndexedResolution>,
+    opacity: Option<Vec<u8>>,
 }
 
 /// The codestream's own `pclr` palette as an [`IndexedResolution`], when the image dictionary

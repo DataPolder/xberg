@@ -3895,6 +3895,18 @@ impl PageRenderer {
             }
         }
 
+        // The extractor keeps the opacity channel only when the image has no /SMask, so the
+        // two soft masks never both apply. ~keep
+        if let Some(opacity) = pdf_image.soft_mask_in_data() {
+            if opacity.len() == rgba_image.width() as usize * rgba_image.height() as usize {
+                for (pixel, &alpha) in rgba_image.pixels_mut().zip(opacity) {
+                    pixel[3] = ((u32::from(pixel[3]) * u32::from(alpha)) / 255) as u8;
+                }
+            } else {
+                tracing::warn!("Ignoring /SMaskInData: the opacity channel does not match the image size");
+            }
+        }
+
         // A tiny_skia pixmap holds premultiplied RGBA, and the decoded image and every mask
         // applied above are straight alpha. Unconverted, a transparent pixel keeps its colour and
         // adds it to the page under it. ~keep

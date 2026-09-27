@@ -29,6 +29,7 @@ impl super::StreamDecoder for JpxDecoder {
 }
 
 /// A decoded JPEG 2000 image: interleaved 8-bit samples plus component count.
+#[non_exhaustive]
 pub struct JpxImage {
     /// `width * height * num_components` bytes, component-interleaved (row-major).
     pub samples: Vec<u8>,
@@ -39,6 +40,9 @@ pub struct JpxImage {
     /// The codestream's own image height (`Ysiz - YOsiz`), authoritative over `/Height` for the
     /// same reason as `width`. ~keep
     pub height: u32,
+    /// The codestream's opacity channel, one 8-bit sample per pixel, when it carries one. It is
+    /// not part of `samples`. A PDF uses it only when the image dictionary sets `/SMaskInData`.
+    pub opacity: Option<Vec<u8>>,
 }
 
 /// Decode a JP2/J2K codestream to interleaved 8-bit-per-component samples.
@@ -279,7 +283,16 @@ pub fn decode_jpx(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxIm
     // decoder's own interleave. ~keep
     if comps.iter().all(|c| c.samples().len() == npix) {
         let mut samples = decoded.data_u8();
+        let mut opacity = None;
         if has_alpha {
+            opacity = Some(
+                samples
+                    .iter()
+                    .skip(num_components - 1)
+                    .step_by(num_components)
+                    .copied()
+                    .collect(),
+            );
             samples = drop_last_channel(&samples, num_components);
         }
         return Ok(JpxImage {
@@ -287,6 +300,7 @@ pub fn decode_jpx(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxIm
             num_components: colour_components as u8,
             width,
             height,
+            opacity,
         });
     }
 
@@ -417,6 +431,7 @@ fn decode_subsampled(
         num_components: colour_components as u8,
         width,
         height,
+        opacity: planes.get(colour_components).cloned(),
     })
 }
 
