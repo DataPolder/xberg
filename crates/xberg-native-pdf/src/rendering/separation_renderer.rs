@@ -2789,7 +2789,7 @@ fn paint_image_to_plates(
                 pixmaps,
                 dict,
                 &indexed.samples,
-                indexed.base_fmt.bytes_per_pixel(),
+                indexed.components,
                 indexed.width as usize,
                 indexed.height as usize,
                 // An Indexed image's own /Decode remaps its INDEX values

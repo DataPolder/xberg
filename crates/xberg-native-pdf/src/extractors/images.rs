@@ -1767,6 +1767,9 @@ pub(crate) fn resolve_icc_profile_from_obj(
 /// when the base is `ICCBased`.
 pub(crate) struct IndexedResolution {
     pub base_fmt: PixelFormat,
+    /// The bytes in each palette entry: the base's component count, which for a `/DeviceN` base is
+    /// its colorant count rather than the four `base_fmt` holds. (GH#1913) ~keep
+    pub components: usize,
     pub palette: Vec<u8>,
     /// `None` for device-dependent bases or bases we already folded
     /// colourimetrically (e.g. Lab, whose palette is rewritten to RGB
@@ -1778,7 +1781,7 @@ impl IndexedResolution {
     /// The last index the palette holds an entry for: `hival`, or lower when the lookup is short.
     /// The expander paints any index past it black.
     fn highest_index(&self) -> u8 {
-        let entries = self.palette.len() / self.base_fmt.bytes_per_pixel();
+        let entries = self.palette.len() / self.components;
         u8::try_from(entries.saturating_sub(1)).unwrap_or(u8::MAX)
     }
 }
@@ -1803,7 +1806,7 @@ fn resolve_indexed_palette(
 
     let base = resolve_indexed_base(doc, arr)?;
     let hival = resolve_indexed_hival(doc, arr)?;
-    let n = base.base_fmt.bytes_per_pixel();
+    let n = devicen_ink_count(&base.base_obj).unwrap_or_else(|| base.base_fmt.bytes_per_pixel());
     let Some(palette_bytes) = resolve_indexed_palette_bytes(doc, arr, hival, n)? else {
         return Ok(None);
     };
@@ -1819,6 +1822,7 @@ fn resolve_indexed_palette(
         // Lab palettes are now RGB; no base ICC profile to carry through. ~keep
         return Ok(Some(IndexedResolution {
             base_fmt: PixelFormat::RGB,
+            components: 3,
             palette: rgb_palette,
             base_profile: None,
         }));
@@ -1826,6 +1830,7 @@ fn resolve_indexed_palette(
 
     Ok(Some(IndexedResolution {
         base_fmt: base.base_fmt,
+        components: n,
         palette: palette_bytes,
         base_profile: base.base_profile,
     }))
@@ -1996,6 +2001,7 @@ fn expand_indexed_to_rgb(
         raw,
         palette,
         base_fmt,
+        components: base_fmt.bytes_per_pixel(),
         width,
         height,
         bpc,
@@ -2012,6 +2018,8 @@ struct IndexedExpandParams<'a> {
     raw: &'a [u8],
     palette: &'a [u8],
     base_fmt: PixelFormat,
+    /// Bytes per palette entry; see [`IndexedResolution::components`].
+    components: usize,
     width: u32,
     height: u32,
     bpc: u8,
@@ -2036,6 +2044,7 @@ fn expand_indexed_image(
         raw,
         palette: &ir.palette,
         base_fmt: ir.base_fmt,
+        components: ir.components,
         width,
         height,
         bpc,
@@ -2064,7 +2073,7 @@ fn expand_indexed_to_rgb_with_transform(params: IndexedExpandParams<'_>) -> Resu
 
     let w = params.width as usize;
     let h = params.height as usize;
-    let n = params.base_fmt.bytes_per_pixel();
+    let n = params.components;
     let (bytes_per_row, output_bytes) = indexed_expand_geometry(w, h, bpc, 3)?;
     validate_indexed_input_len(params.raw, bytes_per_row, h)?;
 
@@ -2214,10 +2223,10 @@ fn decode_indexed_pixels(
                     out.push(g);
                 }
                 PixelFormat::CMYK => {
-                    let c = params.palette[off];
-                    let m = params.palette[off + 1];
-                    let y_c = params.palette[off + 2];
-                    let k = params.palette[off + 3];
+                    // A `/DeviceN` entry with other than four colorants is read as CMYK from its
+                    // first four, a missing one taken as no ink. (GH#1913) ~keep
+                    let ink = |i: usize| if i < n { params.palette[off + i] } else { 0 };
+                    let (c, m, y_c, k) = (ink(0), ink(1), ink(2), ink(3));
                     let [r, g, b] = if let Some(t) = params.transform {
                         t.convert_cmyk_pixel(c, m, y_c, k)
                     } else {
@@ -2272,12 +2281,12 @@ fn unpack_indexed_indices(raw: &[u8], width: u32, height: u32, bpc: u8) -> Resul
 /// misattribute a CMYK/Separation/DeviceN base's ink if handed to plate
 /// routing directly (GH#1898). Shares bpc validation, row geometry, and
 /// out-of-range handling with [`expand_indexed_to_rgb_with_transform`]; the
-/// only difference is the per-pixel output width (`base_fmt.bytes_per_pixel()`
-/// instead of a fixed 3) and that the looked-up bytes are copied verbatim.
+/// only difference is the per-pixel output width (`components`, the bytes in
+/// one palette entry, instead of a fixed 3) and that the looked-up bytes are copied verbatim.
 pub(crate) fn expand_indexed_to_base_samples(
     raw: &[u8],
     palette: &[u8],
-    base_fmt: PixelFormat,
+    components: usize,
     width: u32,
     height: u32,
     bpc: u8,
@@ -2290,7 +2299,7 @@ pub(crate) fn expand_indexed_to_base_samples(
     }
     let w = width as usize;
     let h = height as usize;
-    let n = base_fmt.bytes_per_pixel();
+    let n = components;
     let (bytes_per_row, output_bytes) = indexed_expand_geometry(w, h, bpc, n)?;
     validate_indexed_input_len(raw, bytes_per_row, h)?;
 
@@ -2322,7 +2331,8 @@ pub(crate) fn expand_indexed_to_base_samples(
 /// screen.
 pub(crate) struct IndexedBaseSamples {
     pub samples: Vec<u8>,
-    pub base_fmt: PixelFormat,
+    /// The bytes per pixel in `samples`, one per base component. (GH#1913) ~keep
+    pub components: usize,
     pub width: u32,
     pub height: u32,
 }
@@ -2387,10 +2397,10 @@ pub(crate) fn decode_indexed_image_in_base_space(
         let ImageData::Raw { pixels: indices, .. } = data else {
             return Ok(None);
         };
-        let samples = expand_indexed_to_base_samples(&indices, &ir.palette, ir.base_fmt, width, height, 8)?;
+        let samples = expand_indexed_to_base_samples(&indices, &ir.palette, ir.components, width, height, 8)?;
         return Ok(Some(IndexedBaseSamples {
             samples,
-            base_fmt: ir.base_fmt,
+            components: ir.components,
             width,
             height,
         }));
@@ -2416,14 +2426,14 @@ pub(crate) fn decode_indexed_image_in_base_space(
     let samples = expand_indexed_to_base_samples(
         &decoded_data,
         &ir.palette,
-        ir.base_fmt,
+        ir.components,
         width,
         height,
         bits_per_component,
     )?;
     Ok(Some(IndexedBaseSamples {
         samples,
-        base_fmt: ir.base_fmt,
+        components: ir.components,
         width,
         height,
     }))
@@ -3242,6 +3252,7 @@ fn codestream_palette_resolution(
     }
     Some(IndexedResolution {
         base_fmt,
+        components: usize::from(palette.columns),
         palette: palette.entries,
         base_profile: None,
     })
@@ -3563,6 +3574,71 @@ mod indexed_tests {
         let raw = vec![0, 1, 2];
         let out = expand_indexed_to_rgb(&raw, &palette, fmt, 3, 1, 8).unwrap();
         assert_eq!(out, vec![10, 20, 30, 40, 50, 60, 0, 0, 0]);
+    }
+
+    /// GH#1913: a palette over a `/DeviceN` base holds one byte per colorant in each entry, and the
+    /// composite reads a two-colorant entry as CMYK with no ink in the missing two.
+    #[test]
+    fn a_devicen_palette_is_read_one_byte_per_colorant() {
+        use crate::object::Object;
+        let cs = Object::Array(vec![
+            Object::Name("Indexed".to_string()),
+            Object::Array(vec![
+                Object::Name("DeviceN".to_string()),
+                Object::Array(vec![
+                    Object::Name("Spot-A".to_string()),
+                    Object::Name("Spot-B".to_string()),
+                ]),
+                Object::Name("DeviceCMYK".to_string()),
+                Object::Null,
+            ]),
+            Object::Integer(1),
+            Object::String(vec![0xFF, 0x00, 0x00, 0xFF]),
+        ]);
+        let ir = resolve_indexed_palette(None, &cs).unwrap().unwrap();
+        assert_eq!(ir.components, 2, "one byte per colorant");
+        assert_eq!(ir.highest_index(), 1, "two entries");
+        let rgb = expand_indexed_image(&[0, 1], &ir, 2, 1, 8, crate::color::RenderingIntent::default()).unwrap();
+        assert_eq!(
+            rgb[..3],
+            cmyk_pixel_to_rgb(0xFF, 0, 0, 0),
+            "entry 0 is the first colorant"
+        );
+        assert_eq!(
+            rgb[3..],
+            cmyk_pixel_to_rgb(0, 0xFF, 0, 0),
+            "entry 1 is the second colorant"
+        );
+        let base = expand_indexed_to_base_samples(&[0, 1], &ir.palette, ir.components, 2, 1, 8).unwrap();
+        assert_eq!(
+            base,
+            vec![0xFF, 0x00, 0x00, 0xFF],
+            "the plates see each entry's own two bytes"
+        );
+    }
+
+    /// A palette over a `/Lab` base is converted to RGB when it is resolved, and the expander steps
+    /// through the converted palette three bytes per entry.
+    #[test]
+    fn a_lab_palette_is_stepped_as_rgb_after_conversion() {
+        use crate::object::Object;
+        let (black, white) = ([0u8, 128, 128], [255u8, 128, 128]);
+        let cs = Object::Array(vec![
+            Object::Name("Indexed".to_string()),
+            Object::Array(vec![
+                Object::Name("Lab".to_string()),
+                Object::Dictionary(std::collections::HashMap::new()),
+            ]),
+            Object::Integer(1),
+            Object::String([black, white].concat()),
+        ]);
+        let ir = resolve_indexed_palette(None, &cs).unwrap().unwrap();
+        assert_eq!(ir.highest_index(), 1, "two entries");
+        let d65 = [0.9505, 1.0, 1.0890];
+        let rgb = expand_indexed_image(&[0, 1], &ir, 2, 1, 8, crate::color::RenderingIntent::default()).unwrap();
+        assert_eq!(rgb[..3], lab_palette_to_rgb(&black, d65)[..], "entry 0 is Lab black");
+        assert_eq!(rgb[3..], lab_palette_to_rgb(&white, d65)[..], "entry 1 is Lab white");
+        assert_ne!(rgb[..3], rgb[3..], "the two entries differ");
     }
 
     #[test]

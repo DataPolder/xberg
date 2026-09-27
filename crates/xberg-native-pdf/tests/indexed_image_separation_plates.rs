@@ -191,3 +191,21 @@ fn an_indexed_cmyk_jpeg2000_image_paints_the_process_plates() {
         "the paper paints the magenta plate, got {paper} against {text}"
     );
 }
+
+#[test]
+fn an_indexed_two_colorant_devicen_image_paints_its_colorant_plates() {
+    // Each palette entry holds one byte per colorant, two here, not the four of a CMYK entry. (GH#1913)
+    let resources = "/CS0 [/Indexed [/DeviceN [/Spot-A /Spot-B] /DeviceCMYK 6 0 R] 1 <FF00 00FF>]";
+    let program = "{pop pop 0 0 0 0}";
+    let tint = format!(
+        "<< /FunctionType 4 /Domain [0 1 0 1] /Range [0 1 0 1 0 1 0 1] /Length {} >>\nstream\n{program}\nendstream",
+        program.len()
+    );
+    let plates = plates(build(&two_indices("/CS0"), resources, &[&tint]));
+    let (a_left, a_right) = left_and_right(&plates, "Spot-A");
+    let (b_left, b_right) = left_and_right(&plates, "Spot-B");
+    assert!(a_left > 200, "entry 0 paints the first colorant, got {a_left}");
+    assert_eq!(a_right, 0, "entry 1 leaves the first colorant empty");
+    assert_eq!(b_left, 0, "entry 0 leaves the second colorant empty");
+    assert!(b_right > 200, "entry 1 paints the second colorant, got {b_right}");
+}
