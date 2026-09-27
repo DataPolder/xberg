@@ -3766,11 +3766,19 @@ pub(crate) fn image_handle_from_xobject<'doc>(
 
     // Resolve the reported colour space via the shared helper: resource-name →
     // map entry, one indirect-ref hop, and `[/Indexed base ...]` (§8.6.6.3) →
-    // `Indexed` + de-indexed base. Default to DeviceRGB when `/ColorSpace` is
-    // absent. ~keep
+    // `Indexed` + de-indexed base. `/ColorSpace` is forbidden on an `/ImageMask`
+    // (§8.9.6.2), so route the same placeholder `resolve_image_xobject_metadata`
+    // uses through the helper when it is absent -- GH#1825: a plain DeviceRGB
+    // default here disagreed with the DeviceGray the extraction path reports for
+    // the same image. ~keep
+    let missing_color_space_default = if is_image_mask {
+        crate::object::Object::Name("DeviceGray".to_string())
+    } else {
+        crate::object::Object::Name("DeviceRGB".to_string())
+    };
     let (color_space, indexed_base) = match xobject_dict.get("ColorSpace") {
         Some(entry) => resolve_color_space_for_handle(entry, color_space_resources, Some(doc)),
-        None => (ColorSpace::DeviceRGB, None),
+        None => resolve_color_space_for_handle(&missing_color_space_default, color_space_resources, Some(doc)),
     };
 
     // Compute bbox and rotation in Phase 1 while the CTM is in scope. ~keep
@@ -3849,10 +3857,21 @@ pub(crate) fn image_handle_from_inline<'doc>(
     // Resolve the reported colour space via the same shared helper as the
     // XObject path so the two agree. For inline images a resource-name
     // `/ColorSpace` into `/Resources/ColorSpace` is explicitly legal (§8.9.7),
-    // and `[/Indexed base ...]` (§8.6.6.3) reports `Indexed` + de-indexed base. ~keep
+    // and `[/Indexed base ...]` (§8.6.6.3) reports `Indexed` + de-indexed base.
+    // `/ColorSpace` is forbidden on an `/ImageMask` (§8.9.6.2) just as it is for
+    // an XObject mask, so the missing-entry default mirrors that site's
+    // GH#1825 fix rather than defaulting to DeviceRGB unconditionally. ~keep
+    let is_image_mask = expanded
+        .get("ImageMask")
+        .is_some_and(|value| matches!(value, Object::Boolean(true)));
+    let missing_color_space_default = if is_image_mask {
+        Object::Name("DeviceGray".to_string())
+    } else {
+        Object::Name("DeviceRGB".to_string())
+    };
     let (color_space, indexed_base) = match expanded.get("ColorSpace") {
         Some(entry) => resolve_color_space_for_handle(entry, color_space_resources, Some(doc)),
-        None => (ColorSpace::DeviceRGB, None),
+        None => resolve_color_space_for_handle(&missing_color_space_default, color_space_resources, Some(doc)),
     };
 
     // Compute bbox and rotation in Phase 1 while the CTM is in scope. ~keep
