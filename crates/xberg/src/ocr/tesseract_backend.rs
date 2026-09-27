@@ -231,11 +231,7 @@ impl TesseractBackend {
     /// this probe from resolving a directory it would first have to download into: a caller asking
     /// about a language this machine does not have gets the historical English-datapath
     /// enumeration, which answers "no" without touching the network. GH#1891. ~keep
-    fn probe_languages(
-        languages: &[String],
-        override_path: Option<&Path>,
-        tessdata_env: &TessdataEnv,
-    ) -> Vec<String> {
+    fn probe_languages(languages: &[String], override_path: Option<&Path>, tessdata_env: &TessdataEnv) -> Vec<String> {
         let resolvable = !languages.is_empty()
             && crate::ocr::processor::validation::existing_tessdata_dir_for(languages, override_path, tessdata_env)
                 .is_some();
@@ -283,15 +279,12 @@ impl TesseractBackend {
         // rejected a `tessdata_path` holding only the caller's own language, fell through to
         // another directory, and denied a language every real job with that config loads. See
         // GH#1891. `probe_languages` is what keeps the fallback from downloading. ~keep
-        let tessdata_path = crate::ocr::processor::validation::resolve_tessdata_path_in(
-            probe_languages,
-            override_path,
-            tessdata_env,
-        )
-        .map_err(|e| crate::XbergError::Ocr {
-            message: format!("Failed to resolve tessdata path for language query: {}", e),
-            source: Some(Box::new(e)),
-        })?;
+        let tessdata_path =
+            crate::ocr::processor::validation::resolve_tessdata_path_in(probe_languages, override_path, tessdata_env)
+                .map_err(|e| crate::XbergError::Ocr {
+                message: format!("Failed to resolve tessdata path for language query: {}", e),
+                source: Some(Box::new(e)),
+            })?;
 
         // ~keep Initialize with a language the resolved directory is known to hold, not a
         // hardcoded `eng`: `resolve_tessdata_path_in` guarantees that only for the languages it
@@ -305,10 +298,11 @@ impl TesseractBackend {
             message: format!("Failed to allocate Tesseract engine: {}", e),
             source: Some(Box::new(e)),
         })?;
-        api.init(&tessdata_path, init_language).map_err(|e| crate::XbergError::Ocr {
-            message: format!("Failed to initialize Tesseract for language query: {}", e),
-            source: Some(Box::new(e)),
-        })?;
+        api.init(&tessdata_path, init_language)
+            .map_err(|e| crate::XbergError::Ocr {
+                message: format!("Failed to initialize Tesseract for language query: {}", e),
+                source: Some(Box::new(e)),
+            })?;
 
         api.get_available_languages().map_err(|e| crate::XbergError::Ocr {
             message: format!("Failed to query available Tesseract languages: {}", e),
@@ -968,8 +962,7 @@ mod tests {
         let prefix_dir = root.path().join("prefix");
         std::fs::create_dir_all(&override_dir).expect("must create the override directory");
         std::fs::create_dir_all(&prefix_dir).expect("must create the prefix directory");
-        std::fs::write(override_dir.join("deu.traineddata"), b"not-a-real-model")
-            .expect("must write deu.traineddata");
+        std::fs::write(override_dir.join("deu.traineddata"), b"not-a-real-model").expect("must write deu.traineddata");
         std::fs::write(prefix_dir.join("eng.traineddata"), b"not-a-real-model").expect("must write eng.traineddata");
 
         let tessdata_env = TessdataEnv {

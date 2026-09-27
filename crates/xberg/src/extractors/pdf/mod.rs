@@ -6195,7 +6195,8 @@ mod tests {
                     .iter()
                     .any(|warning| warning.message.contains("do not read as any real detectable language"));
                 assert_eq!(
-                    warned, !branch_runs,
+                    warned,
+                    !branch_runs,
                     "the not-routed-to-OCR warning must be emitted exactly when the automatic OCR \
                      branch will not run, and suppressed exactly when it will (ocr_block: {}, \
                      ocr_near_empty_fallback: {near_empty_fallback:?}, branch_runs: {branch_runs})",
