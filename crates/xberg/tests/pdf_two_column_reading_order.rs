@@ -5,7 +5,12 @@
 mod helpers;
 use helpers::extract_bytes_document_blocking;
 
-use xberg::core::config::{ExtractionConfig, OutputFormat, PdfConfig};
+use xberg::core::config::{ExtractionConfig, OutputFormat};
+// Only the `layout-detection`-gated test builds a `PdfConfig`, so the import carries the same
+// gate: a helper's cfg must equal the union of its users' cfgs, or a narrow feature leg fails on
+// `unused_imports` under `-D warnings`. ~keep
+#[cfg(feature = "layout-detection")]
+use xberg::core::config::PdfConfig;
 
 const ISSUE_1484_PDF: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
