@@ -2729,13 +2729,13 @@ fn decode_jpx_image(
         xobject.decode_stream_data()?
     };
 
-    let img = crate::decoders::jpx::decode_jpx(&codestream)?;
-
-    // The decoded sample layout is fixed by the codestream's component count
-    // (ISO 32000-1 §7.4.9: a JPX stream carries its own colour space, which
-    // agrees with the component count). The XObject's /ColorSpace is reserved
-    // for future disambiguation (e.g. SMask/alpha handling). ~keep
-    let _ = color_space;
+    // ISO 32000-1 §7.4.9 makes the XObject's `/ColorSpace` authoritative over the codestream, and
+    // it is load-bearing rather than informational: for a BARE codestream hayro-jpeg2000 infers
+    // `Srgb` from the component count and then treats a 4th channel as alpha, so a CMYK image
+    // reports 3 colour components and loses its K plane unless the declared count contradicts it
+    // (GH#1850). `Pattern` reports 0 components and is filtered out as meaningless here. ~keep
+    let declared_components = u8::try_from(color_space.components()).ok().filter(|&n| n > 0);
+    let img = crate::decoders::jpx::decode_jpx_with_declared_components(&codestream, declared_components)?;
     let format = match img.num_components {
         1 => PixelFormat::Grayscale,
         3 => PixelFormat::RGB,

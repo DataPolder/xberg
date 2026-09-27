@@ -43,6 +43,16 @@ pub struct JpxImage {
 /// the common case for PDF image XObjects; a subsampled component is rejected with a
 /// typed error rather than producing misaligned output.
 pub fn decode_jpx(bytes: &[u8]) -> Result<JpxImage> {
+    decode_jpx_with_declared_components(bytes, None)
+}
+
+/// As [`decode_jpx`], but told how many colour components the image dictionary's
+/// `/ColorSpace` implies, when it named one.
+///
+/// ISO 32000-1 §7.4.9 makes that entry authoritative over anything in the JPEG 2000 data,
+/// and it is the only way to tell a 4-component CMYK codestream from an RGBA one. See the
+/// alpha decision below for why that matters. ~keep
+pub fn decode_jpx_with_declared_components(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxImage> {
     use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
 
     let image = Image::new(bytes, &DecodeSettings::default())
@@ -68,11 +78,24 @@ pub fn decode_jpx(bytes: &[u8]) -> Result<JpxImage> {
     // ~keep An alpha channel is a component like any other in the codestream, so counting
     // components raw reports a colour space the image does not have: RGBA reads as four
     // components and was mapped to DeviceCMYK, and grey-with-alpha reads as two and was
-    // rejected outright, dropping the image (GH#1850). `Image::has_alpha` is the codestream's
-    // own answer, so no channel-count guessing is needed. The alpha is dropped rather than
+    // rejected outright, dropping the image (GH#1850). The alpha is dropped rather than
     // returned as a soft mask: the caller maps `colour_components` straight onto a
     // `PixelFormat`, and carrying transparency through to an `/SMask` is a separate feature.
-    let has_alpha = image.has_alpha() && num_components > 1;
+    //
+    // `Image::has_alpha()` is NOT the codestream's own answer for a BARE codestream, which an
+    // earlier version of this comment claimed. `hayro_jpeg2000::j2c::parse` synthesises a colour
+    // space for a bare stream by component count alone -- Greyscale below 3, otherwise `Srgb`,
+    // ignoring `Csiz` -- and `resolve_alpha_and_color_space` then reconciles the 4-vs-3 mismatch
+    // under the default `strict: false` by taking the repair arm
+    // `actual == num_channels + 1 && !has_alpha` and declaring the fourth channel alpha. That arm
+    // is tested BEFORE the branch that would correctly infer CMYK at 4 components, so it shadows
+    // it. A bare CMYK codestream therefore reports RGB + alpha, and dropping "alpha" discarded the
+    // K plane: CMY painted as RGB on the render path, and dropped from every plate on the
+    // separation path, silently. `declared_components` is the only signal that separates the two,
+    // and §7.4.9 makes it authoritative.
+    let has_alpha = image.has_alpha()
+        && num_components > 1
+        && declared_components.is_none_or(|declared| usize::from(declared) != num_components);
     let colour_components = if has_alpha { num_components - 1 } else { num_components };
 
     // Fast path: every component is full-resolution (the common case) → use the
@@ -159,7 +182,7 @@ fn upsample_nearest_u8(sub: &[f32], sw: usize, sh: usize, fw: usize, fh: usize) 
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_jpx, upsample_nearest_u8};
+    use super::{decode_jpx, decode_jpx_with_declared_components, upsample_nearest_u8};
 
     /// Grayscale JP2 codestream from the minimal repro (816x1056 DeviceGray).
     const SAMPLE_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/sample_gray.jp2");
@@ -173,6 +196,53 @@ mod tests {
     const RGBA_J2K: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1850_rgba.j2k");
     /// Greyscale plus alpha: two components, which the unfixed decoder rejected outright.
     const GREY_ALPHA_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1850_grey_alpha.jp2");
+    /// A BARE 4-component CMYK codestream, 16x16, no JP2 container and so no `colr` box to
+    /// declare CMYK. This is the shape hayro-jpeg2000 misreads as RGB + alpha. ~keep
+    const CMYK_QUADRANTS_J2K: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1855_cmyk_quadrants.j2k");
+
+    /// GH#1850: a bare CMYK codestream must keep its K plane when the image dictionary declares
+    /// four components.
+    ///
+    /// The first assertion is a NEGATIVE CONTROL that pins the upstream misread rather than a
+    /// behaviour we want: with no declared count, hayro-jpeg2000 infers `Srgb` from the component
+    /// count, takes its non-strict `actual == num_channels + 1 && !has_alpha` repair arm, and calls
+    /// the fourth channel alpha -- so we report 3 and drop K. If that first assertion ever starts
+    /// failing, upstream has fixed it and this whole workaround can go. ~keep
+    #[test]
+    fn a_bare_cmyk_codestream_keeps_four_components_when_the_dictionary_declares_four() {
+        let misread = decode_jpx(CMYK_QUADRANTS_J2K).expect("bare CMYK codestream must decode");
+        assert_eq!(
+            misread.num_components, 3,
+            "negative control: undeclared, hayro reports RGB+alpha and the K plane is dropped"
+        );
+
+        let correct = decode_jpx_with_declared_components(CMYK_QUADRANTS_J2K, Some(4))
+            .expect("bare CMYK codestream must decode with a declared count");
+        assert_eq!(
+            correct.num_components, 4,
+            "a declared 4 must suppress the phantom alpha and keep all four planes"
+        );
+        assert_eq!(
+            correct.samples.len(),
+            16 * 16 * 4,
+            "all four planes must be present, 16x16 image"
+        );
+    }
+
+    /// A declared count that does NOT match the component count must leave a real alpha channel
+    /// alone: an RGBA codestream under `/DeviceRGB` declares 3 against 4 actual, so the mismatch
+    /// arm keeps the existing drop. ~keep
+    #[test]
+    fn a_declared_count_that_disagrees_does_not_suppress_a_real_alpha_channel() {
+        for (label, bytes) in [("jp2", RGBA_JP2), ("j2k", RGBA_J2K)] {
+            let img = decode_jpx_with_declared_components(bytes, Some(3))
+                .unwrap_or_else(|e| panic!("{label} must decode: {e:?}"));
+            assert_eq!(
+                img.num_components, 3,
+                "{label}: a declared 3 against 4 actual components must still drop the alpha"
+            );
+        }
+    }
 
     /// GH#1850: an alpha channel is a component like any other in the codestream, so counting
     /// components raw described a colour space the image does not have. Four components were
