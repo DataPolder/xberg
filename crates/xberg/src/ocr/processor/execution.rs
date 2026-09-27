@@ -749,31 +749,100 @@ fn flatten_hocr_elements_to_text(elements: &[crate::types::internal::InternalEle
 /// paragraph level, using the paragraph's own bbox centre, so `internal_document` agrees
 /// with `content` regardless of `output_format` (the string rebuild above is skipped for
 /// Plain/Djot output, but the duplication it was masking is not). ~keep
+///
+/// A table only claims its region when it kept the region's words — see
+/// [`table_retains_region_words`] (xberg-io/xberg#1884).
 fn filter_elements_covered_by_tables(
     elements: Vec<crate::types::internal::InternalElement>,
     tables: &[OcrTable],
 ) -> Vec<crate::types::internal::InternalElement> {
-    let table_bboxes: Vec<_> = tables.iter().filter_map(|t| t.bounding_box.as_ref()).collect();
-    if table_bboxes.is_empty() {
+    let mut claiming_bboxes: Vec<&OcrTableBoundingBox> = Vec::new();
+    for table in tables {
+        let Some(bbox) = table.bounding_box.as_ref() else {
+            continue;
+        };
+        if table_retains_region_words(&elements, bbox, &table.cells) {
+            claiming_bboxes.push(bbox);
+        } else {
+            tracing::warn!(
+                target: "xberg::ocr::tables",
+                left = bbox.left,
+                top = bbox.top,
+                right = bbox.right,
+                bottom = bbox.bottom,
+                table_rows = table.cells.len(),
+                "reconstructed table dropped words from its region; keeping the region's lines in the page document"
+            );
+        }
+    }
+    if claiming_bboxes.is_empty() {
         return elements;
     }
 
     elements
         .into_iter()
         .filter(|element| {
-            let Some(bbox) = element.bbox.as_ref() else {
-                return true;
-            };
-            let center_x = (bbox.x0 + bbox.x1) / 2.0;
-            let center_y = (bbox.y0 + bbox.y1) / 2.0;
-            !table_bboxes.iter().any(|table_bbox| {
-                center_x >= table_bbox.left as f64
-                    && center_x <= table_bbox.right as f64
-                    && center_y >= table_bbox.top as f64
-                    && center_y <= table_bbox.bottom as f64
-            })
+            !claiming_bboxes
+                .iter()
+                .any(|table_bbox| element_center_within_table(element, table_bbox))
         })
         .collect()
+}
+
+/// Whether `element`'s bbox centre lies inside `table_bbox`.
+///
+/// Shared by [`filter_elements_covered_by_tables`] and [`table_retains_region_words`] so a table is
+/// judged for word retention against exactly the elements it would remove — two copies of this test
+/// could disagree and make the retention check answer about a different set of lines than the filter
+/// then deletes. An element with no geometry is not covered by any table. ~keep
+fn element_center_within_table(
+    element: &crate::types::internal::InternalElement,
+    table_bbox: &OcrTableBoundingBox,
+) -> bool {
+    let Some(bbox) = element.bbox.as_ref() else {
+        return false;
+    };
+    let center_x = (bbox.x0 + bbox.x1) / 2.0;
+    let center_y = (bbox.y0 + bbox.y1) / 2.0;
+    center_x >= table_bbox.left as f64
+        && center_x <= table_bbox.right as f64
+        && center_y >= table_bbox.top as f64
+        && center_y <= table_bbox.bottom as f64
+}
+
+/// Whether `cells` still carries the words of the elements `table_bbox` covers
+/// (xberg-io/xberg#1884).
+///
+/// Reconstruction can lose a region's words outright: a wrapped label splits across two rows, a
+/// value glues onto its label, the interior cells of a sparse row vanish (`73 | | | |` for a line
+/// that read `73 4 4 4 4 -`). Removing the region's lines on the strength of a table that no longer
+/// carries them deletes those words from the page entirely — they are in neither the paragraphs nor
+/// the table. When this returns false the lines stay and the table is still emitted in `tables`, so
+/// the structured form is never lost either; the cost is the #1571 duplication for that one region,
+/// which is strictly better than losing content.
+///
+/// Judged by [`should_adopt_table_rebuild`], the same absolute word-count rule the standalone-image
+/// rebuild uses (GH#1599), and against the table's non-empty cell tokens rather than its markdown,
+/// whose `|`/`---` syntax would pad the count. ~keep
+fn table_retains_region_words(
+    elements: &[crate::types::internal::InternalElement],
+    table_bbox: &OcrTableBoundingBox,
+    cells: &[Vec<String>],
+) -> bool {
+    let region_text = elements
+        .iter()
+        .filter(|element| element_center_within_table(element, table_bbox))
+        .map(|element| element.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cell_text = cells
+        .iter()
+        .flatten()
+        .map(|cell| cell.trim())
+        .filter(|cell| !cell.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    should_adopt_table_rebuild(&region_text, &cell_text)
 }
 
 /// Minimum confidence for accepting orientation detection results.
@@ -3319,9 +3388,16 @@ mod tests {
     }
 
     fn table_at(left: u32, top: u32, right: u32, bottom: u32) -> OcrTable {
+        table_at_with_cells(left, top, right, bottom, vec![vec!["cell".to_string()]])
+    }
+
+    /// A table at a bbox whose cells are given explicitly, because `filter_elements_covered_by_tables`
+    /// now decides per table whether its cells kept the covered lines' words (#1884), so the cells are
+    /// part of every case's input and not incidental filler. ~keep
+    fn table_at_with_cells(left: u32, top: u32, right: u32, bottom: u32, cells: Vec<Vec<String>>) -> OcrTable {
         OcrTable {
-            cells: vec![vec!["cell".to_string()]],
-            markdown: "| cell |".to_string(),
+            markdown: table_to_markdown(&cells),
+            cells,
             page_number: 1,
             bounding_box: Some(OcrTableBoundingBox {
                 left,
@@ -3332,13 +3408,18 @@ mod tests {
         }
     }
 
+    /// One row of cells from whitespace-separated text, for tables that must retain a paragraph's words.
+    fn cells_of(text: &str) -> Vec<Vec<String>> {
+        vec![text.split_whitespace().map(str::to_string).collect()]
+    }
+
     #[test]
     fn filter_elements_covered_by_tables_drops_paragraph_inside_table_bbox() {
         // A paragraph whose bbox is fully inside (so its centre is inside) a detected
         // table's bbox must be removed -- this is the #1571 duplication itself: the
         // paragraph's words are also the table's cells.
         let elements = vec![paragraph_with_bbox("Apple 50 10 00", 10.0, 10.0, 90.0, 30.0)];
-        let tables = vec![table_at(0, 0, 100, 100)];
+        let tables = vec![table_at_with_cells(0, 0, 100, 100, cells_of("Apple 50 10 00"))];
 
         let filtered = filter_elements_covered_by_tables(elements, &tables);
 
@@ -3357,7 +3438,7 @@ mod tests {
             paragraph_with_bbox("Vehicle Maintenance Guide", 10.0, 0.0, 90.0, 15.0),
             paragraph_with_bbox("Apple 50 10 00", 10.0, 50.0, 90.0, 70.0),
         ];
-        let tables = vec![table_at(0, 40, 100, 140)];
+        let tables = vec![table_at_with_cells(0, 40, 100, 140, cells_of("Apple 50 10 00"))];
 
         let filtered = filter_elements_covered_by_tables(elements, &tables);
 
@@ -3367,6 +3448,50 @@ mod tests {
             "only the paragraph centred inside the table bbox should be dropped"
         );
         assert_eq!(filtered[0].text, "Vehicle Maintenance Guide");
+    }
+
+    #[test]
+    fn filter_elements_covered_by_tables_keeps_lines_whose_words_the_table_dropped() {
+        // xberg-io/xberg#1884: reconstruction lost the interior cells of a sparse row -- the line
+        // read "73 4 4 4 4 -" and the table carries only "73". Removing the line would delete those
+        // five words from the page: they are in neither the paragraphs nor the table.
+        let elements = vec![paragraph_with_bbox("73 4 4 4 4 -", 10.0, 10.0, 90.0, 30.0)];
+        let sparse_row = vec![vec![
+            "73".to_string(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ]];
+        let tables = vec![table_at_with_cells(0, 0, 100, 100, sparse_row)];
+
+        let filtered = filter_elements_covered_by_tables(elements, &tables);
+
+        assert_eq!(
+            filtered.len(),
+            1,
+            "a table that dropped the region's words must not claim it"
+        );
+        assert_eq!(filtered[0].text, "73 4 4 4 4 -");
+    }
+
+    #[test]
+    fn filter_elements_covered_by_tables_claims_only_the_tables_that_retained_their_words() {
+        // The decision is per table, not per page (#1884): a faithful table still removes its own
+        // region's duplicate lines even when another table on the same page lost words.
+        let elements = vec![
+            paragraph_with_bbox("Apple 50 10 00", 10.0, 10.0, 90.0, 30.0),
+            paragraph_with_bbox("Pear 61 11 01", 10.0, 210.0, 90.0, 230.0),
+        ];
+        let tables = vec![
+            table_at_with_cells(0, 0, 100, 100, cells_of("Apple 50 10 00")),
+            table_at_with_cells(0, 200, 100, 300, cells_of("Pear")),
+        ];
+
+        let filtered = filter_elements_covered_by_tables(elements, &tables);
+
+        assert_eq!(filtered.len(), 1, "{filtered:?}");
+        assert_eq!(filtered[0].text, "Pear 61 11 01");
     }
 
     #[test]
