@@ -1551,6 +1551,22 @@ fn extract_elements_via_iterator(
 /// set `security_limits` explicitly (GH#1554: `load_image_for_ocr` previously hardcoded
 /// this default unconditionally, ignoring a caller's own configured, possibly higher,
 /// limit). ~keep
+/// A region's grid with the two cleanups that every reader of it depends on: the GH#1649
+/// leading section-caption row dropped, then disjoint right-aligned numeric columns merged.
+///
+/// Extracted because the blank-quantity retry path rebuilt the grid with a bare
+/// `reconstruct_table_with_columns` and silently discarded both, so any table that hit the
+/// retry got its caption row back in row 0 and its amount columns un-merged -- and left
+/// `column_positions` describing a grid that no longer existed. Both call sites must run all
+/// three steps or neither. ~keep
+fn reconstruct_cleaned_table(words: &[HocrWord], config: &TesseractConfig) -> (Vec<Vec<String>>, Vec<u32>) {
+    let (mut table, mut column_positions) =
+        reconstruct_table_with_columns(words, config.table_column_threshold, config.table_row_threshold_ratio);
+    drop_leading_caption_row(&mut table);
+    merge_disjoint_numeric_columns(&mut table, &mut column_positions, median_word_height(words));
+    (table, column_positions)
+}
+
 fn security_limits_for_ocr(
     tesseract_config: &TesseractConfig,
     extraction_config: Option<&ExtractionConfig>,
@@ -2155,15 +2171,7 @@ pub(super) fn perform_ocr(
                 .take(200)
                 .collect();
 
-            let (mut table, mut column_positions) = reconstruct_table_with_columns(
-                &region.words,
-                config.table_column_threshold,
-                config.table_row_threshold_ratio,
-            );
-            // A section caption sharing this region with the real header row (#1649) always sits
-            // in row 0, ahead of any right-aligned-amount column split, so drop it first. ~keep
-            drop_leading_caption_row(&mut table);
-            merge_disjoint_numeric_columns(&mut table, &mut column_positions, median_word_height(&region.words));
+            let (mut table, column_positions) = reconstruct_cleaned_table(&region.words, config);
             let retry_region = if let Some((quantity_column, blank_row)) = quantity_retry_column_index(&table) {
                 let row_positions = detect_rows(&region.words, config.table_row_threshold_ratio);
                 if row_positions.len() == table.len() {
@@ -2185,12 +2193,7 @@ pub(super) fn perform_ocr(
             let recovered = recover_blank_quantity_word(&api, config, retry_region.as_ref(), width, height);
             if let Some(recovered) = recovered {
                 region.push(recovered);
-                table = reconstruct_table_with_columns(
-                    &region.words,
-                    config.table_column_threshold,
-                    config.table_row_threshold_ratio,
-                )
-                .0;
+                table = reconstruct_cleaned_table(&region.words, config).0;
             }
 
             tracing::debug!(
