@@ -95,7 +95,7 @@ regex = "1.13"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11"
-skrifa = "0.46"                                                                             # capped by harfrust: skrifa 0.47 requires read-fonts ^0.44 while harfrust 0.13.3 still requires ^0.43.3, and text_rasterizer hands a harfrust FontRef to skrifa's OutlineFace, so the two must share one read-fonts. `cargo upgrade --incompatible` raises this and leaves the comment behind; re-pin it. Re-verified 2026-09-25 against the crates.io requirements of harfrust 0.13.3 (latest) and skrifa 0.47.0: still incompatible, 0.47 fails to compile (E0308) ~keep
+skrifa = "0.46"                                                                             # capped by harfrust, which is the binding constraint and not a preference: skrifa 0.47.0 requires read-fonts ^0.44.0 while harfrust 0.13.3 -- the LATEST harfrust -- requires ^0.43.3, and for a 0.x crate those carets cannot resolve to one version. text_rasterizer hands a harfrust `FontRef` to skrifa's `OutlineFace`, so the two must share a single read-fonts or the call is a type error (E0308 + E0599). `cargo upgrade --incompatible` raises this every time and leaves this comment behind; re-pin it. Re-verified 2026-09-27 against the crates.io index: harfrust has no release above 0.13.3, and every skrifa <= 0.46.2 asks for read-fonts ^0.43.x. Unblocks when harfrust ships a read-fonts 0.44 build. ~keep
 smallvec = "1.16"
 stringprep = "0.1"
 subsetter = { version = "0.2", default-features = false }                                  # drops the duplicate skrifa 0.42/read-fonts 0.39 stack ~keep

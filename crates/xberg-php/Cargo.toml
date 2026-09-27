@@ -68,9 +68,9 @@ xml = ["xberg/xml"]
 
 [dependencies]
 async-trait = "0.1"
-crawlberg = { default-features = false, version = "1.7.1" }
+crawlberg = { default-features = false, version = "1.8.0" }
 ext-php-rs = "0.15.15"
-html-to-markdown-rs = { default-features = false, version = "3.14" }
+html-to-markdown-rs = { default-features = false, version = "3.15" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
