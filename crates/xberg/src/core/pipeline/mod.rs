@@ -869,23 +869,56 @@ pub fn run_pipeline_sync(mut doc: InternalDocument, config: &ExtractionConfig) -
 ///
 /// The page count is read from the parse-time page inventory
 /// (`metadata.pages.total_count`) so it is available even when per-page content
-/// extraction is disabled; it falls back to the materialized `pages` length and
-/// finally `0` for inputs that are not page-addressable (plain text, etc.).
-/// Table and image counts are the lengths of the already-populated collections.
+/// extraction is disabled; it falls back to the materialized `pages` length, then to
+/// a format-specific page count that was captured independent of any page tracking
+/// (GH#1888: a scanned PDF extracted with OCR disabled and no `PageConfig` builds
+/// neither `metadata.pages` nor `pages` -- there is no text to assign page boundaries
+/// to -- even though `metadata.format`'s PDF page count was already read from the
+/// page tree up front), and finally `0` for inputs that are not page-addressable
+/// (plain text, etc.). Table and image counts are the lengths of the
+/// already-populated collections.
 fn populate_document_counts(result: &mut ExtractedDocument, images_dropped_after_ocr: usize) {
-    let pages = result
+    // ~keep `counts.pages` is documented as the SOURCE document's page count, so the format's own
+    // count is a floor and not merely a last resort. Page tracking counts the pages that produced
+    // content, which is fewer than the document has whenever a page yields none: with OCR off, a
+    // fully scanned PDF tracks nothing and used to report 0, and a PDF with one native page beside
+    // one scanned page reports 1 of its 2 (GH#1888). Taking the larger of the two can only correct
+    // such a shortfall -- a format count is read from the page tree, independently of any tracking.
+    let tracked = result
         .metadata
         .pages
         .as_ref()
         .map(|p| p.total_count as usize)
         .filter(|&n| n > 0)
-        .or_else(|| result.pages.as_ref().map(Vec::len))
-        .unwrap_or(0);
+        .or_else(|| result.pages.as_ref().map(Vec::len));
+    let pages = match (tracked, format_metadata_page_count(&result.metadata)) {
+        (Some(tracked), Some(declared)) => tracked.max(declared),
+        (Some(tracked), None) => tracked,
+        (None, declared) => declared.unwrap_or(0),
+    };
     result.counts = crate::types::DocumentCounts {
         pages,
         tables: result.tables.len(),
         images: result.images.as_ref().map_or(images_dropped_after_ocr, Vec::len),
     };
+}
+
+/// Page count carried by format-specific metadata, independent of per-page tracking.
+///
+/// Only PDF reports one this way today: `PdfMetadata::page_count` is read from the
+/// document's page tree during metadata extraction regardless of whether page
+/// boundaries were tracked (GH#1888).
+#[cfg(feature = "pdf")]
+fn format_metadata_page_count(metadata: &crate::types::Metadata) -> Option<usize> {
+    match metadata.format.as_ref()? {
+        crate::types::FormatMetadata::Pdf(pdf) => pdf.page_count.map(|n| n as usize),
+        _ => None,
+    }
+}
+
+#[cfg(not(feature = "pdf"))]
+fn format_metadata_page_count(_metadata: &crate::types::Metadata) -> Option<usize> {
+    None
 }
 
 /// Determine the [`SchemaCompliance`](crate::heuristics::confidence::SchemaCompliance) signal

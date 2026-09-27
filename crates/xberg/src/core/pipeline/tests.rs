@@ -2559,6 +2559,57 @@ mod document_counts {
         populate_document_counts(&mut result, 0);
         assert_eq!(result.counts.pages, 2);
     }
+
+    /// GH#1888: a scanned PDF extracted with OCR disabled and no `PageConfig` builds
+    /// neither `metadata.pages` (no page boundaries were tracked) nor `pages` (no
+    /// per-page content was collected), so both of the fallbacks above fall through --
+    /// yet `metadata.format`'s PDF page count was already read from the page tree
+    /// during metadata extraction, independent of page tracking. `populate_document_counts`
+    /// must fall back to it instead of reporting `0` for a document that plainly has pages.
+    #[test]
+    #[cfg(feature = "pdf")]
+    fn pages_fall_back_to_pdf_format_metadata_page_count() {
+        use crate::pdf::metadata::PdfMetadata;
+        use crate::types::FormatMetadata;
+
+        let mut result = ExtractedDocument {
+            metadata: Metadata {
+                pages: None,
+                format: Some(FormatMetadata::Pdf(PdfMetadata {
+                    page_count: Some(3),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            pages: None,
+            ..Default::default()
+        };
+        populate_document_counts(&mut result, 0);
+        assert_eq!(
+            result.counts.pages, 3,
+            "counts.pages must fall back to metadata.format's PDF page_count (GH#1888)"
+        );
+    }
+
+    /// Non-PDF format metadata carries no page count of its own, so the fallback must not
+    /// invent one -- the final `unwrap_or(0)` tier still applies.
+    #[test]
+    #[cfg(feature = "pdf")]
+    fn non_pdf_format_metadata_does_not_supply_a_fallback_page_count() {
+        use crate::types::{ExcelMetadata, FormatMetadata};
+
+        let mut result = ExtractedDocument {
+            metadata: Metadata {
+                pages: None,
+                format: Some(FormatMetadata::Excel(ExcelMetadata::default())),
+                ..Default::default()
+            },
+            pages: None,
+            ..Default::default()
+        };
+        populate_document_counts(&mut result, 0);
+        assert_eq!(result.counts.pages, 0);
+    }
 }
 
 /// GH#1662, GH#1752: `ExtractionConfig::runs_ocr_on_embedded_images` must be the ONLY
