@@ -86,6 +86,13 @@ pub struct PdfImage {
     /// cover). (GH#1899) ~keep
     #[serde(skip)]
     raw_indexed_samples: Option<Vec<u8>>,
+    /// The raw samples, one byte per component per pixel in the declared bit depth, kept only
+    /// when the dictionary carries a colour-key `/Mask` and an image unpacked from 1, 2 or 4 bits
+    /// or with a `/Decode` folded in left that space (GH#1904). The mask ranges are written in that
+    /// space, so the renderer tests the mask against these instead. An `/Indexed` image keeps its
+    /// indices in `raw_indexed_samples`. ~keep
+    #[serde(skip)]
+    color_key_samples: Option<Vec<u8>>,
 }
 
 impl PdfImage {
@@ -106,6 +113,7 @@ impl PdfImage {
             samples_are_raw: true,
             decode_folded_in: false,
             raw_indexed_samples: None,
+            color_key_samples: None,
         }
     }
 
@@ -147,6 +155,12 @@ impl PdfImage {
         self.raw_indexed_samples = Some(samples);
     }
 
+    /// The raw samples a colour-key `/Mask` is tested against, when the stored samples left the
+    /// raw sample space.
+    pub(crate) fn color_key_samples(&self) -> Option<&[u8]> {
+        self.color_key_samples.as_deref()
+    }
+
     /// Create a new PDF image with spatial metadata.
     pub fn with_spatial(
         width: u32,
@@ -173,6 +187,7 @@ impl PdfImage {
             samples_are_raw: true,
             decode_folded_in: false,
             raw_indexed_samples: None,
+            color_key_samples: None,
         }
     }
 
@@ -221,6 +236,7 @@ impl PdfImage {
             samples_are_raw: true,
             decode_folded_in: false,
             raw_indexed_samples: None,
+            color_key_samples: None,
         }
     }
 
@@ -1395,6 +1411,10 @@ pub fn extract_image_from_xobject(
     // Populated only for a non-JPX /Indexed image, whose raw index plane a
     // colour-key /Mask needs (GH#1899); see `raw_indexed_samples` field docs. ~keep
     let mut raw_indexed_samples: Option<Vec<u8>> = None;
+    // A colour-key /Mask is tested against the raw samples, so they are kept wherever unpacking
+    // below moves the stored samples out of that space. (GH#1904) ~keep
+    let has_color_key_mask = matches!(dict.get("Mask"), Some(crate::object::Object::Array(_)));
+    let mut color_key_samples = None;
     let data = if is_jbig2 {
         decode_jbig2_image(xobject, obj_ref, dict, doc, width, height)?
     } else if is_jpx {
@@ -1602,6 +1622,11 @@ pub fn extract_image_from_xobject(
                     // Plate routing applies /Decode itself, so it needs the
                     // narrower fact: only `ranges` actually folds one in. ~keep
                     decode_folded_in = ranges.is_some();
+                    // A 16-bit sample does not fit the kept byte plane, so its mask stays skipped. ~keep
+                    if has_color_key_mask && matches!(bits_per_component, 1 | 2 | 4 | 8) {
+                        color_key_samples =
+                            Some(unpack_raw_samples(&reduced, width, height, ncomp, bits_per_component));
+                    }
                     samples
                 }
                 None => reduced,
@@ -1637,6 +1662,7 @@ pub fn extract_image_from_xobject(
     if let Some(indices) = raw_indexed_samples {
         image.set_raw_indexed_samples(indices);
     }
+    image.color_key_samples = color_key_samples;
 
     // Attach the ICC profile if we found one — prefer the direct ICCBased
     // profile, then fall back to an Indexed base's profile so the CMM has
@@ -2077,6 +2103,21 @@ fn validate_indexed_input_len(raw: &[u8], bytes_per_row: usize, h: usize) -> Res
         )));
     }
     Ok(())
+}
+
+/// One byte per sample from a packed sample stream of `ncomp` components at `bpc` bits (1, 2, 4
+/// or 8), with each row starting on a byte boundary. A short stream reads as zeros, as the
+/// unpacked samples do. Called only after the caller's own unpack accepted the geometry.
+fn unpack_raw_samples(raw: &[u8], width: u32, height: u32, ncomp: usize, bpc: u8) -> Vec<u8> {
+    let samples_per_row = width as usize * ncomp;
+    let bytes_per_row = (samples_per_row * usize::from(bpc)).div_ceil(8);
+    let mut out = Vec::with_capacity(samples_per_row * height as usize);
+    for y in 0..height as usize {
+        let row = raw.get(y * bytes_per_row..).unwrap_or(&[]);
+        let row = &row[..bytes_per_row.min(row.len())];
+        out.extend((0..samples_per_row).map(|i| read_indexed_pixel(row, i, bpc) as u8));
+    }
+    out
 }
 
 /// Read one packed Indexed pixel from `row` at column `x`, given index depth

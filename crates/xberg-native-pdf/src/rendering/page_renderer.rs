@@ -3841,7 +3841,7 @@ impl PageRenderer {
                             tracing::warn!("Ignoring malformed color-key /Mask array (ncomp={})", ncomp);
                         }
                     }
-                } else if !pdf_image.samples_are_raw() {
+                } else if pdf_image.color_key_samples().is_none() && !pdf_image.samples_are_raw() {
                     // The extractor mapped a non-default /Decode into the
                     // stored samples, so they are no longer in the space the
                     // /Mask ranges are expressed in. Masking them here would
@@ -8784,11 +8784,11 @@ fn premultiply_rgba(rgba: &mut image::RgbaImage) {
 /// mask ranges.
 ///
 /// Colour-key masking is defined against the raw pre-Decode samples. Those are
-/// only recoverable from an 8-bit `ImageData::Raw` buffer whose per-pixel byte
-/// count matches `ranges.len()`. For anything else (JPEG, non-8-bit depths, or a
-/// palette-expanded Indexed image whose original indices are lost) the ranges
-/// cannot be mapped onto the decoded pixels, so masking is skipped rather than
-/// applied incorrectly.
+/// the raw samples the extractor kept when it moved the stored samples out of
+/// that space, or else an 8-bit `ImageData::Raw` buffer whose per-pixel byte
+/// count matches `ranges.len()`. For anything else (JPEG, 16-bit depths) the
+/// ranges cannot be mapped onto the decoded pixels, so masking is skipped
+/// rather than applied incorrectly.
 fn apply_color_key_mask(
     image: &crate::extractors::images::PdfImage,
     ranges: &[(u32, u32)],
@@ -8797,19 +8797,28 @@ fn apply_color_key_mask(
     use crate::extractors::images::ImageData;
 
     let ncomp = ranges.len();
-    let ImageData::Raw { pixels, format } = image.data() else {
-        tracing::warn!("color-key /Mask: non-raw (e.g. JPEG) image, skipping");
-        return;
+    let pixels = if let Some(samples) = image.color_key_samples() {
+        if samples.len() != image.width() as usize * image.height() as usize * ncomp {
+            tracing::warn!("color-key /Mask: {ncomp} ranges do not fit the image's raw samples, skipping");
+            return;
+        }
+        samples
+    } else {
+        let ImageData::Raw { pixels, format } = image.data() else {
+            tracing::warn!("color-key /Mask: non-raw (e.g. JPEG) image, skipping");
+            return;
+        };
+        if image.bits_per_component() != 8 || format.bytes_per_pixel() != ncomp {
+            tracing::warn!(
+                "color-key /Mask: unsupported layout (bpc={}, bpp={}, ncomp={}), skipping",
+                image.bits_per_component(),
+                format.bytes_per_pixel(),
+                ncomp
+            );
+            return;
+        }
+        pixels.as_slice()
     };
-    if image.bits_per_component() != 8 || format.bytes_per_pixel() != ncomp {
-        tracing::warn!(
-            "color-key /Mask: unsupported layout (bpc={}, bpp={}, ncomp={}), skipping",
-            image.bits_per_component(),
-            format.bytes_per_pixel(),
-            ncomp
-        );
-        return;
-    }
     let w = rgba.width() as usize;
     let h = rgba.height() as usize;
     if pixels.len() < w * h * ncomp {
