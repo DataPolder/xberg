@@ -1667,6 +1667,19 @@ fn redirect_split_out_of_content(
     }
     let search_lines: &[SpanLine] = band.as_deref().unwrap_or(lines);
     let max_redirect_distance = page_width * MAX_REDIRECT_DISTANCE_FRACTION;
+    let max_label_width = page_width * MAX_DENSE_COLUMN_SPLIT_SNAP_SPAN_FRACTION;
+    // GH#1800: the same two qualifications PATH 2 (below) already applies to a corridor a
+    // split is inside a column, applied here too. Before this fix PATH 1 took the WIDEST
+    // whitespace corridor with no qualification at all, and a sparse table's own cell gap
+    // is routinely wider than the page's real gutter (53 vs 21pt, 37 vs 24, 24 vs 15 on the
+    // reporter's pages) -- so a table beside prose always won the "widest" comparison before
+    // either gate had a chance to run. Excluding a hanging-label indent and requiring both
+    // flanks to read as columns are exactly the tests that already keep PATH 2 from doing
+    // the same thing; the asymmetry, not a missing third gate, was the defect. ~keep
+    let qualifies = |&corridor: &(f32, f32)| {
+        !corridor_is_hanging_label_indent(spans, search_lines, max_label_width, corridor)
+            && both_sides_are_columns(spans, search_lines, furniture_width, (corridor.0 + corridor.1) / 2.0)
+    };
     let widest_within_reach = |corridors: Vec<(f32, f32)>| {
         corridors
             .into_iter()
@@ -1674,12 +1687,12 @@ fn redirect_split_out_of_content(
             .map(|(left, right)| (left + right) / 2.0)
             .filter(|candidate| (candidate - split_x).abs() <= max_redirect_distance)
     };
-    if let Some(candidate) = widest_within_reach(page_whitespace_corridors(
-        spans,
-        search_lines,
-        furniture_width,
-        min_gutter,
-    )) {
+    let whitespace_corridors: Vec<(f32, f32)> =
+        page_whitespace_corridors(spans, search_lines, furniture_width, min_gutter)
+            .into_iter()
+            .filter(qualifies)
+            .collect();
+    if let Some(candidate) = widest_within_reach(whitespace_corridors) {
         return candidate;
     }
 
@@ -1703,7 +1716,6 @@ fn redirect_split_out_of_content(
     {
         return split_x;
     }
-    let max_label_width = page_width * MAX_DENSE_COLUMN_SPLIT_SNAP_SPAN_FRACTION;
     let corridors = page_low_occupancy_corridors(
         spans,
         search_lines,
@@ -1712,8 +1724,7 @@ fn redirect_split_out_of_content(
         MAX_GUTTER_CROSSING_LINES,
     )
     .into_iter()
-    .filter(|&corridor| !corridor_is_hanging_label_indent(spans, search_lines, max_label_width, corridor))
-    .filter(|&(left, right)| both_sides_are_columns(spans, search_lines, furniture_width, (left + right) / 2.0))
+    .filter(qualifies)
     .collect();
     widest_within_reach(corridors).unwrap_or(split_x)
 }
@@ -7088,6 +7099,52 @@ mod tests {
             boundaries.is_some(),
             "an `ocr` block alone is still sufficient; Some(false) on the sibling settings \
              does not take anything away"
+        );
+    }
+
+    /// GH#1800: a two-cell-per-row sparse table sits in the left column (cell 0 at x
+    /// 40..65, cell 1 at x 105..130 -- columns 2-4 of the reporter's 5-column table are
+    /// never filled in this reproducer, which is what "sparse" means here), beside an
+    /// ordinary prose column starting at x 148. The table's own cell gap (65..105, 40pt)
+    /// is wider than the true column gutter (130..148, 18pt) -- 2.2x, the same order as
+    /// the reporter's measured 53-vs-21 and 37-vs-24 pages. `detect_split_x` is presumed
+    /// to have landed inside the table's second cell (a bimodal median artifact); PATH 1
+    /// must not redirect it to the table's own cell gap just because that gap is wider. ~keep
+    #[test]
+    fn redirect_prefers_the_true_gutter_over_a_wider_sparse_table_cell_gap_gh1800() {
+        let mut spans = Vec::new();
+        for row in 0..8 {
+            let y = 500.0 - row as f32 * 8.0;
+            spans.push(span_with_width(&format!("{row}"), 40.0, y, 25.0, 8.0, 8.0));
+            spans.push(span_with_width(&format!("{row}00"), 105.0, y, 25.0, 8.0, 8.0));
+        }
+        for row in 0..8 {
+            let y = 650.0 - row as f32 * 12.0;
+            spans.push(span_with_width(
+                "some prose text filling out this line of the right column",
+                148.0,
+                y,
+                250.0,
+                12.0,
+                12.0,
+            ));
+        }
+        let lines = corridor_fixture_lines(&spans);
+        let furniture_width = CORRIDOR_PAGE_WIDTH * FULL_WIDTH_FURNITURE_FRACTION;
+        let min_gutter = (CORRIDOR_PAGE_WIDTH * MIN_DENSE_COLUMN_GUTTER_FRACTION).max(MIN_DENSE_COLUMN_GUTTER_PTS);
+        let corridors = page_whitespace_corridors(&spans, &lines, furniture_width, min_gutter);
+        assert_eq!(
+            corridors,
+            vec![(65.0, 105.0), (130.0, 148.0)],
+            "both the false table gap and the true gutter must be present as raw candidates"
+        );
+
+        let split_x = 115.0; // inside the table's second cell, as a bimodal median would land
+        let redirected = redirect_split_out_of_content(&spans, &lines, CORRIDOR_PAGE_WIDTH, split_x);
+        assert!(
+            (redirected - 139.0).abs() < 1.0,
+            "expected the 18pt true gutter (mid 139), got {redirected} -- \
+             the 40pt table cell gap (mid 85) must not win merely for being wider"
         );
     }
 }
