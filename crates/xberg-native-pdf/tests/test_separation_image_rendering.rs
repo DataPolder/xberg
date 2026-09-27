@@ -721,9 +721,47 @@ fn build_pdf_with_jpx_cmyk_image(codestream: &[u8], width: u32, height: u32) -> 
     finalize_pdf(buf, offsets)
 }
 
+/// Wrap a bare JPEG 2000 codestream in the minimal JP2 box structure, declaring CMYK through an
+/// enumerated `colr` box.
+///
+/// Load-bearing, not cosmetic: `hayro-jpeg2000` reads a *bare* codestream's colour space by
+/// assuming `Srgb` for any image with three or more components, ignoring the `Csiz` field, and
+/// then reconciles the 4-vs-3 mismatch by treating the fourth channel as alpha. So this fixture,
+/// whose codestream does declare `Csiz=4`, decodes as 3-component RGB unless the colour space is
+/// stated in a JP2 box, where `jp2::parse` reads it directly. `/JPXDecode` accepts either form.
+/// ~keep
+fn wrap_as_cmyk_jp2(codestream: &[u8]) -> Vec<u8> {
+    fn jp2_box(tag: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(8 + data.len());
+        out.extend_from_slice(&((8 + data.len()) as u32).to_be_bytes());
+        out.extend_from_slice(tag);
+        out.extend_from_slice(data);
+        out
+    }
+
+    const ENUM_CS_CMYK: u32 = 12;
+    let signature_box = jp2_box(b"jP  ", &[0x0D, 0x0A, 0x87, 0x0A]);
+    let mut ftyp_data = b"jp2 ".to_vec();
+    ftyp_data.extend_from_slice(&0u32.to_be_bytes());
+    ftyp_data.extend_from_slice(b"jp2 ");
+    let ftyp_box = jp2_box(b"ftyp", &ftyp_data);
+    let mut colr_data = vec![1u8, 0, 0];
+    colr_data.extend_from_slice(&ENUM_CS_CMYK.to_be_bytes());
+    let colr_box = jp2_box(b"colr", &colr_data);
+    let jp2h_box = jp2_box(b"jp2h", &colr_box);
+    let jp2c_box = jp2_box(b"jp2c", codestream);
+
+    [signature_box, ftyp_box, jp2h_box, jp2c_box].concat()
+}
+
 #[test]
 fn jpx_cmyk_image_routes_channels_to_process_plates() {
-    let doc = PdfDocument::from_bytes(build_pdf_with_jpx_cmyk_image(CMYK_QUADRANTS_J2K, 16, 16)).expect("parse");
+    let doc = PdfDocument::from_bytes(build_pdf_with_jpx_cmyk_image(
+        &wrap_as_cmyk_jp2(CMYK_QUADRANTS_J2K),
+        16,
+        16,
+    ))
+    .expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
 
     let quadrant_samples = [
