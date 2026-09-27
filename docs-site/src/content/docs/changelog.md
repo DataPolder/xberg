@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **(bindings): `pdf_page_count` is available again in every language binding.** It returns the number of pages in a PDF without rendering any of them, takes an optional password for an encrypted file, and raises an error on bytes that are not a PDF. The 1.0.0 notes list it as the cheap way to size a render loop, but a later regeneration dropped it from the bindings, so it existed only in Rust. It now ships in Python, TypeScript (Node and WASM), Ruby, PHP, Go, Java, C#, Elixir, Dart, Kotlin, Swift, Zig and the C FFI. (GH#1869)
 - **(tesseract): `ResultIterator::extract_word_symbols` reads the text and box of each symbol in the words that a filter accepts.** It walks the page under one lock, like `extract_all_words`. (GH#1833)
 
 ### Changed
