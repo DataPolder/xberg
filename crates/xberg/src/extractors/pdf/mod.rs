@@ -8895,4 +8895,141 @@ BT /F1 12 Tf 30 30 Td (Beta) Tj ET
             "the singular compatibility field must deterministically report the first preprocessed page"
         );
     }
+
+    /// A minimal 2-page PDF carrying real text content, for tests that only need page
+    /// structure and must not depend on the `test_documents/` corpus (see `read_test_fixture`).
+    #[cfg(feature = "pdf")]
+    fn build_two_page_text_pdf() -> Vec<u8> {
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets: Vec<usize> = Vec::new();
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n");
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(
+            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] \
+              /Contents 5 0 R /Resources << /Font << /F1 7 0 R >> >> >>\nendobj\n",
+        );
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(
+            b"4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] \
+              /Contents 6 0 R /Resources << /Font << /F1 7 0 R >> >> >>\nendobj\n",
+        );
+
+        let stream1 = "BT /F1 12 Tf 72 700 Td (Page one has real text content here.) Tj ET\n";
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(
+            format!(
+                "5 0 obj\n<< /Length {} >>\nstream\n{}\nendstream\nendobj\n",
+                stream1.len(),
+                stream1
+            )
+            .as_bytes(),
+        );
+
+        let stream2 = "BT /F1 12 Tf 72 700 Td (Page two has different text content here.) Tj ET\n";
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(
+            format!(
+                "6 0 obj\n<< /Length {} >>\nstream\n{}\nendstream\nendobj\n",
+                stream2.len(),
+                stream2
+            )
+            .as_bytes(),
+        );
+
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(
+            b"7 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica \
+              /Encoding /WinAnsiEncoding >>\nendobj\n",
+        );
+
+        let xref_pos = pdf.len();
+        let total_objs = offsets.len() + 1;
+        pdf.extend_from_slice(format!("xref\n0 {}\n", total_objs).as_bytes());
+        pdf.extend_from_slice(b"0000000000 65535 f\r\n");
+        for &off in &offsets {
+            pdf.extend_from_slice(format!("{off:010} 00000 n\r\n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+                total_objs, xref_pos
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
+
+    /// GH#1752: `metadata.pages` must be populated when `ocr_near_empty_fallback = Some(true)`
+    /// is set with no `ocr` block, at parity with what an `ocr` block alone already produced.
+    ///
+    /// Before the fix, `page_structure_was_implicitly_tracked` in `extraction.rs` discarded the
+    /// page structure whenever `config.ocr` was `None`, regardless of the two settings GH#1752
+    /// gave the near-empty-fallback and scanned-page-quality-gate behaviours. Both configs here
+    /// set `pdf_options: None` and `pages: None` so `force_annotation_page_tracking` is `true`,
+    /// the only condition under which this site is reachable. Config X (an `ocr` block) is
+    /// checked first as a control -- asserting it is `Some` before checking config Y rules out a
+    /// fixture that simply never produces page structure at all, which would make the Y
+    /// assertion pass vacuously.
+    #[cfg(feature = "pdf")]
+    #[tokio::test]
+    async fn metadata_pages_populated_for_near_empty_fallback_without_ocr_block() {
+        use crate::core::config::OcrConfig;
+
+        let pdf = build_two_page_text_pdf();
+        let extractor = PdfExtractor::new();
+
+        let config_x = ExtractionConfig {
+            ocr: Some(OcrConfig::default()),
+            pdf_options: None,
+            pages: None,
+            ..ExtractionConfig::default()
+        };
+        let result_x = extractor
+            .extract_content(&pdf, "application/pdf", &config_x)
+            .await
+            .expect("extraction with an `ocr` block must succeed");
+        let result_x = crate::extraction::derive::derive_extraction_result(
+            result_x,
+            false,
+            crate::core::config::OutputFormat::Plain,
+        );
+        let pages_x = result_x
+            .metadata
+            .pages
+            .as_ref()
+            .expect("control: an `ocr` block alone must populate metadata.pages");
+
+        let config_y = ExtractionConfig {
+            ocr: None,
+            ocr_near_empty_fallback: Some(true),
+            pdf_options: None,
+            pages: None,
+            ..ExtractionConfig::default()
+        };
+        let result_y = extractor
+            .extract_content(&pdf, "application/pdf", &config_y)
+            .await
+            .expect("extraction with ocr_near_empty_fallback must succeed");
+        let result_y = crate::extraction::derive::derive_extraction_result(
+            result_y,
+            false,
+            crate::core::config::OutputFormat::Plain,
+        );
+        let pages_y = result_y.metadata.pages.as_ref().expect(
+            "ocr_near_empty_fallback = Some(true) without an `ocr` block must also populate \
+             metadata.pages (GH#1752)",
+        );
+
+        assert_eq!(
+            pages_y.total_count, pages_x.total_count,
+            "page counts must match between the two configurations"
+        );
+    }
 }
