@@ -192,9 +192,21 @@ fn padded_dark_band(gray: &[u8], width: i32, height: i32, band: (i32, i32, i32, 
 
 /// Inverts every dark band in place (white text on a dark fill becomes black text on
 /// white), over the box [`padded_dark_band`] grows for it. Mirrors `bands.py::invert_bands`.
+///
+/// No pixel row is inverted twice. [`find_dark_bands`] splits one physical dark row in two
+/// wherever a couple of its rows fall under [`DARK_ROW_MIN_DARK_FRACTION`] -- the baseline gap
+/// of a tall capital does it -- and [`padded_dark_band`] then grows both halves back across
+/// that gap, so the two padded boxes overlap on the rows between them. Inverting an overlap
+/// twice restores it, leaving a dark stripe struck through the middle of the row's text: on
+/// `shaded_table_scan.pdf` that rule through `CLOSING STOCK BALANCE` cost the row its label and
+/// read its 30,474 as 20,474 (GH#1918). Clamping each band to the rows no earlier band has
+/// already claimed inverts those rows exactly once, which is what both halves wanted. ~keep
 fn invert_dark_bands(gray: &mut [u8], width: i32, height: i32, bands: &[(i32, i32, i32, i32)]) {
+    let mut claimed_through = 0;
     for &band in bands {
         let (y0, y1, x0, x1) = padded_dark_band(gray, width, height, band);
+        let y0 = y0.max(claimed_through);
+        claimed_through = claimed_through.max(y1);
         for y in y0..y1 {
             for x in x0..x1 {
                 let index = (y * width + x) as usize;
@@ -550,6 +562,46 @@ mod tests {
             255,
             "the paper above the band must not be inverted into a black rule"
         );
+    }
+
+    /// GH#1918: one physical dark row that [`find_dark_bands`] splits in two -- a couple of its
+    /// rows fall under the dark-fraction threshold, as the baseline gap of a line of capitals
+    /// does -- must still have every one of its rows inverted exactly once.
+    ///
+    /// [`padded_dark_band`] grows both halves back across the gap, so their boxes overlap there.
+    /// Inverting an overlap twice returns it to its original value, leaving the fill's own dark
+    /// pixels as a rule struck through the row's text.
+    #[test]
+    fn should_invert_a_split_dark_bands_overlapping_padding_only_once() {
+        let width = 200;
+        let height = 80;
+        let mut gray = synthetic_page(width, height);
+        // Rows 50 and 51 stand for the baseline gap: lighter than the fill, so the dark row
+        // splits in two, but still under `SHADED_BAND_HIGH_GRAY`, so the padding of both halves
+        // reaches across them.
+        for y in 50..52 {
+            for x in 0..width {
+                gray[(y * width + x) as usize] = 200;
+            }
+        }
+
+        let bands = find_dark_bands(&gray, width, height);
+        assert_eq!(
+            bands.len(),
+            2,
+            "control: the gap must split the dark row into two bands, or this test pins nothing: {bands:?}"
+        );
+
+        invert_dark_bands(&mut gray, width, height, &bands);
+
+        for y in 50..52 {
+            assert_eq!(
+                gray[(y * width + 5) as usize],
+                55,
+                "row {y} lies in both padded boxes and must be inverted once (200 -> 55), not \
+                 twice (back to 200), which would strike a dark rule through the row's text"
+            );
+        }
     }
 
     #[test]
