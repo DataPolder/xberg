@@ -1,43 +1,83 @@
-use pyo3::exceptions::PyRuntimeError;
-use pyo3::prelude::*;
+use std::sync::Arc;
 
-struct PyProgressListener {
-    callback: Py<PyAny>,
+use pyo3::exceptions::{PyAttributeError, PyRuntimeError};
+use pyo3::prelude::*;
+use xberg::engine::seams::{ProgressEvent, ProgressSink};
+
+struct PythonProgressSink {
+    sender: std::sync::mpsc::Sender<PythonProgressEvent>,
 }
 
-impl xberg::ProgressListener for PyProgressListener {
-    fn on_progress(
-        &self,
-        stage: String,
-        page: Option<usize>,
-        total: Option<usize>,
-        completed: Option<usize>,
-        backend: Option<String>,
+enum PythonProgressEvent {
+    OcrPage {
+        page: usize,
+        total: usize,
+        completed: usize,
+        backend: String,
         input_index: Option<usize>,
-    ) {
-        Python::attach(|py| {
-            if let Err(error) =
-                self.callback
-                    .call_method1(py, "on_progress", (stage, page, total, completed, backend, input_index))
-            {
-                tracing::warn!(%error, "progress callback raised; ignoring");
-            }
+    },
+}
+
+impl ProgressSink for PythonProgressSink {
+    fn emit(&self, _event: ProgressEvent) {}
+
+    fn emit_ocr_page(&self, page: usize, total: usize, completed: usize, backend: &str, input_index: Option<usize>) {
+        let _ = self.sender.send(PythonProgressEvent::OcrPage {
+            page,
+            total,
+            completed,
+            backend: backend.to_string(),
+            input_index,
         });
     }
 }
 
-fn listener_handle(on_progress: Py<PyAny>) -> PyResult<xberg::ProgressListenerHandle> {
+fn validate_listener(on_progress: &Py<PyAny>) -> PyResult<()> {
     Python::attach(|py| {
-        if !on_progress.bind(py).hasattr("on_progress")? {
-            return Err(pyo3::exceptions::PyAttributeError::new_err(
-                "progress listener is missing on_progress",
-            ));
+        if on_progress.bind(py).hasattr("on_progress")? {
+            Ok(())
+        } else {
+            Err(PyAttributeError::new_err("progress listener is missing on_progress"))
         }
-        Ok(
-            std::sync::Arc::new(std::sync::Mutex::new(PyProgressListener { callback: on_progress }))
-                as xberg::ProgressListenerHandle,
-        )
     })
+}
+
+fn progress_forwarder(on_progress: Py<PyAny>) -> (Arc<PythonProgressSink>, tokio::task::JoinHandle<()>) {
+    let (sender, receiver) = std::sync::mpsc::channel::<PythonProgressEvent>();
+    let worker = tokio::task::spawn_blocking(move || {
+        while let Ok(event) = receiver.recv() {
+            let PythonProgressEvent::OcrPage {
+                page,
+                total,
+                completed,
+                backend,
+                input_index,
+            } = event;
+            Python::attach(|py| {
+                if let Err(error) = on_progress.call_method1(
+                    py,
+                    "on_progress",
+                    (
+                        "ocr_page",
+                        Some(page),
+                        Some(total),
+                        Some(completed),
+                        Some(backend),
+                        input_index,
+                    ),
+                ) {
+                    tracing::warn!(%error, "progress callback raised; ignoring");
+                }
+            });
+        }
+    });
+    (Arc::new(PythonProgressSink { sender }), worker)
+}
+
+async fn finish_progress_forwarder(worker: tokio::task::JoinHandle<()>) {
+    if let Err(error) = worker.await {
+        tracing::warn!(%error, "progress callback worker failed");
+    }
 }
 
 #[pyfunction]
@@ -48,12 +88,19 @@ pub fn extract_with_progress<'py>(
     config: crate::ExtractionConfig,
     on_progress: Py<PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let listener = listener_handle(on_progress)?;
+    validate_listener(&on_progress)?;
     let input = input.into();
     let config = config.into();
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        xberg::extract_with_progress(input, &config, listener)
-            .await
+        let (sink, worker) = progress_forwarder(on_progress);
+        let engine = xberg::engine::Engine::builder()
+            .with_progress_sink(sink.clone())
+            .build();
+        let result = engine.extract(input, &config).await;
+        drop(engine);
+        drop(sink);
+        finish_progress_forwarder(worker).await;
+        result
             .map(crate::ExtractionResult::from)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))
     })
@@ -67,12 +114,19 @@ pub fn extract_batch_with_progress<'py>(
     config: crate::ExtractionConfig,
     on_progress: Py<PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let listener = listener_handle(on_progress)?;
+    validate_listener(&on_progress)?;
     let inputs = inputs.into_iter().map(Into::into).collect();
     let config = config.into();
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        xberg::extract_batch_with_progress(inputs, &config, listener)
-            .await
+        let (sink, worker) = progress_forwarder(on_progress);
+        let engine = xberg::engine::Engine::builder()
+            .with_progress_sink(sink.clone())
+            .build();
+        let result = engine.extract_batch(inputs, &config).await;
+        drop(engine);
+        drop(sink);
+        finish_progress_forwarder(worker).await;
+        result
             .map(crate::ExtractionResult::from)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))
     })
@@ -85,18 +139,19 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn should_deliver_exact_progress_values_to_python() {
+    #[tokio::test]
+    async fn should_deliver_exact_progress_values_to_python() {
         Python::initialize();
-        Python::attach(|py| {
+        let (listener, module, extraction_thread) = Python::attach(|py| {
             let module = PyModule::from_code(
                 py,
                 c_str!(
                     r#"
+import threading
 events = []
 class Listener:
     def on_progress(self, *args):
-        events.append(args)
+        events.append((args, threading.get_ident()))
 listener = Listener()
 "#
                 ),
@@ -104,35 +159,47 @@ listener = Listener()
                 c_str!("progress_test"),
             )
             .expect("test Python module should compile");
-            let listener = listener_handle(module.getattr("listener").expect("listener should exist").unbind())
-                .expect("listener bridge should be created");
-            let bridge = listener.lock().expect("listener mutex poisoned");
+            let listener = module.getattr("listener").expect("listener should exist").unbind();
+            let extraction_thread = py
+                .import("threading")
+                .expect("threading should import")
+                .call_method0("get_ident")
+                .expect("thread identifier should be available")
+                .extract::<u64>()
+                .expect("thread identifier should be numeric");
+            (listener, module.unbind(), extraction_thread)
+        });
+        let (sink, worker) = progress_forwarder(listener);
 
-            xberg::ProgressListener::on_progress(
-                &*bridge,
-                "ocr_page".to_string(),
-                Some(3),
-                Some(9),
-                Some(4),
-                Some("tesseract".to_string()),
-                Some(2),
-            );
+        sink.emit_ocr_page(3, 9, 4, "tesseract", Some(2));
+        sink.emit_ocr_page(5, 9, 5, "paddleocr", Some(2));
+        drop(sink);
+        finish_progress_forwarder(worker).await;
 
-            let event: (String, usize, usize, usize, String, usize) = module
-                .getattr("events")
-                .expect("events should exist")
+        Python::attach(|py| {
+            let events = module.bind(py).getattr("events").expect("events should exist");
+            let first: ((String, usize, usize, usize, String, usize), u64) = events
                 .get_item(0)
-                .expect("event should be recorded")
+                .expect("first event should be recorded")
                 .extract()
-                .expect("event should contain typed values");
-            assert_eq!(event, ("ocr_page".to_string(), 3, 9, 4, "tesseract".to_string(), 2));
+                .expect("first event should contain typed values");
+            let second: ((String, usize, usize, usize, String, usize), u64) = events
+                .get_item(1)
+                .expect("second event should be recorded")
+                .extract()
+                .expect("second event should contain typed values");
+            assert_eq!(first.0, ("ocr_page".to_string(), 3, 9, 4, "tesseract".to_string(), 2));
+            assert_eq!(second.0, ("ocr_page".to_string(), 5, 9, 5, "paddleocr".to_string(), 2));
+            assert_ne!(first.1, extraction_thread);
+            assert_eq!(first.1, second.1);
+            assert_eq!(events.len().expect("event count should be available"), 2);
         });
     }
 
-    #[test]
-    fn should_ignore_python_callback_exception() {
+    #[tokio::test]
+    async fn should_ignore_python_callback_exception() {
         Python::initialize();
-        Python::attach(|py| {
+        let listener = Python::attach(|py| {
             let module = PyModule::from_code(
                 py,
                 c_str!(
@@ -147,19 +214,32 @@ listener = Listener()
                 c_str!("progress_error_test"),
             )
             .expect("test Python module should compile");
-            let listener = listener_handle(module.getattr("listener").expect("listener should exist").unbind())
-                .expect("listener bridge should be created");
-            let bridge = listener.lock().expect("listener mutex poisoned");
+            module.getattr("listener").expect("listener should exist").unbind()
+        });
+        let (sink, worker) = progress_forwarder(listener);
 
-            xberg::ProgressListener::on_progress(
-                &*bridge,
-                "ocr_page".to_string(),
-                Some(1),
-                Some(1),
-                Some(1),
-                Some("tesseract".to_string()),
-                None,
-            );
+        sink.emit_ocr_page(1, 1, 1, "tesseract", None);
+        drop(sink);
+        finish_progress_forwarder(worker).await;
+    }
+
+    #[test]
+    fn should_reject_listener_without_progress_method() {
+        Python::initialize();
+        Python::attach(|py| {
+            let listener = PyModule::from_code(
+                py,
+                c_str!("listener = object()"),
+                c_str!("invalid_progress_test.py"),
+                c_str!("invalid_progress_test"),
+            )
+            .expect("test Python module should compile")
+            .getattr("listener")
+            .expect("listener should exist")
+            .unbind();
+
+            let error = validate_listener(&listener).expect_err("listener should be rejected");
+            assert!(error.is_instance_of::<PyAttributeError>(py));
         });
     }
 }
