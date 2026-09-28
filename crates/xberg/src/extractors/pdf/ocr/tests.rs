@@ -3479,6 +3479,7 @@ mod tests {
             &config,
             &pipeline,
             None,
+            None,
         )
         .await;
 
@@ -3593,6 +3594,12 @@ mod tests {
 
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     fn build_minimal_multi_page_pdf_with_media_box(page_count: usize, width_pt: u32, height_pt: u32) -> Vec<u8> {
+        build_minimal_pdf_with_media_boxes(&vec![(width_pt, height_pt); page_count])
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    fn build_minimal_pdf_with_media_boxes(media_boxes: &[(u32, u32)]) -> Vec<u8> {
+        let page_count = media_boxes.len();
         let mut buf = Vec::<u8>::new();
         buf.extend_from_slice(b"%PDF-1.4\n");
         let mut offsets = Vec::new();
@@ -3611,7 +3618,7 @@ mod tests {
             .as_bytes(),
         );
 
-        for i in 0..page_count {
+        for (i, (width_pt, height_pt)) in media_boxes.iter().enumerate() {
             offsets.push(buf.len());
             let obj_num = 3 + i;
             buf.extend_from_slice(
@@ -3634,6 +3641,201 @@ mod tests {
         buf.extend_from_slice(format!("trailer\n<</Size {} /Root 1 0 R>>\n", total_objs).as_bytes());
         buf.extend_from_slice(format!("startxref\n{}\n%%EOF\n", xref_offset).as_bytes());
         buf
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn mixed_ocr_keeps_successful_pages_when_one_backend_call_fails() {
+        use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::{ExtractedDocument, PageBoundary};
+        use std::sync::Arc;
+
+        const BACKEND_NAME: &str = "mixed-page-failure-test-backend";
+        const OCR_TEXT: &str = "Successful OCR page text repeated enough times to bypass the short-text raster probe. \
+            Successful OCR page text repeated enough times to bypass the short-text raster probe. \
+            Successful OCR page text repeated enough times to bypass the short-text raster probe.";
+
+        struct FailSquarePageBackend;
+
+        #[async_trait::async_trait]
+        impl OcrBackend for FailSquarePageBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, data: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                let image = image::load_from_memory(data).map_err(|error| crate::XbergError::Ocr {
+                    message: format!("test backend could not decode page: {error}"),
+                    source: None,
+                })?;
+                if image.width() == image.height() {
+                    return Err(crate::XbergError::Ocr {
+                        message: "mock backend failure for square page".to_string(),
+                        source: None,
+                    });
+                }
+                Ok(ExtractedDocument {
+                    content: OCR_TEXT.to_string(),
+                    ..Default::default()
+                })
+            }
+            fn supports_document_processing(&self) -> bool {
+                false
+            }
+        }
+
+        impl Plugin for FailSquarePageBackend {
+            fn name(&self) -> &str {
+                BACKEND_NAME
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        crate::plugins::register_ocr_backend(Arc::new(FailSquarePageBackend)).unwrap();
+
+        let pdf = build_minimal_pdf_with_media_boxes(&[(612, 792), (504, 504), (612, 792)]);
+        let native_pages = ["native page one", "native page two", "native page three"];
+        let native_text = native_pages.join("\n");
+        let mut offset = 0;
+        let boundaries: Vec<PageBoundary> = native_pages
+            .iter()
+            .enumerate()
+            .map(|(index, text)| {
+                let boundary = PageBoundary {
+                    byte_start: offset,
+                    byte_end: offset + text.len(),
+                    page_number: (index + 1) as u32,
+                };
+                offset = boundary.byte_end + usize::from(index + 1 < native_pages.len());
+                boundary
+            })
+            .collect();
+        let config = ExtractionConfig {
+            force_ocr_pages: Some(vec![1, 2, 3]),
+            ocr: Some(OcrConfig {
+                backend: BACKEND_NAME.to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = extract_mixed_ocr_native(&native_text, &boundaries, &[1, 2, 3], &pdf, &config, None).await;
+
+        let result = result.expect("one failed page must not discard the two successful OCR pages");
+        assert_eq!(result.1.len(), 2);
+        assert_eq!(result.1.get(&1).map(String::as_str), Some(OCR_TEXT));
+        assert_eq!(result.1.get(&3).map(String::as_str), Some(OCR_TEXT));
+        assert_eq!(result.1.get(&2), None);
+        assert!(result.0.contains("native page two"));
+        assert_eq!(
+            result
+                .8
+                .iter()
+                .filter(|warning| warning.message.contains("OCR of page 2 failed"))
+                .count(),
+            1
+        );
+
+        let pipeline_config = ExtractionConfig {
+            force_ocr_pages: Some(vec![1, 2, 3]),
+            ocr: Some(OcrConfig {
+                pipeline: Some(OcrPipelineConfig {
+                    stages: vec![OcrPipelineStage {
+                        backend: BACKEND_NAME.to_string(),
+                        priority: 100,
+                        language: None,
+                        tesseract_config: None,
+                        paddle_ocr_config: None,
+                        vlm_config: None,
+                        backend_options: None,
+                    }],
+                    quality_thresholds: OcrQualityThresholds {
+                        pipeline_min_quality: 0.0,
+                        ..Default::default()
+                    },
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let pipeline_result =
+            extract_mixed_ocr_native(&native_text, &boundaries, &[1, 2, 3], &pdf, &pipeline_config, None)
+                .await
+                .expect("the pipeline loop must isolate the same middle-page failure");
+        assert_eq!(pipeline_result.1.len(), 2);
+        assert_eq!(pipeline_result.1.get(&2), None);
+        assert_eq!(
+            pipeline_result
+                .8
+                .iter()
+                .filter(|warning| warning.message.contains("OCR of page 2 failed"))
+                .count(),
+            1
+        );
+
+        let square_pdf = build_minimal_pdf_with_media_boxes(&[(504, 504), (504, 504)]);
+        let square_native = "first native\nsecond native";
+        let square_boundaries = vec![
+            PageBoundary {
+                byte_start: 0,
+                byte_end: 12,
+                page_number: 1,
+            },
+            PageBoundary {
+                byte_start: 13,
+                byte_end: square_native.len(),
+                page_number: 2,
+            },
+        ];
+        let all_explicit_failed = extract_mixed_ocr_native(
+            square_native,
+            &square_boundaries,
+            &[1, 2],
+            &square_pdf,
+            &ExtractionConfig {
+                force_ocr_pages: Some(vec![1, 2]),
+                ocr: config.ocr.clone(),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .expect_err("force_ocr_pages must fail when every requested page fails");
+        assert!(
+            all_explicit_failed
+                .to_string()
+                .contains("mock backend failure for square page")
+        );
+
+        let automatic_result = extract_mixed_ocr_native(
+            square_native,
+            &square_boundaries,
+            &[1, 2],
+            &square_pdf,
+            &ExtractionConfig {
+                ocr: config.ocr.clone(),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .expect("an automatic per-page route must preserve native text when every OCR page fails");
+        assert_eq!(automatic_result.0, square_native);
+        assert_eq!(automatic_result.8.len(), 2);
+
+        crate::plugins::unregister_ocr_backend(BACKEND_NAME).unwrap();
     }
 
     /// #1690/#1747: `render_selected_pages_from_document` must actually dispatch page
@@ -4269,6 +4471,11 @@ mod tests {
     /// renders successfully with no content stream.
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     fn build_minimal_two_page_pdf(w: f32, h: f32) -> Vec<u8> {
+        build_minimal_two_page_pdf_with_sizes((w, h), (w, h))
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    fn build_minimal_two_page_pdf_with_sizes(first: (f32, f32), second: (f32, f32)) -> Vec<u8> {
         let mut buf = Vec::<u8>::new();
         buf.extend_from_slice(b"%PDF-1.4\n");
 
@@ -4278,11 +4485,22 @@ mod tests {
         let obj2_offset = buf.len();
         buf.extend_from_slice(b"2 0 obj\n<</Type /Pages /Kids [3 0 R 4 0 R] /Count 2>>\nendobj\n");
 
-        let mb = format!("[0 0 {} {}]", w, h);
         let obj3_offset = buf.len();
-        buf.extend_from_slice(format!("3 0 obj\n<</Type /Page /MediaBox {} /Parent 2 0 R>>\nendobj\n", mb).as_bytes());
+        buf.extend_from_slice(
+            format!(
+                "3 0 obj\n<</Type /Page /MediaBox [0 0 {} {}] /Parent 2 0 R>>\nendobj\n",
+                first.0, first.1
+            )
+            .as_bytes(),
+        );
         let obj4_offset = buf.len();
-        buf.extend_from_slice(format!("4 0 obj\n<</Type /Page /MediaBox {} /Parent 2 0 R>>\nendobj\n", mb).as_bytes());
+        buf.extend_from_slice(
+            format!(
+                "4 0 obj\n<</Type /Page /MediaBox [0 0 {} {}] /Parent 2 0 R>>\nendobj\n",
+                second.0, second.1
+            )
+            .as_bytes(),
+        );
 
         let xref_offset = buf.len();
         buf.extend_from_slice(b"xref\n");
@@ -4297,6 +4515,322 @@ mod tests {
         buf.extend_from_slice(format!("startxref\n{}\n%%EOF\n", xref_offset).as_bytes());
 
         buf
+    }
+
+    #[cfg(all(paddle_ocr, feature = "pdf", feature = "ocr"))]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn implicit_classical_fallback_is_decided_per_page_on_all_pdf_routes() {
+        use crate::core::config::OcrConfig;
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::{ExtractedDocument, PageBoundary};
+        use std::sync::{Arc, Mutex};
+
+        struct RecordingBackend {
+            name: &'static str,
+            primary: bool,
+            widths: Arc<Mutex<Vec<u32>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl OcrBackend for RecordingBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, bytes: &[u8], _: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                let width = image::load_from_memory(bytes).unwrap().width();
+                self.widths.lock().unwrap().push(width);
+                let content = if self.primary && width < 900 {
+                    String::new()
+                } else if self.primary {
+                    "Primary text is complete and readable for this page.".to_string()
+                } else {
+                    "Fallback text recovers the unreadable narrow page.".to_string()
+                };
+                Ok(ExtractedDocument {
+                    content,
+                    ..Default::default()
+                })
+            }
+        }
+
+        impl Plugin for RecordingBackend {
+            fn name(&self) -> &str {
+                self.name
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        struct RestoreBuiltins;
+
+        impl Drop for RestoreBuiltins {
+            fn drop(&mut self) {
+                let _ = crate::plugins::clear_ocr_backends();
+                crate::plugins::ensure_ocr_backends_initialized();
+            }
+        }
+
+        crate::plugins::ensure_ocr_backends_initialized();
+        crate::plugins::clear_ocr_backends().unwrap();
+        let _restore_builtins = RestoreBuiltins;
+        let primary_widths = Arc::new(Mutex::new(Vec::new()));
+        let fallback_widths = Arc::new(Mutex::new(Vec::new()));
+        crate::plugins::register_ocr_backend(Arc::new(RecordingBackend {
+            name: "tesseract",
+            primary: true,
+            widths: Arc::clone(&primary_widths),
+        }))
+        .unwrap();
+        crate::plugins::register_ocr_backend(Arc::new(RecordingBackend {
+            name: "paddleocr",
+            primary: false,
+            widths: Arc::clone(&fallback_widths),
+        }))
+        .unwrap();
+
+        let pdf = build_minimal_two_page_pdf_with_sizes((612.0, 792.0), (306.0, 792.0));
+        let boundaries = vec![
+            PageBoundary {
+                byte_start: 0,
+                byte_end: 0,
+                page_number: 1,
+            },
+            PageBoundary {
+                byte_start: 0,
+                byte_end: 0,
+                page_number: 2,
+            },
+        ];
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig::default()),
+            ..Default::default()
+        };
+
+        let result = extract_mixed_ocr_native("", &boundaries, &[1, 2], &pdf, &config, None)
+            .await
+            .unwrap();
+
+        let mut primary = primary_widths.lock().unwrap().clone();
+        primary.sort_unstable();
+        let fallback = fallback_widths.lock().unwrap().clone();
+        assert_eq!(primary, vec![638, 1275]);
+        assert_eq!(fallback, vec![638]);
+        assert_eq!(
+            result.0,
+            "Primary text is complete and readable for this page.Fallback text recovers the unreadable narrow page."
+        );
+
+        primary_widths.lock().unwrap().clear();
+        fallback_widths.lock().unwrap().clear();
+        let whole_document = super::super::super::run_ocr_with_layout(
+            &pdf,
+            &config,
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+        )
+        .await
+        .unwrap();
+        let mut primary = primary_widths.lock().unwrap().clone();
+        primary.sort_unstable();
+        let fallback = fallback_widths.lock().unwrap().clone();
+        assert_eq!(primary, vec![638, 1275]);
+        assert_eq!(fallback, vec![638]);
+        assert_eq!(
+            whole_document.0,
+            "Primary text is complete and readable for this page.\n\nFallback text recovers the unreadable narrow page."
+        );
+
+        primary_widths.lock().unwrap().clear();
+        fallback_widths.lock().unwrap().clear();
+        let marker_config = ExtractionConfig {
+            ocr: Some(OcrConfig::default()),
+            pages: Some(crate::core::config::PageConfig {
+                insert_page_markers: true,
+                marker_format: "<PAGE {page_num}>".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let marked_document = super::super::super::run_ocr_with_layout(
+            &pdf,
+            &marker_config,
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+        )
+        .await
+        .unwrap();
+        let mut marked_primary = primary_widths.lock().unwrap().clone();
+        marked_primary.sort_unstable();
+        assert_eq!(marked_primary, vec![638, 1275]);
+        assert_eq!(fallback_widths.lock().unwrap().as_slice(), &[638]);
+        assert_eq!(
+            marked_document.0,
+            "<PAGE 1>Primary text is complete and readable for this page.<PAGE 2>Fallback text recovers the unreadable narrow page."
+        );
+
+        #[cfg(feature = "layout-detection")]
+        {
+            crate::extractors::pdf::layout_runner::watch_ocr_layout_runs_for(&pdf);
+            primary_widths.lock().unwrap().clear();
+            fallback_widths.lock().unwrap().clear();
+            let layout_config = ExtractionConfig {
+                ocr: Some(OcrConfig::default()),
+                layout: Some(Default::default()),
+                ..Default::default()
+            };
+            let layout_images = vec![image::RgbImage::new(1275, 1650), image::RgbImage::new(638, 1650)];
+            let layout_detections = layout_images
+                .iter()
+                .map(|image| crate::layout::DetectionResult {
+                    page_width: image.width(),
+                    page_height: image.height(),
+                    detections: Vec::new(),
+                })
+                .collect();
+            let layout_document = super::super::super::run_ocr_with_layout(
+                &pdf,
+                &layout_config,
+                None,
+                Some(layout_images),
+                Some(layout_detections),
+                None,
+            )
+            .await
+            .unwrap();
+            assert_eq!(crate::extractors::pdf::layout_runner::ocr_layout_run_count(), 0);
+            assert_eq!(
+                layout_document.0,
+                "Primary text is complete and readable for this page.\n\nFallback text recovers the unreadable narrow page."
+            );
+        }
+
+        primary_widths.lock().unwrap().clear();
+        fallback_widths.lock().unwrap().clear();
+        let token = crate::cancellation::CancellationToken::new();
+        token.cancel();
+        let cancelled_config = ExtractionConfig {
+            cancel_token: Some(token),
+            ..config
+        };
+        let cancelled = super::super::super::run_ocr_with_layout(
+            &pdf,
+            &cancelled_config,
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+        )
+        .await;
+        assert!(matches!(cancelled, Err(crate::XbergError::Cancelled)));
+        assert!(primary_widths.lock().unwrap().is_empty());
+        assert!(fallback_widths.lock().unwrap().is_empty());
+    }
+
+    #[cfg(all(paddle_ocr, feature = "pdf", feature = "ocr"))]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn full_document_per_page_pipeline_errors_when_every_stage_fails() {
+        use crate::core::config::OcrConfig;
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use std::sync::Arc;
+
+        struct FailingBackend(&'static str);
+
+        #[async_trait::async_trait]
+        impl OcrBackend for FailingBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<crate::types::ExtractedDocument> {
+                Err(crate::XbergError::Plugin {
+                    message: format!("{} full-document failure", self.0),
+                    plugin_name: self.0.to_string(),
+                })
+            }
+        }
+
+        impl Plugin for FailingBackend {
+            fn name(&self) -> &str {
+                self.0
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        struct RestoreBuiltins;
+
+        impl Drop for RestoreBuiltins {
+            fn drop(&mut self) {
+                let _ = crate::plugins::clear_ocr_backends();
+                crate::plugins::ensure_ocr_backends_initialized();
+            }
+        }
+
+        crate::plugins::ensure_ocr_backends_initialized();
+        crate::plugins::clear_ocr_backends().unwrap();
+        let _restore_builtins = RestoreBuiltins;
+        crate::plugins::register_ocr_backend(Arc::new(FailingBackend("tesseract"))).unwrap();
+        crate::plugins::register_ocr_backend(Arc::new(FailingBackend("paddleocr"))).unwrap();
+
+        let pdf = build_minimal_two_page_pdf_with_sizes((612.0, 792.0), (306.0, 792.0));
+        let config = ExtractionConfig {
+            force_ocr: true,
+            ocr: Some(OcrConfig::default()),
+            ..Default::default()
+        };
+
+        let result = super::super::super::run_ocr_with_layout(
+            &pdf,
+            &config,
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+        )
+        .await;
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("full-document OCR must fail when every page exhausts every pipeline stage"),
+        };
+
+        assert!(error.to_string().contains("full-document failure"));
     }
 
     /// Regression test (review follow-up to #1341): the nested `run_ocr_pipeline`
@@ -4739,7 +5273,9 @@ mod tests {
             0,
             false,
             None,
+            None,
             0,
+            None,
         )
         .await
         .unwrap();
@@ -4861,7 +5397,9 @@ mod tests {
             0,
             false,
             None,
+            None,
             0,
+            None,
         )
         .await
         .unwrap();
@@ -4947,6 +5485,7 @@ mod tests {
             None,
             &config,
             &pipeline,
+            None,
             None,
         )
         .await;
@@ -5068,6 +5607,7 @@ mod tests {
             None,
             &config,
             &pipeline,
+            None,
             None,
         )
         .await;
@@ -5198,6 +5738,7 @@ mod tests {
             &config,
             &pipeline,
             None,
+            None,
         )
         .await;
 
@@ -5295,6 +5836,7 @@ mod tests {
             None,
             &config,
             &pipeline,
+            None,
             None,
         )
         .await;
@@ -8196,6 +8738,138 @@ Name: ___
         );
     }
 
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn selected_page_pipeline_keeps_whole_document_scan_hints() {
+        use crate::core::config::{OcrConfig, OcrPipelineConfig, OcrPipelineStage, OcrQualityThresholds};
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use crate::types::{ExtractedDocument, PageBoundary};
+        use std::sync::{Arc, Mutex};
+
+        struct TesseractHintCapturingBackend {
+            configs: Mutex<Vec<OcrConfig>>,
+        }
+
+        #[async_trait::async_trait]
+        impl OcrBackend for TesseractHintCapturingBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], config: &OcrConfig) -> crate::Result<ExtractedDocument> {
+                self.configs.lock().unwrap().push(config.clone());
+                Ok(ExtractedDocument {
+                    content: "scanned page text".to_string(),
+                    ..Default::default()
+                })
+            }
+        }
+
+        impl Plugin for TesseractHintCapturingBackend {
+            fn name(&self) -> &str {
+                "tesseract"
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        crate::plugins::unregister_ocr_backend("tesseract").unwrap();
+        let backend = Arc::new(TesseractHintCapturingBackend {
+            configs: Mutex::new(Vec::new()),
+        });
+        crate::plugins::register_ocr_backend(backend.clone()).unwrap();
+
+        let pipeline = OcrPipelineConfig {
+            stages: vec![OcrPipelineStage {
+                backend: "tesseract".to_string(),
+                priority: 100,
+                language: None,
+                tesseract_config: None,
+                paddle_ocr_config: None,
+                vlm_config: None,
+                backend_options: None,
+            }],
+            quality_thresholds: OcrQualityThresholds {
+                pipeline_min_quality: 0.0,
+                ..Default::default()
+            },
+        };
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig {
+                pipeline: Some(pipeline.clone()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let pdf = crate::pdf::render::build_full_page_raster_pdf((100.0, 100.0), (400, 400), 1.0, 0);
+        let rendered = render_selected_pages_for_ocr(&pdf, &[0]).expect("scan page renders");
+        let images = rendered.into_iter().map(|(_, image)| image).collect::<Vec<_>>();
+
+        run_ocr_pipeline(
+            Some(&pdf),
+            Some(&images),
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            &pipeline,
+            None,
+            None,
+        )
+        .await
+        .expect("whole-document pipeline succeeds");
+
+        let native_text = "native page text";
+        let boundaries = [PageBoundary {
+            byte_start: 0,
+            byte_end: native_text.len(),
+            page_number: 1,
+        }];
+        extract_mixed_ocr_native(native_text, &boundaries, &[1], &pdf, &config, None)
+            .await
+            .expect("selected-page pipeline succeeds");
+
+        crate::plugins::unregister_ocr_backend("tesseract").unwrap();
+        crate::plugins::ensure_ocr_backends_initialized();
+
+        let configs = backend.configs.lock().unwrap();
+        assert_eq!(configs.len(), 2, "each route must call the backend once");
+        let hint = |config: &OcrConfig, key: &str| {
+            config
+                .backend_options
+                .as_ref()
+                .and_then(|options| options.get(key))
+                .cloned()
+        };
+        let whole = &configs[0];
+        let selected = &configs[1];
+        assert_eq!(
+            hint(selected, "source_dpi"),
+            hint(whole, "source_dpi"),
+            "selected-page and whole-document OCR must use the same source DPI"
+        );
+        assert!(hint(whole, "source_dpi").and_then(|value| value.as_f64()).is_some());
+        assert_eq!(
+            hint(selected, "known_full_page_scan"),
+            Some(serde_json::Value::Bool(true))
+        );
+        assert_eq!(
+            selected.tesseract_config.as_ref().and_then(|config| config.psm),
+            whole.tesseract_config.as_ref().and_then(|config| config.psm),
+            "selected-page and whole-document OCR must use the same scan segmentation mode"
+        );
+        assert!(whole.tesseract_config.as_ref().and_then(|config| config.psm).is_some());
+    }
+
     /// Build a single-line OCR "block" element carrying an hOCR `x_fsize` (points)
     /// attribute, mirroring what `ocr::hocr_parser` attaches for tesseract output.
     #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
@@ -9957,6 +10631,7 @@ Name: ___
             None,
             &config,
             &pipeline,
+            None,
             None,
         )
         .await;
