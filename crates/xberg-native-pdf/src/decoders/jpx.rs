@@ -29,6 +29,8 @@ impl super::StreamDecoder for JpxDecoder {
 }
 
 /// A decoded JPEG 2000 image: interleaved 8-bit samples plus component count.
+#[derive(Debug)]
+#[non_exhaustive]
 pub struct JpxImage {
     /// `width * height * num_components` bytes, component-interleaved (row-major).
     pub samples: Vec<u8>,
@@ -39,6 +41,9 @@ pub struct JpxImage {
     /// The codestream's own image height (`Ysiz - YOsiz`), authoritative over `/Height` for the
     /// same reason as `width`. ~keep
     pub height: u32,
+    /// The codestream's opacity channel, one 8-bit sample per pixel, when it carries one. It is
+    /// not part of `samples`. A PDF uses it only when the image dictionary sets `/SMaskInData`.
+    pub opacity: Option<Vec<u8>>,
 }
 
 /// Decode a JP2/J2K codestream to interleaved 8-bit-per-component samples.
@@ -117,15 +122,20 @@ fn codestream_component_count(bytes: &[u8]) -> Option<u8> {
 }
 
 /// The codestream within `bytes`: `bytes` itself when it is bare, otherwise the contents of the
-/// `jp2c` box.
-///
-/// ISO/IEC 15444-1 Annex I.4: a JP2 box is `LBox`(4) `TBox`(4) `DBox`, where `LBox == 1` means the
-/// real length follows as a 64-bit `XLBox` and `LBox == 0` means the box runs to end of file. Only
-/// top-level boxes are walked -- `jp2c` is always one. ~keep
+/// `jp2c` box. Only top-level boxes are walked -- `jp2c` is always one. ~keep
 fn locate_codestream(bytes: &[u8]) -> Option<&[u8]> {
     if bytes.starts_with(&SOC_MARKER) {
         return Some(bytes);
     }
+    find_box(bytes, &JP2C_BOX_TYPE)
+}
+
+/// The contents of the first box of type `wanted` among the boxes laid end to end in `bytes`.
+///
+/// ISO/IEC 15444-1 Annex I.4: a JP2 box is `LBox`(4) `TBox`(4) `DBox`, where `LBox == 1` means the
+/// real length follows as a 64-bit `XLBox` and `LBox == 0` means the box runs to end of file. A box
+/// whose length runs past the end of `bytes` yields what is there. ~keep
+fn find_box<'a>(bytes: &'a [u8], wanted: &[u8; 4]) -> Option<&'a [u8]> {
     let mut offset = 0usize;
     // `checked_add` rather than `offset + 8 <= len`: a 64-bit `XLBox` is attacker-controlled and
     // can advance `offset` to anywhere in the usize range. ~keep
@@ -143,12 +153,77 @@ fn locate_codestream(bytes: &[u8]) -> Option<&[u8]> {
         if box_len < header_len {
             return None;
         }
-        if box_type == JP2C_BOX_TYPE {
-            return bytes.get(offset + header_len..);
+        if box_type == wanted {
+            let end = offset.saturating_add(box_len).min(bytes.len());
+            return bytes.get(offset + header_len..end);
         }
         offset = offset.checked_add(box_len)?;
     }
     None
+}
+
+/// A palette carried in a JP2 file's own `pclr` box (ISO/IEC 15444-1 I.5.3.4).
+pub struct CodestreamPalette {
+    /// Components per palette entry: 1, 3 or 4.
+    pub columns: u8,
+    /// One byte per component, entry after entry.
+    pub entries: Vec<u8>,
+}
+
+/// The palette of a JP2 file whose header maps its one index component through a `pclr` box, in
+/// the only shape xberg resolves itself: 8-bit unsigned entries, at most 256 of them, 1, 3 or 4
+/// columns in order, and a colour specification that is grey, sRGB or CMYK when it names one.
+///
+/// hayro-jpeg2000 0.4 resolves this palette without clamping, so one lossily coded index just past
+/// the last entry fails the whole image (GH#1903). Reading it here lets the caller clamp the
+/// indices and look them up in it, in the palette's own colour space. Any
+/// other shape returns `None` and decodes as before. ~keep
+pub fn codestream_palette(bytes: &[u8]) -> Option<CodestreamPalette> {
+    let header = find_box(bytes, b"jp2h")?;
+    let pclr = find_box(header, b"pclr")?;
+    let entry_count = usize::from(u16::from_be_bytes(pclr.get(0..2)?.try_into().ok()?));
+    let columns = *pclr.get(2)?;
+    let depths = pclr.get(3..3 + usize::from(columns))?;
+    // `B` stores the depth minus one, with the top bit set for signed values: 7 is unsigned 8-bit. ~keep
+    if !(1..=256).contains(&entry_count) || !matches!(columns, 1 | 3 | 4) || depths.iter().any(|&b| b != 7) {
+        return None;
+    }
+    let start = 3 + usize::from(columns);
+    let entries = pclr.get(start..start + entry_count * usize::from(columns))?.to_vec();
+
+    // The first channels must be palette columns 0.. in order, all read from component 0 (`MTYP` 1
+    // is a palette mapping); any channel after them must map a component directly (`MTYP` 0), as an
+    // opacity component does. ~keep
+    let cmap = find_box(header, b"cmap")?;
+    if cmap.len() % 4 != 0 || cmap.len() < 4 * usize::from(columns) {
+        return None;
+    }
+    let (palette_channels, direct_channels) = cmap.split_at(4 * usize::from(columns));
+    let in_order = palette_channels
+        .chunks_exact(4)
+        .zip(0u8..)
+        .all(|(channel, column)| channel == [0, 0, 1, column]);
+    if !in_order || direct_channels.chunks_exact(4).any(|channel| channel[2] != 0) {
+        return None;
+    }
+
+    // An enumerated colour space other than CMYK (12), sRGB (16) or grey (17), or one whose
+    // component count differs from the palette's, is left to the decoder. ~keep
+    if let Some(colr) = find_box(header, b"colr")
+        && colr.first() == Some(&1)
+    {
+        let enumcs = u32::from_be_bytes(colr.get(3..7)?.try_into().ok()?);
+        let expected = match enumcs {
+            12 => 4,
+            16 => 3,
+            17 => 1,
+            _ => return None,
+        };
+        if expected != columns {
+            return None;
+        }
+    }
+    Some(CodestreamPalette { columns, entries })
 }
 
 /// The component count to treat as declared when the image dictionary named no `/ColorSpace` at all
@@ -209,7 +284,16 @@ pub fn decode_jpx(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxIm
     // decoder's own interleave. ~keep
     if comps.iter().all(|c| c.samples().len() == npix) {
         let mut samples = decoded.data_u8();
+        let mut opacity = None;
         if has_alpha {
+            opacity = Some(
+                samples
+                    .iter()
+                    .skip(num_components - 1)
+                    .step_by(num_components)
+                    .copied()
+                    .collect(),
+            );
             samples = drop_last_channel(&samples, num_components);
         }
         return Ok(JpxImage {
@@ -217,10 +301,124 @@ pub fn decode_jpx(bytes: &[u8], declared_components: Option<u8>) -> Result<JpxIm
             num_components: colour_components as u8,
             width,
             height,
+            opacity,
         });
     }
 
     decode_subsampled(comps, width, height, colour_components)
+}
+
+/// Decode the palette indices of a JPEG 2000 image whose dictionary names an `/Indexed` colour
+/// space, one byte per pixel, for the caller to look up in the dictionary's own palette. The
+/// result is a one-component [`JpxImage`] at the codestream's own size, which the caller uses in
+/// place of the dictionary's `/Width` and `/Height` as [`decode_jpx`]'s callers do (GH#1900).
+///
+/// ISO 32000-1 §7.4.9 says a `/ColorSpace` entry overrides any colour specification in the
+/// JPEG 2000 data, and a `pclr` palette box is one: pdf.js decodes such an image with the
+/// codestream palette switched off for the same reason. It is also the only way these images
+/// decode at all. A lossily coded index plane rings around every edge, so samples land a little
+/// outside `0..=255`; hayro-jpeg2000 0.4 looks each one up unclamped and fails the whole image
+/// with `PaletteResolutionFailed`. Rounding and clamping to `highest_index`, the last entry the
+/// dictionary's palette holds, maps that ringing to the nearest real index instead. ~keep
+///
+/// The index plane is the first component. hayro-jpeg2000 reports the colour channels it found,
+/// and with palette resolution off it reports an image carrying a `pclr` box as one grey channel
+/// and clears its alpha flag, even when a second component is the image's opacity. So the channel
+/// count, not the component count, says whether the image is an index plane; any component after
+/// the first is opacity and is dropped, as [`decode_jpx`] drops it for every other image. ~keep
+pub fn decode_jpx_indices(bytes: &[u8], highest_index: u8) -> Result<JpxImage> {
+    use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
+
+    let settings = DecodeSettings {
+        resolve_palette_indices: false,
+        ..DecodeSettings::default()
+    };
+    let image = Image::new(bytes, &settings)
+        .map_err(|e| Error::UnsupportedFilter(format!("JPXDecode: JPEG 2000 decode failed: {e:?}")))?;
+
+    let mut ctx = DecoderContext::default();
+    let decoded = image
+        .decode(&mut ctx)
+        .map_err(|e| Error::UnsupportedFilter(format!("JPXDecode: JPEG 2000 decode failed: {e:?}")))?;
+
+    let index_components = image.color_space().num_channels();
+    let [indices, ..] = decoded.components() else {
+        return Err(Error::UnsupportedFilter(
+            "JPXDecode: JPEG 2000 image has no components".to_string(),
+        ));
+    };
+    if index_components != 1 {
+        return Err(Error::UnsupportedFilter(format!(
+            "JPXDecode: an /Indexed JPEG 2000 image needs one index component, found {index_components}"
+        )));
+    }
+    let (indices, clamped) = clamp_indices(indices.samples(), highest_index);
+    let opacity = codestream_opacity_component(bytes)
+        .and_then(|component| decoded.components().get(component))
+        .and_then(|component| {
+            let samples = component.samples();
+            (samples.len() == image.width() as usize * image.height() as usize).then(|| {
+                samples
+                    .iter()
+                    .map(|&value| value.round().clamp(0.0, 255.0) as u8)
+                    .collect()
+            })
+        });
+    if clamped > 0 {
+        tracing::warn!(
+            clamped,
+            total = indices.len(),
+            highest_index,
+            "JPXDecode: clamped out-of-range palette indices to the palette"
+        );
+    }
+    Ok(JpxImage {
+        samples: indices,
+        num_components: 1,
+        width: image.width(),
+        height: image.height(),
+        opacity,
+    })
+}
+
+/// The codestream component mapped to a JP2 channel-definition entry of type opacity.
+///
+/// A palette maps output channels back to codestream components through `cmap`, so the opacity
+/// channel number in `cdef` is not necessarily its component number. (GH#1885) ~keep
+fn codestream_opacity_component(bytes: &[u8]) -> Option<usize> {
+    let header = find_box(bytes, b"jp2h")?;
+    let definitions = find_box(header, b"cdef")?;
+    let count = usize::from(u16::from_be_bytes(definitions.get(0..2)?.try_into().ok()?));
+    let entries = definitions.get(2..2 + count.checked_mul(6)?)?;
+    let channel = entries.chunks_exact(6).find_map(|entry| {
+        let channel = u16::from_be_bytes(entry[0..2].try_into().ok()?);
+        let kind = u16::from_be_bytes(entry[2..4].try_into().ok()?);
+        matches!(kind, 1 | 2).then_some(usize::from(channel))
+    })?;
+    let Some(mapping) = find_box(header, b"cmap") else {
+        return Some(channel);
+    };
+    let entry = mapping.get(channel.checked_mul(4)?..channel.checked_add(1)?.checked_mul(4)?)?;
+    Some(usize::from(u16::from_be_bytes(entry[0..2].try_into().ok()?)))
+}
+
+/// Round each index sample and clamp it to `0..=highest_index`, and count the samples the clamp
+/// moved. hayro-jpeg2000 hands back each component's samples at the codestream's own scale, not
+/// normalised to 8 bits, so this reads a 16-bit index plane correctly too. ~keep
+fn clamp_indices(samples: &[f32], highest_index: u8) -> (Vec<u8>, usize) {
+    let highest = f32::from(highest_index);
+    let mut clamped = 0;
+    let indices = samples
+        .iter()
+        .map(|&v| {
+            let rounded = v.round();
+            if !(0.0..=highest).contains(&rounded) {
+                clamped += 1;
+            }
+            rounded.clamp(0.0, highest) as u8
+        })
+        .collect();
+    (indices, clamped)
 }
 
 /// The chroma-subsampled path (WS1.7), separated so [`decode_jpx`] stays readable.
@@ -274,6 +472,7 @@ fn decode_subsampled(
         num_components: colour_components as u8,
         width,
         height,
+        opacity: planes.get(colour_components).cloned(),
     })
 }
 
@@ -304,7 +503,7 @@ fn upsample_nearest_u8(sub: &[f32], sw: usize, sh: usize, fw: usize, fh: usize) 
 
 #[cfg(test)]
 mod tests {
-    use super::{alpha_is_droppable, decode_jpx, upsample_nearest_u8};
+    use super::{alpha_is_droppable, decode_jpx, decode_jpx_indices, upsample_nearest_u8};
 
     /// Grayscale JP2 codestream from the minimal repro (816x1056 DeviceGray).
     const SAMPLE_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/sample_gray.jp2");
@@ -321,6 +520,228 @@ mod tests {
     /// A BARE 4-component CMYK codestream, 16x16, no JP2 container and so no `colr` box to
     /// declare CMYK. This is the shape hayro-jpeg2000 misreads as RGB + alpha. ~keep
     const CMYK_QUADRANTS_J2K: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1855_cmyk_quadrants.j2k");
+
+    /// GH#1885 fixtures, 120x40, dark text (index 0) on paper (index 255), generated with Pillow's
+    /// OpenJPEG encoder. `PALETTE_CMYK_JP2` is one 8-bit index component coded lossily (9/7
+    /// irreversible, rate 4) in a JP2 container carrying a `colr` box naming CMYK, a 256-entry
+    /// four-column `pclr` box (entry `i` is CMYK `(0, 0, 0, 255 - i)`) and a `cmap` box routing the
+    /// component through all four columns. The lossy coding leaves index samples outside
+    /// `0..=255` near the glyph edges. `INDICES_GREY_JP2` is the same picture coded losslessly as
+    /// a plain greyscale JP2 with no palette box. ~keep
+    const PALETTE_CMYK_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1885_palette_cmyk.jp2");
+    const INDICES_GREY_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1885_indices_grey.jp2");
+    /// The same picture as one index component plus an opaque alpha component. The `pclr` box routes
+    /// the first through the same four-column CMYK palette, and the `cmap` and `cdef` boxes route the
+    /// second direct as opacity. With palette resolution off, hayro-jpeg2000 reports this as one
+    /// grey channel with no alpha. ~keep
+    const PALETTE_ALPHA_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1885_palette_alpha.jp2");
+    /// A lossily coded index plane for a 16-entry palette, ink at index 0 and paper at 15, in a plain
+    /// greyscale JP2. The lossy coding rings samples up to 16, one past the last palette entry. ~keep
+    const HIVAL15_LOSSY_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1885_hival15_lossy.jp2");
+
+    /// NEGATIVE CONTROL pinning the upstream failure: resolving the codestream palette fails the
+    /// whole image. If this ever passes, hayro-jpeg2000 clamps out-of-range indices itself. ~keep
+    #[test]
+    fn a_lossy_palette_codestream_fails_when_the_decoder_resolves_its_palette() {
+        let err = decode_jpx(PALETTE_CMYK_JP2, Some(1))
+            .expect_err("negative control: the codestream palette lookup must fail on out-of-range indices");
+        assert!(
+            format!("{err:?}").contains("PaletteResolutionFailed"),
+            "unexpected failure: {err:?}"
+        );
+    }
+
+    #[test]
+    fn a_lossy_palette_codestream_decodes_to_clamped_indices() {
+        let indices = decode_jpx_indices(PALETTE_CMYK_JP2, u8::MAX)
+            .expect("GH#1885: the index plane must decode")
+            .samples;
+        assert_eq!(indices.len(), 120 * 40, "one index byte per pixel");
+        assert_eq!(indices[0], 255, "the top-left pixel is paper");
+        assert!(indices.contains(&0), "the ink index must survive the clamp");
+    }
+
+    /// The unresolved plane really rings outside `0..=255`; each such sample must land on the
+    /// nearest end of the palette, and every in-range sample must round, not truncate.
+    #[test]
+    fn lossy_indices_round_and_clamp_samples_outside_the_palette() {
+        use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
+        let settings = DecodeSettings {
+            resolve_palette_indices: false,
+            ..DecodeSettings::default()
+        };
+        let image = Image::new(PALETTE_CMYK_JP2, &settings).expect("the index plane must parse");
+        let mut ctx = DecoderContext::default();
+        let decoded = image.decode(&mut ctx).expect("the index plane must decode");
+        let plane = decoded.components()[0].samples();
+        let below = plane.iter().filter(|&&v| v.round() < 0.0).count();
+        let above = plane.iter().filter(|&&v| v.round() > 255.0).count();
+        assert!(
+            below > 0 && above > 0,
+            "control failed: the lossy plane must ring past both ends, got {below} below and {above} above"
+        );
+        let rounds_up = plane
+            .iter()
+            .filter(|&&v| (0.0..255.0).contains(&v) && v.fract() > 0.5)
+            .count();
+        assert!(
+            rounds_up > 0,
+            "control failed: the plane must hold samples that round up"
+        );
+
+        let indices = decode_jpx_indices(PALETTE_CMYK_JP2, u8::MAX).expect("indices").samples;
+        for (&v, &index) in plane.iter().zip(&indices) {
+            let expected = if v.round() < 0.0 {
+                0
+            } else if v.round() > 255.0 {
+                255
+            } else {
+                v.round() as u8
+            };
+            assert_eq!(index, expected, "sample {v} must map to index {expected}");
+        }
+        assert_eq!(
+            super::clamp_indices(plane, u8::MAX).1,
+            below + above,
+            "every repaired sample is counted"
+        );
+    }
+
+    /// hayro-jpeg2000 returns a 16-bit plane's samples unscaled, so a 16-bit index plane reads
+    /// its indices directly rather than as a fraction of 65535. The fixture is a lossless 16x16
+    /// greyscale JP2, index 3 on the left half and index 200 on the right. ~keep
+    #[test]
+    fn a_16_bit_index_plane_reads_its_indices_unscaled() {
+        const INDICES_16BIT_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1885_indices_16bit.jp2");
+        let settings = hayro_jpeg2000::DecodeSettings {
+            resolve_palette_indices: false,
+            ..hayro_jpeg2000::DecodeSettings::default()
+        };
+        let image = hayro_jpeg2000::Image::new(INDICES_16BIT_JP2, &settings).expect("the fixture must parse");
+        let mut ctx = hayro_jpeg2000::DecoderContext::default();
+        let decoded = image.decode(&mut ctx).expect("the fixture must decode");
+        assert_eq!(
+            decoded.components()[0].bit_depth(),
+            16,
+            "control failed: the fixture must be a 16-bit plane"
+        );
+        let indices = decode_jpx_indices(INDICES_16BIT_JP2, u8::MAX)
+            .expect("a 16-bit index plane must decode")
+            .samples;
+        assert_eq!(indices.len(), 16 * 16);
+        assert_eq!((indices[0], indices[15]), (3, 200), "the indices must not be rescaled");
+    }
+
+    /// Decoding a plane the clamp had to repair logs one warning; a clean plane logs none.
+    #[test]
+    fn a_repaired_index_plane_logs_one_warning() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        struct WarnCount(Arc<AtomicUsize>);
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for WarnCount {
+            fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+                if *event.metadata().level() == tracing::Level::WARN {
+                    self.0.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        }
+        let warnings = |bytes: &[u8]| {
+            // ~keep tracing-core treats a lone live dispatcher as the only one, so a test on another
+            // thread that reaches the warning first caches it as "never" from its own empty
+            // subscriber. A second live dispatcher makes that registration ask this one as well.
+            let _second = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+            let count = Arc::new(AtomicUsize::new(0));
+            let subscriber = tracing_subscriber::registry().with(WarnCount(Arc::clone(&count)));
+            tracing::subscriber::with_default(subscriber, || decode_jpx_indices(bytes, u8::MAX).expect("indices"));
+            count.load(Ordering::SeqCst)
+        };
+        assert_eq!(warnings(PALETTE_CMYK_JP2), 1, "the lossy plane needs the clamp");
+        assert_eq!(
+            warnings(INDICES_GREY_JP2),
+            0,
+            "control: a lossless plane needs no repair"
+        );
+    }
+
+    /// Every sample the clamp moves is counted, so the decoder can warn with the count.
+    #[test]
+    fn clamp_indices_counts_the_samples_it_repairs() {
+        let (indices, clamped) = super::clamp_indices(&[-0.6, -0.4, 4.5, 15.4, 15.6, 300.0], 15);
+        assert_eq!(indices, vec![0, 0, 5, 15, 15, 15]);
+        assert_eq!(clamped, 3, "-0.6, 15.6 and 300.0 fall outside 0..=15");
+    }
+
+    /// Without a palette box the index plane is the codestream's only component, unchanged.
+    #[test]
+    fn a_plain_codestream_decodes_to_its_own_samples_as_indices() {
+        let decoded = decode_jpx_indices(INDICES_GREY_JP2, u8::MAX).expect("a plain index codestream must decode");
+        assert_eq!(decoded.opacity, None, "an unmarked component must not become opacity");
+        let indices = decoded.samples;
+        let grey = decode_jpx(INDICES_GREY_JP2, None).expect("the same codestream as greyscale");
+        assert_eq!(indices, grey.samples);
+        assert!(
+            indices.contains(&0) && indices.contains(&255),
+            "the fixture must hold ink and paper"
+        );
+    }
+
+    /// An alpha channel is dropped as it is for any other image; three colour components cannot
+    /// be palette indices, so that image is refused rather than read through its first plane.
+    #[test]
+    fn index_decoding_drops_alpha_and_refuses_colour_codestreams() {
+        let grey = decode_jpx_indices(GREY_ALPHA_JP2, u8::MAX)
+            .expect("grey plus alpha has one index component")
+            .samples;
+        assert_eq!(grey.len(), 16 * 16);
+        assert_eq!(grey[0], 180, "the left half's index must survive");
+
+        let err = decode_jpx_indices(RGBA_JP2, u8::MAX).expect_err("an RGBA codestream has three components");
+        assert!(format!("{err:?}").contains("found 3"), "unexpected failure: {err:?}");
+    }
+
+    /// A palette box plus an opacity channel: the index plane is the first component and the opacity
+    /// plane after it is dropped, not counted as a second index component.
+    #[test]
+    fn a_palette_codestream_with_an_opacity_channel_decodes_its_index_plane() {
+        let decoded = decode_jpx_indices(PALETTE_ALPHA_JP2, u8::MAX).expect("the index plane must decode");
+        let indices = decoded.samples;
+        let plain = decode_jpx_indices(INDICES_GREY_JP2, u8::MAX)
+            .expect("the same picture without alpha")
+            .samples;
+        assert_eq!(
+            indices, plain,
+            "the indices must be the plane's, not the opacity plane's"
+        );
+        assert_eq!(
+            decoded.opacity.as_deref(),
+            Some(vec![255; 120 * 40].as_slice()),
+            "the marked opacity plane must be retained beside the indices"
+        );
+    }
+
+    /// Ringing past a short palette clamps to its last entry, not to 255: the expander paints an
+    /// index past the palette black.
+    #[test]
+    fn lossy_indices_clamp_to_the_highest_palette_index() {
+        let unclamped = decode_jpx_indices(HIVAL15_LOSSY_JP2, u8::MAX)
+            .expect("the index plane must decode")
+            .samples;
+        assert!(
+            unclamped.iter().any(|&i| i > 15),
+            "control failed: the fixture must ring past index 15"
+        );
+        let indices = decode_jpx_indices(HIVAL15_LOSSY_JP2, 15)
+            .expect("the index plane must decode")
+            .samples;
+        assert_eq!(
+            indices.iter().max(),
+            Some(&15),
+            "no index may pass the palette's last entry"
+        );
+        assert!(indices.contains(&0), "the ink index must survive the clamp");
+    }
 
     /// The alpha decision in isolation, so the truth table is readable without decoding anything.
     /// The third row is the GH#1850 case: a declared count equal to the actual one means every
@@ -450,6 +871,42 @@ mod tests {
         assert_eq!(img.samples[0], 180, "the left half's grey value must survive");
     }
 
+    /// An 8x8 bare codestream: a lossless grey plane at full resolution, `16 * x + 2 * y`, and an
+    /// opacity plane coded 2x2 subsampled, 4x4 samples of `17 * i`. ~keep
+    const SUBSAMPLED_GREY_ALPHA_J2K: &[u8] =
+        include_bytes!("../../tests/fixtures/jpx/gh1902_subsampled_grey_alpha.j2k");
+
+    /// GH#1902: an opacity plane coded subsampled still reaches `/SMaskInData` at full resolution.
+    /// hayro-jpeg2000 0.4 upsamples every component to the image size itself, so the image takes
+    /// the full-resolution path and not [`decode_subsampled`]. If the first assertion ever fails,
+    /// hayro started returning planes at their coded size and the subsampled path is live. ~keep
+    #[test]
+    fn a_subsampled_opacity_plane_is_returned_at_full_resolution() {
+        use hayro_jpeg2000::{DecodeSettings, DecoderContext, Image};
+        let image = Image::new(SUBSAMPLED_GREY_ALPHA_J2K, &DecodeSettings::default()).expect("fixture parses");
+        let mut ctx = DecoderContext::default();
+        let decoded = image.decode(&mut ctx).expect("fixture decodes");
+        let lens: Vec<usize> = decoded.components().iter().map(|c| c.samples().len()).collect();
+        assert_eq!(
+            lens,
+            vec![64, 64],
+            "hayro-jpeg2000 upsamples the subsampled plane itself"
+        );
+
+        let img = decode_jpx(SUBSAMPLED_GREY_ALPHA_J2K, Some(1)).expect("subsampled grey+alpha must decode");
+        assert_eq!(img.num_components, 1, "the opacity plane is not a colour component");
+        let grey: Vec<u8> = (0..8u8).flat_map(|y| (0..8u8).map(move |x| 16 * x + 2 * y)).collect();
+        assert_eq!(img.samples, grey, "the grey plane must be read as coded");
+        let opacity: Vec<u8> = (0..8usize)
+            .flat_map(|y| (0..8usize).map(move |x| 17 * (y / 2 * 4 + x / 2) as u8))
+            .collect();
+        assert_eq!(
+            img.opacity,
+            Some(opacity),
+            "the opacity plane must be upsampled, not dropped"
+        );
+    }
+
     /// The `SIZ` reader against every JPEG 2000 fixture in the tree, bare and JP2-boxed, with the
     /// expected `Csiz` taken from each fixture's construction. This is the assertion that the
     /// Annex A.5.1 offsets are right; the decode tests above only see the consequence. ~keep
@@ -461,6 +918,7 @@ mod tests {
             ("boxed rgba jp2", RGBA_JP2, 4),
             ("boxed grey+alpha jp2", GREY_ALPHA_JP2, 2),
             ("boxed grey jp2", SAMPLE_JP2, 1),
+            ("bare subsampled grey+alpha j2k", SUBSAMPLED_GREY_ALPHA_J2K, 2),
         ] {
             assert_eq!(
                 super::codestream_component_count(bytes),
@@ -562,5 +1020,159 @@ mod tests {
             img.samples.iter().any(|&b| b != first),
             "decoded image is uniformly flat — decode likely failed"
         );
+    }
+
+    /// A JP2 file mapping its index component through a `pclr` box yields that palette, an
+    /// opacity channel after the palette columns included; a file with no `pclr` and a bare
+    /// codestream yield none. (GH#1903)
+    #[test]
+    fn codestream_palette_reads_the_pclr_box() {
+        let palette = super::codestream_palette(PALETTE_CMYK_JP2).expect("the fixture carries a pclr box");
+        assert_eq!(palette.columns, 4);
+        assert_eq!(palette.entries.len(), 256 * 4);
+        let with_alpha = super::codestream_palette(PALETTE_ALPHA_JP2).expect("an opacity channel maps directly");
+        assert_eq!(with_alpha.entries, palette.entries);
+        assert!(super::codestream_palette(INDICES_GREY_JP2).is_none());
+        assert!(super::codestream_palette(RGBA_J2K).is_none());
+    }
+
+    fn jp2_box(kind: &[u8; 4], contents: &[u8]) -> Vec<u8> {
+        let mut out = u32::try_from(8 + contents.len())
+            .expect("small box")
+            .to_be_bytes()
+            .to_vec();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(contents);
+        out
+    }
+
+    /// A JP2 header holding the given `pclr`, `cmap` and optional `colr` contents; the palette
+    /// reader needs nothing past the header.
+    fn palette_header(pclr: &[u8], cmap: &[u8], colr: Option<&[u8]>) -> Vec<u8> {
+        let mut header = Vec::new();
+        if let Some(colr) = colr {
+            header.extend(jp2_box(b"colr", colr));
+        }
+        header.extend(jp2_box(b"pclr", pclr));
+        header.extend(jp2_box(b"cmap", cmap));
+        let mut file = jp2_box(b"jP  ", &[0x0D, 0x0A, 0x87, 0x0A]);
+        file.extend(jp2_box(b"jp2h", &header));
+        file
+    }
+
+    /// `pclr` contents: `entries` palette entries of `depths.len()` columns, each entry's bytes
+    /// counting up from 0.
+    fn pclr(entries: u16, depths: &[u8]) -> Vec<u8> {
+        let mut out = entries.to_be_bytes().to_vec();
+        out.push(u8::try_from(depths.len()).expect("few columns"));
+        out.extend_from_slice(depths);
+        out.extend((0..usize::from(entries) * depths.len()).map(|i| i as u8));
+        out
+    }
+
+    const RGB_CMAP: [u8; 12] = [0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 2];
+    const SRGB_COLR: [u8; 7] = [1, 0, 0, 0, 0, 0, 16];
+
+    /// Each shape the palette reader resolves itself, and each it leaves to the decoder. (GH#1903)
+    #[test]
+    fn codestream_palette_accepts_only_the_shape_it_can_resolve() {
+        let read = |pclr: &[u8], cmap: &[u8], colr: Option<&[u8]>| {
+            super::codestream_palette(&palette_header(pclr, cmap, colr)).map(|p| (p.columns, p.entries))
+        };
+        let good = read(&pclr(2, &[7, 7, 7]), &RGB_CMAP, Some(&SRGB_COLR));
+        assert_eq!(
+            good,
+            Some((3, vec![0, 1, 2, 3, 4, 5])),
+            "control: an 8-bit sRGB palette"
+        );
+
+        assert_eq!(read(&pclr(2, &[15, 15, 15]), &RGB_CMAP, None), None, "16-bit entries");
+        assert_eq!(read(&pclr(2, &[0x87, 7, 7]), &RGB_CMAP, None), None, "signed entries");
+        assert_eq!(read(&pclr(2, &[7, 7]), &RGB_CMAP[..8], None), None, "two columns");
+        assert_eq!(read(&pclr(0, &[7, 7, 7]), &RGB_CMAP, None), None, "no entries");
+        assert_eq!(
+            read(&pclr(257, &[7, 7, 7]), &RGB_CMAP, None),
+            None,
+            "more entries than an index byte reaches"
+        );
+        assert!(
+            read(&pclr(256, &[7, 7, 7]), &RGB_CMAP, None).is_some(),
+            "control: 256 entries"
+        );
+        let short = pclr(2, &[7, 7, 7]);
+        assert_eq!(
+            read(&short[..short.len() - 1], &RGB_CMAP, None),
+            None,
+            "truncated entries"
+        );
+
+        let swapped = [0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 2];
+        assert_eq!(read(&pclr(2, &[7, 7, 7]), &swapped, None), None, "columns out of order");
+        let other_component = [0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 2];
+        assert_eq!(
+            read(&pclr(2, &[7, 7, 7]), &other_component, None),
+            None,
+            "palette read from component 1"
+        );
+        let mut with_opacity = RGB_CMAP.to_vec();
+        with_opacity.extend_from_slice(&[0, 1, 0, 0]);
+        assert!(
+            read(&pclr(2, &[7, 7, 7]), &with_opacity, None).is_some(),
+            "control: a direct opacity channel"
+        );
+        let mut fourth_palette_channel = RGB_CMAP.to_vec();
+        fourth_palette_channel.extend_from_slice(&[0, 0, 1, 2]);
+        assert_eq!(
+            read(&pclr(2, &[7, 7, 7]), &fourth_palette_channel, None),
+            None,
+            "a fourth palette channel"
+        );
+        assert_eq!(read(&pclr(2, &[7, 7, 7]), &RGB_CMAP[..11], None), None, "a ragged cmap");
+
+        assert_eq!(
+            read(&pclr(2, &[7, 7, 7]), &RGB_CMAP, Some(&[1, 0, 0, 0, 0, 0, 18])),
+            None,
+            "sYCC"
+        );
+        assert_eq!(
+            read(&pclr(2, &[7, 7, 7]), &RGB_CMAP, Some(&[1, 0, 0, 0, 0, 0, 17])),
+            None,
+            "grey, three columns"
+        );
+        assert!(
+            read(&pclr(2, &[7]), &RGB_CMAP[..4], Some(&[1, 0, 0, 0, 0, 0, 17])).is_some(),
+            "control: grey"
+        );
+        assert!(
+            read(
+                &pclr(2, &[7, 7, 7, 7]),
+                &[RGB_CMAP.as_slice(), &[0, 0, 1, 3]].concat(),
+                Some(&[1, 0, 0, 0, 0, 0, 12])
+            )
+            .is_some(),
+            "control: CMYK"
+        );
+        assert!(
+            read(&pclr(2, &[7, 7, 7]), &RGB_CMAP, Some(&[2, 0, 0])).is_some(),
+            "an ICC colr is read by count"
+        );
+    }
+
+    /// A box with `LBox` 0 runs to the end of the file; one whose `XLBox` runs past it yields what
+    /// is there. (GH#1903)
+    #[test]
+    fn find_box_reads_open_ended_and_extended_lengths() {
+        let mut open_ended = jp2_box(b"jP  ", &[0x0D, 0x0A, 0x87, 0x0A]);
+        open_ended.extend_from_slice(&[0, 0, 0, 0]);
+        open_ended.extend_from_slice(b"pclr");
+        open_ended.extend_from_slice(&[9, 8, 7]);
+        assert_eq!(super::find_box(&open_ended, b"pclr"), Some(&[9u8, 8, 7][..]));
+
+        let mut extended = vec![0, 0, 0, 1];
+        extended.extend_from_slice(b"pclr");
+        extended.extend_from_slice(&1000u64.to_be_bytes());
+        extended.extend_from_slice(&[5, 6]);
+        assert_eq!(super::find_box(&extended, b"pclr"), Some(&[5u8, 6][..]));
+        assert_eq!(super::find_box(&extended, b"cmap"), None);
     }
 }
