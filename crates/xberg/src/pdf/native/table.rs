@@ -1272,6 +1272,9 @@ const COLUMN_BLOCK_CORRIDOR_DOMINANCE_PERCENT: u64 = 150;
 /// corridor. This prevents a financial table's label/value gutter from being
 /// mistaken for a page-column boundary. ~keep
 const COLUMN_BLOCK_MIN_SEMANTIC_WORDS: usize = 3;
+/// A page-column split should not cut through a dense run of shared table rows. ~keep
+const COLUMN_BLOCK_MIN_SYNCHRONOUS_ROWS: usize = 6;
+const COLUMN_BLOCK_SYNCHRONOUS_ROW_PERCENT: usize = 90;
 
 /// Tolerance, in points, for collapsing word left edges onto one column track. Matches the
 /// region filter's own existing dedup width (previously an unnamed literal 8). ~keep
@@ -1433,7 +1436,30 @@ fn split_region_at_column_corridor(
     if !has_mixed_label_value_evidence(&left) || !has_mixed_label_value_evidence(&right) {
         return None;
     }
+    if has_synchronous_rows_across_seam(region, seam, median_height) {
+        return None;
+    }
     Some((left, right))
+}
+
+fn has_synchronous_rows_across_seam(
+    region: &[crate::pdf::table_reconstruct::HocrWord],
+    seam: u32,
+    median_height: u32,
+) -> bool {
+    let row_tolerance = (median_height / 2).max(3);
+    let rows = numeric_rows(region, row_tolerance);
+    if rows.len() < COLUMN_BLOCK_MIN_SYNCHRONOUS_ROWS {
+        return false;
+    }
+    let synchronous_rows = rows
+        .iter()
+        .filter(|row| {
+            row.iter().any(|word| word.left.saturating_add(word.width) <= seam)
+                && row.iter().any(|word| word.left >= seam)
+        })
+        .count();
+    synchronous_rows.saturating_mul(100) >= rows.len().saturating_mul(COLUMN_BLOCK_SYNCHRONOUS_ROW_PERCENT)
 }
 
 /// Whether `side` contains at least two distinct column tracks (word left edges more
@@ -4981,6 +5007,28 @@ mod tests {
             height,
             confidence: 95.0,
         }
+    }
+
+    #[test]
+    fn a_dense_multiword_ledger_is_not_split_at_its_widest_gutter() {
+        let mut words = vec![
+            make_word("Account", 20, 40, 45),
+            make_word("Amount", 210, 40, 40),
+            make_word("Note", 310, 40, 35),
+        ];
+        for row in 1..=30 {
+            let top = 40 + row * 12;
+            words.push(make_word("Account", 20, top, 45));
+            words.push(make_word(&format!("{row:04}"), 70, top, 30));
+            words.push(make_word(&format!("${}.00", row * 137), 210, top, 40));
+            words.push(make_word("ref", 310, top, 25));
+            words.push(make_word(&row.to_string(), 340, top, 20));
+        }
+
+        assert!(
+            split_region_at_column_corridor(&words, 10).is_none(),
+            "synchronized ledger rows must not be mistaken for independent page columns"
+        );
     }
 
     /// A block of two overlapping x-tracks (so it merges into a single horizontal
