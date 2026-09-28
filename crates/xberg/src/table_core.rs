@@ -115,8 +115,9 @@ pub(crate) struct ColumnTrack {
     left: u32,
     /// Median right edge of the column's tokens (the rightmost once folded).
     right: u32,
-    /// Whether every one of the column's tokens is a value ([`is_cell_value_text`]), which is what
-    /// makes it eligible to fold into an adjacent value column.
+    /// Whether every one of the column's data tokens is a value ([`is_cell_value_text`]), which is
+    /// what makes it eligible to fold into an adjacent value column. Header-row tokens are not
+    /// read: a column's header label is text by nature. See [`column_track`].
     right_aligned: bool,
     /// The median left edge of each track this column was folded from, one entry when it was not
     /// folded at all.
@@ -160,45 +161,149 @@ impl ColumnTrack {
 /// Detect columns from word x-coordinates, each carrying the left edges membership is decided
 /// against and the median left edge callers report as its position.
 ///
-/// Groups words by left edge within `column_threshold`, then folds adjacent all-value columns whose
-/// right edges coincide within the same threshold — see [`fold_right_aligned_tracks`].
-pub(crate) fn detect_columns(words: &[HocrWord], column_threshold: u32) -> Vec<ColumnTrack> {
+/// Groups words by left edge within `column_threshold`, splits a group that holds two columns
+/// (see [`split_row_sharing_groups`]), then folds adjacent all-value columns whose right edges
+/// coincide within the same threshold (see [`fold_right_aligned_tracks`]). `row_positions` are the
+/// rows the words were grouped into; row 0 is the header row.
+pub(crate) fn detect_columns(words: &[HocrWord], row_positions: &[u32], column_threshold: u32) -> Vec<ColumnTrack> {
     if words.is_empty() {
         return Vec::new();
     }
 
-    let mut groups: Vec<Vec<&HocrWord>> = Vec::new();
+    let groups = cluster_by_edge(words, column_threshold, |word| word.left);
+    let groups = split_row_sharing_groups(groups, row_positions, column_threshold);
 
-    for word in words {
-        let mut found_group = false;
-        for group in &mut groups {
-            if let Some(first) = group.first()
-                && word.left.abs_diff(first.left) <= column_threshold
-            {
-                group.push(word);
-                found_group = true;
-                break;
-            }
-        }
-
-        if !found_group {
-            groups.push(vec![word]);
-        }
-    }
-
-    let mut columns: Vec<ColumnTrack> = groups.iter().map(|group| column_track(group.as_slice())).collect();
+    let mut columns: Vec<ColumnTrack> = groups
+        .iter()
+        .map(|group| column_track(group.as_slice(), row_positions))
+        .collect();
     columns.sort_by_key(|column| column.left);
     fold_right_aligned_tracks(&mut columns, column_threshold);
     columns
 }
 
+/// Group `words` in order, each joining the first group whose first word's `edge` lies within
+/// `column_threshold` of its own.
+fn cluster_by_edge<'a>(
+    words: impl IntoIterator<Item = &'a HocrWord>,
+    column_threshold: u32,
+    edge: impl Fn(&HocrWord) -> u32,
+) -> Vec<Vec<&'a HocrWord>> {
+    let mut groups: Vec<Vec<&HocrWord>> = Vec::new();
+    for word in words {
+        match groups.iter_mut().find(|group| {
+            group
+                .first()
+                .is_some_and(|first| edge(word).abs_diff(edge(first)) <= column_threshold)
+        }) {
+            Some(group) => group.push(word),
+            None => groups.push(vec![word]),
+        }
+    }
+    groups
+}
+
+fn right_edge(word: &HocrWord) -> u32 {
+    word.left.saturating_add(word.width)
+}
+
+/// Whether two of `group`'s tokens sit in the same row.
+fn shares_a_row(group: &[&HocrWord], row_positions: &[u32]) -> bool {
+    let mut seen = vec![false; row_positions.len()];
+    group
+        .iter()
+        .filter_map(|word| find_row_index(row_positions, word))
+        .any(|row| {
+            let already = seen[row];
+            seen[row] = true;
+            already
+        })
+}
+
+/// Split a left-edge group that holds two columns (xberg-io/xberg#1909).
+///
+/// Tokens are already merged into cells, so two tokens of one row in one group are two cells, and
+/// two cells of one row cannot be one column. That happens when a short amount in one column starts
+/// within `column_threshold` of a long amount in the next: `7` ends where its column ends, and
+/// `40,218,965` starts 47px to its right at 300 dpi. Such a group is split by
+/// [`split_by_right_edge`] when that gives each of the two columns its own tokens; otherwise it is
+/// kept whole. Membership stays on left edges, as [`ColumnTrack::lefts`] requires: the split only
+/// gives each of the two columns its own left edge. ~keep
+fn split_row_sharing_groups<'a>(
+    groups: Vec<Vec<&'a HocrWord>>,
+    row_positions: &[u32],
+    column_threshold: u32,
+) -> Vec<Vec<&'a HocrWord>> {
+    let mut split = Vec::with_capacity(groups.len());
+    for group in groups {
+        match shares_a_row(&group, row_positions)
+            .then(|| split_by_right_edge(&group, row_positions, column_threshold))
+            .flatten()
+        {
+            Some(parts) => split.extend(parts),
+            None => split.push(group),
+        }
+    }
+    split
+}
+
+/// Re-group `group` by right edge, or `None` unless that gives exactly two independently
+/// supported parts with at most one token from each row.
+///
+/// Only data tokens are re-grouped by right edge. A header label is written from the left edge of
+/// its column whatever the alignment of the values under it, so its right edge says nothing about
+/// its column: it joins the part whose median left edge is nearest its own. ~keep
+fn split_by_right_edge<'a>(
+    group: &[&'a HocrWord],
+    row_positions: &[u32],
+    column_threshold: u32,
+) -> Option<Vec<Vec<&'a HocrWord>>> {
+    let (header, data): (Vec<&HocrWord>, Vec<&HocrWord>) = group
+        .iter()
+        .copied()
+        .partition(|word| find_row_index(row_positions, word) == Some(0));
+    let mut parts = cluster_by_edge(data, column_threshold, right_edge);
+    if parts.len() != 2 {
+        return None;
+    }
+    let lefts: Vec<u32> = parts
+        .iter()
+        .map(|part| median_of(part.iter().map(|word| word.left).collect()))
+        .collect();
+    for word in header {
+        let nearest = (0..parts.len()).min_by_key(|&index| lefts[index].abs_diff(word.left))?;
+        parts[nearest].push(word);
+    }
+    if parts.iter().any(|part| part.len() < 2) {
+        return None;
+    }
+    (!parts.iter().any(|part| shares_a_row(part, row_positions))).then_some(parts)
+}
+
+/// Whether `group` reads as values: its tokens below the header row when it has any, else its
+/// header tokens. Row 0 is not read when data rows are present: a column's header label is text by
+/// nature. A header-only group reads as values only when its label is one, such as a year.
+fn reads_as_values(group: &[&HocrWord], row_positions: &[u32]) -> bool {
+    let (header, data): (Vec<&HocrWord>, Vec<&HocrWord>) = group
+        .iter()
+        .copied()
+        .partition(|word| find_row_index(row_positions, word) == Some(0));
+    let tokens = if data.is_empty() { header } else { data };
+    !tokens.is_empty() && tokens.iter().all(|word| is_cell_value_text(&word.text))
+}
+
 /// The column one group of tokens forms.
-fn column_track(group: &[&HocrWord]) -> ColumnTrack {
+///
+/// The fold test reads the data tokens only. A header label sits on the left edge of the values it
+/// labels, so it joins one of their left-edge groups, and reading its text as well would stop that
+/// group from folding with the rest of its column. A group with no data token is a header-only
+/// track: it folds only when its label is a value, such as a year (xberg-io/xberg#1909). ~keep
+fn column_track(group: &[&HocrWord], row_positions: &[u32]) -> ColumnTrack {
     let left = median_of(group.iter().map(|word| word.left).collect());
     ColumnTrack {
         left,
-        right: median_of(group.iter().map(|word| word.left.saturating_add(word.width)).collect()),
-        right_aligned: group.iter().all(|word| is_cell_value_text(&word.text)),
+        right: median_of(group.iter().map(|word| right_edge(word)).collect()),
+        right_aligned: reads_as_values(group, row_positions),
         lefts: vec![left],
     }
 }
@@ -213,10 +318,10 @@ fn column_track(group: &[&HocrWord]) -> ColumnTrack {
 /// content: a dropped nil-dash column, a sparse row's interior cells, a value in the label cell.
 ///
 /// Raising `column_threshold` is not the alternative — it merges genuinely narrow neighbouring
-/// columns (the GH#1649 `DEPOSIT` case). Both sides must be all-value, so a text column and a
-/// column holding any label are never folded: that keeps a right-aligned column's header word,
-/// which is clustered on its left edge like all text, in the same column as its data instead of
-/// splitting off into a header-only track. ~keep
+/// columns (the GH#1649 `DEPOSIT` case). Both sides must hold only values in their data rows, so a
+/// text column and a column with any label below the header are never folded. A header-only track
+/// with a text label never folds either, which keeps it for the header-fragment merge; a header
+/// word clustered with data values does not stop them folding (see [`column_track`]). ~keep
 fn fold_right_aligned_tracks(columns: &mut Vec<ColumnTrack>, column_threshold: u32) {
     let mut index = 0;
     while index + 1 < columns.len() {
@@ -577,7 +682,7 @@ pub(crate) fn reconstruct_table_with_columns(
     let row_positions = detect_rows(words, row_threshold_ratio);
     let groups = group_words_into_cell_tokens(words, &row_positions);
     let cell_tokens: Vec<HocrWord> = groups.iter().map(|(token, _)| token.clone()).collect();
-    let columns = detect_columns(&cell_tokens, column_threshold);
+    let columns = detect_columns(&cell_tokens, &row_positions, column_threshold);
 
     if columns.is_empty() || row_positions.is_empty() {
         return (Vec::new(), Vec::new());
@@ -832,6 +937,7 @@ fn assign_grouped_words_to_cells<'a>(
     let num_rows = row_positions.len();
     let num_cols = columns.len();
     let mut table: Vec<Vec<Vec<&'a HocrWord>>> = vec![vec![vec![]; num_cols]; num_rows];
+    let data_supported = columns_with_data_support(groups, row_positions, columns);
 
     for (token, members) in groups {
         let Some(row) = find_row_index(row_positions, token) else {
@@ -842,18 +948,16 @@ fn assign_grouped_words_to_cells<'a>(
         }
         if row == 0 {
             // Row 0 is conventionally the header row throughout this module (see
-            // `data_support_count`, `table_to_markdown`). A multi-word header label can still
-            // legitimately span more than one detected column even after merging into one
-            // cluster for column detection -- its second word's x-position may line up with the
-            // data column it labels rather than with its own first word (xberg-io/xberg#2219).
-            // Keep independent per-word placement here so `merge_header_fragments_by_geometry`
-            // can still reconcile that split; only data rows get whole-cluster placement. ~keep
-            for word in members {
-                if let Some(col) = find_column_index(columns, word)
-                    && col < num_cols
-                {
-                    table[row][col].push(word);
-                }
+            // `data_support_count`, `table_to_markdown`). Keep a merged header token together when
+            // its column has data below it; splitting its words again can move a trailing word to
+            // the next header (#1934). A header-only token can genuinely span toward the data
+            // column it labels, so retain independent placement for that case and let
+            // `merge_header_fragments_by_geometry` reconcile it (#2219). ~keep
+            let token_column = find_column_index(columns, token);
+            if let Some(col) = token_column.filter(|&col| col < num_cols && data_supported[col]) {
+                table[row][col].extend(members.iter().copied());
+            } else {
+                assign_words_to_row(&mut table[row], members, columns);
             }
         } else if let Some(col) = find_column_index(columns, token)
             && col < num_cols
@@ -863,6 +967,30 @@ fn assign_grouped_words_to_cells<'a>(
     }
 
     finish_cell_assignment(table)
+}
+
+fn columns_with_data_support(
+    groups: &[(HocrWord, Vec<&HocrWord>)],
+    row_positions: &[u32],
+    columns: &[ColumnTrack],
+) -> Vec<bool> {
+    let mut supported = vec![false; columns.len()];
+    for (token, _) in groups {
+        if find_row_index(row_positions, token) != Some(0)
+            && let Some(column) = find_column_index(columns, token)
+        {
+            supported[column] = true;
+        }
+    }
+    supported
+}
+
+fn assign_words_to_row<'a>(row: &mut [Vec<&'a HocrWord>], words: &[&'a HocrWord], columns: &[ColumnTrack]) {
+    for &word in words {
+        if let Some(column) = find_column_index(columns, word) {
+            row[column].push(word);
+        }
+    }
 }
 
 /// Shared tail of [`assign_words_to_cells`] and [`assign_grouped_words_to_cells`]: order each
@@ -1306,7 +1434,7 @@ mod tests {
             },
         ];
 
-        let cols = detect_columns(&words, 20);
+        let cols = detect_columns(&words, &detect_rows(&words, 0.5), 20);
         assert_eq!(cols.len(), 2);
     }
 
@@ -1634,6 +1762,37 @@ mod tests {
         );
         assert_eq!(table[0], vec!["Name".to_string(), "Value".to_string()]);
         assert_eq!(table[1], vec!["Alice Smith".to_string(), "42".to_string()]);
+    }
+
+    /// xberg-io/xberg#1934: column detection treats a close two-word header as one cell token.
+    /// Assignment must keep that token together when its first word anchors the supported data
+    /// column, even if the second word is geometrically closer to the next column.
+    ///
+    /// TEST HONESTY: assigning header words independently produces `["Code", "Amount", "Unit",
+    /// "cost Total"]`; the second word leaves the cell token and joins the next header. ~keep
+    #[test]
+    fn issue_1934_two_word_header_stays_in_its_supported_column() {
+        let words = vec![
+            word("Code", 0, 0, 50, 20),
+            word("Amount", 100, 0, 70, 20),
+            word("Unit", 200, 0, 70, 20),
+            word("cost", 280, 0, 45, 20),
+            word("Total", 350, 0, 60, 20),
+            word("A", 0, 60, 20, 20),
+            word("10", 100, 60, 30, 20),
+            word("2.50", 200, 60, 50, 20),
+            word("25.00", 350, 60, 60, 20),
+            word("B", 0, 120, 20, 20),
+            word("20", 100, 120, 30, 20),
+            word("3.00", 200, 120, 50, 20),
+            word("60.00", 350, 120, 60, 20),
+        ];
+
+        let (table, column_positions) = reconstruct_table_with_columns(&words, 50, 0.5);
+
+        assert_eq!(table[0], vec!["Code", "Amount", "Unit cost", "Total"]);
+        assert_eq!(table[1], vec!["A", "10", "2.50", "25.00"]);
+        assert_eq!(column_positions, vec![0, 100, 200, 350]);
     }
 
     #[test]
@@ -2305,5 +2464,227 @@ mod tests {
             ]
         );
         assert_eq!(column_positions, vec![0, 60]);
+    }
+
+    /// xberg-io/xberg#1909: a one-digit amount of one column starts within the threshold of an
+    /// eight-digit amount of the next, so one left-edge group holds cells of two columns. Two cells
+    /// of one row cannot be one column, so the group splits on its right edges and each amount stays
+    /// in its own column.
+    ///
+    /// TEST HONESTY: without the split, row 0 reads `["A", "", "7 40,218,965"]`: both amounts share
+    /// a cell.
+    #[test]
+    fn issue_1909_amount_columns_whose_left_edges_interleave_stay_apart() {
+        let words = vec![
+            word("A", 0, 0, 60, 20),
+            word("7", 285, 0, 15, 20),
+            word("40,218,965", 330, 0, 170, 20),
+            word("B", 0, 60, 60, 20),
+            word("12,345,678", 130, 60, 170, 20),
+            word("4", 485, 60, 15, 20),
+            word("C", 0, 120, 60, 20),
+            word("5", 285, 120, 15, 20),
+            word("17,382,649", 332, 120, 168, 20),
+        ];
+
+        let (table, column_positions) = reconstruct_table_with_columns(&words, 50, 0.5);
+
+        assert_eq!(
+            table,
+            vec![
+                vec!["A".to_string(), "7".to_string(), "40,218,965".to_string()],
+                vec!["B".to_string(), "12,345,678".to_string(), "4".to_string()],
+                vec!["C".to_string(), "5".to_string(), "17,382,649".to_string()],
+            ]
+        );
+        assert_eq!(column_positions, vec![0, 130, 332]);
+    }
+
+    #[test]
+    fn issue_1769_footer_fragments_do_not_split_a_six_column_table() {
+        let columns = [44, 87, 129, 171, 211, 252];
+        let mut words = Vec::new();
+        for (column, text) in ["Number", "DP", "SP-C", "SP-D", "DP vs SP-C", "DP vs SP-D"]
+            .into_iter()
+            .enumerate()
+        {
+            words.push(word(text, columns[column], 0, 24, 6));
+        }
+        for row in 1..29 {
+            let top = row * 12;
+            let cells = if row == 1 {
+                ["Number", "166/647", "157/647", "324/647", "0.114", "<0.001"]
+            } else {
+                ["Measure", "10", "20", "30", "0.1", "0.2"]
+            };
+            for (column, text) in cells.into_iter().enumerate() {
+                words.push(word(text, columns[column], top, 24, 6));
+            }
+        }
+        let footer_top = 29 * 12;
+        words.push(word("Fisher", 38, footer_top, 10, 6));
+        words.push(word("exact test (2x2), and quantitative", 66, footer_top, 107, 6));
+        for (column, text) in ["10", "20", "30", "0.1", "0.2"].into_iter().enumerate() {
+            words.push(word(text, columns[column + 1], footer_top, 24, 6));
+        }
+
+        let (table, column_positions) = reconstruct_table_with_columns(&words, 30, 0.5);
+
+        assert_eq!(table.len(), 30);
+        assert_eq!(column_positions.len(), 6);
+        assert_eq!(table[1], ["Number", "166/647", "157/647", "324/647", "0.114", "<0.001"]);
+    }
+
+    /// xberg-io/xberg#1909: a header label clusters with the values under it by its left edge. Its
+    /// text must not stop that group folding with the rest of its right-aligned column.
+    ///
+    /// TEST HONESTY: when the header word counts against the fold, the grid keeps three columns and
+    /// `12,345,678` sits in a column of its own.
+    #[test]
+    fn issue_1909_a_header_label_does_not_stop_its_value_column_folding() {
+        let words = vec![
+            word("Item", 0, 0, 60, 20),
+            word("Total", 250, 0, 60, 20),
+            word("A", 0, 60, 60, 20),
+            word("846", 255, 60, 45, 20),
+            word("B", 0, 120, 60, 20),
+            word("12,345,678", 130, 120, 170, 20),
+            word("C", 0, 180, 60, 20),
+            word("5", 285, 180, 15, 20),
+        ];
+
+        let table = reconstruct_table(&words, 50, 0.5);
+
+        assert_eq!(
+            table,
+            vec![
+                vec!["Item".to_string(), "Total".to_string()],
+                vec!["A".to_string(), "846".to_string()],
+                vec!["B".to_string(), "12,345,678".to_string()],
+                vec!["C".to_string(), "5".to_string()],
+            ]
+        );
+    }
+
+    /// xberg-io/xberg#1909: the split is taken only when every part holds at most one cell per row.
+    /// Here `1` and `2` share a row and a right edge, so re-grouping by right edge cannot separate
+    /// them, and the group stays one column.
+    ///
+    /// TEST HONESTY: taking that split anyway yields `[["1", "2"], ["3", ""]]`.
+    #[test]
+    fn issue_1909_a_split_that_leaves_two_cells_of_one_row_together_is_not_taken() {
+        let words = vec![
+            word("1", 100, 0, 10, 20),
+            word("2", 135, 0, 10, 20),
+            word("3", 120, 60, 90, 20),
+        ];
+
+        let table = reconstruct_table(&words, 50, 0.5);
+
+        assert_eq!(table, vec![vec!["1 2".to_string()], vec!["3".to_string()]]);
+    }
+
+    /// xberg-io/xberg#1909: two left-aligned text columns that start closer than the threshold
+    /// share one left-edge group. Two cells of one row cannot be one column whatever their text,
+    /// so the group splits on its right edges as a group of amounts does.
+    ///
+    /// TEST HONESTY: when only a group of values may split, every row reads as one cell, such as
+    /// `["Al ABCDEFG"]`.
+    #[test]
+    fn issue_1909_two_close_text_columns_split_like_two_close_amount_columns() {
+        let words = vec![
+            word("N", 0, 0, 15, 20),
+            word("Code", 45, 0, 60, 20),
+            word("Al", 0, 60, 15, 20),
+            word("ABCDEFG", 45, 60, 105, 20),
+            word("Bo", 0, 120, 15, 20),
+            word("HIJKLMN", 45, 120, 105, 20),
+            word("Cy", 0, 180, 15, 20),
+            word("OPQRSTU", 45, 180, 105, 20),
+        ];
+
+        let table = reconstruct_table(&words, 50, 0.5);
+
+        assert_eq!(
+            table,
+            vec![
+                vec!["N".to_string(), "Code".to_string()],
+                vec!["Al".to_string(), "ABCDEFG".to_string()],
+                vec!["Bo".to_string(), "HIJKLMN".to_string()],
+                vec!["Cy".to_string(), "OPQRSTU".to_string()],
+            ]
+        );
+    }
+
+    /// xberg-io/xberg#1909: a header label written from the left edge of its column joins the
+    /// left-edge group where a one-digit amount of the column before meets the long amounts of its
+    /// own column. The label must not stop that group splitting on its right edges.
+    ///
+    /// TEST HONESTY: when the header label counts against the split, row 1 reads
+    /// `["A", "", "7 40,218,965"]`: both amounts share a cell. When the label is re-grouped by its
+    /// right edge with the amounts, it leaves its column, and row 3's amount lands in a fourth
+    /// column with row 2's `4`.
+    #[test]
+    fn issue_1909_a_header_label_does_not_stop_a_row_sharing_value_group_splitting() {
+        let words = vec![
+            word("Item", 0, 0, 60, 20),
+            word("One", 130, 0, 50, 20),
+            word("Two", 330, 0, 50, 20),
+            word("A", 0, 60, 60, 20),
+            word("7", 285, 60, 15, 20),
+            word("40,218,965", 330, 60, 170, 20),
+            word("B", 0, 120, 60, 20),
+            word("12,345,678", 130, 120, 170, 20),
+            word("4", 485, 120, 15, 20),
+            word("C", 0, 180, 60, 20),
+            word("5", 285, 180, 15, 20),
+            word("17,382,649", 332, 180, 168, 20),
+        ];
+
+        let table = reconstruct_table(&words, 50, 0.5);
+
+        assert_eq!(
+            table,
+            vec![
+                vec!["Item".to_string(), "One".to_string(), "Two".to_string()],
+                vec!["A".to_string(), "7".to_string(), "40,218,965".to_string()],
+                vec!["B".to_string(), "12,345,678".to_string(), "4".to_string()],
+                vec!["C".to_string(), "5".to_string(), "17,382,649".to_string()],
+            ]
+        );
+    }
+
+    /// xberg-io/xberg#1909: a header label that reads as a value, such as a year, can start more
+    /// than the threshold right of its column's long amounts and form a header-only track. Its right
+    /// edge is the column's right edge, so it folds with the column as it did before the fold test
+    /// read data tokens only.
+    ///
+    /// TEST HONESTY: when a header-only track never folds, the year keeps its own column between
+    /// the long amounts and the one-digit amount, and every row spreads over four columns, such as
+    /// `["B", "", "", "5"]`.
+    #[test]
+    fn issue_1909_a_value_header_only_track_folds_with_its_amount_column() {
+        let words = vec![
+            word("Item", 0, 0, 60, 20),
+            word("2023", 420, 0, 80, 20),
+            word("A", 0, 60, 60, 20),
+            word("12,345,678", 330, 60, 170, 20),
+            word("B", 0, 120, 60, 20),
+            word("5", 485, 120, 15, 20),
+            word("C", 0, 180, 60, 20),
+            word("40,218,965", 330, 180, 170, 20),
+        ];
+
+        let table = reconstruct_table(&words, 50, 0.5);
+
+        assert_eq!(
+            table,
+            vec![
+                vec!["Item".to_string(), "2023".to_string()],
+                vec!["A".to_string(), "12,345,678".to_string()],
+                vec!["B".to_string(), "5".to_string()],
+                vec!["C".to_string(), "40,218,965".to_string()],
+            ]
+        );
     }
 }
