@@ -2012,6 +2012,7 @@ impl ImageExtractor {
             Some(crate::extractors::pdf::ocr::PageOcrHints {
                 source_dpi,
                 known_full_page_scan: true,
+                single_block_pages: None,
             }),
         ))
         .await?;

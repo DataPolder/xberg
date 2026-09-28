@@ -30,9 +30,6 @@ use std::path::Path;
 
 use extraction::extract_all_from_native_document;
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-use ocr::extract_with_ocr;
-
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 fn extraction_method_after_mixed_ocr(replacements: &ahash::AHashMap<u32, String>) -> ExtractionMethod {
     if replacements.is_empty() {
         ExtractionMethod::Native
@@ -985,6 +982,7 @@ async fn run_ocr_with_layout(
     content: &[u8],
     config: &ExtractionConfig,
     path: Option<&std::path::Path>,
+    page_ocr_hints: Option<ocr::PageOcrHints>,
     #[cfg(feature = "layout-detection")] precomputed_layout_images: Option<Vec<image::RgbImage>>,
     #[cfg(feature = "layout-detection")] precomputed_layout_detections: Option<Vec<crate::layout::DetectionResult>>,
     #[cfg(feature = "layout-detection")] precomputed_layout_acceleration_override: Option<
@@ -1177,7 +1175,7 @@ async fn run_ocr_with_layout(
             config,
             &pipeline,
             path,
-            None,
+            page_ocr_hints,
         ))
         .await?;
         // GH#1892: the whole-document route repaired nothing, so `numeric_repair` was honoured for
@@ -1229,7 +1227,7 @@ async fn run_ocr_with_layout(
         formulas,
         preprocessing,
         ocr_confidence,
-    ) = Box::pin(extract_with_ocr(
+    ) = Box::pin(ocr::extract_with_ocr_with_page_hints(
         Some(content),
         #[cfg(feature = "layout-detection")]
         ocr_images,
@@ -1239,6 +1237,7 @@ async fn run_ocr_with_layout(
         layout_detections,
         config,
         path,
+        page_ocr_hints,
     ))
     .await?;
     // GH#1892: same repair as the pipeline branch above -- this is the other half of the
@@ -1720,6 +1719,16 @@ fn attach_pdf_ocr_confidence(
     }
 }
 
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn automatic_unmapped_text_hints(metadata: &crate::pdf::metadata::PdfExtractionMetadata) -> Option<ocr::PageOcrHints> {
+    let pages = metadata.pdf_specific.fabricated_text_pages.as_ref()?;
+    (!pages.is_empty()).then(|| ocr::PageOcrHints {
+        source_dpi: None,
+        known_full_page_scan: false,
+        single_block_pages: Some(std::sync::Arc::new(pages.iter().copied().collect())),
+    })
+}
+
 /// PDF document extractor using xberg_native_pdf.
 #[cfg_attr(alef, alef(skip))]
 pub struct PdfExtractor;
@@ -2109,6 +2118,7 @@ impl PdfExtractor {
                 content,
                 config,
                 path,
+                None,
                 #[cfg(feature = "layout-detection")]
                 markdown_layout_images.take(),
                 #[cfg(feature = "layout-detection")]
@@ -2148,8 +2158,16 @@ impl PdfExtractor {
                             mixed_preprocessing,
                             mixed_ocr_confidence,
                             mixed_warnings,
-                        ) = ocr::extract_mixed_ocr_native(&native_text, bounds, ocr_pages, content, config, path)
-                            .await?;
+                        ) = ocr::extract_mixed_ocr_native_with_single_block_pages(
+                            &native_text,
+                            bounds,
+                            ocr_pages,
+                            &[],
+                            content,
+                            config,
+                            path,
+                        )
+                        .await?;
                         let extraction_method = extraction_method_after_mixed_ocr(&results_map);
                         ocr_llm_usage = mixed_llm_usage;
                         ocr_results_map = Some(results_map);
@@ -2191,7 +2209,21 @@ impl PdfExtractor {
                 // EXPLICIT sites (`force_ocr_pages` above, `ocr_inline_images`) keep their
                 // hard error, because there the caller asked for something the build cannot
                 // do. See GH#1610. ~keep
-                match ocr::extract_mixed_ocr_native(&native_text, bounds, &scanned_pages, content, config, path).await {
+                match ocr::extract_mixed_ocr_native_with_single_block_pages(
+                    &native_text,
+                    bounds,
+                    &scanned_pages,
+                    pdf_metadata
+                        .pdf_specific
+                        .fabricated_text_pages
+                        .as_deref()
+                        .unwrap_or(&[]),
+                    content,
+                    config,
+                    path,
+                )
+                .await
+                {
                     Ok((
                         mixed,
                         results_map,
@@ -2376,6 +2408,7 @@ impl PdfExtractor {
                         content,
                         config,
                         path,
+                        automatic_unmapped_text_hints(&pdf_metadata),
                         #[cfg(feature = "layout-detection")]
                         markdown_layout_images.take(),
                         #[cfg(feature = "layout-detection")]
@@ -2440,7 +2473,21 @@ impl PdfExtractor {
                 }
                 ocr::OcrGateOutcome::RunFallbackOnPages(pages) => match boundaries.as_deref() {
                     Some(bounds) if !bounds.is_empty() => {
-                        match ocr::extract_mixed_ocr_native(&native_text, bounds, &pages, content, config, path).await {
+                        match ocr::extract_mixed_ocr_native_with_single_block_pages(
+                            &native_text,
+                            bounds,
+                            &pages,
+                            pdf_metadata
+                                .pdf_specific
+                                .fabricated_text_pages
+                                .as_deref()
+                                .unwrap_or(&[]),
+                            content,
+                            config,
+                            path,
+                        )
+                        .await
+                        {
                             Ok((
                                 mixed,
                                 results_map,
@@ -7468,6 +7515,110 @@ mod tests {
             Some(ExtractionMethod::Ocr),
             "Auto strategy must record extraction_method: ocr for a fabricated-provenance page"
         );
+    }
+
+    #[tokio::test]
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[serial]
+    async fn fabricated_mapping_page_records_effective_block_psm_in_page_metadata() {
+        use crate::core::config::{OcrConfig, PageConfig};
+
+        const FABRICATED_NATIVE_TEXT: &str = "synthetic fabricated text used to verify the per page segmentation mode recorded after automatic ocr routing";
+        let config = ExtractionConfig {
+            ocr: Some(OcrConfig::default()),
+            pages: Some(PageConfig {
+                extract_pages: true,
+                ..Default::default()
+            }),
+            use_cache: false,
+            ..Default::default()
+        };
+
+        let internal = PdfExtractor::new()
+            .extract_content(
+                &identity_h_mapping_pdf(FABRICATED_NATIVE_TEXT, false),
+                "application/pdf",
+                &config,
+            )
+            .await
+            .expect("fabricated-provenance PDF extraction should succeed");
+        assert_eq!(
+            internal
+                .metadata
+                .additional
+                .get(crate::ocr_metadata_keys::OCR_PAGE_SEGMENTATION_MODES_METADATA_KEY),
+            Some(&serde_json::json!([{ "page_number": 1, "psm": 6 }]))
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[serial]
+    async fn explicit_force_ocr_does_not_apply_the_automatic_block_mode() {
+        use crate::core::config::{OcrConfig, PageConfig};
+
+        const FABRICATED_NATIVE_TEXT: &str = "synthetic fabricated text used to verify explicit whole document ocr retains the caller controlled segmentation mode";
+        let config = ExtractionConfig {
+            force_ocr: true,
+            ocr: Some(OcrConfig::default()),
+            pages: Some(PageConfig {
+                extract_pages: true,
+                ..Default::default()
+            }),
+            use_cache: false,
+            ..Default::default()
+        };
+
+        let internal = PdfExtractor::new()
+            .extract_content(
+                &identity_h_mapping_pdf(FABRICATED_NATIVE_TEXT, false),
+                "application/pdf",
+                &config,
+            )
+            .await
+            .expect("explicit whole-document OCR should succeed");
+        let entries = internal
+            .metadata
+            .additional
+            .get(crate::ocr_metadata_keys::OCR_PAGE_SEGMENTATION_MODES_METADATA_KEY)
+            .and_then(serde_json::Value::as_array);
+
+        assert!(entries.is_none_or(|entries| entries.iter().all(|entry| entry["psm"] != serde_json::json!(6))));
+    }
+
+    #[tokio::test]
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[serial]
+    async fn explicit_force_ocr_pages_does_not_apply_the_automatic_block_mode() {
+        use crate::core::config::{OcrConfig, PageConfig};
+
+        const FABRICATED_NATIVE_TEXT: &str = "synthetic fabricated text used to verify explicit selected page ocr retains the caller controlled segmentation mode";
+        let config = ExtractionConfig {
+            force_ocr_pages: Some(vec![1]),
+            ocr: Some(OcrConfig::default()),
+            pages: Some(PageConfig {
+                extract_pages: true,
+                ..Default::default()
+            }),
+            use_cache: false,
+            ..Default::default()
+        };
+
+        let internal = PdfExtractor::new()
+            .extract_content(
+                &identity_h_mapping_pdf(FABRICATED_NATIVE_TEXT, false),
+                "application/pdf",
+                &config,
+            )
+            .await
+            .expect("explicit selected-page OCR should succeed");
+        let entries = internal
+            .metadata
+            .additional
+            .get(crate::ocr_metadata_keys::OCR_PAGE_SEGMENTATION_MODES_METADATA_KEY)
+            .and_then(serde_json::Value::as_array);
+
+        assert!(entries.is_none_or(|entries| entries.iter().all(|entry| entry["psm"] != serde_json::json!(6))));
     }
 
     /// xberg#1696's false-positive control: a Type0/Identity-H font that DOES carry a

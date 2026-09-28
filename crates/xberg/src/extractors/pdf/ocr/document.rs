@@ -163,6 +163,16 @@ pub(super) fn carry_page_ocr_payload_forward(
     new_page_doc.prebuilt_ocr_elements = existing.prebuilt_ocr_elements.clone();
     new_page_doc.processing_warnings = existing.processing_warnings.clone();
     new_page_doc.ocr_coordinate_frame = existing.ocr_coordinate_frame;
+    if let Some(modes) = existing
+        .metadata
+        .additional
+        .get(crate::ocr_metadata_keys::OCR_PAGE_SEGMENTATION_MODES_METADATA_KEY)
+    {
+        new_page_doc.metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::ocr_metadata_keys::OCR_PAGE_SEGMENTATION_MODES_METADATA_KEY),
+            modes.clone(),
+        );
+    }
 }
 /// Rescale an OCR backend's pixel-space bounding boxes into the PDF page's own
 /// coordinate space before its structured document is assembled (#1423).
@@ -855,6 +865,26 @@ pub(crate) fn merge_structured_ocr_pages_into_internal_document(
         doc.prebuilt_ocr_elements
             .get_or_insert_with(Vec::new)
             .extend(assets.ocr_elements);
+    }
+    let mut segmentation_modes = structured_pages
+        .iter()
+        .filter(|(page_number, _)| replacements.contains_key(page_number))
+        .flat_map(|(_, page)| {
+            page.metadata
+                .additional
+                .get(crate::ocr_metadata_keys::OCR_PAGE_SEGMENTATION_MODES_METADATA_KEY)
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .cloned()
+        })
+        .collect::<Vec<_>>();
+    segmentation_modes.sort_by_key(|entry| entry.get("page_number").and_then(serde_json::Value::as_u64));
+    if !segmentation_modes.is_empty() {
+        doc.metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::ocr_metadata_keys::OCR_PAGE_SEGMENTATION_MODES_METADATA_KEY),
+            serde_json::Value::Array(segmentation_modes),
+        );
     }
 }
 /// Tables, images and OCR elements lifted out of per-page OCR documents and

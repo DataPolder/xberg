@@ -63,10 +63,12 @@ pub(crate) use document::{
 #[cfg(all(paddle_ocr, any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 pub(crate) use pipeline::extract_full_document_ocr_pipeline_per_page;
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
-pub(crate) use pipeline::extract_mixed_ocr_native;
+pub(crate) use pipeline::extract_mixed_ocr_native_with_single_block_pages;
+#[cfg(test)]
+pub(crate) use pipeline::extract_with_ocr;
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(crate) use pipeline::{
-    PageOcrHints, apply_numeric_repair_to_whole_document_ocr, extract_with_ocr, numeric_repair_enabled,
+    PageOcrHints, apply_numeric_repair_to_whole_document_ocr, extract_with_ocr_with_page_hints, numeric_repair_enabled,
     run_ocr_pipeline,
 };
 

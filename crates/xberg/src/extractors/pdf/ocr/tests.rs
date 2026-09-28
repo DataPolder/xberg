@@ -4637,6 +4637,7 @@ mod tests {
             &pdf,
             &config,
             None,
+            None,
             #[cfg(feature = "layout-detection")]
             None,
             #[cfg(feature = "layout-detection")]
@@ -4670,6 +4671,7 @@ mod tests {
         let marked_document = super::super::super::run_ocr_with_layout(
             &pdf,
             &marker_config,
+            None,
             None,
             #[cfg(feature = "layout-detection")]
             None,
@@ -4712,6 +4714,7 @@ mod tests {
                 &pdf,
                 &layout_config,
                 None,
+                None,
                 Some(layout_images),
                 Some(layout_detections),
                 None,
@@ -4736,6 +4739,7 @@ mod tests {
         let cancelled = super::super::super::run_ocr_with_layout(
             &pdf,
             &cancelled_config,
+            None,
             None,
             #[cfg(feature = "layout-detection")]
             None,
@@ -4816,6 +4820,7 @@ mod tests {
         let result = super::super::super::run_ocr_with_layout(
             &pdf,
             &config,
+            None,
             None,
             #[cfg(feature = "layout-detection")]
             None,
@@ -6957,6 +6962,27 @@ Name: ___
         assert_eq!(elements[0].page_number, 2, "element must be renumbered onto its page");
     }
 
+    #[test]
+    fn selected_automatic_ocr_merge_keeps_page_segmentation_metadata() {
+        let mut page_doc = structured_ocr_page_with_table(2);
+        page_doc.metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::ocr_metadata_keys::OCR_PAGE_SEGMENTATION_MODES_METADATA_KEY),
+            serde_json::json!([{ "page_number": 2, "psm": 6 }]),
+        );
+        let mut doc = native_two_page_document();
+        let replacements = ahash::AHashMap::from_iter([(2u32, "ocr prose".to_string())]);
+        let structured = ahash::AHashMap::from_iter([(2u32, page_doc)]);
+
+        merge_structured_ocr_pages_into_internal_document(&mut doc, &replacements, &structured);
+
+        assert_eq!(
+            doc.metadata
+                .additional
+                .get(crate::ocr_metadata_keys::OCR_PAGE_SEGMENTATION_MODES_METADATA_KEY),
+            Some(&serde_json::json!([{ "page_number": 2, "psm": 6 }]))
+        );
+    }
+
     /// #60 — the single-backend mixed route must carry the backend's tables and OCR
     /// elements onto the page document instead of discarding them.
     #[cfg(feature = "pdf")]
@@ -7822,7 +7848,7 @@ Name: ___
         const RENDER_DPI: f64 = 150.0;
         let config = crate::core::config::ocr::OcrConfig::default();
 
-        let hinted = ocr_config_with_page_rotation_hint(&config, 0, Some(RENDER_DPI), false);
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, Some(RENDER_DPI), false, false);
 
         let options = hinted
             .backend_options
@@ -7850,7 +7876,7 @@ Name: ___
         const REDUCED_RENDER_DPI: f64 = 96.0;
         let config = crate::core::config::ocr::OcrConfig::default();
 
-        let hinted = ocr_config_with_page_rotation_hint(&config, 270, Some(REDUCED_RENDER_DPI), false);
+        let hinted = ocr_config_with_page_rotation_hint(&config, 270, Some(REDUCED_RENDER_DPI), false, false);
 
         let options = hinted.backend_options.as_ref().expect("both hints must be carried");
         assert_eq!(
@@ -7875,7 +7901,7 @@ Name: ___
     fn should_borrow_config_when_no_page_hint_applies() {
         let config = crate::core::config::ocr::OcrConfig::default();
 
-        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, false);
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, false, false);
 
         assert!(matches!(hinted, Cow::Borrowed(_)), "no hints must mean no config clone");
     }
@@ -7888,7 +7914,7 @@ Name: ___
     fn should_apply_the_whole_image_psm_to_a_scan_page_when_the_caller_set_none() {
         let config = crate::core::config::ocr::OcrConfig::default();
 
-        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, true);
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, true, false);
 
         let psm = hinted.tesseract_config.as_ref().and_then(|c| c.psm);
         assert_eq!(
@@ -7896,6 +7922,82 @@ Name: ___
             Some(11),
             "a scan page must use the sparse-text mode image OCR uses"
         );
+    }
+
+    /// GH#1896: a text-layer page routed to OCR because its character map is unusable needs
+    /// block segmentation so table labels and values remain on the same row. This page-local
+    /// hint takes precedence over the ordinary scan-page default, while an explicit caller PSM
+    /// still wins.
+    #[cfg(feature = "pdf")]
+    #[test]
+    fn should_apply_block_psm_only_for_an_unmapped_text_page_without_an_explicit_psm() {
+        let config = crate::core::config::ocr::OcrConfig::default();
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, true, true);
+        assert_eq!(hinted.tesseract_config.as_ref().and_then(|c| c.psm), Some(6));
+
+        let explicit = crate::core::config::ocr::OcrConfig {
+            tesseract_config: Some(crate::types::TesseractConfig {
+                psm: Some(4),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let hinted = ocr_config_with_page_rotation_hint(&explicit, 0, None, true, true);
+        assert_eq!(hinted.tesseract_config.as_ref().and_then(|c| c.psm), Some(4));
+
+        let other_backend = crate::core::config::ocr::OcrConfig {
+            backend: "paddleocr".to_string(),
+            ..Default::default()
+        };
+        let hinted = ocr_config_with_page_rotation_hint(&other_backend, 0, None, false, true);
+        assert!(hinted.tesseract_config.is_none());
+    }
+
+    #[cfg(all(feature = "pdf", feature = "ocr"))]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn whole_document_automatic_fallback_applies_block_mode_only_to_fabricated_pages() {
+        let image = image::load_from_memory(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/ocr/lone_quantity_invoice.png"
+        )))
+        .expect("fixture must decode");
+        let images = [image.clone(), image];
+        let hints = PageOcrHints {
+            source_dpi: None,
+            known_full_page_scan: false,
+            single_block_pages: Some(std::sync::Arc::new(std::collections::HashSet::from([1]))),
+        };
+        let config = ExtractionConfig {
+            use_cache: false,
+            ocr: Some(crate::core::config::OcrConfig::default()),
+            ..Default::default()
+        };
+
+        let result = extract_with_ocr_with_page_hints(
+            None,
+            Some(&images),
+            #[cfg(feature = "layout-detection")]
+            None,
+            &config,
+            None,
+            Some(hints),
+        )
+        .await
+        .expect("whole-document OCR must succeed");
+        let entries = result
+            .4
+            .expect("accepted OCR pages must produce a document")
+            .metadata
+            .additional
+            .remove(crate::ocr_metadata_keys::OCR_PAGE_SEGMENTATION_MODES_METADATA_KEY)
+            .and_then(|value| value.as_array().cloned())
+            .expect("accepted Tesseract pages must record their effective PSM");
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], serde_json::json!({ "page_number": 1, "psm": 6 }));
+        assert_eq!(entries[1]["page_number"], serde_json::json!(2));
+        assert_ne!(entries[1]["psm"], serde_json::json!(6));
     }
 
     /// GH#1894: the scan-detection density check's result must reach `backend_options` so
@@ -7910,7 +8012,7 @@ Name: ___
     fn should_stamp_known_full_page_scan_hint_for_a_tesseract_scan_page() {
         let config = crate::core::config::ocr::OcrConfig::default();
 
-        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, true);
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, true, false);
 
         assert_eq!(
             hinted
@@ -7931,7 +8033,7 @@ Name: ___
     fn should_not_stamp_known_full_page_scan_hint_for_a_non_scan_page() {
         let config = crate::core::config::ocr::OcrConfig::default();
 
-        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, false);
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, false, false);
 
         assert!(
             hinted
@@ -7995,7 +8097,7 @@ Name: ___
             }),
             ..Default::default()
         };
-        let hinted = ocr_config_with_page_rotation_hint(&explicit, 0, None, true);
+        let hinted = ocr_config_with_page_rotation_hint(&explicit, 0, None, true, false);
         assert_eq!(hinted.tesseract_config.as_ref().and_then(|c| c.psm), Some(6));
         assert_eq!(
             hinted
@@ -8008,7 +8110,7 @@ Name: ___
         );
 
         let config = crate::core::config::ocr::OcrConfig::default();
-        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, false);
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, false, false);
         assert!(
             hinted.tesseract_config.is_none(),
             "a page that is not a scan keeps the engine default"
@@ -8025,7 +8127,7 @@ Name: ___
             ..Default::default()
         };
 
-        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, true);
+        let hinted = ocr_config_with_page_rotation_hint(&config, 0, None, true, false);
 
         assert!(hinted.tesseract_config.is_none());
         assert!(matches!(hinted, Cow::Borrowed(_)));

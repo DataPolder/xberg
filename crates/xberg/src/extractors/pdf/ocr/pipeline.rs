@@ -319,6 +319,12 @@ type MixedLayoutOutcome = (
 );
 
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+struct MixedOcrPageSelection<'a> {
+    ocr: &'a [u32],
+    single_block: &'a [u32],
+}
+
+#[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 pub(crate) async fn extract_mixed_ocr_native(
     native_text: &str,
     boundaries: &[crate::types::PageBoundary],
@@ -327,10 +333,35 @@ pub(crate) async fn extract_mixed_ocr_native(
     config: &ExtractionConfig,
     _path: Option<&std::path::Path>,
 ) -> MixedOcrResult {
-    extract_mixed_ocr_native_with_layout_inputs(
+    extract_mixed_ocr_native_with_single_block_pages(
         native_text,
         boundaries,
         ocr_page_numbers,
+        &[],
+        content,
+        config,
+        _path,
+    )
+    .await
+}
+
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+pub(crate) async fn extract_mixed_ocr_native_with_single_block_pages(
+    native_text: &str,
+    boundaries: &[crate::types::PageBoundary],
+    ocr_page_numbers: &[u32],
+    single_block_page_numbers: &[u32],
+    content: &[u8],
+    config: &ExtractionConfig,
+    _path: Option<&std::path::Path>,
+) -> MixedOcrResult {
+    extract_mixed_ocr_native_with_layout_inputs(
+        native_text,
+        boundaries,
+        MixedOcrPageSelection {
+            ocr: ocr_page_numbers,
+            single_block: single_block_page_numbers,
+        },
         content,
         config,
         if config.force_ocr_pages.is_some() {
@@ -348,13 +379,14 @@ pub(crate) async fn extract_mixed_ocr_native(
 async fn extract_mixed_ocr_native_with_layout_inputs(
     native_text: &str,
     boundaries: &[crate::types::PageBoundary],
-    ocr_page_numbers: &[u32],
+    pages: MixedOcrPageSelection<'_>,
     content: &[u8],
     config: &ExtractionConfig,
     all_pages_failed_policy: AllPagesFailedPolicy,
     #[cfg(feature = "layout-detection")] layout_inputs: MixedLayoutInputs,
 ) -> MixedOcrResult {
-    let ocr_set: std::collections::HashSet<u32> = ocr_page_numbers
+    let ocr_set: std::collections::HashSet<u32> = pages
+        .ocr
         .iter()
         .copied()
         .filter(|&p| {
@@ -366,6 +398,13 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
             }
         })
         .collect();
+    let single_block_pages = std::sync::Arc::new(
+        pages
+            .single_block
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<u32>>(),
+    );
 
     if ocr_set.is_empty() {
         return Ok((
@@ -713,6 +752,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                         source_dpi: rendered_page_source_dpi(&render_doc, *page_idx, image_arc.width()),
                         known_full_page_scan: crate::pdf::scan_detect::full_page_raster_density(&render_doc, *page_idx)
                             .is_some(),
+                        single_block_pages: Some(std::sync::Arc::clone(&single_block_pages)),
                     };
                     // See `extract_with_ocr_for_page`'s doc comment on
                     // `points_per_pixel_override`: this call hands the stage a single
@@ -858,6 +898,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                         source_dpi: rendered_page_source_dpi(&render_doc, *page_idx, image.width()),
                         known_full_page_scan: crate::pdf::scan_detect::full_page_raster_density(&render_doc, *page_idx)
                             .is_some(),
+                        single_block_pages: Some(std::sync::Arc::clone(&single_block_pages)),
                     };
                     let points_per_pixel_override = {
                         let (_, page_height_pt) = page_dimensions_pt(&render_doc, *page_idx);
@@ -1061,6 +1102,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     page_rotation_degrees,
                     source_dpi,
                     whole_page_raster,
+                    single_block_pages.contains(&(*page_idx as u32 + 1)),
                 )
                 .into_owned();
                 let (upright_data, upright_width, upright_height, correction_degrees) = match upright_raster_for_backend(
@@ -1147,6 +1189,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     .find(|(encoded_page, ..)| *encoded_page == page_idx)
                     .map_or((0, 0), |(_, _, w, h)| (*w, *h));
                 let (page_width_pt, page_height_pt) = page_dimensions_pt(&render_doc, page_idx);
+                let page_psm = effective_tesseract_psm(&extraction_result.metadata, backend.name());
                 if let Some((mut page_doc, paragraphs)) = build_mixed_ocr_page_document(
                     &mut extraction_result,
                     &ocr_config_resolved,
@@ -1163,6 +1206,9 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     );
                     if !paragraphs.is_empty() {
                         ocr_page_paragraphs.insert((page_idx + 1) as u32, paragraphs);
+                    }
+                    if let Some(psm) = page_psm {
+                        attach_page_segmentation_modes(&mut page_doc, [((page_idx + 1) as u32, psm)]);
                     }
                     structured_ocr_pages.insert((page_idx + 1) as u32, page_doc);
                 }
@@ -1198,6 +1244,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     page_rotation_degrees,
                     source_dpi,
                     whole_page_raster,
+                    single_block_pages.contains(&(*page_idx as u32 + 1)),
                 );
                 let (upright_data, upright_width, upright_height, correction_degrees) = match upright_raster_for_backend(
                     data,
@@ -1253,6 +1300,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     std::mem::take(&mut extraction_result.processing_warnings),
                 );
                 let (page_width_pt, page_height_pt) = page_dimensions_pt(&render_doc, *page_idx);
+                let page_psm = effective_tesseract_psm(&extraction_result.metadata, backend.name());
                 if let Some((mut page_doc, paragraphs)) = build_mixed_ocr_page_document(
                     &mut extraction_result,
                     &ocr_config_resolved,
@@ -1269,6 +1317,9 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     );
                     if !paragraphs.is_empty() {
                         ocr_page_paragraphs.insert((*page_idx + 1) as u32, paragraphs);
+                    }
+                    if let Some(psm) = page_psm {
+                        attach_page_segmentation_modes(&mut page_doc, [((*page_idx + 1) as u32, psm)]);
                     }
                     structured_ocr_pages.insert((*page_idx + 1) as u32, page_doc);
                 }
@@ -1621,7 +1672,10 @@ pub(crate) async fn extract_full_document_ocr_pipeline_per_page(
         Box::pin(extract_mixed_ocr_native_with_layout_inputs(
             &seed_text,
             &boundaries,
-            &page_numbers,
+            MixedOcrPageSelection {
+                ocr: &page_numbers,
+                single_block: &[],
+            },
             content,
             config,
             AllPagesFailedPolicy::ReturnError,
@@ -1682,13 +1736,46 @@ pub(crate) async fn extract_full_document_ocr_pipeline_per_page(
 /// rotation override (`0`), so every pre-existing caller keeps today's behavior: content-based
 /// per-page auto-detection when `content` is available and index-aligned to `images`, or no
 /// rotation correction at all otherwise.
-#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+#[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline")))]
 pub(crate) async fn extract_with_ocr(
     content: Option<&[u8]>,
     images: Option<&[image::DynamicImage]>,
     #[cfg(feature = "layout-detection")] layout_detections: Option<&[crate::layout::DetectionResult]>,
     config: &ExtractionConfig,
     path: Option<&std::path::Path>,
+) -> crate::Result<(
+    String,
+    Option<f64>,
+    Vec<crate::types::Table>,
+    Vec<crate::types::OcrElement>,
+    Option<crate::types::internal::InternalDocument>,
+    Vec<crate::types::LlmUsage>,
+    Vec<String>,
+    Option<Vec<crate::types::ExtractedImage>>,
+    Vec<crate::types::Formula>,
+    ahash::AHashMap<u32, crate::types::ImagePreprocessingMetadata>,
+    ahash::AHashMap<u32, crate::types::page::PageOcrConfidence>,
+)> {
+    extract_with_ocr_with_page_hints(
+        content,
+        images,
+        #[cfg(feature = "layout-detection")]
+        layout_detections,
+        config,
+        path,
+        None,
+    )
+    .await
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+pub(crate) async fn extract_with_ocr_with_page_hints(
+    content: Option<&[u8]>,
+    images: Option<&[image::DynamicImage]>,
+    #[cfg(feature = "layout-detection")] layout_detections: Option<&[crate::layout::DetectionResult]>,
+    config: &ExtractionConfig,
+    path: Option<&std::path::Path>,
+    page_ocr_hints: Option<PageOcrHints>,
 ) -> crate::Result<(
     String,
     Option<f64>,
@@ -1726,7 +1813,7 @@ pub(crate) async fn extract_with_ocr(
         0,
         false,
         None,
-        None,
+        page_ocr_hints,
         0,
         None,
     ))
@@ -1747,10 +1834,42 @@ pub(crate) async fn extract_with_ocr(
 }
 
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct PageOcrHints {
     pub(crate) source_dpi: Option<f64>,
+    /// `true` is authoritative; `false` means the detached caller has no positive scan signal,
+    /// so a content-backed whole-document route still performs its normal per-page detection.
     pub(crate) known_full_page_scan: bool,
+    /// One-indexed document page numbers selected by automatic fabricated-map routing.
+    pub(crate) single_block_pages: Option<std::sync::Arc<std::collections::HashSet<u32>>>,
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn effective_tesseract_psm(metadata: &crate::types::Metadata, backend: &str) -> Option<i32> {
+    if backend != "tesseract" {
+        return None;
+    }
+    match metadata.format.as_ref()? {
+        crate::types::FormatMetadata::Ocr(ocr) => Some(ocr.psm),
+        _ => None,
+    }
+}
+
+#[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
+fn attach_page_segmentation_modes(
+    doc: &mut crate::types::internal::InternalDocument,
+    modes: impl IntoIterator<Item = (u32, i32)>,
+) {
+    let entries = modes
+        .into_iter()
+        .map(|(page_number, psm)| serde_json::json!({ "page_number": page_number, "psm": psm }))
+        .collect::<Vec<_>>();
+    if !entries.is_empty() {
+        doc.metadata.additional.insert(
+            std::borrow::Cow::Borrowed(crate::ocr_metadata_keys::OCR_PAGE_SEGMENTATION_MODES_METADATA_KEY),
+            serde_json::Value::Array(entries),
+        );
+    }
 }
 /// Same as [`extract_with_ocr`], but `page_rotation_override` -- when non-zero -- is used as
 /// the known `/Rotate` value for every image in `images` instead of this function's own
@@ -2140,6 +2259,7 @@ pub(super) async fn extract_with_ocr_for_page(
     let mut backend_page_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
     let mut backend_additional_metadata: Option<ahash::AHashMap<std::borrow::Cow<'static, str>, serde_json::Value>> =
         None;
+    let mut page_segmentation_modes = std::collections::BTreeMap::<u32, i32>::new();
 
     // Opened on first blank page only; see `fallback_render_document`.
     #[cfg(feature = "pdf")]
@@ -2311,7 +2431,7 @@ pub(super) async fn extract_with_ocr_for_page(
                 // reach the same answer from the source document's MediaBox instead, and stay
                 // hint-free when they are not a whole-page render of it (#1753).
                 #[cfg(feature = "pdf")]
-                let source_dpi = page_ocr_hints.and_then(|hints| hints.source_dpi).or_else(|| {
+                let source_dpi = page_ocr_hints.as_ref().and_then(|hints| hints.source_dpi).or_else(|| {
                     lazy_pdf_render_state
                         .as_ref()
                         .and_then(|(doc, _, _)| rendered_page_source_dpi(doc, *page_idx, *width))
@@ -2324,17 +2444,20 @@ pub(super) async fn extract_with_ocr_for_page(
                 #[cfg(not(feature = "pdf"))]
                 let source_dpi: Option<f64> = None;
                 #[cfg(feature = "pdf")]
-                let whole_page_raster = page_ocr_hints.map_or_else(
-                    || {
-                        whole_page_raster_for_ocr_page(
-                            lazy_pdf_render_state.as_ref(),
-                            &mut fallback_pdf_state,
-                            content,
-                            *page_idx,
-                        )
-                    },
-                    |hints| hints.known_full_page_scan,
-                );
+                let whole_page_raster = page_ocr_hints
+                    .as_ref()
+                    .filter(|hints| hints.known_full_page_scan)
+                    .map_or_else(
+                        || {
+                            whole_page_raster_for_ocr_page(
+                                lazy_pdf_render_state.as_ref(),
+                                &mut fallback_pdf_state,
+                                content,
+                                *page_idx,
+                            )
+                        },
+                        |_| true,
+                    );
                 #[cfg(not(feature = "pdf"))]
                 let whole_page_raster = false;
                 let config_clone = ocr_config_with_page_rotation_hint(
@@ -2342,6 +2465,11 @@ pub(super) async fn extract_with_ocr_for_page(
                     page_rotation_degrees,
                     source_dpi,
                     whole_page_raster,
+                    page_ocr_hints.as_ref().is_some_and(|hints| {
+                        hints.single_block_pages.as_ref().is_some_and(|pages| {
+                            pages.contains(&u32::try_from(page_index_offset + *page_idx + 1).unwrap_or(u32::MAX))
+                        })
+                    }),
                 )
                 .into_owned();
                 // No PDF `/Rotate` is ever known without the `pdf` feature (`page_rotation_degrees`
@@ -2411,7 +2539,7 @@ pub(super) async fn extract_with_ocr_for_page(
                 let page_rotation_degrees: u32 = 0;
                 // See the JoinSet branch above for both derivations.
                 #[cfg(feature = "pdf")]
-                let source_dpi = page_ocr_hints.and_then(|hints| hints.source_dpi).or_else(|| {
+                let source_dpi = page_ocr_hints.as_ref().and_then(|hints| hints.source_dpi).or_else(|| {
                     lazy_pdf_render_state
                         .as_ref()
                         .and_then(|(doc, _, _)| rendered_page_source_dpi(doc, *page_idx, *width))
@@ -2424,17 +2552,20 @@ pub(super) async fn extract_with_ocr_for_page(
                 #[cfg(not(feature = "pdf"))]
                 let source_dpi: Option<f64> = None;
                 #[cfg(feature = "pdf")]
-                let whole_page_raster = page_ocr_hints.map_or_else(
-                    || {
-                        whole_page_raster_for_ocr_page(
-                            lazy_pdf_render_state.as_ref(),
-                            &mut fallback_pdf_state,
-                            content,
-                            *page_idx,
-                        )
-                    },
-                    |hints| hints.known_full_page_scan,
-                );
+                let whole_page_raster = page_ocr_hints
+                    .as_ref()
+                    .filter(|hints| hints.known_full_page_scan)
+                    .map_or_else(
+                        || {
+                            whole_page_raster_for_ocr_page(
+                                lazy_pdf_render_state.as_ref(),
+                                &mut fallback_pdf_state,
+                                content,
+                                *page_idx,
+                            )
+                        },
+                        |_| true,
+                    );
                 #[cfg(not(feature = "pdf"))]
                 let whole_page_raster = false;
                 let config_for_page = ocr_config_with_page_rotation_hint(
@@ -2442,6 +2573,11 @@ pub(super) async fn extract_with_ocr_for_page(
                     page_rotation_degrees,
                     source_dpi,
                     whole_page_raster,
+                    page_ocr_hints.as_ref().is_some_and(|hints| {
+                        hints.single_block_pages.as_ref().is_some_and(|pages| {
+                            pages.contains(&u32::try_from(page_index_offset + *page_idx + 1).unwrap_or(u32::MAX))
+                        })
+                    }),
                 );
                 #[cfg(feature = "pdf")]
                 let (upright_data, upright_width, upright_height, correction_degrees) = upright_raster_for_backend(
@@ -2486,6 +2622,9 @@ pub(super) async fn extract_with_ocr_for_page(
             let document_page_idx = page_index_offset + page_idx;
             let document_page_number = (document_page_idx + 1) as u32;
             let mut ocr_result = batch_ocr_results[offset].take().expect("OCR result missing for page");
+            if let Some(psm) = effective_tesseract_psm(&ocr_result.metadata, &backend_name) {
+                page_segmentation_modes.insert(document_page_number, psm);
+            }
             if let Some(metadata) = ocr_result.metadata.image_preprocessing.clone() {
                 preprocessing_by_page.insert(document_page_number, metadata);
             }
@@ -3216,6 +3355,14 @@ pub(super) async fn extract_with_ocr_for_page(
         if let (Some(doc), Some(additional)) = (ocr_doc.as_mut(), backend_additional_metadata) {
             doc.metadata.additional.extend(additional);
         }
+        if let Some(doc) = ocr_doc.as_mut() {
+            let accepted_modes = page_segmentation_modes.into_iter().filter(|(page_number, _)| {
+                let local_index = (*page_number as usize).saturating_sub(page_index_offset + 1);
+                !rejected_pages.get(local_index).copied().unwrap_or(true)
+                    && page_texts.get(local_index).is_some_and(|text| !text.trim().is_empty())
+            });
+            attach_page_segmentation_modes(doc, accepted_modes);
+        }
         ocr_doc
     };
     // Without `pdf` there is no page renderer, so no page-level OCR runs and the vector is
@@ -3226,6 +3373,7 @@ pub(super) async fn extract_with_ocr_for_page(
         page_failure_warnings,
         backend_page_warnings,
         backend_additional_metadata,
+        page_segmentation_modes,
     );
 
     Ok((
@@ -4111,7 +4259,7 @@ pub(super) async fn run_ocr_pipeline_for_page(
             page_rotation_degrees,
             skip_document_global_heuristic,
             points_per_pixel_override,
-            page_ocr_hints,
+            page_ocr_hints.clone(),
             page_index_offset,
             xobject_document,
         ))
@@ -4530,15 +4678,22 @@ pub(super) fn ocr_config_with_page_rotation_hint(
     page_rotation_degrees: u32,
     source_dpi: Option<f64>,
     whole_page_raster: bool,
+    prefer_single_block: bool,
 ) -> Cow<'_, crate::core::config::ocr::OcrConfig> {
     let source_dpi = source_dpi.and_then(serde_json::Number::from_f64);
-    let is_tesseract_scan = whole_page_raster && config.backend == "tesseract";
+    let is_tesseract = config.backend == "tesseract";
+    let is_tesseract_scan = whole_page_raster && is_tesseract;
+    let apply_single_block_psm =
+        prefer_single_block && is_tesseract && config.tesseract_config.as_ref().and_then(|c| c.psm).is_none();
     let apply_whole_image_psm = is_tesseract_scan && config.tesseract_config.as_ref().and_then(|c| c.psm).is_none();
-    if page_rotation_degrees == 0 && source_dpi.is_none() && !is_tesseract_scan {
+    if page_rotation_degrees == 0 && source_dpi.is_none() && !is_tesseract_scan && !apply_single_block_psm {
         return Cow::Borrowed(config);
     }
     let mut config = config.clone();
-    if apply_whole_image_psm {
+    if apply_single_block_psm {
+        let tesseract = config.tesseract_config.get_or_insert_with(Default::default);
+        tesseract.psm = Some(6);
+    } else if apply_whole_image_psm {
         crate::extractors::image::apply_default_whole_image_tesseract_psm(&mut config);
     }
     let mut opts = config.backend_options.take().unwrap_or_else(|| serde_json::json!({}));
