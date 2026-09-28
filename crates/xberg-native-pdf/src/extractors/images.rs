@@ -1463,25 +1463,38 @@ pub fn extract_image_from_xobject(
         width = jpx_width;
         height = jpx_height;
         jpx_opacity = opacity;
+        // An image with no `/Indexed` whose codestream carries its own palette decodes to indices,
+        // looked up here into the palette's own device space rather than RGB: a CMYK palette
+        // stays CMYK, so the image keeps its declared space and its process plates. (GH#1903) ~keep
+        let jpx_data = match (codestream_palette, jpx_data) {
+            (Some(palette), ImageData::Raw { pixels: indices, .. }) => {
+                samples_are_raw = false;
+                stored_bpc = 8;
+                ImageData::Raw {
+                    pixels: expand_indexed_to_base_samples(
+                        &indices,
+                        &palette.palette,
+                        palette.components,
+                        width,
+                        height,
+                        8,
+                    )?,
+                    format: palette.base_fmt,
+                }
+            }
+            (_, data) => data,
+        };
         // An `/Indexed` image decodes to one index byte per pixel, looked up in the
-        // dictionary's palette exactly as any other codec's index stream is below. (GH#1885)
-        // An image with no `/Indexed` whose codestream carries its own palette is looked up in
-        // that palette the same way. (GH#1903) ~keep
-        if let Some(ir) = indexed_resolution.as_ref().or(codestream_palette.as_ref())
+        // dictionary's palette exactly as any other codec's index stream is below. (GH#1885) ~keep
+        if let Some(ir) = indexed_resolution.as_ref()
             && let ImageData::Raw { pixels: indices, .. } = &jpx_data
         {
             samples_are_raw = false;
             stored_bpc = 8;
             // A colour-key /Mask on an /Indexed image states its range in these indices, not in
             // the RGB below. (GH#1885) ~keep
-            if has_color_key_mask && indexed_resolution.is_some() {
+            if has_color_key_mask {
                 raw_indexed_samples = Some(indices.clone());
-            }
-            // The expansion is RGB whatever the palette's own space was, so an image that named
-            // no `/Indexed` now reports the space its samples are in. ~keep
-            if codestream_palette.is_some() {
-                color_space = ColorSpace::DeviceRGB;
-                direct_icc_profile = None;
             }
             ImageData::Raw {
                 pixels: expand_indexed_image(indices, ir, width, height, 8, rendering_intent)?,
@@ -5298,10 +5311,11 @@ mod palette_expansion_tests {
     }
 
     /// A lossy palette JPEG 2000 image that names no `/Indexed` decodes through the codestream's
-    /// own palette, clamped, to the same pixels as the same palette given as an `/Indexed` lookup.
-    /// A declared device space with the palette's component count leaves room for it too. (GH#1903)
+    /// own palette, clamped, to the same samples as the same palette given as an `/Indexed` lookup
+    /// in its base space. The samples stay in the palette's device space: a CMYK palette reports
+    /// CMYK, whether the dictionary declared `/DeviceCMYK` or named no space. (GH#1903)
     #[test]
-    fn a_codestream_palette_without_indexed_matches_the_indexed_expansion() {
+    fn a_codestream_palette_without_indexed_keeps_the_palette_device_space() {
         use crate::object::Object;
         const PALETTE_CMYK_JP2: &[u8] = include_bytes!("../../tests/fixtures/jpx/gh1885_palette_cmyk.jp2");
         let palette = crate::decoders::jpx::codestream_palette(PALETTE_CMYK_JP2).expect("the fixture's pclr box");
@@ -5311,11 +5325,10 @@ mod palette_expansion_tests {
             Object::Integer(255),
             Object::String(palette.entries.clone()),
         ]);
-        let oracle =
-            extract_image_from_xobject(None, &jpx_xobject(Some(indexed)), None, None).expect("the /Indexed image");
-        let ImageData::Raw { pixels: expected, .. } = oracle.data() else {
-            panic!("the /Indexed image must expand to raw pixels");
-        };
+        let oracle = decode_indexed_image_in_base_space(None, &jpx_xobject(Some(indexed)), None, None)
+            .expect("the /Indexed image")
+            .expect("an /Indexed image has base-space samples");
+        assert_eq!(oracle.components, 4, "the oracle is a CMYK lookup");
         for declared in [None, Some(Object::Name("DeviceCMYK".to_string()))] {
             let label = format!("{declared:?}");
             let image = extract_image_from_xobject(None, &jpx_xobject(declared), None, None)
@@ -5323,15 +5336,14 @@ mod palette_expansion_tests {
             let ImageData::Raw { pixels, format } = image.data() else {
                 panic!("{label}: raw pixels expected");
             };
-            assert_eq!(*format, PixelFormat::RGB, "{label}");
+            assert_eq!(*format, PixelFormat::CMYK, "{label}");
             assert_eq!(
-                pixels, expected,
-                "{label}: the pixels must match the /Indexed expansion"
+                *pixels, oracle.samples,
+                "{label}: the samples must match the /Indexed lookup"
             );
-            assert_eq!(*image.color_space(), ColorSpace::DeviceRGB, "{label}");
+            assert_eq!(*image.color_space(), ColorSpace::DeviceCMYK, "{label}");
             assert_eq!(image.bits_per_component(), 8, "{label}");
         }
-        assert_eq!(oracle.bits_per_component(), 8, "the /Indexed expansion is 8-bit too");
 
         // A declared space the palette does not fit stays authoritative, and the decoder's own
         // unclamped lookup still refuses the lossy plane.

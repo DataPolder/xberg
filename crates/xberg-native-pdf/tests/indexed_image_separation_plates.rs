@@ -7,6 +7,10 @@ use xberg_native_pdf::rendering::{SeparationPlate, render_separations};
 /// 120x40, dark text (index 0) on paper (index 255), a losslessly coded index plane.
 const INDICES_JP2: &[u8] = include_bytes!("fixtures/jpx/gh1885_indices_grey.jp2");
 
+/// The same 120x40 picture coded lossily as one index component, looked up in the JP2's own CMYK
+/// `pclr` palette: entry `i` is `(0, 0, 0, 255 - i)`, so the text is black ink.
+const PALETTE_CMYK_JP2: &[u8] = include_bytes!("fixtures/jpx/gh1885_palette_cmyk.jp2");
+
 /// Pure cyan then pure magenta, as `/DeviceCMYK` entries.
 const CYAN_MAGENTA: &str = "<FF000000 00FF0000>";
 
@@ -190,6 +194,25 @@ fn an_indexed_cmyk_jpeg2000_image_paints_the_process_plates() {
         paper > text,
         "the paper paints the magenta plate, got {paper} against {text}"
     );
+}
+
+/// A JPEG 2000 image that declares `/DeviceCMYK` and carries its own CMYK palette keeps its CMYK
+/// samples, so its ink reaches the process plates. (GH#1903)
+#[test]
+fn a_codestream_palette_cmyk_jpeg2000_image_paints_the_black_plate() {
+    let image = Image {
+        color_space: "/DeviceCMYK",
+        extra: "/Filter /JPXDecode",
+        width: 120,
+        height: 40,
+        bpc: 8,
+        data: PALETTE_CMYK_JP2,
+    };
+    let plates = plates(build(&image, "", &[]));
+    let text = plate(&plates, "Black").data.iter().filter(|&&v| v > 200).count();
+    let cyan = plate(&plates, "Cyan").data.iter().filter(|&&v| v > 0).count();
+    assert!(text > 0, "the text pixels paint the black plate");
+    assert_eq!(cyan, 0, "the palette holds no cyan ink");
 }
 
 #[test]

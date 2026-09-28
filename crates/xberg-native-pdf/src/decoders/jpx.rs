@@ -176,7 +176,7 @@ pub struct CodestreamPalette {
 ///
 /// hayro-jpeg2000 0.4 resolves this palette without clamping, so one lossily coded index just past
 /// the last entry fails the whole image (GH#1903). Reading it here lets the caller clamp the
-/// indices and look them up through the same expander as an `/Indexed` image's palette. Any
+/// indices and look them up in it, in the palette's own colour space. Any
 /// other shape returns `None` and decodes as before. ~keep
 pub fn codestream_palette(bytes: &[u8]) -> Option<CodestreamPalette> {
     let header = find_box(bytes, b"jp2h")?;
