@@ -245,6 +245,24 @@ fn repair_numeric_tokens_in_table(table: &mut crate::types::Table) {
     }
 }
 
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+fn push_mixed_ocr_page_failure_warning(
+    warnings: &mut Vec<crate::types::ProcessingWarning>,
+    page_idx: usize,
+    error: &crate::XbergError,
+) {
+    crate::core::diagnostics::push_warning_deduped(
+        warnings,
+        crate::types::ProcessingWarning {
+            source: std::borrow::Cow::Borrowed("ocr"),
+            message: std::borrow::Cow::Owned(format!(
+                "OCR of page {} failed ({error}); the page's native text was kept.",
+                page_idx + 1
+            )),
+        },
+    );
+}
+
 /// Build mixed text from native extraction and per-page OCR results.
 ///
 /// For each page boundary, if the page is in `ocr_page_numbers` (1-indexed),
@@ -591,6 +609,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
     let mut accumulated_llm_usage: Vec<crate::types::LlmUsage> = Vec::new();
     let mut accumulated_formulas: Vec<crate::types::Formula> = Vec::new();
     let mut accumulated_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
+    let mut failed_page_errors: ahash::AHashMap<usize, crate::XbergError> = ahash::AHashMap::new();
     #[cfg(feature = "layout-detection")]
     {
         if let Some(warning) = layout_pass_warning {
@@ -609,20 +628,22 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
         let default_security_limits = crate::extractors::security::SecurityLimits::default();
         let security_limits = config.security_limits.as_ref().unwrap_or(&default_security_limits);
         #[cfg(feature = "layout-detection")]
-        let page_images = if let Some(images) = layout_images_for_mixed {
-            page_indices[batch_start..batch_end]
-                .iter()
-                .map(|&page_idx| {
-                    images
-                        .get(page_idx)
-                        .cloned()
-                        .map(|image| (page_idx, image))
-                        .ok_or_else(|| crate::XbergError::Ocr {
+        let (page_images, render_failures) = if let Some(images) = layout_images_for_mixed {
+            let mut page_images = Vec::with_capacity(batch_end - batch_start);
+            let mut render_failures = Vec::new();
+            for &page_idx in &page_indices[batch_start..batch_end] {
+                match images.get(page_idx) {
+                    Some(image) => page_images.push((page_idx, image.clone())),
+                    None => render_failures.push((
+                        page_idx,
+                        crate::XbergError::Ocr {
                             message: format!("prepared layout image missing for page {}", page_idx + 1),
                             source: None,
-                        })
-                })
-                .collect::<crate::Result<Vec<_>>>()?
+                        },
+                    )),
+                }
+            }
+            (page_images, render_failures)
         } else {
             render_selected_pages_from_document(
                 &render_doc,
@@ -630,16 +651,20 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                 &page_indices[batch_start..batch_end],
                 security_limits,
                 config.images.as_ref(),
-            )?
+            )
         };
         #[cfg(not(feature = "layout-detection"))]
-        let page_images = render_selected_pages_from_document(
+        let (page_images, render_failures) = render_selected_pages_from_document(
             &render_doc,
             &page_rotations,
             &page_indices[batch_start..batch_end],
             security_limits,
             config.images.as_ref(),
-        )?;
+        );
+        for (page_idx, error) in render_failures {
+            push_mixed_ocr_page_failure_warning(&mut accumulated_warnings, page_idx, &error);
+            failed_page_errors.insert(page_idx, error);
+        }
 
         // Multi-stage pipeline route (#1341): drive each page through `run_ocr_pipeline`
         // so `vlm_fallback` / explicit-pipeline stages apply here, mirroring the image
@@ -732,6 +757,15 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                         message: format!("OCR pipeline task panicked: {}", e),
                         plugin_name: "ocr".to_string(),
                     })?;
+                    let result = match result {
+                        Ok(result) => result,
+                        Err(error @ crate::XbergError::Cancelled) => return Err(error),
+                        Err(error) => {
+                            push_mixed_ocr_page_failure_warning(&mut accumulated_warnings, page_idx, &error);
+                            failed_page_errors.insert(page_idx, error);
+                            continue;
+                        }
+                    };
                     let (
                         text,
                         tables,
@@ -744,7 +778,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                         mut page_raw_paragraphs,
                         preprocessing,
                         page_ocr_confidences,
-                    ) = result?;
+                    ) = result;
                     accumulated_llm_usage.extend(usage);
                     ocr_confidence_by_page.extend(page_ocr_confidences);
                     let page_number = (page_idx + 1) as u32;
@@ -826,19 +860,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     #[cfg(feature = "layout-detection")]
                     let page_detection: Option<&crate::layout::DetectionResult> =
                         detection_for_mixed_route_page(layout_detections_for_mixed, *page_idx);
-                    let (
-                        text,
-                        tables,
-                        elements,
-                        doc,
-                        usage,
-                        page_texts,
-                        _rasters,
-                        formulas,
-                        mut page_raw_paragraphs,
-                        preprocessing,
-                        page_ocr_confidences,
-                    ) = Box::pin(run_ocr_pipeline_for_page(
+                    let result = Box::pin(run_ocr_pipeline_for_page(
                         None,
                         Some(std::slice::from_ref(image.as_ref())),
                         #[cfg(feature = "layout-detection")]
@@ -855,7 +877,29 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                         *page_idx,
                         Some(render_doc.as_ref()),
                     ))
-                    .await?;
+                    .await;
+                    let result = match result {
+                        Ok(result) => result,
+                        Err(error @ crate::XbergError::Cancelled) => return Err(error),
+                        Err(error) => {
+                            push_mixed_ocr_page_failure_warning(&mut accumulated_warnings, *page_idx, &error);
+                            failed_page_errors.insert(*page_idx, error);
+                            continue;
+                        }
+                    };
+                    let (
+                        text,
+                        tables,
+                        elements,
+                        doc,
+                        usage,
+                        page_texts,
+                        _rasters,
+                        formulas,
+                        mut page_raw_paragraphs,
+                        preprocessing,
+                        page_ocr_confidences,
+                    ) = result;
                     accumulated_llm_usage.extend(usage);
                     ocr_confidence_by_page.extend(page_ocr_confidences);
                     let page_number = (*page_idx + 1) as u32;
@@ -1012,14 +1056,20 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     whole_page_raster,
                 )
                 .into_owned();
-                let (upright_data, upright_width, upright_height, correction_degrees) = upright_raster_for_backend(
+                let (upright_data, upright_width, upright_height, correction_degrees) = match upright_raster_for_backend(
                     data,
                     *width,
                     *height,
                     page_rotation_degrees,
                     orientation_handling,
                     config.security_limits.as_ref(),
-                )?;
+                ) {
+                    Ok(upright) => upright,
+                    Err(error) => {
+                        failed_pages.insert(*page_idx, error);
+                        continue;
+                    }
+                };
                 let idx = *page_idx;
                 let cancel_token = config.cancel_token.clone();
                 join_set.spawn(async move {
@@ -1142,14 +1192,20 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     source_dpi,
                     whole_page_raster,
                 );
-                let (upright_data, upright_width, upright_height, correction_degrees) = upright_raster_for_backend(
+                let (upright_data, upright_width, upright_height, correction_degrees) = match upright_raster_for_backend(
                     data,
                     *width,
                     *height,
                     page_rotation_degrees,
                     orientation_handling,
                     config.security_limits.as_ref(),
-                )?;
+                ) {
+                    Ok(upright) => upright,
+                    Err(error) => {
+                        failed_pages.insert(*page_idx, error);
+                        continue;
+                    }
+                };
                 let mut extraction_result = match backend
                     .process_image(upright_data.as_slice(), config_for_page.as_ref())
                     .await
@@ -1288,7 +1344,9 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
             }
             if let Some(error) = failure {
                 if !recovered {
-                    return Err(error);
+                    push_mixed_ocr_page_failure_warning(&mut accumulated_warnings, *page_idx, &error);
+                    failed_page_errors.insert(*page_idx, error);
+                    continue;
                 }
                 accumulated_warnings.push(crate::types::ProcessingWarning {
                     source: std::borrow::Cow::Borrowed("ocr"),
@@ -1306,6 +1364,18 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                 captured_rasters.push(build_page_raster_image(*page_idx, png_bytes, *w, *h));
             }
         }
+    }
+
+    if config.force_ocr_pages.is_some()
+        && !page_indices.is_empty()
+        && page_indices
+            .iter()
+            .all(|page_idx| failed_page_errors.contains_key(page_idx))
+    {
+        let first_failed_page = page_indices[0];
+        return Err(failed_page_errors
+            .remove(&first_failed_page)
+            .expect("every requested page was checked above"));
     }
 
     // Pipeline stages already assess their output in `extract_with_ocr_for_page` using the
