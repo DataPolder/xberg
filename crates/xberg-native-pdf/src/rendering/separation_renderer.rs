@@ -631,7 +631,15 @@ fn scan_do_operator_for_inks(
         // operator in the content stream. Surface those inks so the
         // per-plate short-circuit doesn't drop the image's plates as
         // empty. ~keep
-        scan_image_xobject_for_inks(dict, color_spaces, resources, doc, referenced);
+        scan_image_xobject_for_inks(
+            &xobj,
+            xobj_ref_obj.as_reference(),
+            dict,
+            color_spaces,
+            resources,
+            doc,
+            referenced,
+        );
     }
     Ok(())
 }
@@ -675,13 +683,26 @@ fn scan_form_xobject_for_inks(
 /// (the `/Subtype /Image` branch) — pure code motion, same colour-space
 /// resolution and `/All`/`/None` handling, no logic changed.
 fn scan_image_xobject_for_inks(
+    xobject: &Object,
+    obj_ref: Option<crate::object::ObjectRef>,
     dict: &HashMap<String, Object>,
     color_spaces: &HashMap<String, Object>,
     resources: &Object,
     doc: &PdfDocument,
     referenced: &mut Vec<String>,
 ) {
-    let resolved = resolve_image_color_space(dict, color_spaces, resources, doc);
+    let resolved =
+        match resolve_image_color_space_with_decoded_fallback(xobject, obj_ref, dict, color_spaces, resources, doc) {
+            Ok((resolved, _)) => resolved,
+            Err(error) => {
+                tracing::warn!(
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "skipping image XObject while collecting separation inks"
+                );
+                return;
+            }
+        };
     match resolved {
         ResolvedSpace::Cmyk | ResolvedSpace::IccCmyk => push_process_inks(referenced),
         ResolvedSpace::Separation(ink) => push_separation_ink(referenced, &ink),
@@ -2597,6 +2618,49 @@ fn resolve_image_color_space(
     classify_resolved(&resolved_obj, color_spaces, resources, doc)
 }
 
+/// Resolve the dictionary colour space, decoding the image only for the JPEG 2000 case where
+/// ISO 32000-1 permits `/ColorSpace` to be absent. The decoded image is returned so the paint
+/// pass can reuse it instead of decoding the same stream again. ~keep
+fn resolve_image_color_space_with_decoded_fallback(
+    xobject: &Object,
+    obj_ref: Option<crate::object::ObjectRef>,
+    image_dict: &HashMap<String, Object>,
+    color_spaces: &HashMap<String, Object>,
+    resources: &Object,
+    doc: &PdfDocument,
+) -> Result<(ResolvedSpace, Option<crate::extractors::images::PdfImage>)> {
+    let declared = resolve_image_color_space(image_dict, color_spaces, resources, doc);
+    if image_dict.contains_key("ColorSpace")
+        || !matches!(declared, ResolvedSpace::Unknown)
+        || !image_uses_jpx_decode(image_dict)
+    {
+        return Ok((declared, None));
+    }
+
+    let image = crate::extractors::images::extract_image_from_xobject(Some(doc), xobject, obj_ref, Some(color_spaces))?;
+    let resolved = match image.color_space() {
+        crate::extractors::images::ColorSpace::DeviceCMYK => ResolvedSpace::Cmyk,
+        crate::extractors::images::ColorSpace::ICCBased(4) => ResolvedSpace::IccCmyk,
+        crate::extractors::images::ColorSpace::DeviceRGB
+        | crate::extractors::images::ColorSpace::CalRGB
+        | crate::extractors::images::ColorSpace::Lab
+        | crate::extractors::images::ColorSpace::ICCBased(3) => ResolvedSpace::Rgb,
+        crate::extractors::images::ColorSpace::DeviceGray
+        | crate::extractors::images::ColorSpace::CalGray
+        | crate::extractors::images::ColorSpace::ICCBased(1) => ResolvedSpace::Gray,
+        _ => ResolvedSpace::Unknown,
+    };
+    Ok((resolved, Some(image)))
+}
+
+fn image_uses_jpx_decode(image_dict: &HashMap<String, Object>) -> bool {
+    match image_dict.get("Filter") {
+        Some(Object::Name(name)) => name == "JPXDecode",
+        Some(Object::Array(filters)) => filters.iter().any(|filter| filter.as_name() == Some("JPXDecode")),
+        _ => false,
+    }
+}
+
 /// For a given source colour space and target ink, return the index of the
 /// channel that contributes to that ink, or `None` when the ink is outside
 /// the source's colorant set.
@@ -2750,8 +2814,21 @@ fn paint_image_to_plates(
         );
     }
 
-    // Resolve the image's declared colour space, honouring DefaultCMYK etc. ~keep
-    let resolved_space = resolve_image_color_space(dict, color_spaces, resources, ctx.doc);
+    // Resolve the image's declared colour space, honouring DefaultCMYK etc. A JPEG 2000 image may
+    // omit it and take the colour space from its decoded codestream (GH#1922). ~keep
+    let (resolved_space, decoded_image) =
+        match resolve_image_color_space_with_decoded_fallback(xobject, obj_ref, dict, color_spaces, resources, ctx.doc)
+        {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                tracing::warn!(
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "skipping image XObject"
+                );
+                return Ok(());
+            }
+        };
 
     // For RGB / Gray / Unknown the image carries no ink-coverage intent.
     // Skip entirely; underlying plates are left untouched. xberg-native-pdf does
@@ -2816,15 +2893,19 @@ fn paint_image_to_plates(
         }
     }
 
-    let pdf_image = match extract_image_from_xobject(Some(ctx.doc), xobject, obj_ref, Some(color_spaces)) {
-        Ok(img) => img,
-        Err(error) => {
-            tracing::warn!(
-                error_code = error.telemetry_code(),
-                error_offset = ?error.telemetry_offset(),
-                "skipping image XObject"
-            );
-            return Ok(());
+    let pdf_image = if let Some(image) = decoded_image {
+        image
+    } else {
+        match extract_image_from_xobject(Some(ctx.doc), xobject, obj_ref, Some(color_spaces)) {
+            Ok(image) => image,
+            Err(error) => {
+                tracing::warn!(
+                    error_code = error.telemetry_code(),
+                    error_offset = ?error.telemetry_offset(),
+                    "skipping image XObject"
+                );
+                return Ok(());
+            }
         }
     };
     let w = pdf_image.width() as usize;

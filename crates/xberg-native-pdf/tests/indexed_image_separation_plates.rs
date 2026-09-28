@@ -16,7 +16,7 @@ const CYAN_MAGENTA: &str = "<FF000000 00FF0000>";
 
 struct Image<'a> {
     /// The image's `/ColorSpace` value.
-    color_space: &'a str,
+    color_space: Option<&'a str>,
     /// Extra entries for the image dictionary.
     extra: &'a str,
     width: u32,
@@ -28,7 +28,7 @@ struct Image<'a> {
 /// Four pixels in a row, 8-bit indices 0 0 1 1: index 0 on the left half, 1 on the right.
 fn two_indices(color_space: &str) -> Image<'_> {
     Image {
-        color_space,
+        color_space: Some(color_space),
         extra: "",
         width: 4,
         height: 1,
@@ -64,14 +64,18 @@ fn build(image: &Image<'_>, resources: &str, objects: &[&str]) -> Vec<u8> {
         .as_bytes(),
     );
     offsets.push(buf.len());
+    let color_space = image
+        .color_space
+        .map(|value| format!("/ColorSpace {value} "))
+        .unwrap_or_default();
     buf.extend_from_slice(
         format!(
             "5 0 obj\n<< /Type /XObject /Subtype /Image /Width {} /Height {} /BitsPerComponent {} \
-             /ColorSpace {} {} /Length {} >>\nstream\n",
+             {}{} /Length {} >>\nstream\n",
             image.width,
             image.height,
             image.bpc,
-            image.color_space,
+            color_space,
             image.extra,
             image.data.len()
         )
@@ -177,7 +181,7 @@ fn an_indexed_cmyk_jpeg2000_image_paints_the_process_plates() {
     palette.push('>');
     let cs = format!("[/Indexed /DeviceCMYK 255 {palette}]");
     let image = Image {
-        color_space: &cs,
+        color_space: Some(&cs),
         extra: "/Filter /JPXDecode",
         width: 120,
         height: 40,
@@ -201,7 +205,7 @@ fn an_indexed_cmyk_jpeg2000_image_paints_the_process_plates() {
 #[test]
 fn a_codestream_palette_cmyk_jpeg2000_image_paints_the_black_plate() {
     let image = Image {
-        color_space: "/DeviceCMYK",
+        color_space: Some("/DeviceCMYK"),
         extra: "/Filter /JPXDecode",
         width: 120,
         height: 40,
@@ -213,6 +217,46 @@ fn a_codestream_palette_cmyk_jpeg2000_image_paints_the_black_plate() {
     let cyan = plate(&plates, "Cyan").data.iter().filter(|&&v| v > 0).count();
     assert!(text > 0, "the text pixels paint the black plate");
     assert_eq!(cyan, 0, "the palette holds no cyan ink");
+}
+
+/// ISO 32000-1 Table 89 permits a JPEG 2000 image to omit `/ColorSpace`; in that case its
+/// decoded colour space supplies the process-ink intent. (GH#1922)
+#[test]
+fn a_codestream_palette_cmyk_jpeg2000_image_without_color_space_paints_the_black_plate() {
+    let image = Image {
+        color_space: None,
+        extra: "/Filter /JPXDecode",
+        width: 120,
+        height: 40,
+        bpc: 8,
+        data: PALETTE_CMYK_JP2,
+    };
+    let plates = plates(build(&image, "", &[]));
+    let text = plate(&plates, "Black")
+        .data
+        .iter()
+        .filter(|&&value| value > 200)
+        .count();
+    let cyan = plate(&plates, "Cyan").data.iter().filter(|&&value| value > 0).count();
+    assert!(text > 0, "the codestream's text pixels paint the black plate");
+    assert_eq!(cyan, 0, "the codestream palette holds no cyan ink");
+}
+
+#[test]
+fn a_non_jpeg2000_image_without_color_space_still_paints_no_separation_plate() {
+    let image = Image {
+        color_space: None,
+        extra: "",
+        width: 1,
+        height: 1,
+        bpc: 8,
+        data: &[0],
+    };
+    let plates = plates(build(&image, "", &[]));
+    assert!(
+        plates.iter().all(|plate| plate.data.iter().all(|&value| value == 0)),
+        "the decoded fallback is specific to JPEG 2000 images"
+    );
 }
 
 #[test]
