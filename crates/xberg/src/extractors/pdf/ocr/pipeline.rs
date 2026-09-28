@@ -561,13 +561,13 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
     // Each invocation below owns exactly one page. Page markers belong to the outer document
     // assembly; leaving them enabled here both stamps every detached page as page 1 and lets a
     // marker make an empty primary stage look good enough to suppress its fallback (#1931). ~keep
-    let pipeline_stage_config = effective_pipeline.as_ref().map(|_| {
+    let pipeline_stage_config = {
         let mut stage_config = config.clone();
         if let Some(pages) = stage_config.pages.as_mut() {
             pages.insert_page_markers = false;
         }
         stage_config
-    });
+    };
 
     // The top-level `backend` registry lookup is only needed by the single-backend
     // route below; the pipeline route resolves each of its own stage backends
@@ -686,10 +686,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     let image_arc = Arc::clone(image);
                     let render_doc_clone = Arc::clone(&render_doc);
                     let pipeline_clone = pipeline.clone();
-                    let config_clone = pipeline_stage_config
-                        .as_ref()
-                        .expect("pipeline stage config exists with effective pipeline")
-                        .clone();
+                    let config_clone = pipeline_stage_config.clone();
                     let idx = *page_idx;
                     // This page's own known `/Rotate` value, already resolved by
                     // `open_pdf_for_page_ocr` above -- the sibling single-backend route
@@ -865,9 +862,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                         Some(std::slice::from_ref(image.as_ref())),
                         #[cfg(feature = "layout-detection")]
                         page_detection.map(std::slice::from_ref),
-                        pipeline_stage_config
-                            .as_ref()
-                            .expect("pipeline stage config exists with effective pipeline"),
+                        &pipeline_stage_config,
                         pipeline,
                         None,
                         page_rotation_degrees,
@@ -975,9 +970,10 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
         }
 
         // Reached only when `effective_pipeline` is `None`, so `backend` was resolved above.
-        let backend = backend
-            .as_ref()
-            .expect("backend is resolved above whenever effective_pipeline is None");
+        let backend = backend.as_ref().ok_or_else(|| crate::XbergError::Ocr {
+            message: "OCR backend was not resolved for the direct page route".to_string(),
+            source: None,
+        })?;
         let orientation_handling = backend.page_orientation_handling();
         let batch_slice = &page_images;
         let default_security_limits = crate::extractors::security::SecurityLimits::default();
@@ -1372,10 +1368,16 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
             .iter()
             .all(|page_idx| failed_page_errors.contains_key(page_idx))
     {
-        let first_failed_page = page_indices[0];
-        return Err(failed_page_errors
-            .remove(&first_failed_page)
-            .expect("every requested page was checked above"));
+        if let Some(error) = page_indices
+            .iter()
+            .find_map(|page_idx| failed_page_errors.remove(page_idx))
+        {
+            return Err(error);
+        }
+        return Err(crate::XbergError::Ocr {
+            message: "OCR failed for every requested page".to_string(),
+            source: None,
+        });
     }
 
     // Pipeline stages already assess their output in `extract_with_ocr_for_page` using the
