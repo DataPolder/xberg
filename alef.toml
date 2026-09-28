@@ -581,6 +581,7 @@ WebUI = "WebUI"
 traineddata = "traineddata"
 
 [workspace.poly.per-file-ignores]
+"packages/python/xberg/__init__.py" = ["F811"]
 # Alef config and its generated derivatives. All three grow with the size of the surface alef
 # manages and with the quality-debt baseline below -- alef.toml is where that baseline is
 # written, so paying it down makes this file shorter, never longer. A line count on declarative
@@ -1559,7 +1560,8 @@ html-to-markdown-rs = { workspace = true, default-features = false }
 
 [crates.python]
 module_name = "_xberg"
-exclude_types = ["PooledString"]
+extra_init_imports = { ".progress" = ["ProgressEvent", "ProgressCallback", "extract", "extract_batch"] }
+exclude_types = ["PooledString", "ProgressListenerHandle"]
 exclude_functions = [
   "calculate_quality_score",
   "count_tokens",
@@ -1582,6 +1584,8 @@ exclude_functions = [
   "embed_sparse_async",
   "embed_multi_vector",
   "embed_multi_vector_async",
+  "extract_with_progress",
+  "extract_batch_with_progress",
 ]
 reexported_types = ["ExtractionResult", "ExtractedDocument", "ExtractionDiff"]
 
@@ -1992,6 +1996,10 @@ wasm-bindgen-test = "0.3"
 # declarations in `include/xberg.h`, because no `mod` statement ever compiled
 # them. Re-add a name here only alongside a module that builds. ~keep
 ffi = []
+python = ["progress"]
+
+[crates.custom_registrations.python]
+functions = ["progress::extract_with_progress", "progress::extract_batch_with_progress"]
 
 [crates.ffi]
 prefix = "xberg"

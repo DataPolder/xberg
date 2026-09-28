@@ -242,7 +242,9 @@ pub use extraction::office_metadata::{CoreProperties, DocxAppProperties};
 
 #[cfg(feature = "url-ingestion")]
 pub use core::extract::map_url;
-pub use core::extract::{extract, extract_batch};
+pub use core::extract::{ProgressListener, ProgressListenerHandle, extract, extract_batch};
+#[cfg(feature = "tokio-runtime")]
+pub use core::extract::{extract_batch_with_progress, extract_with_progress};
 #[cfg(feature = "pdf")]
 pub use core::split::{SplitConfig, SplitSegment, SplitStrategy, split_and_extract};
 

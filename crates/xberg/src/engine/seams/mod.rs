@@ -25,6 +25,12 @@ mod structured_policy;
 mod model_provider;
 
 pub use cache::{CacheBackend, NoopCache};
+#[cfg(any(test, feature = "ocr", feature = "ocr-pipeline"))]
+pub(crate) use progress::emit_ocr_page;
+#[cfg(all(feature = "tokio-runtime", any(feature = "ocr", feature = "ocr-pipeline")))]
+pub(crate) use progress::inherit_progress;
+#[cfg(feature = "tokio-runtime")]
+pub(crate) use progress::scope_progress;
 pub use progress::{NoopProgressSink, ProgressEvent, ProgressSink};
 
 #[cfg(feature = "liter-llm")]

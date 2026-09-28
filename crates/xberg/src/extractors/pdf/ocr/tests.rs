@@ -9839,6 +9839,56 @@ Name: ___
 
     #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
     #[tokio::test]
+    async fn xobject_recovery_reports_each_retry_without_advancing_distinct_page_count() {
+        #[derive(Default)]
+        struct RetryProgressSink {
+            events: std::sync::Mutex<Vec<(usize, usize, usize, String)>>,
+        }
+
+        impl crate::engine::seams::ProgressSink for RetryProgressSink {
+            fn emit(&self, _: crate::engine::seams::ProgressEvent) {}
+
+            fn emit_ocr_page(&self, page: usize, total: usize, completed: usize, backend: &str, _: Option<usize>) {
+                self.events
+                    .lock()
+                    .expect("event mutex poisoned")
+                    .push((page, total, completed, backend.to_string()));
+            }
+        }
+
+        let backend: std::sync::Arc<dyn crate::plugins::OcrBackend> = std::sync::Arc::new(XObjectPayloadBackend {
+            result: xobject_test_payload(XOBJECT_RECOVERED_TEXT),
+            calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        });
+        let sink = std::sync::Arc::new(RetryProgressSink::default());
+        let limits = crate::extractors::security::SecurityLimits::default();
+        let mut budget = crate::extractors::security::SecurityBudget::from_limits(&limits);
+
+        crate::engine::seams::scope_progress(sink.clone(), None, async {
+            recover_image_xobjects(
+                &backend,
+                &fallback_test_images(2),
+                6,
+                9,
+                &crate::core::config::OcrConfig::default(),
+                &mut budget,
+            )
+            .await
+            .expect("both retries must succeed");
+        })
+        .await;
+
+        assert_eq!(
+            *sink.events.lock().expect("event mutex poisoned"),
+            vec![
+                (7, 9, 1, "xobject-payload-test-backend".to_string()),
+                (7, 9, 1, "xobject-payload-test-backend".to_string()),
+            ]
+        );
+    }
+
+    #[cfg(all(feature = "pdf", any(feature = "ocr", feature = "ocr-pipeline")))]
+    #[tokio::test]
     async fn xobject_recovery_preserves_payload_and_renumbers_document_page() {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let backend: std::sync::Arc<dyn crate::plugins::OcrBackend> = std::sync::Arc::new(XObjectPayloadBackend {
@@ -9852,6 +9902,7 @@ Name: ___
             &backend,
             &fallback_test_images(1),
             6,
+            9,
             &crate::core::config::OcrConfig::default(),
             &mut budget,
         )
@@ -9891,6 +9942,7 @@ Name: ___
             &backend,
             &fallback_test_images(1),
             0,
+            1,
             &crate::core::config::OcrConfig::default(),
             &mut budget,
         )
@@ -9917,6 +9969,7 @@ Name: ___
             &backend,
             &fallback_test_images(1),
             0,
+            1,
             &crate::core::config::OcrConfig::default(),
             &mut budget,
         )
@@ -10060,6 +10113,7 @@ Name: ___
             &backend,
             &fallback_test_images(1),
             0,
+            1,
             &crate::core::config::OcrConfig::default(),
             &mut budget,
         )
@@ -10090,6 +10144,7 @@ Name: ___
             &backend,
             &fallback_test_images(2),
             0,
+            1,
             &crate::core::config::OcrConfig::default(),
             &mut budget,
         )

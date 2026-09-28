@@ -672,6 +672,7 @@ pub(super) async fn recover_image_xobjects(
     backend: &std::sync::Arc<dyn crate::plugins::OcrBackend>,
     fallback_images: &[crate::pdf::native::images::PageFallbackImage],
     page_idx: usize,
+    total_pages: usize,
     ocr_config: &crate::core::config::OcrConfig,
     budget: &mut crate::extractors::security::SecurityBudget,
 ) -> crate::Result<XObjectRecoveryOutcome> {
@@ -686,7 +687,10 @@ pub(super) async fn recover_image_xobjects(
     };
     for (image_index, fallback) in fallback_images.iter().enumerate() {
         budget.step()?;
-        collect_xobject_recovery_result(backend, fallback, page_idx, ocr_config, budget, &mut outcome).await?;
+        let recovery =
+            collect_xobject_recovery_result(backend, fallback, page_idx, ocr_config, budget, &mut outcome).await;
+        crate::engine::seams::emit_ocr_page(page_idx + 1, total_pages, backend.name());
+        recovery?;
         outcome.images.push(crate::types::ExtractedImage {
             data: fallback.bytes.clone(),
             format: std::borrow::Cow::Borrowed(fallback.format),
@@ -808,6 +812,7 @@ pub(super) async fn recover_page_text_from_image_xobjects(
     backend: &std::sync::Arc<dyn crate::plugins::OcrBackend>,
     render_doc: &xberg_native_pdf::PdfDocument,
     page_idx: usize,
+    total_pages: usize,
     ocr_config: &crate::core::config::OcrConfig,
     budget: &mut crate::extractors::security::SecurityBudget,
 ) -> crate::Result<Option<XObjectRecoveryOutcome>> {
@@ -817,7 +822,7 @@ pub(super) async fn recover_page_text_from_image_xobjects(
     }
     let whole_page_raster = crate::pdf::scan_detect::full_page_raster_density(render_doc, page_idx).is_some();
     let ocr_config = super::pipeline::ocr_config_with_page_rotation_hint(ocr_config, 0, None, whole_page_raster, false);
-    recover_image_xobjects(backend, &fallback_images, page_idx, &ocr_config, budget)
+    recover_image_xobjects(backend, &fallback_images, page_idx, total_pages, &ocr_config, budget)
         .await
         .map(Some)
 }

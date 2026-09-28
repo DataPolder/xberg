@@ -775,7 +775,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     #[cfg(feature = "layout-detection")]
                     let page_detection: Option<crate::layout::DetectionResult> =
                         detection_for_mixed_route_page(layout_detections_for_mixed, *page_idx).cloned();
-                    join_set.spawn(async move {
+                    join_set.spawn(crate::engine::seams::inherit_progress(async move {
                         if config_clone.cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
                             return (idx, Err(crate::XbergError::Cancelled));
                         }
@@ -798,7 +798,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                         ))
                         .await;
                         (idx, result)
-                    });
+                    }));
                 }
                 while let Some(join_result) = join_set.join_next().await {
                     let (page_idx, result) = join_result.map_err(|e| crate::XbergError::Plugin {
@@ -1141,6 +1141,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                         message: format!("OCR task panicked: {}", e),
                         plugin_name: "ocr".to_string(),
                     })?;
+                crate::engine::seams::emit_ocr_page(page_idx + 1, page_rotations.len(), backend.name());
                 let mut extraction_result = match result {
                     Ok(extraction_result) => extraction_result,
                     Err(error @ crate::XbergError::Cancelled) => return Err(error),
@@ -1260,10 +1261,11 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                         continue;
                     }
                 };
-                let mut extraction_result = match backend
+                let result = backend
                     .process_image(upright_data.as_slice(), config_for_page.as_ref())
-                    .await
-                {
+                    .await;
+                crate::engine::seams::emit_ocr_page(*page_idx + 1, page_rotations.len(), backend.name());
+                let mut extraction_result = match result {
                     Ok(extraction_result) => extraction_result,
                     Err(error @ crate::XbergError::Cancelled) => return Err(error),
                     Err(error) => {
@@ -1354,6 +1356,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     backend,
                     &render_doc,
                     *page_idx,
+                    page_rotations.len(),
                     &ocr_config_owned,
                     &mut xobject_recovery_budget,
                 )
@@ -2169,6 +2172,12 @@ pub(super) async fn extract_with_ocr_for_page(
     } else {
         lazy_pdf_page_count
     };
+    #[cfg(feature = "pdf")]
+    let progress_total_pages = xobject_document
+        .and_then(|document| document.page_count().ok())
+        .unwrap_or(page_index_offset + total_pages);
+    #[cfg(not(feature = "pdf"))]
+    let progress_total_pages = page_index_offset + total_pages;
 
     // The layout-detection route hands in pre-rendered `images`, so `lazy_pdf_render_state`
     // above is never populated (it's gated on `images.is_none()`) and the page-rotation
@@ -2506,6 +2515,11 @@ pub(super) async fn extract_with_ocr_for_page(
                         message: format!("OCR task panicked: {}", e),
                         plugin_name: "ocr".to_string(),
                     })?;
+                crate::engine::seams::emit_ocr_page(
+                    page_index_offset + page_idx + 1,
+                    progress_total_pages,
+                    backend_name.as_str(),
+                );
                 batch_upright_correction[page_idx - batch_start] = (correction_degrees, upright_width, upright_height);
                 match ocr_result {
                     Ok(document) => batch_ocr_results[page_idx - batch_start] = Some(document),
@@ -2601,6 +2615,11 @@ pub(super) async fn extract_with_ocr_for_page(
                         .process_image(upright_data.as_slice(), config_for_page.as_ref())
                         .await
                 };
+                crate::engine::seams::emit_ocr_page(
+                    page_index_offset + *page_idx + 1,
+                    progress_total_pages,
+                    backend_name.as_str(),
+                );
                 batch_upright_correction[page_idx - batch_start] = (correction_degrees, upright_width, upright_height);
                 match ocr_result {
                     Ok(document) => batch_ocr_results[page_idx - batch_start] = Some(document),
@@ -2768,6 +2787,7 @@ pub(super) async fn extract_with_ocr_for_page(
                         &backend,
                         render_doc,
                         document_page_idx,
+                        progress_total_pages,
                         &ocr_config_owned,
                         &mut xobject_recovery_budget,
                     )
@@ -3952,7 +3972,7 @@ pub(super) async fn collect_pipeline_xobject_pages(
     let mut outcome = PipelineXObjectRecoveryOutcome::new(page_count);
     for page_idx in 0..page_count {
         let Some(mut recovery) =
-            recover_page_text_from_image_xobjects(backend, doc, page_idx, ocr_config, budget).await?
+            recover_page_text_from_image_xobjects(backend, doc, page_idx, page_count, ocr_config, budget).await?
         else {
             continue;
         };
