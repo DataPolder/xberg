@@ -31,6 +31,7 @@ and provides context for debugging.
 - `LockPoisoned` - Mutex/RwLock poisoning (should not happen in normal operation)
 - `UnsupportedFormat` - Unsupported MIME type or file format
 - `Other` - Catch-all for uncommon errors
+
 #### FFI error codes — a stable public contract
 
 Each variant carries `#[cfg_attr(alef, alef(error_code = N))]`. Without it alef has no stable
