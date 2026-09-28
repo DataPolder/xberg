@@ -311,6 +311,12 @@ pub(crate) mod test_support {
     // after the document-extractor tests were rewritten to use local
     // `DocumentExtractorRegistry` instances instead of mutating the global registry (see
     // `core::extractor::file::issue_217_fallback_tests` and `plugins::extractor::tests`). ~keep
+    registry_guard!(
+        PostProcessorRegistryGuard,
+        POST_PROCESSOR_REGISTRY_LOCK,
+        crate::plugins::clear_post_processors,
+        "post-processor"
+    );
 }
 
 #[cfg(test)]

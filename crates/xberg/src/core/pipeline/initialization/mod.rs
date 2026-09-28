@@ -523,6 +523,16 @@ fn cached_processor_stages(cache: &ProcessorCache) -> ProcessorStages {
     )
 }
 
+/// Get processors from the cache, organized by stage.
+#[cfg(test)]
+pub(super) fn get_processors_from_cache() -> Result<ProcessorStages> {
+    let cache_lock = PROCESSOR_CACHE.read();
+    let cache = cache_lock
+        .as_ref()
+        .ok_or_else(|| crate::XbergError::Other("Processor cache not initialized".to_string()))?;
+    Ok(cached_processor_stages(cache))
+}
+
 #[cfg(all(test, feature = "tokio-runtime"))]
 mod registry_state;
 #[cfg(all(test, feature = "tokio-runtime"))]
