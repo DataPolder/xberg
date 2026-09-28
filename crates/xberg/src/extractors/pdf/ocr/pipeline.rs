@@ -283,6 +283,13 @@ type MixedOcrResult = crate::Result<(
     Vec<crate::types::ProcessingWarning>,
 )>;
 
+#[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AllPagesFailedPolicy {
+    PreserveNative,
+    ReturnError,
+}
+
 #[cfg(all(
     any(feature = "ocr", feature = "ocr-pipeline"),
     feature = "pdf",
@@ -318,7 +325,7 @@ pub(crate) async fn extract_mixed_ocr_native(
     ocr_page_numbers: &[u32],
     content: &[u8],
     config: &ExtractionConfig,
-    path: Option<&std::path::Path>,
+    _path: Option<&std::path::Path>,
 ) -> MixedOcrResult {
     extract_mixed_ocr_native_with_layout_inputs(
         native_text,
@@ -326,7 +333,11 @@ pub(crate) async fn extract_mixed_ocr_native(
         ocr_page_numbers,
         content,
         config,
-        path,
+        if config.force_ocr_pages.is_some() {
+            AllPagesFailedPolicy::ReturnError
+        } else {
+            AllPagesFailedPolicy::PreserveNative
+        },
         #[cfg(feature = "layout-detection")]
         MixedLayoutInputs::Resolve,
     )
@@ -340,7 +351,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
     ocr_page_numbers: &[u32],
     content: &[u8],
     config: &ExtractionConfig,
-    _path: Option<&std::path::Path>,
+    all_pages_failed_policy: AllPagesFailedPolicy,
     #[cfg(feature = "layout-detection")] layout_inputs: MixedLayoutInputs,
 ) -> MixedOcrResult {
     let ocr_set: std::collections::HashSet<u32> = ocr_page_numbers
@@ -1362,7 +1373,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
         }
     }
 
-    if config.force_ocr_pages.is_some()
+    if all_pages_failed_policy == AllPagesFailedPolicy::ReturnError
         && !page_indices.is_empty()
         && page_indices
             .iter()
@@ -1583,7 +1594,7 @@ fn full_document_page_seed(page_count: usize, config: &ExtractionConfig) -> (Str
 pub(crate) async fn extract_full_document_ocr_pipeline_per_page(
     content: &[u8],
     config: &ExtractionConfig,
-    path: Option<&std::path::Path>,
+    _path: Option<&std::path::Path>,
     #[cfg(feature = "layout-detection")] prepared_layout_inputs: Option<(
         Vec<image::DynamicImage>,
         Vec<crate::layout::DetectionResult>,
@@ -1613,7 +1624,7 @@ pub(crate) async fn extract_full_document_ocr_pipeline_per_page(
             &page_numbers,
             content,
             config,
-            path,
+            AllPagesFailedPolicy::ReturnError,
             #[cfg(feature = "layout-detection")]
             MixedLayoutInputs::Prepared(prepared_layout_inputs),
         ))

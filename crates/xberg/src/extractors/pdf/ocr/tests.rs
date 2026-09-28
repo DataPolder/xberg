@@ -4750,6 +4750,89 @@ mod tests {
         assert!(fallback_widths.lock().unwrap().is_empty());
     }
 
+    #[cfg(all(paddle_ocr, feature = "pdf", feature = "ocr"))]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn full_document_per_page_pipeline_errors_when_every_stage_fails() {
+        use crate::core::config::OcrConfig;
+        use crate::plugins::{OcrBackend, OcrBackendType, Plugin};
+        use std::sync::Arc;
+
+        struct FailingBackend(&'static str);
+
+        #[async_trait::async_trait]
+        impl OcrBackend for FailingBackend {
+            fn backend_type(&self) -> OcrBackendType {
+                OcrBackendType::Custom
+            }
+            fn supports_language(&self, _: &str) -> bool {
+                true
+            }
+            async fn process_image(&self, _: &[u8], _: &OcrConfig) -> crate::Result<crate::types::ExtractedDocument> {
+                Err(crate::XbergError::Plugin {
+                    message: format!("{} full-document failure", self.0),
+                    plugin_name: self.0.to_string(),
+                })
+            }
+        }
+
+        impl Plugin for FailingBackend {
+            fn name(&self) -> &str {
+                self.0
+            }
+            fn version(&self) -> String {
+                "1.0.0".to_string()
+            }
+            fn initialize(&self) -> crate::Result<()> {
+                Ok(())
+            }
+            fn shutdown(&self) -> crate::Result<()> {
+                Ok(())
+            }
+        }
+
+        struct RestoreBuiltins;
+
+        impl Drop for RestoreBuiltins {
+            fn drop(&mut self) {
+                let _ = crate::plugins::clear_ocr_backends();
+                crate::plugins::ensure_ocr_backends_initialized();
+            }
+        }
+
+        crate::plugins::ensure_ocr_backends_initialized();
+        crate::plugins::clear_ocr_backends().unwrap();
+        let _restore_builtins = RestoreBuiltins;
+        crate::plugins::register_ocr_backend(Arc::new(FailingBackend("tesseract"))).unwrap();
+        crate::plugins::register_ocr_backend(Arc::new(FailingBackend("paddleocr"))).unwrap();
+
+        let pdf = build_minimal_two_page_pdf_with_sizes((612.0, 792.0), (306.0, 792.0));
+        let config = ExtractionConfig {
+            force_ocr: true,
+            ocr: Some(OcrConfig::default()),
+            ..Default::default()
+        };
+
+        let result = super::super::super::run_ocr_with_layout(
+            &pdf,
+            &config,
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+            #[cfg(feature = "layout-detection")]
+            None,
+        )
+        .await;
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("full-document OCR must fail when every page exhausts every pipeline stage"),
+        };
+
+        assert!(error.to_string().contains("full-document failure"));
+    }
+
     /// Regression test (review follow-up to #1341): the nested `run_ocr_pipeline`
     /// call for a single page assembles its aggregate text as if that lone image
     /// were page 1 of the document, so a configured page marker is stamped "PAGE 1"
