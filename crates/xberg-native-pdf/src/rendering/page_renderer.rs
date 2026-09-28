@@ -3897,20 +3897,30 @@ impl PageRenderer {
 
         // The extractor keeps the opacity channel only when the image has no /SMask, so the
         // two soft masks never both apply. ~keep
-        if let Some(opacity) = pdf_image.soft_mask_in_data() {
+        let mut color_is_premultiplied = false;
+        if let Some(soft_mask) = pdf_image.soft_mask_in_data() {
+            let opacity = soft_mask.samples();
             if opacity.len() == rgba_image.width() as usize * rgba_image.height() as usize {
                 for (pixel, &alpha) in rgba_image.pixels_mut().zip(opacity) {
+                    if soft_mask.is_premultiplied() {
+                        let prior_alpha = u32::from(pixel[3]);
+                        for component in &mut pixel.0[..3] {
+                            *component = ((u32::from(*component) * prior_alpha) / 255) as u8;
+                        }
+                    }
                     pixel[3] = ((u32::from(pixel[3]) * u32::from(alpha)) / 255) as u8;
                 }
+                color_is_premultiplied = soft_mask.is_premultiplied();
             } else {
                 tracing::warn!("Ignoring /SMaskInData: the opacity channel does not match the image size");
             }
         }
 
-        // A tiny_skia pixmap holds premultiplied RGBA, and the decoded image and every mask
-        // applied above are straight alpha. Unconverted, a transparent pixel keeps its colour and
-        // adds it to the page under it. ~keep
-        premultiply_rgba(&mut rgba_image);
+        // A tiny_skia pixmap holds premultiplied RGBA. `/SMaskInData 2` already supplies colour
+        // premultiplied by its opacity; every other decoded image needs the conversion here. ~keep
+        if !color_is_premultiplied {
+            premultiply_rgba(&mut rgba_image);
+        }
 
         let src_w = rgba_image.width();
         let src_h = rgba_image.height();

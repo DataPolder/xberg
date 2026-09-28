@@ -7,11 +7,13 @@ use xberg_native_pdf::rendering::{RenderOptions, render_page};
 /// 16x16, lossless. The left half is opaque `(200, 100, 50)` and the right half is
 /// `(10, 220, 90)` at opacity 128.
 const RGBA_JP2: &[u8] = include_bytes!("fixtures/jpx/gh1850_rgba.jp2");
+/// The right half stores `(5, 110, 45, 128)`, the premultiplied form of `(10, 220, 90, 128)`.
+const PREMULTIPLIED_RGBA_JP2: &[u8] = include_bytes!("fixtures/jpx/gh1902_rgba_premultiplied.jp2");
 const SIZE: u32 = 16;
 
 /// A one-page PDF painted red, with the JPEG 2000 image drawn over all of it. `smask` adds a fully
 /// opaque 8-bit `/SMask` image.
-fn pdf(image_extra: &str, smask: bool) -> Vec<u8> {
+fn pdf_with_codestream(codestream: &[u8], image_extra: &str, smask: bool) -> Vec<u8> {
     let content = format!("1 0 0 rg\n0 0 {SIZE} {SIZE} re f\nq\n{SIZE} 0 0 {SIZE} 0 0 cm\n/Im1 Do\nQ\n");
     let smask_entry = if smask { " /SMask 6 0 R" } else { "" };
     let mut buf: Vec<u8> = b"%PDF-1.5\n".to_vec();
@@ -42,11 +44,11 @@ fn pdf(image_extra: &str, smask: bool) -> Vec<u8> {
             "5 0 obj\n<< /Type /XObject /Subtype /Image /Width {SIZE} /Height {SIZE} \
              /BitsPerComponent 8 /ColorSpace /DeviceRGB /Filter /JPXDecode{smask_entry} {image_extra} \
              /Length {} >>\nstream\n",
-            RGBA_JP2.len()
+            codestream.len()
         )
         .as_bytes(),
     );
-    buf.extend_from_slice(RGBA_JP2);
+    buf.extend_from_slice(codestream);
     buf.extend_from_slice(b"\nendstream\nendobj\n");
     let opaque = vec![255u8; (SIZE * SIZE) as usize];
     offsets.push(buf.len());
@@ -75,6 +77,10 @@ fn pdf(image_extra: &str, smask: bool) -> Vec<u8> {
     buf
 }
 
+fn pdf(image_extra: &str, smask: bool) -> Vec<u8> {
+    pdf_with_codestream(RGBA_JP2, image_extra, smask)
+}
+
 /// The rendered RGB of the pixel at the centre of the left half and of the right half.
 fn left_and_right(pdf: Vec<u8>) -> ([u8; 3], [u8; 3]) {
     let doc = PdfDocument::from_bytes(pdf).expect("fixture parses");
@@ -96,18 +102,31 @@ fn is_half_blended_over_red(rgb: [u8; 3]) -> bool {
 
 #[test]
 fn smask_in_data_makes_the_opacity_channel_the_soft_mask() {
-    for value in [1, 2] {
-        let (left, right) = left_and_right(pdf(&format!("/SMaskInData {value}"), false));
-        assert_eq!(
-            left,
-            [200, 100, 50],
-            "/SMaskInData {value}: the opaque half paints its colour"
-        );
-        assert!(
-            is_half_blended_over_red(right),
-            "/SMaskInData {value}: the half at opacity 128 blends with the red page, got {right:?}"
-        );
-    }
+    let (left, right) = left_and_right(pdf("/SMaskInData 1", false));
+    assert_eq!(left, [200, 100, 50], "the opaque half paints its colour");
+    assert!(
+        is_half_blended_over_red(right),
+        "the half at opacity 128 blends with the red page, got {right:?}"
+    );
+}
+
+#[test]
+fn smask_in_data_two_does_not_premultiply_already_premultiplied_colour_twice() {
+    let (_, right) = left_and_right(pdf_with_codestream(PREMULTIPLIED_RGBA_JP2, "/SMaskInData 2", false));
+    let expected = [132i32, 110, 45];
+    assert!(
+        right
+            .iter()
+            .zip(expected)
+            .all(|(&got, want)| (i32::from(got) - want).abs() <= 3),
+        "the stored premultiplied colour must be composited once, got {right:?}"
+    );
+
+    let (_, straight_right) = left_and_right(pdf_with_codestream(PREMULTIPLIED_RGBA_JP2, "/SMaskInData 1", false));
+    assert!(
+        straight_right[1] < right[1] - 40,
+        "control failed: value 1 must treat the same stored colour as straight alpha; got {straight_right:?}"
+    );
 }
 
 #[test]

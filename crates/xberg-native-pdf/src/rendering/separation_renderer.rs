@@ -2647,7 +2647,7 @@ fn resolve_image_color_space_with_decoded_fallback(
         | crate::extractors::images::ColorSpace::ICCBased(3) => ResolvedSpace::Rgb,
         crate::extractors::images::ColorSpace::DeviceGray
         | crate::extractors::images::ColorSpace::CalGray
-        | crate::extractors::images::ColorSpace::ICCBased(1) => ResolvedSpace::Gray,
+        | crate::extractors::images::ColorSpace::ICCBased(1) => ResolvedSpace::Separation("Black".to_string()),
         _ => ResolvedSpace::Unknown,
     };
     Ok((resolved, Some(image)))
@@ -2874,6 +2874,7 @@ fn paint_image_to_plates(
                 // holds, so it does not apply here -- treat it as already
                 // folded in to skip the base-channel /Decode read below. ~keep
                 true,
+                false,
                 &resolved_space,
                 gs_stack,
                 base_transform,
@@ -2946,7 +2947,7 @@ fn paint_image_to_plates(
     // samples rescaled at all" fact, true for every sub-byte and 16-bit
     // image, and reading it here drops the /Decode those images are owed. ~keep
     let extractor_decode_applied = pdf_image.decode_folded_in();
-    let (samples, stride, decode_pre_applied) = match (resolved_space.clone(), extractor_cs, pdf_image.data()) {
+    let decoded_route = match (resolved_space.clone(), extractor_cs, pdf_image.data()) {
         // Raw CMYK pixel buffer (Flate / CCITT / etc. on a DeviceCMYK image). ~keep
         (
             ResolvedSpace::Cmyk | ResolvedSpace::IccCmyk,
@@ -2955,7 +2956,7 @@ fn paint_image_to_plates(
                 pixels,
                 format: PixelFormat::CMYK,
             },
-        ) => (pixels.clone(), 4usize, extractor_decode_applied),
+        ) => (pixels.clone(), 4usize, extractor_decode_applied, false),
         // JPEG-encoded DeviceCMYK image — decode to raw CMYK preserving APP14 inversion.
         // ~keep
         (
@@ -2966,12 +2967,21 @@ fn paint_image_to_plates(
             crate::extractors::images::decode_cmyk_jpeg_to_raw_cmyk(bytes)?,
             4,
             false,
+            false,
         ),
         (ResolvedSpace::Separation(_), PdfCs::Separation, ImageData::Raw { pixels, .. }) => {
-            (pixels.clone(), 1, extractor_decode_applied)
+            (pixels.clone(), 1, extractor_decode_applied, false)
         }
+        (
+            ResolvedSpace::Separation(ref ink),
+            PdfCs::DeviceGray | PdfCs::CalGray | PdfCs::ICCBased(1),
+            ImageData::Raw {
+                pixels,
+                format: PixelFormat::Grayscale,
+            },
+        ) if ink == "Black" && !dict.contains_key("ColorSpace") => (pixels.clone(), 1, extractor_decode_applied, true),
         (ResolvedSpace::DeviceN(ref names), PdfCs::DeviceN, ImageData::Raw { pixels, .. }) => {
-            (pixels.clone(), names.len().max(1), extractor_decode_applied)
+            (pixels.clone(), names.len().max(1), extractor_decode_applied, false)
         }
         // Shape mismatch (e.g. extractor reports a different colour space than
         // the dict declared after our resolver ran). Drop silently — the
@@ -2988,6 +2998,7 @@ fn paint_image_to_plates(
             return Ok(());
         }
     };
+    let (samples, stride, decode_pre_applied, invert_gray_to_ink) = decoded_route;
     let _ = color_state;
 
     route_image_samples_to_plates(
@@ -2998,6 +3009,7 @@ fn paint_image_to_plates(
         w,
         h,
         decode_pre_applied,
+        invert_gray_to_ink,
         &resolved_space,
         gs_stack,
         base_transform,
@@ -3024,6 +3036,7 @@ fn route_image_samples_to_plates(
     w: usize,
     h: usize,
     decode_pre_applied: bool,
+    invert_gray_to_ink: bool,
     resolved_space: &ResolvedSpace,
     gs_stack: &GraphicsStateStack,
     base_transform: Transform,
@@ -3058,6 +3071,11 @@ fn route_image_samples_to_plates(
             && let Some(&(dmin, dmax)) = decode_pairs.get(channel_idx)
         {
             apply_decode_to_plane(&mut plane, dmin, dmax);
+        }
+        if invert_gray_to_ink {
+            for sample in &mut plane {
+                *sample = 255 - *sample;
+            }
         }
         blit_image_plane_to_plate(&mut pixmaps[i], &plane, w as u32, h as u32, transform, clip);
     }

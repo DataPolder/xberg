@@ -353,6 +353,17 @@ pub fn decode_jpx_indices(bytes: &[u8], highest_index: u8) -> Result<JpxImage> {
         )));
     }
     let (indices, clamped) = clamp_indices(indices.samples(), highest_index);
+    let opacity = codestream_opacity_component(bytes)
+        .and_then(|component| decoded.components().get(component))
+        .and_then(|component| {
+            let samples = component.samples();
+            (samples.len() == image.width() as usize * image.height() as usize).then(|| {
+                samples
+                    .iter()
+                    .map(|&value| value.round().clamp(0.0, 255.0) as u8)
+                    .collect()
+            })
+        });
     if clamped > 0 {
         tracing::warn!(
             clamped,
@@ -366,8 +377,29 @@ pub fn decode_jpx_indices(bytes: &[u8], highest_index: u8) -> Result<JpxImage> {
         num_components: 1,
         width: image.width(),
         height: image.height(),
-        opacity: None,
+        opacity,
     })
+}
+
+/// The codestream component mapped to a JP2 channel-definition entry of type opacity.
+///
+/// A palette maps output channels back to codestream components through `cmap`, so the opacity
+/// channel number in `cdef` is not necessarily its component number. (GH#1885) ~keep
+fn codestream_opacity_component(bytes: &[u8]) -> Option<usize> {
+    let header = find_box(bytes, b"jp2h")?;
+    let definitions = find_box(header, b"cdef")?;
+    let count = usize::from(u16::from_be_bytes(definitions.get(0..2)?.try_into().ok()?));
+    let entries = definitions.get(2..2 + count.checked_mul(6)?)?;
+    let channel = entries.chunks_exact(6).find_map(|entry| {
+        let channel = u16::from_be_bytes(entry[0..2].try_into().ok()?);
+        let kind = u16::from_be_bytes(entry[2..4].try_into().ok()?);
+        matches!(kind, 1 | 2).then_some(usize::from(channel))
+    })?;
+    let Some(mapping) = find_box(header, b"cmap") else {
+        return Some(channel);
+    };
+    let entry = mapping.get(channel.checked_mul(4)?..channel.checked_add(1)?.checked_mul(4)?)?;
+    Some(usize::from(u16::from_be_bytes(entry[0..2].try_into().ok()?)))
 }
 
 /// Round each index sample and clamp it to `0..=highest_index`, and count the samples the clamp
@@ -644,9 +676,9 @@ mod tests {
     /// Without a palette box the index plane is the codestream's only component, unchanged.
     #[test]
     fn a_plain_codestream_decodes_to_its_own_samples_as_indices() {
-        let indices = decode_jpx_indices(INDICES_GREY_JP2, u8::MAX)
-            .expect("a plain index codestream must decode")
-            .samples;
+        let decoded = decode_jpx_indices(INDICES_GREY_JP2, u8::MAX).expect("a plain index codestream must decode");
+        assert_eq!(decoded.opacity, None, "an unmarked component must not become opacity");
+        let indices = decoded.samples;
         let grey = decode_jpx(INDICES_GREY_JP2, None).expect("the same codestream as greyscale");
         assert_eq!(indices, grey.samples);
         assert!(
@@ -673,15 +705,19 @@ mod tests {
     /// plane after it is dropped, not counted as a second index component.
     #[test]
     fn a_palette_codestream_with_an_opacity_channel_decodes_its_index_plane() {
-        let indices = decode_jpx_indices(PALETTE_ALPHA_JP2, u8::MAX)
-            .expect("the index plane must decode")
-            .samples;
+        let decoded = decode_jpx_indices(PALETTE_ALPHA_JP2, u8::MAX).expect("the index plane must decode");
+        let indices = decoded.samples;
         let plain = decode_jpx_indices(INDICES_GREY_JP2, u8::MAX)
             .expect("the same picture without alpha")
             .samples;
         assert_eq!(
             indices, plain,
             "the indices must be the plane's, not the opacity plane's"
+        );
+        assert_eq!(
+            decoded.opacity.as_deref(),
+            Some(vec![255; 120 * 40].as_slice()),
+            "the marked opacity plane must be retained beside the indices"
         );
     }
 

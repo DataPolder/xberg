@@ -687,7 +687,7 @@ fn cmyk_jpeg_app14_inversion_round_trips_to_correct_plate() {
 /// because the writer shares the convention.
 const CMYK_QUADRANTS_J2K: &[u8] = include_bytes!("fixtures/jpx/gh1855_cmyk_quadrants.j2k");
 
-fn build_pdf_with_jpx_cmyk_image(codestream: &[u8], width: u32, height: u32) -> Vec<u8> {
+fn build_pdf_with_jpx_image(codestream: &[u8], width: u32, height: u32, color_space: Option<&str>) -> Vec<u8> {
     let content = b"q\n50 0 0 50 25 25 cm\n/Im1 Do\nQ\n";
     let mut buf = Vec::new();
     let mut offsets = Vec::new();
@@ -708,9 +708,10 @@ fn build_pdf_with_jpx_cmyk_image(codestream: &[u8], width: u32, height: u32) -> 
     buf.extend_from_slice(content);
     buf.extend_from_slice(b"\nendstream\nendobj\n");
     offsets.push(buf.len());
+    let color_space = color_space.map_or(String::new(), |space| format!(" /ColorSpace {space}"));
     let img_hdr = format!(
         "5 0 obj\n<< /Type /XObject /Subtype /Image /Width {w} /Height {h} \
-         /ColorSpace /DeviceCMYK /BitsPerComponent 8 /Filter /JPXDecode /Length {len} >>\nstream\n",
+         {color_space} /BitsPerComponent 8 /Filter /JPXDecode /Length {len} >>\nstream\n",
         w = width,
         h = height,
         len = codestream.len()
@@ -756,10 +757,11 @@ fn wrap_as_cmyk_jp2(codestream: &[u8]) -> Vec<u8> {
 
 #[test]
 fn jpx_cmyk_image_routes_channels_to_process_plates() {
-    let doc = PdfDocument::from_bytes(build_pdf_with_jpx_cmyk_image(
+    let doc = PdfDocument::from_bytes(build_pdf_with_jpx_image(
         &wrap_as_cmyk_jp2(CMYK_QUADRANTS_J2K),
         16,
         16,
+        Some("/DeviceCMYK"),
     ))
     .expect("parse");
     let plates = render_separations(&doc, 0, 72).expect("render");
@@ -791,6 +793,24 @@ fn jpx_cmyk_image_routes_channels_to_process_plates() {
         0,
         "plates stay untouched outside the image bbox"
     );
+}
+
+#[test]
+fn a_gray_jpx_without_a_colorspace_routes_to_the_black_plate() {
+    const GRAY_JP2: &[u8] = include_bytes!("fixtures/jpx/gh1885_indices_grey.jp2");
+    let doc = PdfDocument::from_bytes(build_pdf_with_jpx_image(GRAY_JP2, 120, 40, None)).expect("parse");
+    let plates = render_separations(&doc, 0, 72).expect("render");
+    let black = plate(&plates, "Black");
+    assert!(
+        black.data.chunks_exact(4).any(|pixel| pixel[0] > 200),
+        "the grayscale image's dark glyphs must reach the Black plate"
+    );
+    for ink in ["Cyan", "Magenta", "Yellow"] {
+        assert!(
+            plate(&plates, ink).data.chunks_exact(4).all(|pixel| pixel[0] < 50),
+            "the grayscale image must not reach the {ink} plate"
+        );
+    }
 }
 
 /// GH#1898: the separation classifier had no arm for `/Indexed`, so an

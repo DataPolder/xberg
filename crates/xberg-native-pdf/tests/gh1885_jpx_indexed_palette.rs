@@ -18,6 +18,8 @@ const INDICES_GREY_JP2: &[u8] = include_bytes!("fixtures/jpx/gh1885_indices_grey
 /// The same picture as an index component plus an opaque alpha component, with the CMYK `pclr`
 /// box routing the index through the palette and a `cdef` box marking the second as opacity.
 const PALETTE_ALPHA_JP2: &[u8] = include_bytes!("fixtures/jpx/gh1885_palette_alpha.jp2");
+/// The same palette image with opacity 255 on the left half and 64 on the right half.
+const PALETTE_PARTIAL_ALPHA_JP2: &[u8] = include_bytes!("fixtures/jpx/gh1885_palette_partial_alpha.jp2");
 /// The same picture coded lossily for a 16-entry palette, ink at index 0 and paper at 15. The lossy
 /// coding rings some samples to 16, one past the last entry.
 const HIVAL15_LOSSY_JP2: &[u8] = include_bytes!("fixtures/jpx/gh1885_hival15_lossy.jp2");
@@ -230,6 +232,23 @@ fn a_palette_jpeg2000_image_with_an_opacity_channel_renders_and_extracts() {
     assert_eq!(
         ink, control_ink,
         "the page must paint the same ink as the image without alpha"
+    );
+}
+
+#[test]
+fn a_palette_jpeg2000_image_keeps_its_nonopaque_channel_for_smask_in_data() {
+    let opaque = rendered_ink(pdf_with_jpx_image(PALETTE_ALPHA_JP2, &cmyk_grey_palette()));
+    let translucent = rendered_ink(pdf_with_jpx_image_and_profile(
+        PALETTE_PARTIAL_ALPHA_JP2,
+        &cmyk_grey_palette(),
+        8,
+        None,
+        "/SMaskInData 1",
+    ));
+    assert!(opaque > 100, "control failed: only {opaque} opaque dark pixels");
+    assert!(
+        translucent < opaque * 3 / 4 && translucent > opaque / 3,
+        "the translucent half must no longer count as dark: opaque={opaque}, translucent={translucent}"
     );
 }
 
