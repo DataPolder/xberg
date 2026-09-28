@@ -6,12 +6,15 @@
 //! same check before any page, so these cases extract a plain-text document: it needs no OCR,
 //! and only the up-front check can reject it. ~keep
 //!
-//! TODO(#1893): the `cfg` below is still unsatisfiable -- no CI leg combines `candle-trocr`,
-//! `candle-paddleocr-vl` and `paddle_ocr` (each candle feature is its own `ci-gpu.yaml` matrix
-//! entry, and `paddle_ocr` needs `paddle-ocr-ort`/`paddle-ocr-tract`), so these tests still never
-//! compile. Fixing that means gating each test on the one feature it needs, which has to be
-//! validated on a GPU leg; the two tests that needed no candle or paddle feature at all have been
-//! moved to `issue_1829_per_page_failure_keeps_native_text.rs`.
+//! The `cfg` below looks narrow but `--features full` satisfies all of it: `full` pulls in
+//! `formats` (so `pdf`), `ocr`, `candle-vlm-ocr` (so both `candle-trocr` and
+//! `candle-paddleocr-vl`) and `paddle-ocr` (so `paddle-ocr-ort`, which makes `build.rs` emit
+//! `cfg(paddle_ocr)`). That is the feature set `scripts/ci/rust/run-unit-tests.sh` builds, so
+//! these tests run on the x86-64 Linux and macOS legs. Only the aarch64-Linux leg substitutes
+//! `full-no-heic`, which excludes candle deliberately, and skips them. Do not "fix" this cfg
+//! without first checking a CI log for these test names -- GH#1893 was filed on the assumption
+//! that no build compiled them. The two tests that need no candle or paddle feature at all live
+//! in `issue_1829_per_page_failure_keeps_native_text.rs`. ~keep
 
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(all(
