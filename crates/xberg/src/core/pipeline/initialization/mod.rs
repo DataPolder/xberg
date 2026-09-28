@@ -523,16 +523,6 @@ fn cached_processor_stages(cache: &ProcessorCache) -> ProcessorStages {
     )
 }
 
-/// Get processors from the cache, organized by stage.
-#[cfg(test)]
-pub(super) fn get_processors_from_cache() -> Result<ProcessorStages> {
-    let cache_lock = PROCESSOR_CACHE.read();
-    let cache = cache_lock
-        .as_ref()
-        .ok_or_else(|| crate::XbergError::Other("Processor cache not initialized".to_string()))?;
-    Ok(cached_processor_stages(cache))
-}
-
 #[cfg(all(test, feature = "tokio-runtime"))]
 mod registry_state;
 #[cfg(all(test, feature = "tokio-runtime"))]
@@ -811,13 +801,12 @@ mod tests {
     #[serial_test::serial]
     #[test]
     fn processor_cache_rebuilds_when_registry_changes_after_first_use() {
-        use crate::plugins::registry::test_support::PostProcessorRegistryGuard;
         use crate::plugins::{Plugin, PostProcessor, ProcessingStage};
         use crate::types::ExtractedDocument;
         use async_trait::async_trait;
         use std::sync::Arc;
 
-        let _guard = PostProcessorRegistryGuard::acquire();
+        let state = ProcessorRegistryState::new_isolated();
 
         #[derive(Debug)]
         struct LateAddedProcessor;
@@ -851,31 +840,27 @@ mod tests {
             }
         }
 
-        *PROCESSOR_CACHE.write() = None;
-
         let has_late_added =
             |processors: &[std::sync::Arc<dyn PostProcessor>]| processors.iter().any(|p| p.name() == "late-added-215");
 
         // Populate the cache, exactly as the first pipeline run of a process would.
-        initialize_processor_cache().unwrap();
-        let (_, middle, _) = get_processors_from_cache().unwrap();
+        state.ensure_cache_current().unwrap();
+        let middle = state.try_get_snapshot().unwrap().middle;
         assert!(
             !has_late_added(&middle),
             "the processor under test must not be in the cache before it is registered"
         );
 
         // Register a processor *after* the cache already holds a snapshot.
-        crate::plugins::register_post_processor(Arc::new(LateAddedProcessor)).unwrap();
+        state.register(Arc::new(LateAddedProcessor)).unwrap();
 
         // Without the #215 fix, `initialize_processor_cache` is a no-op once the
         // cache is `Some(_)`, so the newly registered processor would never appear.
-        initialize_processor_cache().unwrap();
-        let (_, middle, _) = get_processors_from_cache().unwrap();
+        state.ensure_cache_current().unwrap();
+        let middle = state.try_get_snapshot().unwrap().middle;
         assert!(
             has_late_added(&middle),
             "the cache must pick up the post-registration processor"
         );
-
-        *PROCESSOR_CACHE.write() = None;
     }
 }
