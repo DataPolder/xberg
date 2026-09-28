@@ -11,11 +11,17 @@ const HEIGHT: u32 = 20;
 /// A one-page PDF painted red, with a white 8-bit RGB image over all of it whose `/SMask` is
 /// `left_opacity` on the left half and fully opaque on the right half.
 fn pdf(left_opacity: u8) -> Vec<u8> {
-    let image = vec![255u8; (WIDTH * HEIGHT * 3) as usize];
-    let row: Vec<u8> = (0..WIDTH)
-        .map(|x| if x < WIDTH / 2 { left_opacity } else { 255 })
+    pdf_with_image(WIDTH, HEIGHT, WIDTH / 2, left_opacity)
+}
+
+/// A one-page PDF painted red, with a white `image_width` x `image_height` image drawn over all of
+/// it. Its `/SMask` is `left_opacity` left of pixel column `edge` and fully opaque from it on.
+fn pdf_with_image(image_width: u32, image_height: u32, edge: u32, left_opacity: u8) -> Vec<u8> {
+    let image = vec![255u8; (image_width * image_height * 3) as usize];
+    let row: Vec<u8> = (0..image_width)
+        .map(|x| if x < edge { left_opacity } else { 255 })
         .collect();
-    let mask = row.repeat(HEIGHT as usize);
+    let mask = row.repeat(image_height as usize);
     let content = format!("1 0 0 rg\n0 0 {WIDTH} {HEIGHT} re f\nq\n{WIDTH} 0 0 {HEIGHT} 0 0 cm\n/Im1 Do\nQ\n");
     let mut buf: Vec<u8> = b"%PDF-1.4\n".to_vec();
     let mut offsets = Vec::new();
@@ -46,7 +52,7 @@ fn pdf(left_opacity: u8) -> Vec<u8> {
         offsets.push(buf.len());
         buf.extend_from_slice(
             format!(
-                "{number} 0 obj\n<< /Type /XObject /Subtype /Image /Width {WIDTH} /Height {HEIGHT} \
+                "{number} 0 obj\n<< /Type /XObject /Subtype /Image /Width {image_width} /Height {image_height} \
                  /BitsPerComponent 8 /ColorSpace {color_space}{extra} /Length {} >>\nstream\n",
                 samples.len()
             )
@@ -70,15 +76,23 @@ fn pdf(left_opacity: u8) -> Vec<u8> {
     buf
 }
 
+/// The rendered RGB of the middle row of the page at `dpi`, one entry per pixel column.
+fn middle_row(pdf: &[u8], dpi: u32) -> Vec<[u8; 3]> {
+    let doc = PdfDocument::from_bytes(pdf.to_vec()).expect("fixture parses");
+    let page = render_page(&doc, 0, &RenderOptions::with_dpi(dpi).as_raw()).expect("render page 0");
+    let row = page.height / 2 * page.width;
+    (0..page.width)
+        .map(|x| {
+            let i = ((row + x) * 4) as usize;
+            [page.data[i], page.data[i + 1], page.data[i + 2]]
+        })
+        .collect()
+}
+
 /// The rendered RGB of the pixel at the centre of the left half and of the right half.
 fn left_and_right(pdf: Vec<u8>) -> ([u8; 3], [u8; 3]) {
-    let doc = PdfDocument::from_bytes(pdf).expect("fixture parses");
-    let page = render_page(&doc, 0, &RenderOptions::with_dpi(72).as_raw()).expect("render page 0");
-    let at = |x: u32| {
-        let i = ((HEIGHT / 2 * page.width + x) * 4) as usize;
-        [page.data[i], page.data[i + 1], page.data[i + 2]]
-    };
-    (at(WIDTH / 4), at(WIDTH * 3 / 4))
+    let row = middle_row(&pdf, 72);
+    (row[(WIDTH / 4) as usize], row[(WIDTH * 3 / 4) as usize])
 }
 
 #[test]
@@ -99,5 +113,35 @@ fn a_half_transparent_image_pixel_blends_with_the_page_colour() {
     assert!(
         (126..=130).contains(&left[1]) && left[1] == left[2],
         "half white over red is pink, not white: got {left:?}"
+    );
+}
+
+/// An image drawn smaller than its pixel size is resized before it is drawn. The resized edge
+/// between the hidden and the opaque half must blend with the page the same way as when the image
+/// is drawn at its own size, not paint its full colour over the page. (GH#1905)
+#[test]
+fn a_downscaled_soft_mask_edge_blends_like_a_full_size_draw() {
+    // Twice the page's size in pixels, so 72 dpi draws it at half size and 144 dpi at its own.
+    // The odd edge column puts the edge inside one 72 dpi pixel. ~keep
+    let pdf = pdf_with_image(WIDTH * 2, HEIGHT * 2, WIDTH + 1, 0);
+    let small = middle_row(&pdf, 72);
+    let large = middle_row(&pdf, 144);
+    let edge = (WIDTH / 2) as usize;
+    let expected = (u32::from(large[2 * edge][1]) + u32::from(large[2 * edge + 1][1])) / 2;
+    let got = small[edge];
+    assert_eq!(got[0], 255, "white over red keeps full red, got {got:?}");
+    assert!(
+        u32::from(got[1]).abs_diff(expected) <= 16 && got[1] == got[2],
+        "the half-covered edge pixel is pink like the full-size draw (green near {expected}), got {got:?}"
+    );
+    assert_eq!(
+        small[edge / 2],
+        [255, 0, 0],
+        "control: the hidden half shows the red page"
+    );
+    assert_eq!(
+        small[edge * 3 / 2],
+        [255, 255, 255],
+        "control: the opaque half paints white"
     );
 }

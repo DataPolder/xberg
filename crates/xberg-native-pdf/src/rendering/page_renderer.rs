@@ -8566,7 +8566,11 @@ fn build_logical_color<'a>(
     }
 }
 
-/// Resize an RGBA (straight-alpha) byte buffer using SIMD-accelerated bilinear filtering.
+/// Resize a premultiplied RGBA byte buffer using SIMD-accelerated bilinear filtering.
+///
+/// The resizer's default treats alpha as straight and multiplies every pixel by it before
+/// filtering, then divides it out after; on a premultiplied buffer that leaves a soft edge with
+/// more colour than its opacity allows, so the alpha pass is turned off. (GH#1905)
 ///
 /// Returns `None` on failure (zero dimensions, SIMD dispatch error) so callers
 /// can fall back to tiny_skia's own resampling path.
@@ -8583,7 +8587,9 @@ fn resize_rgba(src: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Op
         .resize(
             &src_img,
             &mut dst_img,
-            &ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Bilinear)),
+            &ResizeOptions::new()
+                .resize_alg(ResizeAlg::Convolution(FilterType::Bilinear))
+                .use_alpha(false),
         )
         .ok()?;
     Some(dst_img.into_vec())
