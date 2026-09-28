@@ -21,8 +21,8 @@ use xberg_native_pdf::rendering::{ImageFormat, RenderOptions, render_page};
 /// with a colour-key `/Mask [0 0]` keying out index 0.
 fn build_pdf_with_indexed_color_key_mask() -> Vec<u8> {
     let content = b"q\n50 0 0 50 25 25 cm\n/Im1 Do\nQ\n";
-    let indices: [u8; 4] = [0, 0, 0, 0]; // every pixel -> palette index 0
-    let palette: [u8; 3] = [255, 0, 0]; // index 0 = pure red (DeviceRGB base)
+    let indices: [u8; 4] = [0, 0, 0, 0];
+    let palette: [u8; 3] = [255, 0, 0];
 
     let mut buf = Vec::new();
     let mut offsets = Vec::new();
