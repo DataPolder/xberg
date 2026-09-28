@@ -1177,6 +1177,7 @@ async fn run_ocr_with_layout(
             config,
             &pipeline,
             path,
+            None,
         ))
         .await?;
         // GH#1892: the whole-document route repaired nothing, so `numeric_repair` was honoured for
