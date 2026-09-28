@@ -1649,6 +1649,7 @@ pub(crate) async fn extract_full_document_ocr_pipeline_per_page(
     content: &[u8],
     config: &ExtractionConfig,
     _path: Option<&std::path::Path>,
+    page_ocr_hints: Option<PageOcrHints>,
     #[cfg(feature = "layout-detection")] prepared_layout_inputs: Option<(
         Vec<image::DynamicImage>,
         Vec<crate::layout::DetectionResult>,
@@ -1670,6 +1671,11 @@ pub(crate) async fn extract_full_document_ocr_pipeline_per_page(
     }
     let (_, page_count, _) = open_pdf_for_page_ocr(content)?;
     let page_numbers = (1..=page_count as u32).collect::<Vec<_>>();
+    let mut single_block_pages = page_ocr_hints
+        .and_then(|hints| hints.single_block_pages)
+        .map(|pages| pages.iter().copied().collect::<Vec<_>>())
+        .unwrap_or_default();
+    single_block_pages.sort_unstable();
     let (seed_text, boundaries) = full_document_page_seed(page_count, config);
     let (text, accepted_pages, structured_pages, llm_usage, rasters, formulas, preprocessing, ocr_confidence, warnings) =
         Box::pin(extract_mixed_ocr_native_with_layout_inputs(
@@ -1677,7 +1683,7 @@ pub(crate) async fn extract_full_document_ocr_pipeline_per_page(
             &boundaries,
             MixedOcrPageSelection {
                 ocr: &page_numbers,
-                single_block: &[],
+                single_block: &single_block_pages,
             },
             content,
             config,

@@ -1132,6 +1132,7 @@ async fn run_ocr_with_layout(
                     content,
                     config,
                     path,
+                    page_ocr_hints,
                     #[cfg(feature = "layout-detection")]
                     prepared_layout_inputs,
                 ))
@@ -5762,11 +5763,11 @@ mod tests {
             .iter()
             .filter(|warning| warning.source == "ocr")
             .collect::<Vec<_>>();
-        // Two distinct OCR-source warnings belong here, not a duplicate: one reports that
-        // targeted OCR itself failed for page 2, the other that the language-plausibility
-        // check (issue #1709) could not judge that page's retained native text at all. Assert
-        // on each warning's content rather than a bare count, so a real regression in either
-        // one fails loudly instead of the count silently drifting to match.
+        // Three distinct OCR-source warnings belong here, not duplicates: one reports that
+        // targeted OCR itself failed for page 2, one records the XObject retry that preceded
+        // that failure, and the last says the language-plausibility check (issue #1709) could
+        // not judge that page's retained native text at all. Assert on each warning's content
+        // rather than a bare count, so a real regression in any one fails loudly. ~keep
         let fallback_failure_warnings = warnings
             .iter()
             .filter(|warning| warning.message.contains(FAILURE))
@@ -5787,9 +5788,22 @@ mod tests {
             "expected exactly one plausibility-check abstention warning: {warnings:?}"
         );
 
+        let xobject_retry_warnings = warnings
+            .iter()
+            .filter(|warning| {
+                warning.message.contains("Page 2 contains 1 image XObject(s)")
+                    && warning.message.contains("retried on the embedded image bytes")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            xobject_retry_warnings.len(),
+            1,
+            "expected exactly one page-2 XObject retry warning: {warnings:?}"
+        );
+
         assert_eq!(
             warnings.len(),
-            fallback_failure_warnings.len() + plausibility_abstention_warnings.len(),
+            fallback_failure_warnings.len() + plausibility_abstention_warnings.len() + xobject_retry_warnings.len(),
             "unexpected extra OCR-source warning(s): {warnings:?}"
         );
 
