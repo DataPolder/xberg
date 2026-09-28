@@ -1663,6 +1663,10 @@ fn repair_heuristic_header_delimiters(rows: &mut [Vec<String>]) {
         return;
     };
 
+    for cell in header.iter_mut() {
+        repair_joined_header_closer_spacing(cell);
+    }
+
     for column in 0..header.len().saturating_sub(1) {
         let (left_cells, right_cells) = header.split_at_mut(column + 1);
         let left = &mut left_cells[column];
@@ -1677,6 +1681,43 @@ fn repair_heuristic_header_delimiters(rows: &mut [Vec<String>]) {
 
         left.push(closer);
         *right = remainder.to_string();
+    }
+}
+
+fn repair_joined_header_closer_spacing(text: &mut String) {
+    let mut openers = Vec::new();
+    let mut whitespace_ranges = Vec::new();
+    for (index, character) in text.char_indices() {
+        if matches!(character, '(' | '[' | '{') {
+            openers.push((character, index));
+            continue;
+        }
+
+        let Some(expected) = matching_opener(character) else {
+            continue;
+        };
+        let Some((opener, opener_index)) = openers.pop() else {
+            return;
+        };
+        if opener != expected {
+            return;
+        }
+
+        let content_start = opener_index + opener.len_utf8();
+        if text[content_start..]
+            .chars()
+            .next()
+            .is_some_and(|next| !next.is_whitespace())
+        {
+            let trimmed_end = text[..index].trim_end().len();
+            if trimmed_end < index {
+                whitespace_ranges.push(trimmed_end..index);
+            }
+        }
+    }
+
+    for range in whitespace_ranges.into_iter().rev() {
+        text.replace_range(range, "");
     }
 }
 
@@ -3952,6 +3993,18 @@ mod tests {
 
         assert_eq!(rows[0], ["icorr (A/cm2)", "Polarization resistance ( Ω )"]);
         assert_eq!(rows[1], ["1.25", "320"]);
+    }
+
+    #[test]
+    fn repairs_joined_header_closer_spacing() {
+        let mut rows = vec![vec![
+            "icorr (A/cm2 )".to_string(),
+            "Polarization resistance ( Ω )".to_string(),
+        ]];
+
+        repair_heuristic_header_delimiters(&mut rows);
+
+        assert_eq!(rows[0], ["icorr (A/cm2)", "Polarization resistance ( Ω )"]);
     }
 
     #[test]
