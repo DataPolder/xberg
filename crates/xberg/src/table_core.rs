@@ -247,8 +247,8 @@ fn split_row_sharing_groups<'a>(
     split
 }
 
-/// Re-group `group` by right edge, or `None` when that gives fewer than two parts or a part that
-/// still holds two tokens of one row.
+/// Re-group `group` by right edge, or `None` unless that gives exactly two independently
+/// supported parts with at most one token from each row.
 ///
 /// Only data tokens are re-grouped by right edge. A header label is written from the left edge of
 /// its column whatever the alignment of the values under it, so its right edge says nothing about
@@ -263,7 +263,7 @@ fn split_by_right_edge<'a>(
         .copied()
         .partition(|word| find_row_index(row_positions, word) == Some(0));
     let mut parts = cluster_by_edge(data, column_threshold, right_edge);
-    if parts.len() < 2 {
+    if parts.len() != 2 {
         return None;
     }
     let lefts: Vec<u32> = parts
@@ -273,6 +273,9 @@ fn split_by_right_edge<'a>(
     for word in header {
         let nearest = (0..parts.len()).min_by_key(|&index| lefts[index].abs_diff(word.left))?;
         parts[nearest].push(word);
+    }
+    if parts.iter().any(|part| part.len() < 2) {
+        return None;
     }
     (!parts.iter().any(|part| shares_a_row(part, row_positions))).then_some(parts)
 }
@@ -2495,6 +2498,41 @@ mod tests {
             ]
         );
         assert_eq!(column_positions, vec![0, 130, 332]);
+    }
+
+    #[test]
+    fn issue_1769_footer_fragments_do_not_split_a_six_column_table() {
+        let columns = [44, 87, 129, 171, 211, 252];
+        let mut words = Vec::new();
+        for (column, text) in ["Number", "DP", "SP-C", "SP-D", "DP vs SP-C", "DP vs SP-D"]
+            .into_iter()
+            .enumerate()
+        {
+            words.push(word(text, columns[column], 0, 24, 6));
+        }
+        for row in 1..29 {
+            let top = row * 12;
+            let cells = if row == 1 {
+                ["Number", "166/647", "157/647", "324/647", "0.114", "<0.001"]
+            } else {
+                ["Measure", "10", "20", "30", "0.1", "0.2"]
+            };
+            for (column, text) in cells.into_iter().enumerate() {
+                words.push(word(text, columns[column], top, 24, 6));
+            }
+        }
+        let footer_top = 29 * 12;
+        words.push(word("Fisher", 38, footer_top, 10, 6));
+        words.push(word("exact test (2x2), and quantitative", 66, footer_top, 107, 6));
+        for (column, text) in ["10", "20", "30", "0.1", "0.2"].into_iter().enumerate() {
+            words.push(word(text, columns[column + 1], footer_top, 24, 6));
+        }
+
+        let (table, column_positions) = reconstruct_table_with_columns(&words, 30, 0.5);
+
+        assert_eq!(table.len(), 30);
+        assert_eq!(column_positions.len(), 6);
+        assert_eq!(table[1], ["Number", "166/647", "157/647", "324/647", "0.114", "<0.001"]);
     }
 
     /// xberg-io/xberg#1909: a header label clusters with the values under it by its left edge. Its

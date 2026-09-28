@@ -11,8 +11,8 @@ const DENSE_NUMERIC_MIN_DATA_ROWS: usize = 6;
 const DENSE_NUMERIC_MIN_COLUMNS: usize = 6;
 const DENSE_NUMERIC_MIN_CELL_PERCENT: usize = 75;
 const RECURRING_NUMERIC_MIN_TRACKS: usize = 3;
-const RECURRING_NUMERIC_MIN_TRACK_ROWS: usize = 5;
-const RECURRING_NUMERIC_MIN_TRACK_PERCENT: usize = 30;
+const RECURRING_NUMERIC_MIN_TRACK_ROWS: usize = 6;
+const RECURRING_NUMERIC_MIN_COINCIDENT_PERCENT: usize = 30;
 /// Minimum non-empty data cells for the short-numeric-table exemption. Below
 /// this there is too little evidence to call a grid a genuine table.
 const SHORT_NUMERIC_MIN_DATA_CELLS: usize = 4;
@@ -715,6 +715,10 @@ fn post_process_table_inner(
     }
 
     prune_spurious_interior_column(&mut processed, layout_guided, column_positions.as_deref_mut());
+
+    if layout_guided {
+        fold_coincident_fragment_columns_left(&mut processed, column_positions.as_deref_mut());
+    }
 
     // An OCR-split row-label tail (a word-group, or the number in `Item 1`) mints its own
     // near-empty column that would otherwise trip the sparsity/asymmetry gates below and reject
@@ -2052,21 +2056,37 @@ fn has_recurring_numeric_tracks(grid: &[Vec<String>]) -> bool {
         return false;
     }
     let minimum_support = data_rows
-        .saturating_mul(RECURRING_NUMERIC_MIN_TRACK_PERCENT)
+        .saturating_mul(RECURRING_NUMERIC_MIN_COINCIDENT_PERCENT)
         .div_ceil(100)
         .max(RECURRING_NUMERIC_MIN_TRACK_ROWS);
 
-    (0..width)
-        .filter(|&column| {
+    let supports: Vec<usize> = (0..width)
+        .map(|column| {
             grid.iter()
                 .skip(1)
                 .filter(|row| row.get(column).is_some_and(|cell| is_numeric_value_cell(cell.trim())))
                 .count()
-                >= minimum_support
         })
-        .take(RECURRING_NUMERIC_MIN_TRACKS)
+        .collect();
+    let recurring_columns: Vec<usize> = (0..width)
+        .filter(|&column| supports.get(column).copied().unwrap_or_default() >= minimum_support)
+        .collect();
+    if recurring_columns.len() < RECURRING_NUMERIC_MIN_TRACKS {
+        return false;
+    }
+
+    grid.iter()
+        .skip(1)
+        .filter(|row| {
+            recurring_columns
+                .iter()
+                .filter(|&&column| row.get(column).is_some_and(|cell| is_numeric_value_cell(cell.trim())))
+                .take(RECURRING_NUMERIC_MIN_TRACKS)
+                .count()
+                >= RECURRING_NUMERIC_MIN_TRACKS
+        })
         .count()
-        >= RECURRING_NUMERIC_MIN_TRACKS
+        >= minimum_support
 }
 
 /// Whether the grid's data cells are overwhelmingly numeric values, with no
@@ -2383,6 +2403,52 @@ fn fold_column_into_neighbour(table: &mut [Vec<String>], col: usize, column_posi
         }
     }
     drop_column_position(column_positions, col);
+}
+
+/// Fold an unheaded track that is geometrically tucked against the label column, or whose
+/// populated cells are predominantly detached numeric suffixes (`%`, `)`, `]`, `}`). Both shapes
+/// are fragments of their left neighbour rather than independent columns (xberg-io/xberg#1769).
+/// ~keep
+fn fold_coincident_fragment_columns_left(table: &mut [Vec<String>], mut column_positions: Option<&mut Vec<u32>>) {
+    if table.len() < 2 || table[0].len() < 3 {
+        return;
+    }
+
+    let data_row_count = table.len() - 1;
+    let mut column = 1;
+    while column + 1 < table[0].len() {
+        let header_empty = table[0][column].trim().is_empty();
+        let populated: Vec<&str> = table[1..]
+            .iter()
+            .map(|row| row[column].trim())
+            .filter(|cell| !cell.is_empty())
+            .collect();
+        let sparse = !populated.is_empty() && populated.len() * 10 <= data_row_count;
+        let tucked_left = column_positions.as_deref().is_some_and(|positions| {
+            positions
+                .get(column - 1)
+                .zip(positions.get(column))
+                .zip(positions.get(column + 1))
+                .is_some_and(|((&left, &current), &right)| current.abs_diff(left) * 4 < right.abs_diff(current) * 3)
+        });
+        let closing_fragments = table[1..]
+            .iter()
+            .filter(|row| {
+                let cell = row[column].trim();
+                let left = row[column - 1].trim();
+                !cell.is_empty()
+                    && left.chars().any(|character| character.is_ascii_digit())
+                    && cell.chars().all(|character| matches!(character, '%' | ')' | ']' | '}'))
+            })
+            .count();
+        let predominantly_closing = !populated.is_empty() && closing_fragments * 4 >= populated.len() * 3;
+
+        if header_empty && ((sparse && tucked_left) || predominantly_closing) {
+            fold_column_into_neighbour(table, column, column_positions.as_deref_mut());
+        } else {
+            column += 1;
+        }
+    }
 }
 
 fn merge_header_only_column(
@@ -3413,7 +3479,7 @@ mod tests {
             "Measure C".into(),
         ]];
         for row in 0..8 {
-            let incidental = row < 3;
+            let incidental = row < 5;
             table.push(vec![
                 format!("continuing prose row {row}"),
                 if incidental {
@@ -3436,7 +3502,7 @@ mod tests {
 
         assert!(
             post_process_table(table, true, false).is_none(),
-            "three incidental numeric tracks without recurring row support must not bypass prose-flow rejection"
+            "three incidental numeric tracks in five of eight prose rows must not bypass prose-flow rejection"
         );
     }
 
@@ -3459,6 +3525,61 @@ mod tests {
             result_guided.is_none(),
             "High-row low-column fully-filled table should be rejected (layout-guided)"
         );
+    }
+
+    #[test]
+    fn issue_1769_folds_short_label_and_value_suffix_tracks() {
+        let mut table = vec![vec![
+            "Metric".into(),
+            "".into(),
+            "DP".into(),
+            "SP-C".into(),
+            "".into(),
+            "SP-D".into(),
+            "p 1".into(),
+            "p 2".into(),
+        ]];
+        for row in 0..40 {
+            table.push(vec![
+                format!("Measure {row}"),
+                match row {
+                    0 => "GC".into(),
+                    1 => "60".into(),
+                    2 => "x".into(),
+                    _ => "".into(),
+                },
+                format!("{}", 100 + row),
+                format!("({}.6", 40 + row),
+                "%".into(),
+                format!("{}", 30 + row),
+                format!("0.{row}"),
+                format!("0.{}", row + 1),
+            ]);
+        }
+        let mut positions = vec![44, 66, 106, 145, 164, 184, 224, 259];
+
+        let processed = post_process_table_with_columns(table, true, false, &mut positions)
+            .expect("the table must remain accepted");
+
+        assert_eq!(processed[0].len(), 6);
+        assert_eq!(positions, [44, 106, 145, 184, 224, 259]);
+        assert_eq!(processed[1][0], "Measure 0 GC");
+        assert_eq!(processed[1][2], "(40.6 %");
+    }
+
+    #[test]
+    fn issue_1769_preserves_unheaded_dash_status_column() {
+        let mut table = vec![vec!["Metric".into(), "".into(), "Value".into()]];
+        for row in 0..10 {
+            table.push(vec![format!("Measure {row}"), "—".into(), format!("{}", row + 1)]);
+        }
+        let mut positions = vec![44, 106, 184];
+
+        fold_coincident_fragment_columns_left(&mut table, Some(&mut positions));
+
+        assert_eq!(table[0].len(), 3);
+        assert_eq!(positions, [44, 106, 184]);
+        assert_eq!(table[1][1], "—");
     }
 
     #[test]

@@ -1260,7 +1260,7 @@ const ROW_CENTER_ROUNDING_SLACK: f32 = 1.0;
 /// that may split one region into independent column blocks. A floor only — see
 /// COLUMN_BLOCK_CORRIDOR_DOMINANCE_PERCENT for what actually distinguishes a page gutter
 /// from a table's own inter-column corridor. ~keep
-const COLUMN_BLOCK_MIN_CORRIDOR_HEIGHTS: f32 = 2.5;
+const COLUMN_BLOCK_MIN_CORRIDOR_HEIGHTS: f32 = 2.375;
 
 /// How much wider (percent) the splitting corridor must be than the next-widest corridor
 /// of the same region that is also crossed on no row. A genuine table's inter-column
@@ -4764,6 +4764,55 @@ mod tests {
     }
 
     #[test]
+    fn page_six_table_is_isolated_from_prose_at_nineteen_unit_corridor_gh1769() {
+        const PAGE_SIX_PROSE_LEFT: u32 = GH1769_TABLE_RIGHT_EDGE + 19;
+
+        let mut words = gh1769_table_words();
+        for word in &mut words {
+            word.height = 8;
+        }
+        words.push(gh1769_word(
+            "Table 2 characteristics across all groups",
+            GH1769_TABLE_COLUMNS[0],
+            30,
+            GH1769_TABLE_RIGHT_EDGE - GH1769_TABLE_COLUMNS[0],
+            8,
+        ));
+        let mut prose = gh1769_prose_words();
+        for word in &mut prose {
+            word.left -= GH1769_PROSE_LEFT - PAGE_SIX_PROSE_LEFT;
+        }
+        words.extend(prose);
+
+        let regions = cluster_words_into_vertical_regions(&words);
+        let table_region = regions
+            .iter()
+            .find(|region| {
+                region
+                    .iter()
+                    .all(|word| word.left + word.width <= GH1769_TABLE_RIGHT_EDGE)
+            })
+            .expect("page six must retain a region containing only Table 2");
+        let prose_region = regions
+            .iter()
+            .find(|region| region.iter().all(|word| word.left >= PAGE_SIX_PROSE_LEFT))
+            .expect("page six must retain the neighbouring prose as a separate region");
+
+        let tables = reconstruct_region_tables(table_region, 792.0, 6, false, 0);
+        assert_eq!(
+            tables.len(),
+            1,
+            "the isolated page-six table region must reconstruct once"
+        );
+        assert_eq!(tables[0].cells.len(), GH1769_TABLE_ROWS + 1);
+        assert_eq!(tables[0].cells[0].len(), GH1769_TABLE_COLUMNS.len());
+        assert!(
+            reconstruct_region_tables(prose_region, 792.0, 6, false, 0).is_empty(),
+            "the neighbouring prose must remain ordinary page content"
+        );
+    }
+
+    #[test]
     fn table_region_keeps_its_six_columns_gh1769() {
         let mut words = gh1769_table_words();
         words.extend(gh1769_prose_words());
@@ -4777,7 +4826,7 @@ mod tests {
         let region_right = table_region.iter().map(|w| w.left + w.width).max().unwrap_or(0);
         let region_width = region_right.saturating_sub(region_left) as f32;
         let col_gap = heuristic_column_gap(table_region, region_width);
-        let columns = crate::table_core::detect_columns(table_region, col_gap);
+        let (_, columns) = crate::table_core::reconstruct_table_with_columns(table_region, col_gap, 0.5);
 
         assert!(
             (5..=6).contains(&columns.len()),
@@ -4924,6 +4973,20 @@ mod tests {
         assert!(
             split_region_at_column_corridor(&region, height).is_some(),
             "a corridor exactly at the height-relative floor must split the region"
+        );
+    }
+
+    #[test]
+    fn nineteen_unit_corridor_with_eight_unit_words_is_split_gh1769() {
+        let height = 8;
+        let gap = 19;
+
+        let mut region = gh1769_corridor_block(0, height);
+        region.extend(gh1769_corridor_block(GH1769_CORRIDOR_BLOCK_WIDTH + gap, height));
+
+        assert!(
+            split_region_at_column_corridor(&region, height).is_some(),
+            "the page-six corridor must split the table from the neighbouring prose column"
         );
     }
 
