@@ -30,11 +30,24 @@ use super::*;
 /// the explicit check above already returned on that condition, but keeps this
 /// function equivalent to calling the validator directly.
 ///
-/// Silently returns `Ok(())` when `reader` is not a readable ZIP at all (e.g. a legacy
-/// `.xls`/`.xla` OLE2 file misrouted here) — the subsequent calamine open then reports a
-/// format error with clearer context than this pre-check could.
+/// Skips ZIP validation only when a legacy `.xls`/`.xla` input has the OLE compound-file
+/// signature. An embedded ZIP can otherwise make `ZipArchive` accept the outer OLE bytes,
+/// then fail while resolving a member against the wrong container (#1938). Modern spreadsheet
+/// extensions retain ZIP validation even when their bytes begin with an OLE signature.
 #[cfg(feature = "excel")]
-fn validate_zip_container<R: Read + Seek>(reader: R, limits: &SecurityLimits) -> Result<()> {
+fn validate_zip_container<R: Read + Seek>(mut reader: R, file_extension: &str, limits: &SecurityLimits) -> Result<()> {
+    const OLE_SIGNATURE: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+
+    let initial_position = reader.stream_position()?;
+    let mut signature = [0u8; OLE_SIGNATURE.len()];
+    let has_ole_signature = reader.read_exact(&mut signature).is_ok() && signature == OLE_SIGNATURE;
+    reader.seek(std::io::SeekFrom::Start(initial_position))?;
+
+    let extension = file_extension.to_ascii_lowercase();
+    if matches!(extension.as_str(), ".xls" | ".xla") && has_ole_signature {
+        return Ok(());
+    }
+
     let mut archive = match zip::ZipArchive::new(reader) {
         Ok(archive) => archive,
         Err(_) => return Ok(()),
@@ -58,7 +71,12 @@ pub(crate) fn read_excel_file(file_path: &str, limits: &SecurityLimits) -> Resul
     #[cfg(feature = "excel")]
     {
         let check_file = std::fs::File::open(file_path)?;
-        validate_zip_container(std::io::BufReader::new(check_file), limits)?;
+        let file_extension = Path::new(file_path)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| format!(".{extension}"))
+            .unwrap_or_default();
+        validate_zip_container(std::io::BufReader::new(check_file), &file_extension, limits)?;
     }
     #[cfg(not(feature = "excel"))]
     let _ = limits;
@@ -210,7 +228,7 @@ pub(crate) fn read_excel_bytes(data: &[u8], file_extension: &str, limits: &Secur
     let warnings: Vec<ProcessingWarning> = Vec::new();
 
     #[cfg(feature = "excel")]
-    validate_zip_container(Cursor::new(data), limits)?;
+    validate_zip_container(Cursor::new(data), file_extension, limits)?;
     #[cfg(not(feature = "excel"))]
     let _ = limits;
 
