@@ -1561,7 +1561,7 @@ html-to-markdown-rs = { workspace = true, default-features = false }
 [crates.python]
 module_name = "_xberg"
 extra_init_imports = { ".progress" = ["ProgressEvent", "ProgressCallback", "extract", "extract_batch"] }
-exclude_types = ["PooledString", "ProgressListenerHandle"]
+exclude_types = ["PooledString"]
 exclude_functions = [
   "calculate_quality_score",
   "count_tokens",
@@ -1584,8 +1584,6 @@ exclude_functions = [
   "embed_sparse_async",
   "embed_multi_vector",
   "embed_multi_vector_async",
-  "extract_with_progress",
-  "extract_batch_with_progress",
 ]
 reexported_types = ["ExtractionResult", "ExtractedDocument", "ExtractionDiff"]
 

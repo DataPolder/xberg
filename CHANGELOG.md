@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-28
+
 ### Added
 
 - **(ocr): PDF pages with an unusable text-layer character map use Tesseract block segmentation per page.** During automatic OCR fallback, only pages routed by the fabricated-character-map detector use PSM 6 so table row labels and values stay together; ordinary scans and explicit `force_ocr` or `force_ocr_pages` requests retain their existing mode, and an explicit caller setting still wins. Accepted Tesseract pages record their effective mode in `metadata.additional.ocr_page_segmentation_modes`. (GH#1896)
