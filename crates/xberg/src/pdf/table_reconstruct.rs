@@ -2429,7 +2429,9 @@ fn fold_coincident_fragment_columns_left(table: &mut [Vec<String>], mut column_p
                 .get(column - 1)
                 .zip(positions.get(column))
                 .zip(positions.get(column + 1))
-                .is_some_and(|((&left, &current), &right)| current.abs_diff(left) * 4 < right.abs_diff(current) * 3)
+                .is_some_and(|((&left, &current), &right)| {
+                    u64::from(current.abs_diff(left)) * 4 < u64::from(right.abs_diff(current)) * 3
+                })
         });
         let closing_fragments = table[1..]
             .iter()
@@ -3580,6 +3582,25 @@ mod tests {
         assert_eq!(table[0].len(), 3);
         assert_eq!(positions, [44, 106, 184]);
         assert_eq!(table[1][1], "—");
+    }
+
+    #[test]
+    fn issue_1769_handles_weighted_coordinate_gaps_above_u32() {
+        let mut table = vec![vec!["Metric".into(), "".into(), "Value".into()]];
+        for row in 0..10 {
+            table.push(vec![
+                format!("Measure {row}"),
+                if row == 0 { "tail".into() } else { "".into() },
+                format!("{}", row + 1),
+            ]);
+        }
+        let mut positions = vec![0, 1_100_000_000, 3_000_000_000];
+
+        fold_coincident_fragment_columns_left(&mut table, Some(&mut positions));
+
+        assert_eq!(table[0].len(), 2);
+        assert_eq!(positions, [0, 3_000_000_000]);
+        assert_eq!(table[1][0], "Measure 0 tail");
     }
 
     #[test]
