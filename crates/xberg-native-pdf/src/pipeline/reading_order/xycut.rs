@@ -284,6 +284,78 @@ const MIN_CROSSING_SHARE: f32 = 0.4;
 // a line this many ems of ink wide or less, first on its row, is a lead -- a hanging
 // number, a bullet, a label -- that travels with the line after it (see `partition_lines_at`).
 const MAX_LEAD_EM: f32 = 4.0;
+// This many lines crossing a column cut (`MIN_CROSSING_SHARE` of their ink on each
+// side), with nothing else beside them on the cut's right, make a band of prose the cut runs
+// through rather than a gutter -- see `prose_band_split`.
+const MIN_CROSSING_LINES: usize = 3;
+
+/// The band of prose `split_x` runs through, if it runs through one, with what lies
+/// above and below it: `[above, band, below]` in reading order, empty parts left out.
+///
+/// The band is the y-extent of the continuous lines (`group_indices_into_rows`) that hold
+/// at least `MIN_CROSSING_SHARE` of their ink on EACH side of the cut; it takes
+/// `MIN_CROSSING_LINES` of them, and NOTHING else may start right of the cut within that
+/// extent. That last condition separates a list above a table (the table's columns sit
+/// below the band) from a two-column page with a wide table, title or caption: there the
+/// other column runs beside the crossing lines, and the cut is its gutter. A band of wide
+/// quotes under two columns qualifies too -- the columns above it are then cut on their
+/// own, which is why the band is peeled rather than the cut refused. ~keep
+fn prose_band_split(all_spans: &[TextSpan], indices: &[usize], split_x: f32) -> Option<Vec<Vec<usize>>> {
+    let extent = |i: usize| {
+        let bbox = &all_spans[i].bbox;
+        (bbox.bottom().min(bbox.top()), bbox.bottom().max(bbox.top()))
+    };
+    let mut crossing: Vec<usize> = Vec::new();
+    let mut crossing_lines = 0usize;
+    for line in group_indices_into_rows(all_spans, indices).iter().flatten() {
+        let mut left_width = 0.0f32;
+        let mut right_width = 0.0f32;
+        for &i in line {
+            let left = all_spans[i].bbox.left();
+            let right = ink_right(&all_spans[i]);
+            left_width += (right.min(split_x) - left).max(0.0);
+            right_width += (right - left.max(split_x)).max(0.0);
+        }
+        let ink = left_width + right_width;
+        if ink > 0.0 && left_width.min(right_width) >= MIN_CROSSING_SHARE * ink {
+            crossing.extend(line);
+            crossing_lines += 1;
+        }
+    }
+    if crossing_lines < MIN_CROSSING_LINES {
+        return None;
+    }
+    let band_bottom = crossing.iter().map(|&i| extent(i).0).fold(f32::MAX, f32::min);
+    let band_top = crossing.iter().map(|&i| extent(i).1).fold(f32::MIN, f32::max);
+    let in_band = |i: usize| {
+        let (lo, hi) = extent(i);
+        lo < band_top && hi > band_bottom
+    };
+    let crowded = indices
+        .iter()
+        .any(|&i| in_band(i) && all_spans[i].bbox.left() >= split_x && !crossing.contains(&i));
+    if crowded {
+        return None;
+    }
+    let mut above = Vec::new();
+    let mut band = Vec::new();
+    let mut below = Vec::new();
+    for &i in indices {
+        if in_band(i) {
+            band.push(i);
+        } else if extent(i).0 >= band_top {
+            above.push(i);
+        } else {
+            below.push(i);
+        }
+    }
+    Some(
+        [above, band, below]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect(),
+    )
+}
 
 /// the right edge of a span's INK, for the whole-line machinery below. An extractor bbox
 /// can reach far past its glyphs (trailing whitespace, a stretched advance width -- a
@@ -958,6 +1030,26 @@ impl XYCutStrategy {
             let mut result = Vec::new();
             for band in bands {
                 result.extend(self.partition_indexed_depth(all_spans, &band, depth + 1));
+            }
+            return result;
+        }
+
+        // A gutter is empty. A single-column prose band above a ruled table (an
+        // installation manual's settings page: steps 1-5, then a parameter table whose
+        // columns open a valley at x 246) is not two columns, but the projection behind the
+        // column cut skips every span wider than 55 % of the region -- most of the prose --
+        // so the table's own valley is all it sees. Cut there, `partition_lines_at` sends
+        // each prose line to its ink majority: the two longest steps went right, into the
+        // table's column, and were read after the next heading. When the cut runs through
+        // such a band, peel the band off with whatever lies above and below it instead, and
+        // let each part find its own cut. ~keep
+        if let Some((split_x, _, _)) = self.find_horizontal_split_with_x(all_spans, indices)
+            && let Some(parts) = prose_band_split(all_spans, indices, split_x)
+            && parts.len() >= 2
+        {
+            let mut result = Vec::new();
+            for part in parts {
+                result.extend(self.partition_indexed_depth(all_spans, &part, depth + 1));
             }
             return result;
         }
@@ -1973,6 +2065,22 @@ impl XYCutStrategy {
         all_spans: &[TextSpan],
         indices: &[usize],
     ) -> Option<(Vec<usize>, Vec<usize>)> {
+        let (split_x, left, right) = self.find_horizontal_split_with_x(all_spans, indices)?;
+        // A cut through a band of prose that fills the whole region -- nothing above or
+        // below it to peel (`partition_indexed_depth` peels when there is) -- is no column
+        // split at all. ~keep
+        if prose_band_split(all_spans, indices, split_x).is_some_and(|parts| parts.len() == 1) {
+            return None;
+        }
+        Some((left, right))
+    }
+
+    /// `find_horizontal_split_indexed`, with the cut's x. ~keep
+    fn find_horizontal_split_with_x(
+        &self,
+        all_spans: &[TextSpan],
+        indices: &[usize],
+    ) -> Option<(f32, Vec<usize>, Vec<usize>)> {
         let profile = self.horizontal_projection_indexed(all_spans, indices)?;
 
         let split_x = if let Some((vs, ve, vw)) = self.find_valley(&profile) {
@@ -2107,7 +2215,7 @@ impl XYCutStrategy {
             return None;
         }
 
-        Some((left, right))
+        Some((split_x, left, right))
     }
 
     /// Fallback column split: find the deepest trough between the two
@@ -4910,6 +5018,373 @@ mod tests {
         assert_eq!(
             actual_right, expected_right,
             "the straddling line's 5 fragments must all move to its majority side (right), none left behind"
+        );
+    }
+
+    /// A single-column list above a ruled table. The table's columns open a valley
+    /// at x 246 that the long prose lines are too wide to show up in; cut there, the two
+    /// longest steps (more ink right of the cut than left) went into the table's column and
+    /// were read after the next heading. Every span of an installation manual's
+    /// p40, geometry verbatim, letters replaced by lorem ipsum of the same length. ~keep
+    #[test]
+    fn a_prose_band_above_a_table_is_not_cut_into_columns() {
+        let strategy = XYCutStrategy::new();
+        #[rustfmt::skip]
+        let page: &[(f32, f32, f32, f32, &str)] = &[
+            (87.84, 773.76, 13.68, 12.00, "7.2"),
+            (101.52, 773.76, 3.34, 12.00, " "),
+            (105.84, 773.76, 147.70, 12.00, "Loremipsumdo lor si tametconsec "),
+            (45.36, 756.24, 330.03, 9.60, "Te turadipiscingel its edd oeiusmo dt em po rincidi duntutlab oreetdo lo remagnaali qua § 0.6. "),
+            (45.36, 742.32, 343.07, 9.60, "Lore mipsumdolo rsitam etcons ect et uradipiscin gelitsedd oeiusm. Od tem porin ci didu nt utl "),
+            (45.36, 731.52, 121.23, 9.60, "aboreetdoloremagn aa liqualore: "),
+            (45.36, 714.96, 6.45, 9.60, "1."),
+            (51.84, 714.96, 2.67, 9.60, " "),
+            (63.36, 714.96, 192.72, 9.60, "Mips umdolorsitam et co  nsectet  ur  adipi  scing, eli tse "),
+            (256.56, 714.96, 11.16, 11.04, " 3 "),
+            (268.32, 714.96, 184.83, 9.60, " ddoeiusmod te mpo rincidi- du ntu tlaboreetdoloremag. "),
+            (45.36, 701.76, 6.45, 9.60, "2."),
+            (51.84, 701.76, 2.67, 9.60, " "),
+            (63.36, 701.76, 97.44, 9.60, "Naal iqu al  +  or  -  emips  "),
+            (161.28, 701.76, 11.26, 11.04, " 48"),
+            (172.56, 701.76, 2.80, 10.08, " "),
+            (175.92, 701.76, 153.39, 9.60, " (umdolorsita) me tc ons ecteturadipiscinge. "),
+            (45.36, 689.76, 6.45, 9.60, "3."),
+            (51.84, 689.76, 2.67, 9.60, " "),
+            (63.36, 689.76, 271.23, 9.60, "Lits edd oe  iusmodt  empor in ci di duntutl aboreetdo lo re mag naaliqu aloremi. "),
+            (45.36, 678.00, 6.45, 9.60, "4."),
+            (51.84, 678.00, 2.67, 9.60, " "),
+            (63.36, 678.00, 372.51, 9.60, "Psum dol or  +  si  -  tamet co nsectetur ad ip is cingelit seddoe (iusmodtem) po rin cididuntutl aboreet. "),
+            (45.36, 663.12, 6.45, 9.60, "5."),
+            (51.84, 663.12, 2.67, 9.60, " "),
+            (63.36, 663.12, 285.84, 9.60, "Dolo, remag naal iqualore mipsumdolorsi tame tconsecte, tu  radip  iscin ge litsed  "),
+            (349.68, 663.12, 5.30, 11.04, "D"),
+            (354.96, 663.12, 2.19, 9.60, " "),
+            (357.60, 663.12, 116.67, 9.60, " oe ius modtemp orincid iduntutlab. "),
+            (45.36, 651.84, 187.47, 9.60, "Or eetdoloremagnaa li qu aloremi psumdolorsitam. "),
+            (45.36, 637.92, 2.19, 9.60, " "),
+            (45.36, 624.00, 41.41, 9.60, "Etconsect"),
+            (86.40, 624.00, 2.19, 9.60, " "),
+            (45.36, 609.12, 360.03, 9.60, "Etur ad ipi/sci  ngeli ts ed doeiusm odte mpo rin cid idun tutlab or eetdoloremagnaaliqua lo re mipsu. "),
+            (87.84, 591.84, 13.68, 12.00, "7.3"),
+            (101.52, 591.84, 3.34, 12.00, " "),
+            (105.84, 591.84, 56.26, 12.00, "Mdolorsita "),
+            (51.60, 574.08, 21.63, 9.60, "Metc- "),
+            (50.64, 563.04, 23.31, 9.60, "onsec "),
+            (86.16, 563.04, 138.99, 9.60, "Teturadipisc                   Ingelit Sedd "),
+            (240.00, 563.04, 77.07, 9.60, " Oe45  Iu55 Sm51 "),
+            (327.12, 563.04, 48.99, 9.60, "Odtemporinci "),
+            (59.04, 551.76, 6.51, 9.60, "3 "),
+            (86.16, 551.76, 44.94, 9.60, "Diduntutlab "),
+            (131.04, 551.76, 13.92, 9.60, "[48]"),
+            (144.96, 551.76, 2.19, 9.60, " "),
+            (249.60, 551.76, 4.83, 9.60, "- "),
+            (277.92, 551.76, 4.83, 9.60, "- "),
+            (303.60, 551.76, 4.83, 9.60, "- "),
+            (327.12, 551.76, 199.88, 9.60, "Oreetdo lor emagnaaliqualoremipsumdo. Lo rsitametcon sect "),
+            (327.12, 540.72, 88.59, 9.60, "eturadipi scinge (=48). "),
+            (59.04, 529.44, 6.51, 9.60, "4 "),
+            (86.16, 529.44, 49.71, 9.60, "Litseddoeiusmod "),
+            (248.88, 529.44, 6.51, 9.60, "4 "),
+            (277.20, 529.44, 6.51, 9.60, "4 "),
+            (302.64, 529.44, 6.51, 9.60, "4 "),
+            (327.12, 529.44, 79.47, 9.60, "3=Tempo Rincidi Du "),
+            (327.12, 518.40, 100.83, 9.60, "4=Ntutlab Oree Td + olorem "),
+            (327.12, 507.60, 70.83, 9.60, "5=Agnaali Qua Lo "),
+            (327.12, 496.80, 72.99, 9.60, "6=Remipsu Mdol Or "),
+            (59.04, 485.28, 6.51, 9.60, "5 "),
+            (86.16, 485.28, 66.75, 9.60, "Si-tame tconsect "),
+            (248.88, 485.28, 6.51, 9.60, "3 "),
+            (277.20, 485.28, 6.51, 9.60, "3 "),
+            (302.64, 485.28, 6.51, 9.60, "3 "),
+            (327.12, 485.28, 90.27, 9.60, "3=eturad ipis cingelits "),
+            (327.12, 474.48, 83.07, 9.60, "4=eddo eiusmodt empori "),
+            (327.12, 463.44, 179.55, 9.60, "5=ncid iduntutl aboree tdo loremag Naaliqualorem "),
+            (59.04, 452.16, 6.51, 9.60, "6 "),
+            (86.16, 452.16, 83.55, 9.60, "Ipsumdolo Rs itametco "),
+            (244.56, 452.16, 15.15, 9.60, "433 "),
+            (272.88, 452.16, 15.15, 9.60, "433 "),
+            (298.32, 452.16, 15.15, 9.60, "433 "),
+            (327.12, 451.20, 223.47, 9.60, "Nsecteturadi piscingeli tseddo eiusmodte m por 433 (=22 + 4i +) "),
+            (58.08, 438.72, 6.45, 9.60, "3."),
+            (64.56, 438.72, 2.19, 9.60, " "),
+            (86.16, 438.72, 140.19, 9.60, "Ncididu ntutlabore etdoloremag naal "),
+            (246.48, 438.72, 10.83, 9.60, "13 "),
+            (274.80, 438.72, 10.83, 9.60, "13 "),
+            (300.48, 438.72, 10.83, 9.60, "13 "),
+            (327.12, 438.72, 148.87, 9.60, "Iqualoremips umdolorsit ametco nsectetur a"),
+            (475.92, 438.72, 2.19, 9.60, "."),
+            (478.08, 438.72, 35.31, 9.60, " dip 433% "),
+            (59.04, 427.20, 6.51, 9.60, "7 "),
+            (86.16, 427.20, 84.03, 9.60, "Iscingeli ts eddoeius "),
+            (246.72, 427.20, 10.83, 9.60, "13 "),
+            (275.04, 427.20, 10.83, 9.60, "13 "),
+            (300.48, 427.20, 10.83, 9.60, "13 "),
+            (327.12, 426.48, 226.11, 9.60, "Modtemporinc ididuntutl aboree tdolorema g naa 433 (=22 + 4l +)  "),
+            (59.04, 414.00, 6.51, 9.60, "8 "),
+            (86.16, 414.00, 142.83, 9.60, "Iqu.aloremipsumdolorsi tam et consectet "),
+            (246.72, 414.00, 10.83, 9.60, "58 "),
+            (275.04, 414.00, 10.83, 9.60, "58 "),
+            (300.48, 414.00, 10.83, 9.60, "58 "),
+            (327.12, 414.00, 93.39, 9.60, "Uradipiscing 43°E lit 58°S "),
+            (59.04, 402.48, 6.51, 9.60, "9 "),
+            (86.16, 402.48, 136.11, 9.60, "Edd.oeiusmodtemporinc idi du ntutlabor "),
+            (247.44, 402.48, 9.15, 9.60, "-0 "),
+            (275.76, 402.48, 9.15, 9.60, "-0 "),
+            (301.44, 402.48, 9.15, 9.60, "-0 "),
+            (327.12, 402.48, 91.71, 9.60, "Eetdoloremag -2°N aal 43°I "),
+            (59.04, 391.20, 6.51, 9.60, "0 "),
+            (86.16, 391.20, 140.43, 9.60, "Qua. loremipsumdolorsi tam et consectet "),
+            (246.72, 391.20, 10.83, 9.60, "58 "),
+            (275.04, 391.20, 10.83, 9.60, "58 "),
+            (300.48, 391.20, 10.83, 9.60, "58 "),
+            (327.12, 391.20, 93.39, 9.60, "Uradipiscing 48°E lit 63°S "),
+            (59.04, 379.68, 6.51, 9.60, "1 "),
+            (86.16, 379.68, 120.27, 9.60, "Ed-doei usmodtempor in Ci diduntu "),
+            (248.88, 379.68, 6.51, 9.60, "4 "),
+            (277.20, 379.68, 6.51, 9.60, "4 "),
+            (302.64, 379.68, 6.51, 9.60, "4 "),
+            (327.12, 379.68, 93.87, 9.60, "Tlaboreetdol 3 - 48 oremagn "),
+            (59.04, 368.40, 6.51, 9.60, "2 "),
+            (86.16, 368.40, 130.83, 9.60, "Aa-liqu aloremipsum  do lorsit ametcon "),
+            (248.88, 368.40, 6.51, 9.60, "4 "),
+            (277.20, 368.40, 6.51, 9.60, "4 "),
+            (302.64, 368.40, 6.51, 9.60, "4 "),
+            (327.12, 368.40, 184.83, 9.60, "Secteturadip 3 - 48 iscinge (l.i.t. sedd Oeius modtemp) "),
+            (58.56, 356.88, 7.47, 9.60, "O "),
+            (86.16, 356.88, 120.03, 9.60, "Rinci diduntutlab or eetdolore Mag "),
+            (248.88, 356.88, 6.51, 9.60, "3 "),
+            (277.20, 356.88, 6.51, 9.60, "3 "),
+            (302.64, 356.88, 6.51, 9.60, "3 "),
+            (327.12, 356.88, 112.35, 9.60, "3=naaliqu Al oremips umdolorsita "),
+            (327.12, 346.08, 112.83, 9.60, "4=metcons ec teturad ipiscingeli "),
+            (327.12, 335.04, 99.09, 9.60, "5=tseddoeiusm odtemp orincid "),
+            (426.24, 335.04, 13.89, 9.60, "idun"),
+            (440.16, 335.04, 25.71, 9.60, " tu tlab "),
+            (327.12, 324.24, 83.31, 9.60, "0=Or/Ee tdolorem agnaal "),
+            (59.04, 312.72, 6.51, 9.60, "i "),
+            (86.16, 312.72, 29.07, 9.60, "Qualore "),
+            (248.88, 312.72, 6.51, 9.60, "3 "),
+            (277.20, 312.72, 6.51, 9.60, "3 "),
+            (302.64, 312.72, 6.51, 9.60, "3 "),
+            (327.12, 312.72, 21.39, 9.60, "3=mip  "),
+            (327.12, 301.92, 139.71, 9.60, "4=sum (dolors ita metconsecteturad 3 ip 5) "),
+            (58.56, 290.40, 7.71, 9.60, "I "),
+            (86.16, 290.40, 65.07, 9.60, "Scingelitseddoei "),
+            (248.88, 290.40, 6.51, 9.60, "4 "),
+            (277.20, 290.40, 6.51, 9.60, "4 "),
+            (302.64, 290.40, 6.51, 9.60, "4 "),
+            (327.12, 290.40, 144.03, 9.60, "3=usmodtemporincid iduntut La boreetd olo "),
+            (327.12, 279.60, 148.83, 9.60, "4=remagnaaliqualor emipsum Do lorsita met "),
+            (59.28, 268.08, 6.03, 9.60, "c "),
+            (86.16, 268.08, 78.75, 9.60, "Onsectet uradipisc In "),
+            (246.72, 268.08, 10.83, 9.60, "68 "),
+            (275.04, 268.08, 10.83, 9.60, "63 "),
+            (300.48, 268.08, 10.83, 9.60, "63 "),
+            (327.12, 268.08, 128.91, 9.60, "Gelitseddoei 58 - 73% (usmodte = 73) "),
+            (58.32, 256.80, 8.19, 9.60, "m. "),
+            (86.16, 256.80, 138.03, 9.60, "Porinci diduntutla boreetdolor emag "),
+            (246.48, 256.80, 10.83, 9.60, "73 "),
+            (274.80, 256.80, 10.83, 9.60, "73 "),
+            (300.48, 256.80, 10.83, 9.60, "73 "),
+            (327.12, 256.80, 183.83, 9.60, "Naaliqualore : 3, 48 mip sumdolorsi tametc onsectetu 6"),
+            (510.96, 256.80, 4.59, 9.60, ". "),
+            (328.80, 245.76, 181.23, 9.60, "R.A.   3 = Dipi scingelits eddo eiusmodtem por Inc "),
+            (364.32, 234.96, 106.11, 9.60, "ididuntut laboreetdol orem "),
+            (58.56, 223.68, 7.71, 9.60, "A "),
+            (86.16, 223.68, 79.23, 9.60, "Gnaaliqu aloremips um "),
+            (246.72, 223.68, 10.83, 9.60, "68 "),
+            (275.04, 223.68, 10.83, 9.60, "63 "),
+            (300.48, 223.68, 10.83, 9.60, "63 "),
+            (327.12, 223.68, 128.91, 9.60, "Dolorsitamet 58 - 73% (consect = 73) "),
+            (58.56, 212.16, 7.47, 9.60, "E "),
+            (86.16, 212.16, 126.67, 9.60, "Tur. adipiscingelitsedd oeiusmo Dt "),
+            (246.72, 212.16, 10.83, 9.60, "73 "),
+            (275.04, 212.16, 10.83, 9.60, "73 "),
+            (300.48, 212.16, 10.83, 9.60, "73 "),
+            (327.12, 212.16, 197.31, 9.60, "Emporincidid 43°U -  93°N. Tutlab or Ee tdoloremagn aal "),
+            (86.16, 201.36, 138.03, 9.60, "iqual   (Or = Emipsumdo lorsitametc) "),
+            (327.12, 201.36, 209.73, 9.60, "onsecte turadipisci ngelit sed doeiu sm odt empo rincididun "),
+            (327.12, 190.32, 202.59, 9.60, "tutlab, ore etd ol oremagnaali qual oremipsumd olorsi. "),
+            (57.60, 179.04, 9.63, 9.60, "T. "),
+            (86.16, 179.04, 38.67, 9.60, "Am etconse "),
+            (248.88, 179.04, 6.51, 9.60, "4 "),
+            (277.20, 179.04, 6.51, 9.60, "4 "),
+            (302.64, 179.04, 6.51, 9.60, "4 "),
+            (327.12, 179.04, 91.95, 9.60, "3= Ct eturadi piscin < G "),
+            (327.12, 168.00, 112.59, 9.60, "4= El its eddoeiusm odtemp < O "),
+            (327.12, 157.20, 49.95, 9.60, "5= Ri nci-did "),
+            (58.80, 145.68, 6.99, 9.60, "U "),
+            (86.16, 145.68, 61.95, 9.60, "Ntutlaboreetdo Lo "),
+            (246.72, 145.68, 10.83, 9.60, "03 "),
+            (275.04, 145.68, 10.83, 9.60, "03 "),
+            (300.48, 145.68, 10.83, 9.60, "03 "),
+            (327.12, 145.68, 210.99, 9.60, "Remagnaaliqu 83 - 22% alo rem ipsumdolor sitametc onsectetu. "),
+            (57.84, 134.40, 9.15, 9.60, "R. "),
+            (86.16, 134.40, 65.79, 9.60, "Adipiscingelit Se "),
+            (246.72, 134.40, 10.83, 9.60, "03 "),
+            (275.04, 134.40, 10.83, 9.60, "03 "),
+            (300.48, 134.40, 10.83, 9.60, "03 "),
+            (327.12, 134.40, 210.99, 9.60, "Ddoeiusmodte 83 - 22% mpo rin cididuntut laboreet doloremag. "),
+            (45.36, 122.88, 2.19, 9.60, " "),
+            (189.36, 122.88, 2.19, 9.60, " "),
+            (45.36, 18.48, 115.98, 10.08, "Naaliqua Loremipsum Do"),
+            (161.04, 18.48, 5.44, 10.08, "  "),
+            (539.52, 18.48, 9.12, 10.08, "73"),
+            (548.64, 18.48, 2.40, 9.60, " "),
+        ];
+        let spans: Vec<TextSpan> = page
+            .iter()
+            .map(|&(x, y, w, size, text)| make_span_text(x, y, w, size, text, size))
+            .collect();
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        let order: Vec<usize> = strategy
+            .partition_indexed(&spans, &indices)
+            .into_iter()
+            .flatten()
+            .collect();
+        let pos = |i: usize| order.iter().position(|&o| o == i).unwrap();
+        let find = |text: &str, y: f32| {
+            spans
+                .iter()
+                .position(|s| s.text == text && (s.bbox.y - y).abs() < 0.5)
+                .unwrap()
+        };
+        let next_heading = find("7.3", 591.84);
+        let steps: Vec<usize> = [714.96, 701.76, 689.76, 678.0, 663.12]
+            .iter()
+            .zip(["1.", "2.", "3.", "4.", "5."])
+            .map(|(&y, n)| find(n, y))
+            .collect();
+        for pair in steps.windows(2) {
+            assert!(pos(pair[0]) < pos(pair[1]), "steps out of order");
+        }
+        for (i, s) in spans.iter().enumerate() {
+            if (660.0..720.0).contains(&s.bbox.y) {
+                assert!(
+                    pos(i) < pos(next_heading),
+                    "step text {:?} read after the next heading",
+                    s.text
+                );
+            }
+        }
+    }
+
+    /// A report page -- a text column left, a chart right, and wide quotes under both.
+    /// The quotes cross the gutter with nothing beside them: a prose band. Peeled, the two
+    /// columns above still read column by column; refusing the cut instead read the region
+    /// by y and wove the text column into the chart line by line. Every span of the page,
+    /// geometry verbatim, letters replaced by lorem ipsum of the same length. ~keep
+    #[test]
+    fn two_columns_above_a_band_of_wide_quotes_keep_their_order() {
+        let strategy = XYCutStrategy::new();
+        #[rustfmt::skip]
+        let page: &[(f32, f32, f32, f32, &str)] = &[
+            (300.79, 744.84, 12.81, 9.00, "13 "),
+            (256.85, 730.68, 100.55, 9.00, "Lor Emipsumd Olorsi "),
+            (66.62, 689.14, 200.41, 11.04, "Tame tconsec tet ura dipi scing elit se "),
+            (66.62, 673.18, 230.56, 11.04, "ddoeiusmo dte mpor in cididu nt utlabor ee tdolo "),
+            (315.07, 671.74, 226.24, 12.96, "Rem-ag-naal Iqua loremip sum dol orsit "),
+            (66.62, 657.10, 222.99, 11.04, "ame tcon secte tu radipisci ng elit seddoeiu. "),
+            (315.07, 656.62, 215.88, 12.96, "dolo rem agnaaliq ualor emipsum dolo "),
+            (315.07, 641.62, 220.97, 12.96, "rsitametc onse cteturadi pi s cingel "),
+            (66.62, 641.14, 212.86, 11.04, "Smodtem por-in-cidi du ntut labor (42%) eet "),
+            (66.62, 625.18, 230.62, 11.04, "itsed doei usm odte mpo rincidi duntut laboree "),
+            (315.07, 625.06, 189.74, 9.00, "Tdolo rem 46% ag naali qu aloremi, psumdolors, "),
+            (315.07, 613.06, 198.47, 9.00, "itametconse cte tura dipi sci nge litse ddoe iu "),
+            (66.62, 609.10, 208.91, 11.04, "sm odt emporinci diduntutl abor eetdolore. "),
+            (315.07, 601.06, 227.84, 9.00, "magnaaliq ual orem ip sumdol ors itam et consect et uradi "),
+            (66.62, 593.14, 222.78, 11.04, "Piscingelit sedd oeiusmod te mpo rinci didu "),
+            (315.07, 589.06, 197.46, 9.00, "ntu, % tla bor eetd ol ore magnaaliq ual oremips "),
+            (66.62, 577.18, 226.42, 11.04, "umdol or sitametco nsecte turadipisci ngeli "),
+            (315.07, 568.06, 135.54, 8.04, "Tsed Doeius Modte Mp Orincidid "),
+            (450.58, 568.06, 2.25, 9.00, " "),
+            (523.08, 568.06, 8.73, 9.00, "% "),
+            (66.62, 561.10, 225.14, 11.04, "untut laboreetdo lo remagnaaliqua loremipsumd "),
+            (315.07, 555.70, 95.64, 9.00, "Olorsitam et consectet  "),
+            (521.04, 555.70, 12.81, 9.00, "42 "),
+            (66.62, 545.14, 158.93, 11.04, "urad ipis cingelit seddoeiusmo.  "),
+            (315.07, 541.30, 133.20, 9.00, "Dtempori nc ididunt utlaboreetdolo  "),
+            (521.04, 541.30, 12.81, 9.00, "42 "),
+            (315.07, 526.87, 188.06, 9.00, "Remagna aliq ualorem ipsumd olo rsitam etconsecte  "),
+            (521.04, 526.87, 12.81, 9.00, "47 "),
+            (315.07, 512.47, 143.16, 9.00, "Turadi, piscingel its eddoei usmodtem  "),
+            (521.04, 512.47, 12.81, 9.00, "45 "),
+            (102.62, 509.95, 199.46, 11.04, "\"P'o rincididuntut laboree td ol O'r ema "),
+            (315.07, 498.07, 146.16, 9.00, "Gnaaliqualo remipsumd olorsitamet  "),
+            (523.68, 498.07, 7.53, 9.00, "2 "),
+            (102.62, 495.67, 185.17, 11.04, "conse ct et u radi piscin gelitse dd "),
+            (315.07, 485.11, 190.72, 9.00, "Oeiu sm odte mporin cidi duntut; labo re etdolorem "),
+            (102.62, 481.27, 103.70, 11.04, "agn aaliq ua lo remi.\""),
+            (206.33, 481.27, 80.38, 11.04, " - Psumd olors, "),
+            (523.68, 480.55, 7.53, 9.00, "2 "),
+            (315.07, 476.11, 40.41, 9.00, "itametcon "),
+            (102.62, 466.87, 50.54, 11.04, "secte, 65  "),
+            (315.07, 461.71, 155.64, 9.00, "Tura dipisci nge lits edd Oeiusm Odtemp "),
+            (523.68, 461.71, 7.53, 9.00, "7 "),
+            (315.07, 447.31, 74.88, 9.00, "Agn aaliq ualoremip "),
+            (521.04, 447.31, 12.81, 9.00, "43 "),
+            (102.62, 446.47, 133.14, 11.04, "\"Orinci didu ntutlaboreet "),
+            (235.85, 446.47, 40.74, 11.04, "dolor em "),
+            (315.07, 432.91, 42.57, 9.00, "Ad ipisci "),
+            (523.68, 432.91, 7.53, 9.00, "1 "),
+            (102.62, 432.07, 142.29, 11.04, "sumd O lo rsitame tc onsec.\""),
+            (244.97, 432.07, 38.79, 11.04, " - Tetur "),
+            (102.62, 417.79, 130.73, 11.04, "nge, litseddo eiusmodte, 62 "),
+            (315.07, 414.91, 220.48, 8.04, "Mpor: Incid id Untu tlabore etd olo remag naal iq ualoremip sum "),
+            (315.07, 404.95, 225.62, 8.04, "dolo rs itamet con sect et uradipi sc ingel its (e=549). Ddoe-ius "),
+            (102.62, 397.39, 182.13, 11.04, "\"Modtempor inc ididun tutl abor ee "),
+            (315.07, 394.99, 213.35, 8.04, "tdolorema gna aliqu alor emipsumdol. Orsitam etc on sect etur "),
+            (315.07, 384.91, 166.68, 8.04, "433% mporinc ididuntu tlaboreet dolo remagna. "),
+            (102.62, 382.99, 38.18, 11.04, "adipis.\""),
+            (140.78, 382.99, 149.01, 11.04, " - Cingelit seddo, eiusmodte, "),
+            (315.07, 374.95, 215.18, 8.04, "Aliqua: Loremi ps U.M. dolors itametcon Sect 44-Etu. 43, 5340. "),
+            (102.62, 368.57, 18.14, 11.04, "71  "),
+            (315.07, 364.97, 219.66, 8.04, "\"Radip isc Ing el Itse Ddoei us Modt Empo Rincididu Ntutla\""),
+            (534.72, 364.97, 2.01, 8.04, " "),
+            (315.07, 350.57, 87.60, 8.04, "Bor Eetdolor Emagna "),
+            (102.62, 348.29, 196.56, 11.04, "\"Aliqua lore mi psu mdolo rs it amet con "),
+            (102.62, 333.89, 198.58, 11.04, "secteturadipi scing elitsedd oe iusmodt "),
+            (102.62, 319.49, 149.39, 11.04, "emp or incididun tu tl abo.\""),
+            (252.05, 319.49, 140.23, 11.04, " - Reetd olore, magnaal, 78 "),
+            (66.62, 299.09, 450.20, 11.04, "Iqualor 47% emip s umdolor sita metcons ectetu rad ipisci ngelitsedd oe ius modtempor inc idi "),
+            (66.62, 284.69, 34.10, 11.04, "duntu: "),
+            (102.62, 264.41, 287.58, 11.04, "\"Tl aboree tdo loremagna al iq ualo. Re mips um dolo rsita.\""),
+            (390.34, 264.41, 126.13, 11.04, " - Metco nsect, eturadip "),
+            (102.62, 250.01, 88.61, 11.04, "iscingelitsed, 93 "),
+            (102.62, 232.73, 324.64, 11.04, "\"Doe iusmodtem po rinci didunt ut lab oreetdolo re magnaa liqu alo"),
+            (427.42, 232.73, 118.65, 11.04, "remipsu mdolorsita me tco "),
+            (102.62, 216.77, 257.57, 11.04, "nsec te turad ip iscinge litseddo ei usm odte mpori.\""),
+            (360.19, 216.77, 145.51, 11.04, " - Ncididun tut, laboreet, 98 "),
+            (66.62, 184.70, 472.29, 11.04, "Dolor ema-gn-aaliq (45%) ua lore mipsu mdo lors itam etcon sectetur adipisci ng elitse, ddoeiusmod "),
+            (66.62, 168.74, 433.78, 11.04, "tem porinc id idu ntut la boree tdo lo remag naaliqualorem ips umdolorsi tame tcons ectet "),
+            (66.62, 152.66, 55.58, 11.04, "uradipisc. "),
+            (102.62, 123.62, 395.34, 11.04, "\"In g elits eddoe I usm odtemp orin cid iduntutlab or eetdolorema gnaaliq ua "),
+            (102.62, 109.22, 433.64, 11.04, "loremipsumd. Ol or sitametc onse ctetu radipi sc i ngeli tse ddoe ius modtemporin cidid un "),
+            (264.41, 37.82, 85.55, 9.00, "tut.laboreetdol.ore "),
+        ];
+        let spans: Vec<TextSpan> = page
+            .iter()
+            .map(|&(x, y, w, size, text)| make_span_text(x, y, w, size, text, size))
+            .collect();
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        let order: Vec<usize> = strategy
+            .partition_indexed(&spans, &indices)
+            .into_iter()
+            .flatten()
+            .collect();
+        let pos = |i: usize| order.iter().position(|&o| o == i).unwrap();
+        let text_column: Vec<usize> = (0..spans.len())
+            .filter(|&i| spans[i].bbox.right() < 305.0 && (540.0..700.0).contains(&spans[i].bbox.y))
+            .collect();
+        let chart: Vec<usize> = (0..spans.len())
+            .filter(|&i| spans[i].bbox.left() >= 315.0 && (350.0..690.0).contains(&spans[i].bbox.y))
+            .collect();
+        assert!(text_column.len() >= 8 && chart.len() >= 8);
+        let last_text = text_column.iter().map(|&i| pos(i)).max().unwrap();
+        let first_chart = chart.iter().map(|&i| pos(i)).min().unwrap();
+        assert!(
+            last_text < first_chart,
+            "the text column is woven into the chart: {order:?}"
         );
     }
 }
