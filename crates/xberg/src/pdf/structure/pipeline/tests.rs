@@ -7205,3 +7205,75 @@ fn blocks_to_paragraphs_merges_normally_without_a_column_corridor_gh1806() {
         "with no corridor, the two lines merge as before this fix"
     );
 }
+
+fn dp3013_column_seg(text: &str, y: f32, width: f32, font_size: f32) -> SegmentData {
+    SegmentData {
+        width,
+        font_size,
+        ..seg_at(text, 306.6, y, font_size, false)
+    }
+}
+
+/// #3013 (Soluble p3): a note block and the text that resumes under it, a blank line apart in
+/// one column, are two paragraphs although the page-wide gap list has no gap there -- the
+/// other column's lines filled it. ~keep
+#[test]
+fn a_blank_line_inside_one_column_splits_without_a_page_wide_gap_3013() {
+    let segments = vec![
+        dp3013_column_seg(
+            "tance; PWP: pulmonary arterial wedge pressure; SD: standard deviation.",
+            247.0,
+            253.0,
+            8.0,
+        ),
+        dp3013_column_seg(
+            "anti-Ku, Ro52, anti-Pm-ScL. Reference ranges for creatinine 60-115",
+            237.4,
+            253.0,
+            8.0,
+        ),
+        dp3013_column_seg("<10 mg/L.", 227.9, 30.0, 8.0),
+        dp3013_column_seg(
+            "intensified treatment group and the standard-of-care group (80.2%",
+            205.5,
+            253.0,
+            9.0,
+        ),
+        dp3013_column_seg(
+            "[standard error (SE) 10.5%] vs. 81.0% [SE 12.8%] at 72 months of",
+            195.1,
+            253.0,
+            9.0,
+        ),
+    ];
+    let paragraphs = blocks_to_paragraphs(segments, &[], &[]);
+    assert_eq!(paragraphs.len(), 2);
+    assert!(paragraph_segment_text(&paragraphs[1]).starts_with("intensified"));
+}
+
+/// #3013's control: the same lines one leading apart are one paragraph. ~keep
+#[test]
+fn lines_one_leading_apart_in_one_column_stay_one_paragraph_3013() {
+    let segments = vec![
+        dp3013_column_seg(
+            "tance; PWP: pulmonary arterial wedge pressure; SD: standard deviation.",
+            247.0,
+            253.0,
+            8.0,
+        ),
+        dp3013_column_seg(
+            "anti-Ku, Ro52, anti-Pm-ScL. Reference ranges for creatinine 60-115",
+            237.4,
+            253.0,
+            8.0,
+        ),
+        dp3013_column_seg(
+            "mmol per litre, measured twice on every sample drawn at baseline",
+            227.9,
+            253.0,
+            8.0,
+        ),
+    ];
+    let paragraphs = blocks_to_paragraphs(segments, &[], &[]);
+    assert_eq!(paragraphs.len(), 1);
+}
