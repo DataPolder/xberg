@@ -810,7 +810,13 @@ fn reconstruct_region_tables(
     let Some(parent) =
         reconstruct_region_table(region, page_height, page_number, allow_single_column, horizontal_rules)
     else {
-        return Vec::new();
+        return reconstruct_gutter_fallback_tables(
+            region,
+            page_height,
+            page_number,
+            allow_single_column,
+            horizontal_rules,
+        );
     };
     if parent.cells.first().map_or(0, Vec::len) < SIDE_BY_SIDE_MIN_PARENT_COLUMNS {
         return vec![parent];
@@ -1320,6 +1326,39 @@ fn cluster_words_into_vertical_regions(
     let median_height = heights[heights.len() / 2].max(1);
     let row_tolerance = (median_height / 2).max(3);
     let row_tolerance_f = row_tolerance as f32;
+
+    let mut regions = split_words_on_row_gaps(words, median_height);
+
+    split_regions_at_column_corridors(&mut regions, median_height);
+
+    attach_aligned_numeric_headers(&mut regions, median_height, row_tolerance);
+
+    regions.retain(|r| {
+        if r.len() < 4 {
+            return false;
+        }
+        let mut row_ycs: Vec<f32> = r.iter().map(row_center).collect();
+        row_ycs.sort_by(|left, right| left.total_cmp(right));
+        row_ycs.dedup_by(|a, b| (*a - *b).abs() <= row_tolerance_f);
+        if row_ycs.len() < 3 {
+            return false;
+        }
+        let mut xs: Vec<u32> = r.iter().map(|w| w.left).collect();
+        xs.sort_unstable();
+        xs.dedup_by(|a, b| a.abs_diff(*b) <= REGION_X_TRACK_TOLERANCE);
+        xs.len() >= 2
+    });
+
+    regions
+}
+
+/// Split `words` into vertically-contiguous slabs on row-centre gaps larger than
+/// [`ROW_GAP_SPLIT_HEIGHT_FACTOR`] median word heights. ~keep
+fn split_words_on_row_gaps(
+    words: &[crate::pdf::table_reconstruct::HocrWord],
+    median_height: u32,
+) -> Vec<Vec<crate::pdf::table_reconstruct::HocrWord>> {
+    let row_tolerance_f = (median_height / 2).max(3) as f32;
     let row_gap_split = median_height as f32 * ROW_GAP_SPLIT_HEIGHT_FACTOR + ROW_CENTER_ROUNDING_SLACK;
 
     let mut sorted = words.to_vec();
@@ -1354,28 +1393,234 @@ fn cluster_words_into_vertical_regions(
     if !current.is_empty() {
         regions.push(current);
     }
-
-    split_regions_at_column_corridors(&mut regions, median_height);
-
-    attach_aligned_numeric_headers(&mut regions, median_height, row_tolerance);
-
-    regions.retain(|r| {
-        if r.len() < 4 {
-            return false;
-        }
-        let mut row_ycs: Vec<f32> = r.iter().map(row_center).collect();
-        row_ycs.sort_by(|left, right| left.total_cmp(right));
-        row_ycs.dedup_by(|a, b| (*a - *b).abs() <= row_tolerance_f);
-        if row_ycs.len() < 3 {
-            return false;
-        }
-        let mut xs: Vec<u32> = r.iter().map(|w| w.left).collect();
-        xs.sort_unstable();
-        xs.dedup_by(|a, b| a.abs_diff(*b) <= REGION_X_TRACK_TOLERANCE);
-        xs.len() >= 2
-    });
-
     regions
+}
+
+/// #3013: corridor floor, in median word heights, for the gutter fallback below. The regular
+/// floor ([`COLUMN_BLOCK_MIN_CORRIDOR_HEIGHTS`], 2.375) is 19 pt at an 8 pt word height,
+/// and a common journal gutter is 16 pt, so a table in one column of such a page is never
+/// separated from the prose beside it: the whole page goes to the table chain as one
+/// region and is rejected, and the table is emitted as prose (Soluble p3, Table 1). 1.5
+/// clears the gutter; the fallback only runs where the regular chain found nothing. ~keep
+const GUTTER_FALLBACK_MIN_CORRIDOR_HEIGHTS: f32 = 1.5;
+
+/// #3013: a region split at a narrow page gutter is re-clustered per side, and each slab, its
+/// caption and note lines peeled, gets the regular chain with column spill folded back.
+/// Only a region the regular chain rejected outright reaches here, so no table the regular
+/// chain builds can change; what is new is a table found inside a region that produced none.
+/// ~keep
+fn reconstruct_gutter_fallback_tables(
+    region: &[crate::pdf::table_reconstruct::HocrWord],
+    page_height: f32,
+    page_number: u32,
+    allow_single_column: bool,
+    horizontal_rules: usize,
+) -> Vec<Table> {
+    let median_height = median_word_height(region);
+    let Some((left, right)) =
+        split_region_at_column_corridor_with_floor(region, median_height, GUTTER_FALLBACK_MIN_CORRIDOR_HEIGHTS)
+    else {
+        return Vec::new();
+    };
+    let mut tables = Vec::new();
+    for side in [left, right] {
+        for slab in split_words_on_row_gaps(&side, median_height) {
+            if !is_table_candidate_slab(&slab, median_height) || is_mostly_running_text(&slab, median_height) {
+                continue;
+            }
+            let slab_words = slab.len();
+            let body = peel_edge_prose_rows(&slab, median_height).unwrap_or(slab);
+            if let Some(table) =
+                reconstruct_gutter_fallback_body(&body, page_height, page_number, allow_single_column, horizontal_rules)
+            {
+                tracing::trace!(
+                    page = page_number,
+                    words = body.len(),
+                    peeled = slab_words - body.len(),
+                    "heuristic table found in one column of a narrow-gutter page"
+                );
+                tables.push(table);
+            }
+        }
+    }
+    tables
+}
+
+/// #3013: the regular chain on a peeled slab, with label and value spill merged back first
+/// ([`merge_spill_columns_into_left_neighbour`]). ~keep
+fn reconstruct_gutter_fallback_body(
+    body: &[crate::pdf::table_reconstruct::HocrWord],
+    page_height: f32,
+    page_number: u32,
+    allow_single_column: bool,
+    horizontal_rules: usize,
+) -> Option<Table> {
+    let left = body.iter().map(|w| w.left).min().unwrap_or(0);
+    let right = body.iter().map(|w| w.left + w.width).max().unwrap_or(0);
+    let col_gap = heuristic_column_gap(body, right.saturating_sub(left) as f32);
+    match reconstruct_region_table_inner(
+        body,
+        page_height,
+        page_number,
+        allow_single_column,
+        col_gap,
+        horizontal_rules,
+        true,
+    ) {
+        Ok(table) => Some(table),
+        Err(reason) => {
+            tracing::trace!(
+                page = page_number,
+                words = body.len(),
+                ?reason,
+                "heuristic table region rejected (gutter fallback)"
+            );
+            None
+        }
+    }
+}
+
+/// #3013: fold a column that is only spill of its left neighbour back into it. A table with
+/// no rules gets its tracks from word positions, so a label that wraps or holds wide word
+/// spacing (`mPAP, mmHg, range`, `ANA only`) opens tracks of its own inside the label
+/// column, and a `58.0 ± 14.6` whose `±` has no glyph splits its value in two. Such a column
+/// has no header (its first-row cell is empty) and never holds a cell whose left neighbour
+/// is empty. Folding it keeps the table's own columns and removes the label fragments the
+/// column-flow guard reads as running text. ~keep
+fn merge_spill_columns_into_left_neighbour(grid: &mut [Vec<String>], column_positions: &mut Vec<u32>) {
+    let columns = grid.first().map_or(0, Vec::len);
+    if columns < 3 || grid.iter().any(|row| row.len() != columns) || column_positions.len() != columns {
+        return;
+    }
+    let mut column = 1;
+    while column < grid[0].len() {
+        let is_spill = grid[0][column].trim().is_empty()
+            && grid.iter().any(|row| !row[column].trim().is_empty())
+            && grid
+                .iter()
+                .all(|row| row[column].trim().is_empty() || !row[column - 1].trim().is_empty());
+        if !is_spill {
+            column += 1;
+            continue;
+        }
+        for row in grid.iter_mut() {
+            let spill = row.remove(column);
+            let spill = spill.trim();
+            if !spill.is_empty() {
+                let left = &mut row[column - 1];
+                left.push(' ');
+                left.push_str(spill);
+            }
+        }
+        column_positions.remove(column);
+    }
+}
+
+/// #3013: the same shape floor `cluster_words_into_vertical_regions` applies to its regions. ~keep
+fn is_table_candidate_slab(slab: &[crate::pdf::table_reconstruct::HocrWord], median_height: u32) -> bool {
+    if slab.len() < 4 {
+        return false;
+    }
+    let row_tolerance = (median_height / 2).max(3);
+    if group_rows(slab, row_tolerance).len() < 3 {
+        return false;
+    }
+    has_independent_column_tracks(slab)
+}
+
+/// #3013: a slab most of whose rows are running text is a column of prose, whatever a few
+/// justified lines with a wide gap make of it: a reference list (`Reitter. 2021. Measuring |
+/// attribution in natu-`) or a question set in a figure came out as two-column tables. A
+/// table's caption and note are a minority of its slab (Soluble p3: 12 rows of 57). ~keep
+fn is_mostly_running_text(slab: &[crate::pdf::table_reconstruct::HocrWord], median_height: u32) -> bool {
+    let rows = group_rows(slab, (median_height / 2).max(3));
+    let slab_left = slab.iter().map(|w| w.left).min().unwrap_or(0);
+    let slab_right = slab.iter().map(|w| w.left + w.width).max().unwrap_or(0);
+    let slab_width = slab_right.saturating_sub(slab_left);
+    let running = rows
+        .iter()
+        .filter(|row| is_running_text_row(row, median_height, slab_width))
+        .count();
+    running * 2 > rows.len()
+}
+
+/// #3013: rows of `slab` top to bottom, each ordered left to right. ~keep
+fn group_rows(
+    slab: &[crate::pdf::table_reconstruct::HocrWord],
+    row_tolerance: u32,
+) -> Vec<Vec<crate::pdf::table_reconstruct::HocrWord>> {
+    let row_tolerance_f = row_tolerance as f32;
+    let mut sorted = slab.to_vec();
+    sorted.sort_by(|left, right| row_center(left).total_cmp(&row_center(right)));
+    let mut rows: Vec<Vec<crate::pdf::table_reconstruct::HocrWord>> = Vec::new();
+    let mut idx = 0;
+    while idx < sorted.len() {
+        let row_yc = row_center(&sorted[idx]);
+        let mut end = idx + 1;
+        while end < sorted.len() && (row_center(&sorted[end]) - row_yc).abs() <= row_tolerance_f {
+            end += 1;
+        }
+        let mut row = sorted[idx..end].to_vec();
+        row.sort_by_key(|word| word.left);
+        rows.push(row);
+        idx = end;
+    }
+    rows
+}
+
+/// #3013: a row of running text — every word within one em of the next, so the row has no
+/// column break. A table caption (`Table 1`, its title lines) and the note block under a
+/// table are such rows; a table's header and data rows are not. ~keep
+fn is_running_text_row(row: &[crate::pdf::table_reconstruct::HocrWord], median_height: u32, slab_width: u32) -> bool {
+    let unbroken = row.windows(2).all(|pair| {
+        let gap = pair[1].left.saturating_sub(pair[0].left.saturating_add(pair[0].width));
+        gap <= median_height
+    });
+    unbroken || is_dense_full_width_row(row, slab_width)
+}
+
+/// #3013: a justified line of a note block can carry one wide gap — a `±` with no glyph, a
+/// stretched space — and still be running text: it spans the slab and its words cover most
+/// of that span. A table row that spans the slab is mostly whitespace between its cells. ~keep
+fn is_dense_full_width_row(row: &[crate::pdf::table_reconstruct::HocrWord], slab_width: u32) -> bool {
+    let (Some(first), Some(last)) = (row.first(), row.last()) else {
+        return false;
+    };
+    let span = last.left.saturating_add(last.width).saturating_sub(first.left);
+    let ink: u32 = row.iter().map(|word| word.width).sum();
+    row.len() >= RUNNING_TEXT_MIN_WORDS
+        && u64::from(span) * 100 >= u64::from(slab_width) * RUNNING_TEXT_MIN_SPAN_PERCENT
+        && u64::from(ink) * 100 >= u64::from(span) * RUNNING_TEXT_MIN_INK_PERCENT
+}
+
+/// #3013: see [`is_dense_full_width_row`]. ~keep
+const RUNNING_TEXT_MIN_WORDS: usize = 6;
+const RUNNING_TEXT_MIN_SPAN_PERCENT: u64 = 80;
+const RUNNING_TEXT_MIN_INK_PERCENT: u64 = 75;
+
+/// #3013: drop the running-text rows at the top and the bottom of `slab` — a caption above a
+/// table and the note block under it, which the column-flow guard rightly reads as prose and
+/// for which it then rejects the whole table. Returns `None` when nothing is peeled or fewer
+/// than three rows remain. ~keep
+fn peel_edge_prose_rows(
+    slab: &[crate::pdf::table_reconstruct::HocrWord],
+    median_height: u32,
+) -> Option<Vec<crate::pdf::table_reconstruct::HocrWord>> {
+    let rows = group_rows(slab, (median_height / 2).max(3));
+    let slab_left = slab.iter().map(|w| w.left).min().unwrap_or(0);
+    let slab_right = slab.iter().map(|w| w.left + w.width).max().unwrap_or(0);
+    let slab_width = slab_right.saturating_sub(slab_left);
+    let start = rows
+        .iter()
+        .position(|row| !is_running_text_row(row, median_height, slab_width))?;
+    let end = rows
+        .iter()
+        .rposition(|row| !is_running_text_row(row, median_height, slab_width))?
+        + 1;
+    if (start == 0 && end == rows.len()) || end.saturating_sub(start) < 3 {
+        return None;
+    }
+    Some(rows[start..end].iter().flatten().cloned().collect())
 }
 
 /// Further split each y-clustered region on a dominant vertical corridor — a gap in x
@@ -1413,6 +1658,17 @@ fn split_region_at_column_corridor(
     Vec<crate::pdf::table_reconstruct::HocrWord>,
     Vec<crate::pdf::table_reconstruct::HocrWord>,
 )> {
+    split_region_at_column_corridor_with_floor(region, median_height, COLUMN_BLOCK_MIN_CORRIDOR_HEIGHTS)
+}
+
+fn split_region_at_column_corridor_with_floor(
+    region: &[crate::pdf::table_reconstruct::HocrWord],
+    median_height: u32,
+    minimum_corridor_heights: f32,
+) -> Option<(
+    Vec<crate::pdf::table_reconstruct::HocrWord>,
+    Vec<crate::pdf::table_reconstruct::HocrWord>,
+)> {
     let intervals = merged_horizontal_intervals(region);
     if intervals.len() < 2 {
         return None;
@@ -1427,7 +1683,7 @@ fn split_region_at_column_corridor(
     corridors.sort_unstable_by_key(|&(width, _)| std::cmp::Reverse(width));
     let (widest, seam) = *corridors.first()?;
 
-    let minimum_corridor = (median_height.max(1) as f32 * COLUMN_BLOCK_MIN_CORRIDOR_HEIGHTS).ceil() as u32;
+    let minimum_corridor = (median_height.max(1) as f32 * minimum_corridor_heights).ceil() as u32;
     if widest < minimum_corridor {
         return None;
     }
@@ -1609,6 +1865,26 @@ fn reconstruct_region_table_with_column_gap(
     col_gap: u32,
     horizontal_rules: usize,
 ) -> std::result::Result<Table, HeuristicTableRejection> {
+    reconstruct_region_table_inner(
+        region,
+        page_height,
+        page_number,
+        allow_single_column,
+        col_gap,
+        horizontal_rules,
+        false,
+    )
+}
+
+fn reconstruct_region_table_inner(
+    region: &[crate::pdf::table_reconstruct::HocrWord],
+    page_height: f32,
+    page_number: u32,
+    allow_single_column: bool,
+    col_gap: u32,
+    horizontal_rules: usize,
+    merge_spill_columns: bool,
+) -> std::result::Result<Table, HeuristicTableRejection> {
     use crate::pdf::table_reconstruct::{
         is_well_formed_borderless_table, looks_like_code_listing, post_process_table_with_columns, table_to_markdown,
     };
@@ -1624,6 +1900,9 @@ fn reconstruct_region_table_with_column_gap(
     // leave `grid` one column narrower than `column_positions` for every consumer below —
     // including `is_well_formed_borderless_table`, which is handed both.
     repair_split_numeric_track(&mut grid, region, &mut column_positions);
+    if merge_spill_columns {
+        merge_spill_columns_into_left_neighbour(&mut grid, &mut column_positions);
+    }
     if grid.is_empty() || grid[0].is_empty() {
         return Err(HeuristicTableRejection::EmptyGrid);
     }
@@ -5202,5 +5481,237 @@ mod tests {
             split_region_at_column_corridor(&region, height).is_some(),
             "a corridor 1.5x wider than the next-widest is dominant and must split the region"
         );
+    }
+
+    fn dp3013_word(text: &str, left: u32, top: u32, width: u32) -> crate::pdf::table_reconstruct::HocrWord {
+        crate::pdf::table_reconstruct::HocrWord {
+            text: text.to_string(),
+            left,
+            top,
+            width,
+            height: 8,
+            confidence: 95.0,
+        }
+    }
+
+    /// One line of running text from `left` to at most `right`: words of varying width,
+    /// 3 units apart, so no two lines share a word edge the way table columns do. Every
+    /// seventh word is a number, as in a results section.
+    fn dp3013_prose_line(line: u32, left: u32, right: u32, top: u32) -> Vec<crate::pdf::table_reconstruct::HocrWord> {
+        let mut words = Vec::new();
+        let mut cursor = left;
+        let mut k = 0;
+        loop {
+            let width = 12 + (line * 31 + k * 17) % 25;
+            if cursor + width > right {
+                break;
+            }
+            let text = if (line + k) % 7 == 3 { "4.7" } else { "lorem" };
+            words.push(dp3013_word(text, cursor, top, width));
+            cursor += width + 3;
+            k += 1;
+        }
+        words
+    }
+
+    /// Soluble p3 in miniature: two columns 16 units apart at an 8-unit word height, a
+    /// caption, a five-column table and a note block at the top of the right column, prose
+    /// everywhere else.
+    fn dp3013_narrow_gutter_page() -> Vec<crate::pdf::table_reconstruct::HocrWord> {
+        let mut words = Vec::new();
+        for line in 0..60 {
+            words.extend(dp3013_prose_line(line, 38, 291, 60 + line * 10));
+        }
+        words.push(dp3013_word("Table", 307, 60, 20));
+        words.push(dp3013_word("1", 330, 60, 4));
+        words.extend(dp3013_prose_line(99, 307, 560, 70));
+        for (text, left, width) in [
+            ("Characteristic", 313, 60),
+            ("Overall", 397, 30),
+            ("Treated", 441, 30),
+            ("Control", 488, 30),
+            ("p-value", 535, 20),
+        ] {
+            words.push(dp3013_word(text, left, 84, width));
+        }
+        let labels = [
+            "Age, y",
+            "Female, n (%)",
+            "Disease duration, y",
+            "Smoking, n (%)",
+            "Limited",
+            "Diffuse",
+            "mRSS, score",
+            "Centromere",
+            "Topoisomerase I",
+            "None",
+            "Digital ulcers, n (%)",
+            "ILD, n (%)",
+            "Prednisone",
+            "Serum creatinine",
+            "CRP, mg/L",
+        ];
+        for (row, label) in labels.iter().enumerate() {
+            let row = row as u32;
+            let top = 94 + row * 9;
+            let mut cursor = 313;
+            for word in label.split(' ') {
+                let width = 4 * word.len() as u32;
+                words.push(dp3013_word(word, cursor, top, width));
+                cursor += width + 3;
+            }
+            for (column, left) in [397, 441, 488].into_iter().enumerate() {
+                let count = (row * 7 + column as u32 * 11) % 40 + 1;
+                words.push(dp3013_word(&count.to_string(), left, top, 8));
+                words.push(dp3013_word(&format!("({})", (count * 13) % 90 + 5), left + 11, top, 12));
+            }
+            words.push(dp3013_word(&format!("0.{:03}", (row * 137) % 1000), 535, top, 18));
+        }
+        for (line, top) in [(200, 300), (201, 310), (202, 320)] {
+            words.extend(dp3013_prose_line(line, 307, 560, top));
+        }
+        for line in 0..30 {
+            words.extend(dp3013_prose_line(300 + line, 307, 560, 345 + line * 10));
+        }
+        words
+    }
+
+    /// #3013: the regular corridor floor (19 units at a word height of 8) keeps a 16-unit gutter
+    /// shut, so the page is one region, and the regular chain rejects it; the gutter fallback
+    /// separates the right column and finds its table. ~keep
+    #[test]
+    fn a_table_in_one_column_of_a_narrow_gutter_page_is_found_3013() {
+        let words = dp3013_narrow_gutter_page();
+        let regions = cluster_words_into_vertical_regions(&words);
+        assert_eq!(
+            regions.len(),
+            1,
+            "the 16-unit gutter does not split the page on the regular floor"
+        );
+        assert!(
+            reconstruct_region_table(&regions[0], 792.0, 3, false, 0).is_none(),
+            "the regular chain rejects the whole page"
+        );
+
+        let tables = reconstruct_region_tables(&regions[0], 792.0, 3, false, 0);
+        assert_eq!(
+            tables.len(),
+            1,
+            "the fallback finds the right column's table, and only it: {:?}",
+            tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+        );
+        let table = &tables[0];
+        assert_eq!(table.cells[0].len(), 5, "{:?}", table.cells);
+        assert_eq!(
+            table.cells[0],
+            ["Characteristic", "Overall", "Treated", "Control", "p-value"]
+        );
+        assert_eq!(table.cells[1], ["Age, y", "1 (18)", "12 (71)", "23 (34)", "0.000"]);
+        assert_eq!(
+            table.cells.len(),
+            16,
+            "the header and fifteen rows, no caption, no note"
+        );
+        assert!(
+            table.cells.iter().flatten().all(|cell| !cell.contains("lorem")),
+            "no prose line is part of the table: {:?}",
+            table.cells
+        );
+    }
+
+    /// #3013: a page of plain two-column prose gets no table from the fallback. ~keep
+    #[test]
+    fn narrow_gutter_prose_yields_no_table_3013() {
+        let mut words = Vec::new();
+        for line in 0..60 {
+            words.extend(dp3013_prose_line(line, 38, 291, 60 + line * 10));
+            words.extend(dp3013_prose_line(500 + line, 307, 560, 60 + line * 10));
+        }
+        let regions = cluster_words_into_vertical_regions(&words);
+        let tables: Vec<Table> = regions
+            .iter()
+            .flat_map(|region| reconstruct_region_tables(region, 792.0, 1, false, 0))
+            .collect();
+        assert!(
+            tables.is_empty(),
+            "{:?}",
+            tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+        );
+    }
+
+    /// #3013: a label that opens tracks of its own, and a value whose `±` has no glyph, are
+    /// folded back into their column; a headed column is never folded. ~keep
+    #[test]
+    fn spill_columns_fold_into_their_left_neighbour_3013() {
+        let row = |cells: &[&str]| cells.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+        let mut grid = vec![
+            row(&["Characteristic", "", "", "Overall", "Treated", "", "p-value"]),
+            row(&["Age, y", "", "", "58.0", "59.7", "14.0", "0.556"]),
+            row(&["ANA", "only", "", "2 (5)", "2 (14)", "", "0.153"]),
+            row(&["mPAP,", "mmHg,", "range", "34", "", "", ""]),
+            row(&["CRP,", "mg/L", "", "2 (3)", "4 (15)", "", "0.104"]),
+        ];
+        let mut positions = vec![313, 340, 361, 397, 441, 462, 535];
+        merge_spill_columns_into_left_neighbour(&mut grid, &mut positions);
+        assert_eq!(positions, vec![313, 397, 441, 535]);
+        assert_eq!(grid[0], row(&["Characteristic", "Overall", "Treated", "p-value"]));
+        assert_eq!(grid[1], row(&["Age, y", "58.0", "59.7 14.0", "0.556"]));
+        assert_eq!(grid[2], row(&["ANA only", "2 (5)", "2 (14)", "0.153"]));
+        assert_eq!(grid[3], row(&["mPAP, mmHg, range", "34", "", ""]));
+    }
+
+    /// #3013: a column with a cell beside an empty left neighbour is a column of its own. ~keep
+    #[test]
+    fn a_column_with_its_own_cells_is_not_spill_3013() {
+        let row = |cells: &[&str]| cells.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+        let mut grid = vec![row(&["Item", "", "Value"]), row(&["a", "1", "2"]), row(&["", "3", "4"])];
+        let mut positions = vec![10, 60, 110];
+        merge_spill_columns_into_left_neighbour(&mut grid, &mut positions);
+        assert_eq!(positions.len(), 3);
+    }
+
+    /// #3013: a caption above a table and the note block under it are peeled; the table's own
+    /// header and rows stay. ~keep
+    #[test]
+    fn caption_and_note_rows_are_peeled_off_a_slab_3013() {
+        let mut slab = vec![dp3013_word("Table", 307, 60, 20), dp3013_word("1", 330, 60, 4)];
+        slab.extend(dp3013_prose_line(7, 307, 560, 70));
+        for row in 0..4 {
+            let top = 84 + row * 9;
+            slab.push(dp3013_word("Label", 313, top, 40));
+            slab.push(dp3013_word("1.0", 397, top, 16));
+            slab.push(dp3013_word("2.0", 441, top, 16));
+        }
+        // A justified note line with one wide gap (a `±` without a glyph) is still text.
+        let mut note = dp3013_prose_line(8, 307, 560, 130);
+        for word in note.iter_mut().skip(3) {
+            word.left += 9;
+        }
+        note.retain(|word| word.left + word.width <= 560);
+        slab.extend(note);
+
+        let body = peel_edge_prose_rows(&slab, 8).expect("the caption and the note are peeled");
+        assert_eq!(body.len(), 12, "the four table rows remain: {body:?}");
+        assert!(body.iter().all(|word| (84..=111).contains(&word.top)));
+    }
+
+    /// #3013: a reference column whose justified lines open a few wide gaps is not a table. ~keep
+    #[test]
+    fn a_prose_column_with_a_few_justified_gaps_is_not_a_table_3013() {
+        let mut slab = Vec::new();
+        for line in 0..20 {
+            let top = 60 + line * 10;
+            let mut words = dp3013_prose_line(400 + line, 307, 560, top);
+            if line % 4 == 0 {
+                // A justified line: its second half pushed right by a 20-unit gap.
+                let half = words.len() / 2;
+                for word in words.iter_mut().skip(half) {
+                    word.left += 20;
+                }
+                words.retain(|word| word.left + word.width <= 580);
+            }
+            slab.extend(words);
+        }
+        assert!(is_mostly_running_text(&slab, 8));
     }
 }

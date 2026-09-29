@@ -1899,6 +1899,30 @@ fn compute_paragraph_gap_ys_in_shared_frame(segments: &[SegmentData]) -> Vec<f32
         return Vec::new();
     }
 
+    let lines = line_bands(segments);
+    if lines.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut heights: Vec<f32> = lines.iter().map(|l| l.height).collect();
+    heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median_height = heights[heights.len() / 2];
+    let gap_threshold = median_height * PARAGRAPH_GAP_HEIGHT_FACTOR;
+    let advance_threshold = body_leading(&lines, median_height) * PARAGRAPH_BREAK_LEADING_MULTIPLE;
+
+    let mut gap_ys = Vec::new();
+    for pair in lines.windows(2) {
+        let gap = pair[0].bottom - pair[1].top;
+        let advance = pair[0].anchor_y - pair[1].anchor_y;
+        if (gap > gap_threshold || advance > advance_threshold) && !(pair[0].monospace && pair[1].monospace) {
+            gap_ys.push((pair[0].bottom + pair[1].top) / 2.0);
+        }
+    }
+    gap_ys
+}
+
+/// Cluster `segments` into visual lines, top to bottom.
+fn line_bands(segments: &[SegmentData]) -> Vec<LineBand> {
     let mut order: Vec<usize> = (0..segments.len()).collect();
     order.sort_by(|&a, &b| {
         paragraph_gap_axis(&segments[b])
@@ -1932,25 +1956,7 @@ fn compute_paragraph_gap_ys_in_shared_frame(segments: &[SegmentData]) -> Vec<f32
             }),
         }
     }
-    if lines.len() < 2 {
-        return Vec::new();
-    }
-
-    let mut heights: Vec<f32> = lines.iter().map(|l| l.height).collect();
-    heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median_height = heights[heights.len() / 2];
-    let gap_threshold = median_height * PARAGRAPH_GAP_HEIGHT_FACTOR;
-    let advance_threshold = body_leading(&lines, median_height) * PARAGRAPH_BREAK_LEADING_MULTIPLE;
-
-    let mut gap_ys = Vec::new();
-    for pair in lines.windows(2) {
-        let gap = pair[0].bottom - pair[1].top;
-        let advance = pair[0].anchor_y - pair[1].anchor_y;
-        if (gap > gap_threshold || advance > advance_threshold) && !(pair[0].monospace && pair[1].monospace) {
-            gap_ys.push((pair[0].bottom + pair[1].top) / 2.0);
-        }
-    }
-    gap_ys
+    lines
 }
 
 /// Estimate the body leading of a page from its own line pitch: the tightest
@@ -2054,6 +2060,83 @@ const PARAGRAPH_FULL_WIDTH_FURNITURE_FRACTION: f32 = 0.55;
 /// break vote's absence, never force one -- so a corridor found here that later turns out
 /// not to be a real column gutter can only leave two segments un-merged, never wrongly
 /// merge or reorder anything. ~keep
+/// #3013: the body leading of each side of `corridor` -- `body_leading` over the lines
+/// that lie wholly left, and wholly right, of it -- or, without a corridor, of all of
+/// `lines` (both entries). `None` for a side with fewer than two lines. ~keep
+fn column_body_leadings(lines: &[SegmentData], corridor: Option<(f32, f32)>) -> (Option<f32>, Option<f32>) {
+    let side = |keep: &dyn Fn(f32, f32) -> bool| {
+        let segments: Vec<SegmentData> = lines
+            .iter()
+            .filter(|segment| segment.is_unrotated() && !segment.text.trim().is_empty())
+            .filter(|segment| {
+                let (left, right) = segment.upright_advance_extent();
+                keep(left, right)
+            })
+            .cloned()
+            .collect();
+        let bands = line_bands(&segments);
+        if bands.len() < 2 {
+            return None;
+        }
+        let mut heights: Vec<f32> = bands.iter().map(|band| band.height).collect();
+        heights.sort_by(f32::total_cmp);
+        Some(body_leading(&bands, heights[heights.len() / 2]))
+    };
+    match corridor {
+        Some((corridor_left, corridor_right)) => (
+            side(&|_, right| right <= corridor_left),
+            side(&|left, _| left >= corridor_right),
+        ),
+        None => {
+            let leading = side(&|_, _| true);
+            (leading, leading)
+        }
+    }
+}
+
+/// #3013: how much smaller than the text under it a note is set, in points, for the
+/// column blank-line break (and the continuation join, `paragraphs.rs`) to treat it as a
+/// note. Journal notes and captions run 0.5–2 pt under body text; `font_change` breaks at
+/// more than 1.5 pt on its own. ~keep
+pub(super) const NOTE_FONT_SIZE_STEP: f32 = 0.5;
+
+/// #3013: whether a line's text ends with sentence punctuation. ~keep
+fn ends_a_sentence(text: &str) -> bool {
+    matches!(
+        text.trim_end().chars().last(),
+        Some('.' | '?' | '!' | ':' | ';' | '\u{3002}' | '\u{FF1F}' | '\u{FF01}')
+    )
+}
+
+/// #3013: whether `prev` and `line` share horizontal extent -- one stacked under the other in
+/// the same column, not a jump to the next column. ~keep
+fn lines_are_stacked(prev: &SegmentData, line: &SegmentData) -> bool {
+    let (prev_left, prev_right) = prev.upright_advance_extent();
+    let (line_left, line_right) = line.upright_advance_extent();
+    prev_left < line_right && line_left < prev_right
+}
+
+/// #3013: the leading of the column side both `prev` and `line` lie on, if they share one. ~keep
+fn same_side_leading(
+    prev: &SegmentData,
+    line: &SegmentData,
+    corridor: Option<(f32, f32)>,
+    leadings: (Option<f32>, Option<f32>),
+) -> Option<f32> {
+    let Some((corridor_left, corridor_right)) = corridor else {
+        return leadings.0;
+    };
+    let (prev_left, prev_right) = prev.upright_advance_extent();
+    let (line_left, line_right) = line.upright_advance_extent();
+    if prev_right <= corridor_left && line_right <= corridor_left {
+        leadings.0
+    } else if prev_left >= corridor_right && line_left >= corridor_right {
+        leadings.1
+    } else {
+        None
+    }
+}
+
 fn page_column_corridor(lines: &[SegmentData]) -> Option<(f32, f32)> {
     let mut extents: Vec<(f32, f32)> = lines
         .iter()
@@ -2112,6 +2195,7 @@ fn blocks_to_paragraphs(
     let gap_info = super::classify::precompute_gap_info(heading_map);
     let visual_line_texts = visual_line_texts(&lines);
     let column_corridor = page_column_corridor(&lines);
+    let column_leadings = column_body_leadings(&lines, column_corridor);
 
     let mut paragraphs: Vec<PdfParagraph> = Vec::new();
     let mut current_lines: Vec<&SegmentData> = Vec::new();
@@ -2213,7 +2297,11 @@ fn blocks_to_paragraphs(
                         line,
                         line_right,
                         column_right_edge_ahead(&lines, line_idx, line_right),
-                        next_visual_line_right_edge(&lines, line_idx, (prev.upright_baseline() - line.upright_baseline()).abs()),
+                        next_visual_line_right_edge(
+                            &lines,
+                            line_idx,
+                            (prev.upright_baseline() - line.upright_baseline()).abs(),
+                        ),
                     )
                 });
             let follows_section = starts_new_line && heading_run.is_some() && !heading_continues;
@@ -2244,6 +2332,31 @@ fn blocks_to_paragraphs(
                     };
                     gap_y < upper && gap_y > lower
                 });
+            // #3013: `paragraph_gap_ys` is measured over the whole page, so on a two-column
+            // page a blank line in one column is filled by the other column's lines at the
+            // same height and never becomes a gap -- also when this grouper is handed one
+            // column's block, whose own lines it cannot see a corridor in. Measured in the
+            // column instead: a line of a note -- set smaller than the text under it --
+            // that ends a sentence, and the line stacked under it (their x-extents
+            // overlap), further apart than `PARAGRAPH_BREAK_LEADING_MULTIPLE` x the leading
+            // of their column side -- of `lines` as a whole when there is no corridor -- are
+            // two paragraphs. Only after a sentence end: an OCR text layer's uneven line
+            // pitch opens such an advance inside a sentence too (`NDA getekend` p7). Only
+            // out of a smaller size: between two blocks of one size the rule split
+            // identical boilerplate paragraphs apart, which the running-line strip then
+            // removed (`eurosurv-25-3`'s licence notes). Soluble p3: the note under Table 1
+            // (`… CRP <10 mg/L.`, 7.2 pt) and the §3.2 text that resumes under it
+            // (`intensified treatment group …`, 8.0 pt) are 22.4 pt apart in a column of
+            // 9.6 pt pitch, and were one paragraph. ~keep
+            let crossed_column_gap = starts_new_line
+                && !(heading_continues && within_heading_leading)
+                && line.font_size - prev.font_size >= NOTE_FONT_SIZE_STEP
+                && ends_a_sentence(&prev.text)
+                && lines_are_stacked(prev, line)
+                && same_side_leading(prev, line, column_corridor, column_leadings).is_some_and(|leading| {
+                    (prev.upright_baseline() - line.upright_baseline()).abs()
+                        > leading * PARAGRAPH_BREAK_LEADING_MULTIPLE
+                });
             // GH#1806: two lines on opposite sides of the page's column corridor, sharing
             // no horizontal extent at all, are not one paragraph -- whatever reading order
             // the page is in. The existing terms vote on rotation, font, role, weight, list
@@ -2270,6 +2383,7 @@ fn blocks_to_paragraphs(
                 || starts_section
                 || follows_section
                 || crossed_gap
+                || crossed_column_gap
                 || crosses_column_corridor
         };
 
@@ -2297,7 +2411,11 @@ fn blocks_to_paragraphs(
                     line,
                     line_right,
                     column_right_edge_ahead(&lines, line_idx, line_right),
-                    next_visual_line_right_edge(&lines, line_idx, (prev.upright_baseline() - line.upright_baseline()).abs()),
+                    next_visual_line_right_edge(
+                        &lines,
+                        line_idx,
+                        (prev.upright_baseline() - line.upright_baseline()).abs(),
+                    ),
                 ) {
                     heading_run = None;
                 }

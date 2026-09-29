@@ -13,6 +13,21 @@ use super::types::PdfParagraph;
 /// associate their text (and mangle the merged block's bounding box). See #1350.
 const MAX_CONTINUATION_LINE_GAP_MULTIPLE: f32 = 3.0;
 
+/// #3013: the baseline gap, in line pitches, a paragraph that ENDS a sentence and is set
+/// smaller than the lowercase paragraph under it (a note, `NOTE_FONT_SIZE_STEP` or more)
+/// may have to it and still be joined. With a terminator the lowercase opening is the only
+/// continuation signal, and a lowercase line that resumes a sentence from elsewhere (the
+/// other column, above a table) meets it as well. A real wrap sits one pitch below its
+/// predecessor; a blank line between them is a break. The pitch is the paragraphs' own
+/// (the larger of the two), so a generously leaded document keeps its joins. On Soluble p3
+/// the note under Table 1 (`… CRP <10 mg/L.`, pitch 9.6 pt) sits 22.4 pt above `intensified
+/// treatment group …`, and was joined to it. ~keep
+const MAX_TERMINATED_CONTINUATION_PITCH_MULTIPLE: f32 = 1.5;
+
+/// #3013: a single-line paragraph has no pitch of its own; one this many font sizes is assumed,
+/// the top of the usual 1.0–1.3 range. ~keep
+const ASSUMED_PITCH_FONT_FACTOR: f32 = 1.3;
+
 /// Merge consecutive body-text paragraphs that are continuations of the same logical paragraph.
 ///
 /// Two consecutive paragraphs are merged if:
@@ -48,7 +63,10 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
         let continuation_signal = !ends_with_sentence_terminator(&current) || starts_with_lowercase_continuation(&next);
         let same_region = current.layout_region_path == next.layout_region_path;
         let same_rotation = paragraphs_share_rotation(&current, &next);
-        let vertical_gap_compatible = baselines_within_continuation_gap(&current, &next);
+        let vertical_gap_compatible = baselines_within_continuation_gap(&current, &next)
+            && (!ends_with_sentence_terminator(&current)
+                || next.dominant_font_size - current.dominant_font_size < super::pipeline::NOTE_FONT_SIZE_STEP
+                || terminated_join_within_one_pitch(&current, &next));
         // A numbered section heading starts a new logical element and must never be
         // absorbed as a continuation. A heading does not end in `.?!:;`, so
         // `continuation_signal` is satisfied by the *previous* heading alone — it is
@@ -169,6 +187,41 @@ fn paragraphs_share_rotation(current: &PdfParagraph, next: &PdfParagraph) -> boo
 /// Returns `true` when either paragraph lacks per-line geometry (`baseline_y`
 /// unset on the structure-tree path), preserving the prior behavior for inputs
 /// where a vertical distance cannot be computed.
+/// #3013: see [`MAX_TERMINATED_CONTINUATION_PITCH_MULTIPLE`]. `true` without geometry, as
+/// [`baselines_within_continuation_gap`]. ~keep
+fn terminated_join_within_one_pitch(current: &PdfParagraph, next: &PdfParagraph) -> bool {
+    let (Some(current_last), Some(next_first)) = (current.lines.last(), next.lines.first()) else {
+        return true;
+    };
+    if current_last.baseline_y == 0.0 || next_first.baseline_y == 0.0 {
+        return true;
+    }
+    let gap = (current_last.baseline_y - next_first.baseline_y).abs();
+    let assumed = current.dominant_font_size.max(next.dominant_font_size).max(1.0) * ASSUMED_PITCH_FONT_FACTOR;
+    let pitch = match (line_pitch(current), line_pitch(next)) {
+        (Some(a), Some(b)) => a.max(b),
+        (Some(a), None) | (None, Some(a)) => a,
+        (None, None) => assumed,
+    };
+    gap <= pitch * MAX_TERMINATED_CONTINUATION_PITCH_MULTIPLE
+}
+
+/// #3013: the median baseline-to-baseline advance of a paragraph's own lines. ~keep
+fn line_pitch(paragraph: &PdfParagraph) -> Option<f32> {
+    let mut advances: Vec<f32> = paragraph
+        .lines
+        .windows(2)
+        .filter(|pair| pair[0].baseline_y != 0.0 && pair[1].baseline_y != 0.0)
+        .map(|pair| (pair[0].baseline_y - pair[1].baseline_y).abs())
+        .filter(|advance| *advance > 0.5)
+        .collect();
+    if advances.is_empty() {
+        return None;
+    }
+    advances.sort_by(f32::total_cmp);
+    Some(advances[advances.len() / 2])
+}
+
 fn baselines_within_continuation_gap(current: &PdfParagraph, next: &PdfParagraph) -> bool {
     let (Some(current_last), Some(next_first)) = (current.lines.last(), next.lines.first()) else {
         return true;
@@ -412,6 +465,33 @@ mod tests {
             segment.y = baseline_y;
         }
         para
+    }
+
+    /// #3013 (Soluble p3): the note under a table ends a sentence; the lowercase line a blank
+    /// line below it resumes a sentence from the other column, not the note's. ~keep
+    #[test]
+    fn a_terminated_paragraph_does_not_absorb_a_lowercase_paragraph_a_blank_line_below_3013() {
+        let mut paragraphs = vec![
+            make_body_paragraph_at(
+                "Reference ranges for creatinine 60-115 umol/L, CRP <10 mg/L.",
+                8.0,
+                227.9,
+            ),
+            make_body_paragraph_at("intensified treatment group and the standard-of-care group", 9.0, 205.5),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 2);
+    }
+
+    /// #3013's control: a lowercase line one leading below a terminated line is still its wrap. ~keep
+    #[test]
+    fn a_terminated_paragraph_still_takes_a_lowercase_wrap_one_leading_below_3013() {
+        let mut paragraphs = vec![
+            make_body_paragraph_at("The dose was 5 mg/kg i.v.", 9.0, 227.9),
+            make_body_paragraph_at("twice daily for the first week", 9.0, 217.5),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1);
     }
 
     #[test]
