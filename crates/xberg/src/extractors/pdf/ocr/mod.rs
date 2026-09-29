@@ -64,7 +64,9 @@ pub(crate) use document::{
 pub(crate) use pipeline::extract_full_document_ocr_pipeline_per_page;
 #[cfg(all(any(feature = "ocr", feature = "ocr-pipeline"), feature = "pdf"))]
 pub(crate) use pipeline::extract_mixed_ocr_native_with_single_block_pages;
-#[cfg(test)]
+// ~keep Must match the definition's own gate in `pipeline.rs`; `#[cfg(test)]` alone left
+// this import unresolved on every leg without an OCR feature (GH#1951).
+#[cfg(all(test, any(feature = "ocr", feature = "ocr-pipeline")))]
 pub(crate) use pipeline::extract_with_ocr;
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 pub(crate) use pipeline::{
