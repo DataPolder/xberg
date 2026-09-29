@@ -276,6 +276,37 @@ const MIN_PEELED_FULL_WIDTH_LINES: usize = 2;
 // across a column cut. A row's two cells are separated by the gutter (several ems); a
 // legend's own font runs abut at normal word/kern spacing.
 const MAX_INTRA_LINE_GAP_EM: f32 = 1.0;
+// X8: the smaller side of a line must hold at least this share of its ink for the line to
+// count as crossing a column cut (and be assigned by its majority, see `partition_lines_at`).
+// A legend through the gutter splits near evenly (upstream's own straddle test is 42/58); a
+// body line cut a third of the way into its own column (29/71) is not crossing anything.
+const MIN_CROSSING_SHARE: f32 = 0.4;
+// X8: a line this many ems of ink wide or less, first on its row, is a lead -- a hanging
+// number, a bullet, a label -- that travels with the line after it (see `partition_lines_at`).
+const MAX_LEAD_EM: f32 = 4.0;
+
+/// X8: the right edge of a span's INK, for the whole-line machinery below. An extractor bbox
+/// can reach far past its glyphs (trailing whitespace, a stretched advance width -- a
+/// running header `J.S. Levine et al.` measured 465 pt wide), and read raw it fuses a
+/// left-column line with the right column's line on the same baseline, counts the pair as
+/// full width and sends it to one side whole. Clamp the bbox to a generous upper bound on
+/// what its text can occupy: 0.75 em per visible character and 1.5 em per space, well
+/// above any real glyph run (body text averages ~0.5 em), so a genuine span keeps its
+/// bbox and only an inflated one is cut back. ~keep
+fn ink_right(span: &TextSpan) -> f32 {
+    let left = span.bbox.left();
+    let right = span.bbox.right();
+    let em = span.font_size.max(1.0);
+    // Trailing whitespace is padding, not ink: the header above is 18 characters and ~80
+    // trailing spaces, and counting those spaces would let its bbox stand.
+    let text = span.text.trim_end();
+    let visible = text.chars().filter(|c| !c.is_whitespace()).count() as f32;
+    let spaces = text.chars().filter(|c| c.is_whitespace()).count() as f32;
+    if visible == 0.0 {
+        return right;
+    }
+    right.min(left + (visible * 0.75 + spaces * 1.5) * em)
+}
 
 /// Group `indices` into visual lines: anchored (not chained) on `y`, top to bottom, and
 /// further split on `x` wherever consecutive items are more than `MAX_INTRA_LINE_GAP_EM`
@@ -283,7 +314,21 @@ const MAX_INTRA_LINE_GAP_EM: f32 = 1.0;
 /// once per column, at the same `y` but 50pt apart) are never treated as one line. A line
 /// returned by this function is therefore a genuinely CONTINUOUS run of ink, which is what
 /// both `peel_full_width_line_bands` and `partition_lines_at` need "line" to mean. ~keep
+// X8: the peel and the partition both work per row now; the flat view is kept for the tests.
+#[cfg(test)]
 fn group_indices_into_lines(all_spans: &[TextSpan], indices: &[usize]) -> Vec<Vec<usize>> {
+    group_indices_into_rows(all_spans, indices)
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+/// X8: the same grouping, kept per visual ROW -- every line that shares one `y` bucket. The
+/// peel needs the row: a numbered clause set with a hanging number (`24.1` at x 71, its
+/// text from x 110, more than an em apart) is two lines on one row, and peeling only the
+/// full-width text line strands the number in another band, where it stops being the
+/// heading's number. ~keep
+fn group_indices_into_rows(all_spans: &[TextSpan], indices: &[usize]) -> Vec<Vec<Vec<usize>>> {
     let mut order: Vec<usize> = indices.to_vec();
     order.sort_by(|&a, &b| {
         all_spans[b]
@@ -302,24 +347,39 @@ fn group_indices_into_lines(all_spans: &[TextSpan], indices: &[usize]) -> Vec<Ve
         }
         y_buckets.last_mut().expect("just pushed above").push(index);
     }
-    let mut lines: Vec<Vec<usize>> = Vec::new();
-    for bucket in y_buckets {
+    let mut rows: Vec<Vec<Vec<usize>>> = Vec::new();
+    for mut bucket in y_buckets {
+        let mut lines: Vec<Vec<usize>> = Vec::new();
+        // The global sort above orders by `y` first and uses `x` only to break an EXACT tie,
+        // so inside a bucket (spans within `XYCUT_LINE_Y_TOLERANCE_PTS` of each other) the
+        // order is still `y` order: a right-column table cell set a fraction of a point above
+        // a left-column body line comes FIRST. Measured left to right from there, the "gap"
+        // to the body line is hundreds of points NEGATIVE -- never more than an em -- and the
+        // two columns are fused into one full-width line, which the peel then lifts out as a
+        // band and `partition_lines_at` assigns whole. Order each bucket by `x` before
+        // splitting it, and measure each gap from the run's rightmost ink so far, not from
+        // its last span, so an overlapping pair cannot hide a gutter behind it. ~keep
+        bucket.sort_by(|&a, &b| all_spans[a].bbox.left().total_cmp(&all_spans[b].bbox.left()));
         let mut run: Vec<usize> = Vec::new();
+        let mut run_right = f32::MIN;
         for index in bucket {
             if let Some(&last) = run.last() {
-                let gap = all_spans[index].bbox.left() - all_spans[last].bbox.right();
+                let gap = all_spans[index].bbox.left() - run_right;
                 let max_font = all_spans[last].font_size.max(all_spans[index].font_size);
                 if gap > max_font * MAX_INTRA_LINE_GAP_EM {
                     lines.push(std::mem::take(&mut run));
+                    run_right = f32::MIN;
                 }
             }
+            run_right = run_right.max(ink_right(&all_spans[index]));
             run.push(index);
         }
         if !run.is_empty() {
             lines.push(run);
         }
+        rows.push(lines);
     }
-    lines
+    rows
 }
 
 impl Default for XYCutStrategy {
@@ -1561,8 +1621,8 @@ impl XYCutStrategy {
     /// full-width when its inked extent reaches `FULL_WIDTH_LINE_FRACTION` of the region's
     /// own width. GH#1808. ~keep
     fn peel_full_width_line_bands(&self, all_spans: &[TextSpan], indices: &[usize]) -> Option<Vec<Vec<usize>>> {
-        let lines = group_indices_into_lines(all_spans, indices);
-        if lines.len() < MIN_PEELED_FULL_WIDTH_LINES {
+        let rows = group_indices_into_rows(all_spans, indices);
+        if rows.len() < MIN_PEELED_FULL_WIDTH_LINES {
             return None;
         }
         let region_left = indices
@@ -1580,10 +1640,19 @@ impl XYCutStrategy {
 
         let is_full_width = |line: &[usize]| -> bool {
             let line_left = line.iter().map(|&i| all_spans[i].bbox.left()).fold(f32::MAX, f32::min);
-            let line_right = line.iter().map(|&i| all_spans[i].bbox.right()).fold(f32::MIN, f32::max);
+            let line_right = line.iter().map(|&i| ink_right(&all_spans[i])).fold(f32::MIN, f32::max);
             (line_right - line_left) / region_width >= FULL_WIDTH_LINE_FRACTION
         };
-        let flags: Vec<bool> = lines.iter().map(|line| is_full_width(line)).collect();
+        // A row is peeled when any of its lines is full width, and then WHOLE (see
+        // `group_indices_into_rows`). X8. ~keep
+        let flags: Vec<bool> = rows
+            .iter()
+            .map(|row| row.iter().any(|line| is_full_width(line)))
+            .collect();
+        let lines: Vec<Vec<usize>> = rows
+            .into_iter()
+            .map(|row| row.into_iter().flatten().collect())
+            .collect();
         if !flags.contains(&true) {
             return None;
         }
@@ -1628,17 +1697,68 @@ impl XYCutStrategy {
     /// line whose inked width splits exactly evenly) go left, matching the pre-existing
     /// left-edge bias. GH#1808. ~keep
     fn partition_lines_at(&self, all_spans: &[TextSpan], indices: &[usize], split_x: f32) -> (Vec<usize>, Vec<usize>) {
-        let lines = group_indices_into_lines(all_spans, indices);
+        // X8: the side is decided per UNIT. A hanging number and its title are two lines
+        // (more than an em apart) but one heading: with a cut through the title (`6.4.3` at
+        // x 43-68, its title 85-381, cut at 223.5) the title alone is a genuine crossing
+        // line and would move to its majority side without its number. So a line joins the
+        // unit before it when that unit is a short LEAD -- a number, a bullet, a label of at
+        // most `MAX_LEAD_EM` ems of ink -- and the cut does not run between them. Two column
+        // lines on one baseline stay two units even when the cut is elsewhere: a column
+        // line is never a short lead. ~keep
+        let mut units: Vec<Vec<usize>> = Vec::new();
+        for row in group_indices_into_rows(all_spans, indices) {
+            let mut unit: Vec<usize> = Vec::new();
+            let mut unit_left = f32::MAX;
+            let mut unit_right = f32::MIN;
+            let mut unit_em = 0.0f32;
+            for line in row {
+                let line_left = line.iter().map(|&i| all_spans[i].bbox.left()).fold(f32::MAX, f32::min);
+                let short_lead = (unit_right - unit_left) <= MAX_LEAD_EM * unit_em;
+                let cut_between = unit_right <= split_x && split_x <= line_left;
+                if !unit.is_empty() && (cut_between || !short_lead) {
+                    units.push(std::mem::take(&mut unit));
+                    unit_left = f32::MAX;
+                    unit_right = f32::MIN;
+                    unit_em = 0.0;
+                }
+                unit_left = unit_left.min(line_left);
+                unit_right = line
+                    .iter()
+                    .map(|&i| ink_right(&all_spans[i]))
+                    .fold(unit_right, f32::max);
+                unit_em = line.iter().map(|&i| all_spans[i].font_size).fold(unit_em, f32::max);
+                unit.extend(line);
+            }
+            if !unit.is_empty() {
+                units.push(unit);
+            }
+        }
+        let lines = units;
         let mut goes_right: std::collections::HashMap<usize, bool> = std::collections::HashMap::new();
         for line in &lines {
             let mut left_width = 0.0f32;
             let mut right_width = 0.0f32;
             for &i in line {
                 let bbox = &all_spans[i].bbox;
-                left_width += (bbox.right().min(split_x) - bbox.left()).max(0.0);
-                right_width += (bbox.right() - bbox.left().max(split_x)).max(0.0);
+                let right = ink_right(&all_spans[i]);
+                left_width += (right.min(split_x) - bbox.left()).max(0.0);
+                right_width += (right - bbox.left().max(split_x)).max(0.0);
             }
-            let line_goes_right = right_width > left_width;
+            // X8: only a line that genuinely CROSSES the cut is moved by its majority -- a
+            // legend running through the gutter holds ink on both sides (the tear fix's legend lines are
+            // near 50/50). A line that merely starts a few points before the cut is a line of
+            // the side it starts on: with a cut inside a column, between hanging numbers (x 48)
+            // and their titles (from x 79, cut at 91.7), the majority rule sent the title right
+            // and left `7.5` behind, splitting the heading. And a line with no ink on either
+            // side (a zero-width space a table leaves in its cells) has no majority at all; the
+            // tie rule would send it LEFT whatever its position. Both fall back to where the
+            // line starts, which is what the per-span partition this replaces did. ~keep
+            let ink = left_width + right_width;
+            let line_goes_right = if ink <= 0.0 || left_width.min(right_width) < MIN_CROSSING_SHARE * ink {
+                line.iter().map(|&i| all_spans[i].bbox.left()).fold(f32::MAX, f32::min) >= split_x
+            } else {
+                right_width > left_width
+            };
             for &i in line {
                 goes_right.insert(i, line_goes_right);
             }
@@ -4417,6 +4537,9 @@ mod tests {
     /// legend line is written as 3 font-run fragments with small (5pt) inter-run gaps --
     /// the shape a `Tm`+`TJ`-per-run producer emits for a caption. Region width is 260pt
     /// (40..300), so a legend line's own 260pt extent is exactly full width.
+    ///
+    /// X8: the fragments carry text of a realistic length for their width (~0.5 em per
+    /// character); `ink_right` cuts back a bbox its text cannot fill. ~keep
     fn gh1808_two_columns_over_torn_legend_spans() -> Vec<TextSpan> {
         let mut spans = Vec::new();
         for &y in &[300.0, 285.0, 270.0] {
@@ -4425,9 +4548,23 @@ mod tests {
         }
         for row in 0..8 {
             let y = 150.0 - row as f32 * 12.0;
-            spans.push(make_span_text(40.0, y, 60.0, 7.17, "LEG-A", 7.17)); // 40..100
-            spans.push(make_span_text(105.0, y, 95.0, 7.17, "LEG-B", 7.17)); // 105..200, gap 5
-            spans.push(make_span_text(205.0, y, 95.0, 7.17, "LEG-C", 7.17)); // 205..300, gap 5
+            spans.push(make_span_text(40.0, y, 60.0, 7.17, "LEG-A lorem ipsum do", 7.17)); // 40..100
+            spans.push(make_span_text(
+                105.0,
+                y,
+                95.0,
+                7.17,
+                "LEG-B lorem ipsum dolor sit a",
+                7.17,
+            )); // 105..200, gap 5
+            spans.push(make_span_text(
+                205.0,
+                y,
+                95.0,
+                7.17,
+                "LEG-C lorem ipsum dolor sit a",
+                7.17,
+            )); // 205..300, gap 5
         }
         spans
     }
@@ -4481,6 +4618,225 @@ mod tests {
         }
     }
 
+    /// X8: a right-column cell set a fraction of a point ABOVE a left-column body line shares
+    /// its `y` bucket and used to sort ahead of it, so the gap between them came out hundreds
+    /// of points negative and the two columns were fused into one "full-width" line. Two such
+    /// rows were then peeled as a band: the table's last column welded into the left column's
+    /// prose (the shape of a two-column journal page with a table in its right column). ~keep
+    #[test]
+    fn a_right_cell_just_above_a_left_line_is_not_one_full_width_line_x8() {
+        let strategy = XYCutStrategy::new();
+        let mut spans = Vec::new();
+        for row in 0..6 {
+            let y = 600.0 - row as f32 * 10.0;
+            spans.push(make_span_text(38.0, y, 253.0, 8.0, "left body line", 8.0)); // 38..291
+            // the right column's last table cell, set 0.3pt higher than the body line
+            spans.push(make_span_text(535.0, y + 0.3, 16.0, 6.4, "0.809", 6.4)); // 535..551
+            spans.push(make_span_text(307.0, y + 0.3, 60.0, 6.4, "cell", 6.4)); // 307..367
+        }
+        let indices: Vec<usize> = (0..spans.len()).collect();
+
+        for line in group_indices_into_lines(&spans, &indices) {
+            let left = line.iter().any(|&i| spans[i].bbox.left() < 300.0);
+            let right = line.iter().any(|&i| spans[i].bbox.left() > 300.0);
+            assert!(
+                !(left && right),
+                "a line may not hold both columns: {:?}",
+                line.iter().map(|&i| &spans[i].text).collect::<Vec<_>>()
+            );
+        }
+        assert!(
+            strategy.peel_full_width_line_bands(&spans, &indices).is_none(),
+            "no line here is full width, so nothing may be peeled"
+        );
+    }
+
+    /// X8: a running header whose bbox runs 465 pt past its 18 characters is not a
+    /// full-width line, and a left-column line it overlaps is not fused with the right
+    /// column's text on the same baseline. ~keep
+    #[test]
+    fn an_inflated_bbox_does_not_make_a_line_full_width_x8() {
+        let strategy = XYCutStrategy::new();
+        let mut spans = Vec::new();
+        for row in 0..4 {
+            let y = 700.0 - row as f32 * 10.0;
+            // left column line whose bbox overreaches into the right column
+            spans.push(make_span_text(
+                38.0,
+                y,
+                464.0,
+                8.0,
+                "J.S. Levine et al.                                        ",
+                6.4,
+            )); // 38..502
+            spans.push(make_span_text(400.0, y, 160.0, 8.0, "Journal of Lorem Ipsum 12", 6.4)); // 400..560
+        }
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        assert!(
+            strategy.peel_full_width_line_bands(&spans, &indices).is_none(),
+            "an inflated bbox must not make its line full width"
+        );
+        let (left, right) = strategy.partition_lines_at(&spans, &indices, 300.0);
+        assert!(left.iter().all(|&i| spans[i].bbox.left() < 300.0), "{left:?}");
+        assert!(right.iter().all(|&i| spans[i].bbox.left() > 300.0), "{right:?}");
+    }
+
+    /// X8: a zero-width space in the right column's table has no ink on either side of the
+    /// cut; it must stay right, not be sent left by the tie rule into the left column. ~keep
+    #[test]
+    fn a_zero_width_span_stays_on_its_own_side_x8() {
+        let strategy = XYCutStrategy::new();
+        let spans = vec![
+            make_span_text(38.0, 600.0, 253.0, 8.0, "left body line", 8.0),
+            make_span_text(530.0, 590.0, 0.0, 8.0, "\u{200b}", 8.0),
+            make_span_text(307.0, 600.0, 200.0, 8.0, "right body line", 8.0),
+        ];
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        let (left, right) = strategy.partition_lines_at(&spans, &indices, 299.0);
+        assert_eq!(left, vec![0]);
+        assert_eq!(right, vec![1, 2]);
+    }
+
+    /// X8: a clause with a hanging number is one row of two lines; the peel must move the
+    /// number with its full-width text, not strand it in the other band. ~keep
+    #[test]
+    fn a_hanging_number_goes_with_its_full_width_clause_x8() {
+        let strategy = XYCutStrategy::new();
+        let mut spans = Vec::new();
+        for row in 0..3 {
+            let y = 700.0 - row as f32 * 12.0;
+            spans.push(make_span_text(71.0, y, 22.0, 9.0, "24.1", 9.0));
+            spans.push(make_span_text(
+                110.0,
+                y,
+                422.0,
+                9.0,
+                "Partijen verstrekken elkaar tijdig alle relevante informatie al dan niet afkomstig van derden die",
+                9.0,
+            ));
+        }
+        for row in 0..3 {
+            let y = 600.0 - row as f32 * 12.0;
+            spans.push(make_span_text(
+                71.0,
+                y,
+                200.0,
+                9.0,
+                "short line of a list item text",
+                9.0,
+            ));
+        }
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        let bands = strategy
+            .peel_full_width_line_bands(&spans, &indices)
+            .expect("the clause rows are full width");
+        let band_of = |i: usize| bands.iter().position(|b| b.contains(&i)).unwrap();
+        for row in 0..3 {
+            assert_eq!(
+                band_of(2 * row),
+                band_of(2 * row + 1),
+                "number and text of row {row} split: {bands:?}"
+            );
+        }
+    }
+
+    /// X8: a title that starts a few points left of a cut placed inside a column stays with
+    /// its hanging number, on the side it starts. ~keep
+    #[test]
+    fn a_title_starting_just_before_the_cut_stays_with_its_number_x8() {
+        let strategy = XYCutStrategy::new();
+        let spans = vec![
+            make_span_text(48.2, 297.2, 13.4, 9.0, "7.5", 9.0),
+            make_span_text(
+                79.3,
+                297.2,
+                170.8,
+                9.0,
+                "Bedrijfsdruk van de CV-installatie instellen",
+                9.0,
+            ),
+            make_span_text(100.0, 280.0, 150.0, 9.0, "indented list content", 9.0),
+        ];
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        let (left, right) = strategy.partition_lines_at(&spans, &indices, 91.7);
+        assert_eq!(left, vec![0, 1]);
+        assert_eq!(right, vec![2]);
+    }
+
+    /// X8: a hanging number and a title that crosses the cut move together; two column
+    /// lines on one baseline, with the cut in the gutter between them, do not. ~keep
+    #[test]
+    fn a_crossing_title_moves_with_its_hanging_number_x8() {
+        let strategy = XYCutStrategy::new();
+        let spans = vec![
+            make_span_text(42.5, 651.2, 25.0, 9.0, "6.4.3", 9.0),
+            make_span_text(
+                85.0,
+                651.2,
+                296.3,
+                9.0,
+                "Minimale grondoppervlakte en oppervlakte van ventilatieopeningen",
+                9.0,
+            ),
+            make_span_text(
+                38.0,
+                600.0,
+                253.0,
+                8.0,
+                "left column body line of ordinary prose text here",
+                8.0,
+            ),
+            make_span_text(
+                307.0,
+                600.0,
+                253.0,
+                8.0,
+                "right column body line of ordinary prose text here",
+                8.0,
+            ),
+        ];
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        let (left, right) = strategy.partition_lines_at(&spans, &indices, 223.5);
+        assert!(
+            left.contains(&0) && left.contains(&1),
+            "number and title must stay together: {left:?} / {right:?}"
+        );
+        let (left, right) = strategy.partition_lines_at(&spans, &indices, 299.0);
+        assert!(
+            left.contains(&2) && right.contains(&3),
+            "column lines split at the gutter: {left:?} / {right:?}"
+        );
+    }
+
+    /// X8: two column lines on one row are never one unit, even when the cut runs through
+    /// the left one rather than the gutter. ~keep
+    #[test]
+    fn a_left_column_line_is_not_a_lead_for_the_right_column_x8() {
+        let strategy = XYCutStrategy::new();
+        let spans = vec![
+            make_span_text(
+                50.0,
+                158.0,
+                241.0,
+                8.0,
+                "Influenza is an acute respiratory viral infection",
+                8.0,
+            ),
+            make_span_text(
+                307.0,
+                158.0,
+                253.0,
+                8.0,
+                "of illnesses, ranging from mild symptoms to fatal",
+                8.0,
+            ),
+        ];
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        let (left, right) = strategy.partition_lines_at(&spans, &indices, 120.0);
+        assert_eq!(left, vec![0], "{left:?} / {right:?}");
+        assert_eq!(right, vec![1]);
+    }
+
     /// Control for the peel: when each legend line is already ONE span (the reporter's own
     /// p2, which passed before the fix), the peel still fires identically -- the fix must
     /// not change behavior for input that was never torn in the first place. ~keep
@@ -4494,7 +4850,14 @@ mod tests {
         }
         for row in 0..8 {
             let y = 150.0 - row as f32 * 12.0;
-            spans.push(make_span_text(40.0, y, 260.0, 7.17, "LEGEND", 7.17));
+            spans.push(make_span_text(
+                40.0,
+                y,
+                260.0,
+                7.17,
+                "LEGEND lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod",
+                7.17,
+            ));
         }
         let indices: Vec<usize> = (0..spans.len()).collect();
 
