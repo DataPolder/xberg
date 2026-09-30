@@ -2042,6 +2042,20 @@ impl XYCutStrategy {
             return None;
         }
 
+        // A column STARTS right of its gutter. When every line on the right
+        // side starts left of `split_x` -- each moved there whole by its majority -- the
+        // "gutter" is a valley inside ONE column (short lines of a ragged paragraph end
+        // before it, the long ones run through it), and taking it reads the long lines as a
+        // second column after the short ones: a journal page's Funding paragraph lost its
+        // first line to the heading after it. ~keep
+        let right_has_own_line = group_indices_into_rows(all_spans, &right)
+            .iter()
+            .flatten()
+            .any(|line| line.iter().map(|&i| all_spans[i].bbox.left()).fold(f32::MAX, f32::min) >= split_x);
+        if !right_has_own_line {
+            return None;
+        }
+
         // Real column splits produce balanced partitions. A 95/5 split is
         // almost always from edge dips or stray content, not a column. ~keep
         let min_side = (indices.len() / 10).max(2);
@@ -4910,6 +4924,73 @@ mod tests {
         assert_eq!(
             actual_right, expected_right,
             "the straddling line's 5 fragments must all move to its majority side (right), none left behind"
+        );
+    }
+
+    /// The left column of a two-column journal page under a full-width figure
+    /// legend, span for span: left, right, top and font size as the page
+    /// has them, text replaced by lorem ipsum of the same visible length and spacing (both
+    /// feed the projection and `ink_right`). The legend band has been peeled above it without
+    /// its short last line (row 0, 7.17 pt), which stays in this column. Then the tail of a
+    /// paragraph from the previous page (row 1), a heading (row 2), that section's paragraph
+    /// with an indented first line (rows 3-4) and the next heading (row 5). Every line starts
+    /// at the column's left edge; the long ones run to 283-291, the short ones stop by 250. ~keep
+    fn left_column_under_a_legend() -> Vec<TextSpan> {
+        let line = |left: f32, right: f32, y: f32, size: f32, text: &str| {
+            make_span_text(left, y, right - left, size, text, size)
+        };
+        vec![
+            line(
+                37.59,
+                209.17,
+                336.53,
+                7.17,
+                "l oremip sum dolorsita metconsectetura dipi scin geli",
+            ),
+            line(209.17, 211.56, 336.53, 7.17, "l"),
+            line(211.56, 283.04, 336.53, 7.17, "l oremipsu mdolorsitame"),
+            line(37.59, 137.62, 314.14, 7.97, "loremipsu mdolorsitametconse"),
+            line(37.59, 68.88, 293.22, 7.97, "loremip"),
+            line(
+                49.55,
+                291.01,
+                272.30,
+                7.97,
+                "lore mipsumdo lor sit ametcon sec teturadi pisci ngel itseddo ",
+            ),
+            line(
+                37.59,
+                250.07,
+                261.81,
+                7.97,
+                "loremips um dol orsitam etconsectet ur adipiscingelit seddoeiu",
+            ),
+            line(37.59, 166.17, 240.89, 7.97, "loremipsumd ol orsitamet consecte"),
+        ]
+    }
+
+    #[test]
+    fn a_valley_inside_one_column_is_not_a_column_cut() {
+        let strategy = XYCutStrategy::new();
+        let spans = left_column_under_a_legend();
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        assert_eq!(
+            strategy.find_horizontal_split_indexed(&spans, &indices),
+            None,
+            "no line starts right of any cut inside this column, so there is no second column"
+        );
+        let order: Vec<f32> = strategy
+            .partition_region(&spans, None)
+            .into_iter()
+            .flatten()
+            .map(|span| span.bbox.y)
+            .collect();
+        let mut top_to_bottom = order.clone();
+        top_to_bottom.sort_by(|a, b| b.total_cmp(a));
+        assert_eq!(
+            order, top_to_bottom,
+            "one column is read top to bottom: the indented first line (272.3) before the \
+             heading under it (240.9), the legend's last line (336.5) first"
         );
     }
 }
