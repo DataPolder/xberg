@@ -1418,14 +1418,26 @@ fn reconstruct_gutter_fallback_tables(
 ) -> Vec<Table> {
     let median_height = median_word_height(region);
     let Some((left, right)) =
-        split_region_at_column_corridor_with_floor(region, median_height, GUTTER_FALLBACK_MIN_CORRIDOR_HEIGHTS)
+        split_region_at_column_corridor_with_floor(region, median_height, GUTTER_FALLBACK_MIN_CORRIDOR_HEIGHTS, true)
     else {
         return Vec::new();
     };
+    // #3025: a split made beside prose tries only the table side, and there only
+    // slabs that show labels and values themselves: a two-cell line in the prose
+    // column (`owners-manual-2170416.pdf` p25) or a chart's number axis in a
+    // column of prose (`f86d073b…pdf` p20) is no table. A split between two
+    // table sides (#3013) has labels and values on both. ~keep
+    let beside_prose = !(has_mixed_label_value_evidence(&left) && has_mixed_label_value_evidence(&right));
     let mut tables = Vec::new();
     for side in [left, right] {
+        if beside_prose && !has_mixed_label_value_evidence(&side) {
+            continue;
+        }
         for slab in split_words_on_row_gaps(&side, median_height) {
-            if !is_table_candidate_slab(&slab, median_height) || is_mostly_running_text(&slab, median_height) {
+            if !is_table_candidate_slab(&slab, median_height)
+                || is_mostly_running_text(&slab, median_height)
+                || (beside_prose && !has_mixed_label_value_evidence(&slab))
+            {
                 continue;
             }
             let slab_words = slab.len();
@@ -1516,6 +1528,80 @@ fn merge_spill_columns_into_left_neighbour(grid: &mut [Vec<String>], column_posi
     }
 }
 
+/// #3025: share of a side's multi-word rows that must span most of its width for
+/// the side to count as a column of prose. ~keep
+const PROSE_COLUMN_FULL_ROW_PERCENT: usize = 60;
+/// #3025: how much of the side's width a row must span to count as a full line. ~keep
+const PROSE_COLUMN_ROW_SPAN_PERCENT: u64 = 75;
+/// #3025: the fewest multi-word lines a side needs to count as a column of prose. ~keep
+const PROSE_COLUMN_MIN_ROWS: usize = 6;
+
+/// #3025: whether `side` reads as a column of running prose — most of its
+/// multi-word rows are running text AND fill the column. A table's label column
+/// is running text row by row but ragged and short. ~keep
+fn is_prose_column(side: &[crate::pdf::table_reconstruct::HocrWord], median_height: u32) -> bool {
+    let left = side.iter().map(|w| w.left).min().unwrap_or(0);
+    let right = side.iter().map(|w| w.left + w.width).max().unwrap_or(0);
+    let width = right.saturating_sub(left);
+    if width == 0 {
+        return false;
+    }
+    let rows = group_rows(side, (median_height / 2).max(3));
+    let rows: Vec<_> = rows.iter().filter(|row| row.len() >= 2).collect();
+    // A few full lines are a statement's label column (`Shares used in
+    // computation of basic earnings per share` beside `467 474 480`,
+    // `AMAZON_2017_10K.pdf` p43), not a column of prose.
+    if rows.len() < PROSE_COLUMN_MIN_ROWS {
+        return false;
+    }
+    let full = rows
+        .iter()
+        .filter(|row| {
+            let (first, last) = (row.first().expect("non-empty"), row.last().expect("non-empty"));
+            let span = last.left.saturating_add(last.width).saturating_sub(first.left);
+            is_running_text_row(row, median_height, width)
+                && u64::from(span) * 100 >= u64::from(width) * PROSE_COLUMN_ROW_SPAN_PERCENT
+        })
+        .count();
+    full * 100 >= rows.len() * PROSE_COLUMN_FULL_ROW_PERCENT
+}
+
+/// #3025: share of a prose side's lines that may sit level with a row of the
+/// table beside it. ~keep
+const PROSE_COLUMN_MAX_LEVEL_PERCENT: usize = 50;
+
+/// #3025: whether most of `prose`'s multi-word lines stand at the very height of
+/// a row of `table`. A statement's label column does — `Deferred compensation
+/// plan assets ......` sits level with `32,063 971 31,092 —`
+/// (`ADOBE_2015_10K.pdf` p75) — while a column of prose beside a table runs on
+/// its own leading. ~keep
+fn runs_level_with(
+    prose: &[crate::pdf::table_reconstruct::HocrWord],
+    table: &[crate::pdf::table_reconstruct::HocrWord],
+    median_height: u32,
+) -> bool {
+    let row_tolerance = (median_height / 2).max(3);
+    let level = (median_height / 8).max(1);
+    let row_top = |row: &[crate::pdf::table_reconstruct::HocrWord]| row.iter().map(|w| w.top).min().unwrap_or(0);
+    let table_tops: Vec<u32> = group_rows(table, row_tolerance)
+        .iter()
+        .map(|row| row_top(row))
+        .collect();
+    let lines: Vec<u32> = group_rows(prose, row_tolerance)
+        .iter()
+        .filter(|row| row.len() >= 2)
+        .map(|row| row_top(row))
+        .collect();
+    if lines.is_empty() {
+        return false;
+    }
+    let level_lines = lines
+        .iter()
+        .filter(|top| table_tops.iter().any(|t| t.abs_diff(**top) <= level))
+        .count();
+    level_lines * 100 > lines.len() * PROSE_COLUMN_MAX_LEVEL_PERCENT
+}
+
 /// #3013: the same shape floor `cluster_words_into_vertical_regions` applies to its regions. ~keep
 fn is_table_candidate_slab(slab: &[crate::pdf::table_reconstruct::HocrWord], median_height: u32) -> bool {
     if slab.len() < 4 {
@@ -1537,12 +1623,27 @@ fn is_mostly_running_text(slab: &[crate::pdf::table_reconstruct::HocrWord], medi
     let slab_left = slab.iter().map(|w| w.left).min().unwrap_or(0);
     let slab_right = slab.iter().map(|w| w.left + w.width).max().unwrap_or(0);
     let slab_width = slab_right.saturating_sub(slab_left);
-    let running = rows
-        .iter()
-        .filter(|row| is_running_text_row(row, median_height, slab_width))
-        .count();
-    running * 2 > rows.len()
+    let running = |rows: &[&Vec<crate::pdf::table_reconstruct::HocrWord>]| {
+        rows.iter()
+            .filter(|row| is_running_text_row(row, median_height, slab_width))
+            .count()
+    };
+    let all: Vec<_> = rows.iter().collect();
+    if running(&all) * 2 <= all.len() {
+        return false;
+    }
+    // #3025 — a one-word row says nothing either way: the second line of a
+    // two-line cell (`(389.0)` under `952.8`) is a row of its own, and counted
+    // as running text it made half of Soluble p7's Table 3 "prose". So a slab
+    // is judged again on its multi-word rows alone — when it has enough of
+    // them: a chart's axis labels (`Total 48` over `39%`, `36`, `32`) are
+    // one-word rows around a few short ones.
+    let multi: Vec<_> = rows.iter().filter(|row| row.len() >= 2).collect();
+    multi.len() < RUNNING_TEXT_MIN_MULTI_WORD_ROWS || running(&multi) * 2 > multi.len()
 }
+
+/// #3025: the fewest multi-word rows a slab needs to be judged on those rows alone. ~keep
+const RUNNING_TEXT_MIN_MULTI_WORD_ROWS: usize = 4;
 
 /// #3013: rows of `slab` top to bottom, each ordered left to right. ~keep
 fn group_rows(
@@ -1658,13 +1759,14 @@ fn split_region_at_column_corridor(
     Vec<crate::pdf::table_reconstruct::HocrWord>,
     Vec<crate::pdf::table_reconstruct::HocrWord>,
 )> {
-    split_region_at_column_corridor_with_floor(region, median_height, COLUMN_BLOCK_MIN_CORRIDOR_HEIGHTS)
+    split_region_at_column_corridor_with_floor(region, median_height, COLUMN_BLOCK_MIN_CORRIDOR_HEIGHTS, false)
 }
 
 fn split_region_at_column_corridor_with_floor(
     region: &[crate::pdf::table_reconstruct::HocrWord],
     median_height: u32,
     minimum_corridor_heights: f32,
+    one_side_may_be_prose: bool,
 ) -> Option<(
     Vec<crate::pdf::table_reconstruct::HocrWord>,
     Vec<crate::pdf::table_reconstruct::HocrWord>,
@@ -1701,7 +1803,42 @@ fn split_region_at_column_corridor_with_floor(
     if !has_independent_column_tracks(&left) || !has_independent_column_tracks(&right) {
         return None;
     }
-    if !has_mixed_label_value_evidence(&left) || !has_mixed_label_value_evidence(&right) {
+    // #3025 — the gutter fallback splits a page, not a table: one side is prose,
+    // which carries no numbers of its own on a page like Soluble p7 (Table 3 in
+    // the left column, discussion in the right). The table side must still
+    // show labels and values; a two-column table cut at its own label|value
+    // gutter has neither side mixed and stays refused.
+    let (left_mixed, right_mixed) = (
+        has_mixed_label_value_evidence(&left),
+        has_mixed_label_value_evidence(&right),
+    );
+    let mixed_ok = if one_side_may_be_prose {
+        // The side without values must be a column of PROSE — lines that fill
+        // the column — not a table's own label column: a financial statement's
+        // `Net income` / `TOTAL COMPREHENSIVE INCOME` labels are unmixed too, and
+        // splitting them off left the values as a table and the labels as loose
+        // lines (`NIKE_2021_10K.pdf` p60).
+        // …and the two sides must both be page columns: a narrow last column
+        // of a full-width table (`-Predictive of worse outcome` / `Unknown` on
+        // Intrathecal p7) fills its own width line by line and reads as prose
+        // on its own; cut off, it was read before the rest of the table.
+        let prose_beside_table = || {
+            let region_left = region.iter().map(|w| w.left).min().unwrap_or(0);
+            let region_right = region.iter().map(|w| w.left.saturating_add(w.width)).max().unwrap_or(0);
+            let region_width = region_right.saturating_sub(region_left);
+            balanced_region_sides(&left, &right, region_left, region_right, region_width)
+                && ((left_mixed
+                    && is_prose_column(&right, median_height)
+                    && !runs_level_with(&right, &left, median_height))
+                    || (right_mixed
+                        && is_prose_column(&left, median_height)
+                        && !runs_level_with(&left, &right, median_height)))
+        };
+        (left_mixed && right_mixed) || prose_beside_table()
+    } else {
+        left_mixed && right_mixed
+    };
+    if !mixed_ok {
         return None;
     }
     if has_synchronous_rows_across_seam(region, seam, median_height) {
@@ -5711,6 +5848,232 @@ mod tests {
                 words.retain(|word| word.left + word.width <= 580);
             }
             slab.extend(words);
+        }
+        assert!(is_mostly_running_text(&slab, 8));
+    }
+
+    /// #3025: Soluble p7 in miniature — the table in the LEFT column, and the right
+    /// column plain prose without a number in it. The regular split wants labels
+    /// and values on both sides; the gutter fallback splits a page, not a table,
+    /// and one mixed side is enough. ~keep
+    #[test]
+    fn a_table_beside_prose_without_numbers_is_found_3025() {
+        let mut words = dp3013_narrow_gutter_page();
+        // Mirror: table and caption to the left column, prose (no digits) to the right.
+        for word in &mut words {
+            if word.left >= 307 {
+                word.left -= 269;
+            } else {
+                word.left += 269;
+                word.text = "lorem".to_string();
+            }
+        }
+        let regions = cluster_words_into_vertical_regions(&words);
+        assert_eq!(regions.len(), 1);
+        let tables = reconstruct_region_tables(&regions[0], 792.0, 7, false, 0);
+        assert_eq!(
+            tables.len(),
+            1,
+            "{:?}",
+            tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            tables[0].cells[0],
+            ["Characteristic", "Overall", "Treated", "Control", "p-value"]
+        );
+    }
+
+    /// #3025: a table whose cells wrap onto a second line (`952.8` over `(389.0)`)
+    /// has as many one-word rows as full ones. They say nothing about prose. ~keep
+    #[test]
+    fn one_word_rows_do_not_make_a_table_prose_3025() {
+        let mut slab = Vec::new();
+        for row in 0..10u32 {
+            let top = 100 + row * 17;
+            slab.push(dp3013_word("sBTLA", 50, top, 22));
+            slab.push(dp3013_word("1358.7", 113, top, 20));
+            slab.push(dp3013_word("889.8", 165, top, 18));
+            slab.push(dp3013_word("952.8", 220, top, 18));
+            slab.push(dp3013_word("0.018", 265, top, 17));
+            slab.push(dp3013_word("(389.0)", 220, top + 8, 22));
+        }
+        // The caption above and the note under it, as on the carrier page:
+        // with the one-word rows counted, running text is the majority.
+        for (line, top) in [(1, 60), (2, 70), (3, 290), (4, 300)] {
+            slab.extend(dp3013_prose_line(line, 38, 291, top));
+        }
+        assert!(!is_mostly_running_text(&slab, 8));
+    }
+
+    /// #3025: Intrathecal p7's Table 3, word boxes as printed, text lorem ipsum. A
+    /// full-width five-column table: the header row and the note under the table
+    /// join columns 1–4 into one block, so the only corridor is the 12-unit gap
+    /// before the narrow column 5 (`-Duisaute in repre henderit` / `Ipsumdo`). That column
+    /// fills its own width line by line, but it is not a page column: the
+    /// fallback must not cut it off as the "prose side" of a gutter. ~keep
+    #[test]
+    fn a_narrow_last_table_column_is_not_a_prose_side_3025() {
+        let w = |t: &str, l: u32, r: u32, top: u32| dp3013_word(t, l, top, r - l);
+        let region = vec![
+            // header
+            w("Lorem", 120, 138, 76),
+            w("ipsum", 140, 155, 76),
+            w("dolorsit", 157, 184, 76),
+            w("Lorem", 228, 246, 76),
+            w("ipsum", 247, 263, 76),
+            w("in", 264, 270, 76),
+            w("Consectet", 271, 298, 76),
+            w("adipisci", 300, 320, 76),
+            w("Lorem", 331, 349, 76),
+            w("ipsum", 351, 366, 76),
+            w("temporinci", 368, 398, 76),
+            w("utlabore", 400, 421, 76),
+            w("(etdolore)", 423, 451, 76),
+            w("Lorem", 463, 480, 76),
+            w("ipsum's", 482, 501, 76),
+            w("magna-ali", 502, 529, 76),
+            w("quaenim", 531, 552, 76),
+            // rows
+            w("Minimveni", 44, 67, 98),
+            w("quisnostr", 69, 93, 98),
+            w("89%", 120, 138, 98),
+            w("Since", 228, 243, 98),
+            w("2024", 245, 259, 98),
+            w("(Exercitat)", 261, 295, 98),
+            w("-Ullamcolabor", 331, 369, 98),
+            w("nisiut", 371, 387, 98),
+            w("ex", 389, 394, 98),
+            w("eacommo", 396, 416, 98),
+            w("consequa", 418, 440, 98),
+            w("-Duisaute", 463, 493, 98),
+            w("in", 495, 501, 98),
+            w("repre", 502, 519, 98),
+            w("henderit", 521, 545, 98),
+            w("-Voluptate", 331, 369, 106),
+            w("ve", 370, 376, 106),
+            w("LI-TES", 377, 401, 106),
+            w("(se", 403, 411, 106),
+            w("ci", 412, 419, 106),
+            w("llumdolo)", 420, 451, 106),
+            w("-Eufugiatn", 463, 494, 106),
+            w("ullapar", 496, 514, 106),
+            w("(iaturexce)", 516, 548, 106),
+            w("CIS", 44, 53, 115),
+            w("63-86%", 120, 142, 115),
+            w("[82,83]", 144, 166, 115),
+            w("No", 228, 236, 115),
+            w("Sintoccae", 331, 360, 115),
+            w("cupida", 362, 378, 115),
+            w("of", 380, 386, 115),
+            w("nonproiden", 387, 418, 115),
+            w("to", 420, 426, 115),
+            w("MS", 428, 436, 115),
+            w("RIS", 44, 53, 124),
+            w("71.5%", 120, 138, 124),
+            w("[25]", 140, 153, 124),
+            w("Since", 228, 243, 124),
+            w("2024", 245, 259, 124),
+            w("(Exercitat)", 261, 295, 124),
+            w("Sintoccae", 331, 360, 124),
+            w("cupida", 362, 378, 124),
+            w("of", 380, 386, 124),
+            w("nonproiden", 387, 418, 124),
+            w("to", 420, 426, 124),
+            w("MS", 428, 436, 124),
+            w("LOREM-IPS4", 44, 85, 132),
+            w("55-73%", 120, 142, 132),
+            w("[95]", 144, 157, 132),
+            w("No", 228, 236, 132),
+            w("Ipsumdo", 331, 359, 132),
+            w("Ipsumdo", 463, 490, 132),
+            w("DOLOR", 44, 67, 141),
+            w("10-15%", 120, 142, 141),
+            w("[95]", 144, 157, 141),
+            w("No", 228, 236, 141),
+            w("Ipsumdo", 331, 359, 141),
+            w("Ipsumdo", 463, 490, 141),
+            w("AE", 44, 52, 149),
+            w("SITAM", 63, 86, 149),
+            w("44%", 120, 133, 149),
+            w("(>6)", 135, 149, 149),
+            w("[102]", 151, 167, 149),
+            w("No", 228, 236, 149),
+            w("Ipsumdo", 331, 359, 149),
+            w("Ipsumdo", 463, 490, 149),
+            w("Other", 63, 79, 158),
+            w("AE", 81, 89, 158),
+            w("45%", 120, 133, 158),
+            w("(>6)", 135, 149, 158),
+            w("[102]", 151, 167, 158),
+            w("No", 228, 236, 158),
+            w("Ipsumdo", 331, 359, 158),
+            w("Ipsumdo", 463, 490, 158),
+            // the note under the table, across columns 1-4
+            w("Loremipsum", 49, 84, 180),
+            w("is", 86, 91, 180),
+            w("dolorsit", 93, 118, 180),
+            w("to", 121, 127, 180),
+            w("ametco", 129, 148, 180),
+            w("due", 150, 161, 180),
+            w("to", 164, 170, 180),
+            w("the", 172, 182, 180),
+            w("lack", 184, 197, 180),
+            w("of", 199, 206, 180),
+            w("a", 208, 211, 180),
+            w("consectetu", 214, 248, 180),
+            w("adipiscin,", 250, 282, 180),
+            w("sedeiusmodte", 284, 321, 180),
+            w("in", 323, 330, 180),
+            w("incididu", 332, 357, 180),
+            w("utlab", 359, 376, 180),
+            w("than", 378, 393, 180),
+            w("MS.", 395, 407, 180),
+        ];
+        assert!(
+            split_region_at_column_corridor_with_floor(&region, 8, GUTTER_FALLBACK_MIN_CORRIDOR_HEIGHTS, true)
+                .is_none(),
+            "a table's narrow last column is not a page column"
+        );
+    }
+
+    /// #3025: a statement's label column (`ADOBE_2015_10K.pdf` p75: `Deferred
+    /// compensation plan assets ......` level with `32,063 971 31,092 —`) runs
+    /// level with the values beside it; a column of prose runs on its own
+    /// leading. ~keep
+    #[test]
+    fn a_label_column_runs_level_with_its_values_3025() {
+        let mut labels = Vec::new();
+        let mut values = Vec::new();
+        let mut prose = Vec::new();
+        for row in 0..10u32 {
+            let top = 100 + row * 14;
+            labels.push(dp3013_word("Lorem", 70, top, 30));
+            labels.push(dp3013_word("ipsum.........", 104, top, 162));
+            values.push(dp3013_word("32,063", 309, top, 27));
+            values.push(dp3013_word("31,092", 457, top, 27));
+        }
+        for line in 0..12u32 {
+            let top = 105 + line * 11;
+            prose.push(dp3013_word("Dolor", 70, top, 30));
+            prose.push(dp3013_word("sitametconsectetur", 104, top, 162));
+        }
+        assert!(runs_level_with(&labels, &values, 8));
+        assert!(!runs_level_with(&prose, &values, 8));
+    }
+
+    /// #3025: a chart's number axis (`PG_2021.03.04_US-Views-on-China_FINAL.pdf`
+    /// p15: `Total 48` over `39%`, `36`, `32`) keeps the one-word verdict: it has
+    /// too few multi-word rows to be judged on those alone. ~keep
+    #[test]
+    fn a_chart_axis_stays_running_text_3025() {
+        let mut slab = vec![
+            dp3013_word("Total", 319, 346, 20),
+            dp3013_word("48", 380, 346, 10),
+            dp3013_word("Lorem", 319, 382, 20),
+            dp3013_word("ipsum", 400, 382, 20),
+        ];
+        for (text, left, top) in [("39%", 319, 358), ("36", 380, 370), ("32", 319, 394)] {
+            slab.push(dp3013_word(text, left, top, 12));
         }
         assert!(is_mostly_running_text(&slab, 8));
     }
