@@ -24,6 +24,15 @@ const MAX_CONTINUATION_LINE_GAP_MULTIPLE: f32 = 3.0;
 /// treatment group …`, and was joined to it. ~keep
 const MAX_TERMINATED_CONTINUATION_PITCH_MULTIPLE: f32 = 1.5;
 
+/// Two BOLD paragraphs whose sizes differ by more than this are two headings (a
+/// heading and the sub-heading or callout under it), not one heading wrapping -- a wrap keeps
+/// its size. Mirrors the XY-cut heading-run pre-pass's own size epsilon. ~keep
+const BOLD_WRAP_MAX_SIZE_STEP: f32 = 0.5;
+
+/// A baseline gap under this fraction of the pitch is the same printed line (a digit
+/// set in its own font inside a sentence), which the size rule must not tear. ~keep
+const SAME_LINE_PITCH_FRACTION: f32 = 0.5;
+
 /// #3013: a single-line paragraph has no pitch of its own; one this many font sizes is assumed,
 /// the top of the usual 1.0–1.3 range. ~keep
 const ASSUMED_PITCH_FONT_FACTOR: f32 = 1.3;
@@ -149,7 +158,17 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
             .is_some_and(|prev_segment| super::pipeline::heading_fills_column(prev_segment, next_right_edge));
         let heading_wrap_exempt =
             boundary_is_heading_wrap || (starts_with_lowercase_continuation(&next) && heading_fills_column);
-        let should_merge = both_body
+        // A bold paragraph never runs on into a bold paragraph of another size a line
+        // or more below it. Two headings in a row -- `FINAL (…): Your Career in Business`
+        // (11.04 pt) over `PART 1: PERSONAL REFLECTION:` (10.08 pt) -- pass every other test
+        // here: both body-level, both bold, sizes within 2 pt, no terminator. ~keep
+        let bold_size_step = current.is_bold
+            && next.is_bold
+            && (current.dominant_font_size - next.dominant_font_size).abs() > BOLD_WRAP_MAX_SIZE_STEP
+            && below_its_own_line(&current, &next)
+            && share_a_left_edge(&current, &next);
+        let should_merge = !bold_size_step
+            && both_body
             && fonts_compatible
             && bold_compatible
             && continuation_signal
@@ -204,6 +223,41 @@ fn terminated_join_within_one_pitch(current: &PdfParagraph, next: &PdfParagraph)
         (None, None) => assumed,
     };
     gap <= pitch * MAX_TERMINATED_CONTINUATION_PITCH_MULTIPLE
+}
+
+/// `next` starts on a line of its own below `current` -- its first baseline at least
+/// [`SAME_LINE_PITCH_FRACTION`] of a pitch under `current`'s last. `false` without geometry,
+/// so the size rule stays out of paragraphs it cannot place. ~keep
+fn below_its_own_line(current: &PdfParagraph, next: &PdfParagraph) -> bool {
+    let (Some(current_last), Some(next_first)) = (current.lines.last(), next.lines.first()) else {
+        return false;
+    };
+    if current_last.baseline_y == 0.0 || next_first.baseline_y == 0.0 {
+        return false;
+    }
+    let gap = (current_last.baseline_y - next_first.baseline_y).abs();
+    let assumed = current.dominant_font_size.max(next.dominant_font_size).max(1.0) * ASSUMED_PITCH_FONT_FACTOR;
+    let pitch = match (line_pitch(current), line_pitch(next)) {
+        (Some(a), Some(b)) => a.max(b),
+        (Some(a), None) | (None, Some(a)) => a,
+        (None, None) => assumed,
+    };
+    gap >= pitch * SAME_LINE_PITCH_FRACTION
+}
+
+/// `next`'s first line starts within an em of `current`'s last line -- a stack of headings
+/// down one margin. Labels scattered over a figure, a map or a centred receipt footer do not
+/// share an edge; splitting them only turned each label into a heading of its own, so they are
+/// left to the rest of the pass. `false` without geometry. ~keep
+fn share_a_left_edge(current: &PdfParagraph, next: &PdfParagraph) -> bool {
+    let (Some(current_last), Some(next_first)) = (current.lines.last(), next.lines.first()) else {
+        return false;
+    };
+    let (Some(a), Some(b)) = (current_last.segments.first(), next_first.segments.first()) else {
+        return false;
+    };
+    let em = current.dominant_font_size.max(next.dominant_font_size).max(1.0);
+    (a.x - b.x).abs() <= em
 }
 
 /// #3013: the median baseline-to-baseline advance of a paragraph's own lines. ~keep
@@ -481,6 +535,88 @@ mod tests {
         ];
         merge_continuation_paragraphs(&mut paragraphs);
         assert_eq!(paragraphs.len(), 2);
+    }
+
+    /// A bold paragraph of `lines` (`(text, font size, baseline)`). ~keep
+    fn make_bold_paragraph(lines: &[(&str, f32, f32)]) -> PdfParagraph {
+        let mut para = make_body_paragraph_at(lines[0].0, lines[0].1, lines[0].2);
+        let template = para.lines[0].clone();
+        para.lines.clear();
+        for &(text, size, baseline) in lines {
+            let mut line = template.clone();
+            line.baseline_y = baseline;
+            line.dominant_font_size = size;
+            line.is_bold = true;
+            line.segments[0].text = text.to_string();
+            line.segments[0].font_size = size;
+            line.segments[0].height = size;
+            line.segments[0].baseline_y = baseline;
+            line.segments[0].y = baseline;
+            line.segments[0].is_bold = true;
+            para.lines.push(line);
+        }
+        para.is_bold = true;
+        para.dominant_font_size = lines[0].1;
+        para
+    }
+
+    /// (f8d3a162 p13, geometry verbatim, text lorem ipsum): an 11.04 pt bold heading and
+    /// the 10.08 pt two-line bold heading 19.2 pt under it are two headings. ~keep
+    #[test]
+    fn a_bold_heading_does_not_absorb_a_smaller_bold_heading_below_it() {
+        let mut paragraphs = vec![
+            make_bold_paragraph(&[(
+                "LOREM (Ipsumdolo si Ame Tconse ct 3rd EIU): Smod Tempor in Cididunt",
+                11.04,
+                177.84,
+            )]),
+            make_bold_paragraph(&[("LORE 1:", 10.08, 158.64), ("IPSUMDOL ORSITAMETC:", 10.08, 147.12)]),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 2);
+    }
+
+    /// Control: two bold labels of different sizes that do not share a left edge (Wisselaar
+    /// reparatieset p1: the 9 pt label `niet afdichten` at x 121.3 and the 10 pt `Lokaliseer de
+    /// haarscheur` at x 289.7, 26.2 pt apart) are not split by the size rule. ~keep
+    #[test]
+    fn bold_labels_on_different_left_edges_are_left_to_the_other_rules() {
+        let mut label = make_bold_paragraph(&[("Lorem ipsumdo", 9.0, 741.94)]);
+        label.lines[0].segments[0].x = 121.31;
+        let mut other = make_bold_paragraph(&[("Doloremips ut al laboreetd", 10.0, 768.14)]);
+        other.lines[0].segments[0].x = 289.72;
+        let mut paragraphs = vec![label, other];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1);
+    }
+
+    /// Control: a bold heading wrapping onto a second line of its own size still
+    /// joins (f8d3a162, `FINAL ASSESSMENT: …` over `INTERNSHIP W/ …`, 10.08 pt, 11.52 pt). ~keep
+    #[test]
+    fn a_bold_heading_still_takes_its_wrap_of_the_same_size() {
+        let mut paragraphs = vec![
+            make_bold_paragraph(&[("LOREM IPSUMDOLO: SITA-METC CONSECT", 10.08, 300.0)]),
+            make_bold_paragraph(&[("ETURADIPIS C/ ELITSE & DOEIUSM TEMPORINCI DIDUNTUT", 10.08, 288.48)]),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1);
+    }
+
+    /// Control: a digit set in its own, larger font inside a bold sentence sits on the
+    /// sentence's own baseline (88557804: 9.48 pt text, 11.04 pt LCD digit, gap 0) and is not
+    /// torn off by the size rule. ~keep
+    #[test]
+    fn a_larger_digit_on_the_same_line_is_not_torn_off() {
+        let mut paragraphs = vec![
+            make_bold_paragraph(&[(
+                "Lo remipsum dolo si tamet co nsectetu ra dip is ci ngelits van",
+                9.48,
+                412.0,
+            )]),
+            make_bold_paragraph(&[("0' seddoeius (modtemp orincid).", 11.04, 412.0)]),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1);
     }
 
     /// #3013's control: a lowercase line one leading below a terminated line is still its wrap. ~keep
