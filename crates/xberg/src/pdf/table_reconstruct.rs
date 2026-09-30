@@ -659,6 +659,10 @@ fn post_process_table_inner(
         return None;
     }
 
+    let mut data_char_counts: Vec<usize> = (0..processed[0].len())
+        .map(|column| column_data_char_count(&processed, column))
+        .collect();
+    let mut total_data_chars: usize = data_char_counts.iter().sum();
     let mut col = 0;
     while col < processed[0].len() {
         let header_text = processed[0][col].trim().to_string();
@@ -672,21 +676,46 @@ fn post_process_table_inner(
         // rejects the whole table on, so fold it into its neighbour instead of losing the table
         // (see `fold_column_into_neighbour`). Guarded on an empty header for the same reason
         // that gate is: a column with its own label is a legitimately sparse column, not noise.
+        // A header-less value column beside a value column that the `content_asymmetry_sparse_column`
+        // gate would reject the table on is folded as well when the pair is row-disjoint: that is
+        // the shape of an amount column OCR split by digit width (see
+        // `column_is_a_sparse_fragment_for_ocr`). A value column beside a label column, or one that
+        // overlaps another value column, is not a fragment and keeps that gate's rejection.
+        let drift_split_value_column = !layout_guided
+            && col > 0
+            && column_is_a_sparse_fragment_for_ocr(
+                data_char_counts[col],
+                total_data_chars,
+                empty_count,
+                data_row_count,
+            )
+            && columns_are_row_disjoint(&processed, col - 1, col)
+            && column_reads_as_values(&processed, col)
+            && column_reads_as_values(&processed, col - 1);
         let sparse_and_headerless = !data_empty
             && header_text.is_empty()
             && processed[0].len() > 2
             && if layout_guided {
                 empty_count * 20 > data_row_count * 19
             } else {
-                column_is_sparse_for_ocr(empty_count, data_row_count)
+                column_is_sparse_for_ocr(empty_count, data_row_count) || drift_split_value_column
             };
         let header_fragment = !data_empty
             && column_is_a_header_fragment(&header_text, col, processed[0].len(), empty_count, data_row_count);
 
         if data_empty {
             merge_header_only_column(&mut processed, col, header_text, column_positions.as_deref_mut());
+            total_data_chars -= data_char_counts.remove(col);
         } else if sparse_and_headerless || header_fragment {
+            let target_before_fold = if col > 0 { col - 1 } else { 1 };
+            let previous_target_chars = data_char_counts[target_before_fold];
+            let moved_chars = data_char_counts[col];
             fold_column_into_neighbour(&mut processed, col, column_positions.as_deref_mut());
+            let target_after_fold = if col > 0 { col - 1 } else { 0 };
+            data_char_counts.remove(col);
+            let merged_chars = column_data_char_count(&processed, target_after_fold);
+            data_char_counts[target_after_fold] = merged_chars;
+            total_data_chars = total_data_chars - previous_target_chars - moved_chars + merged_chars;
         } else {
             col += 1;
         }
@@ -977,7 +1006,9 @@ fn post_process_table_inner(
                         .first()
                         .and_then(|header| header.get(c))
                         .is_some_and(|cell| !cell.trim().is_empty());
-                    if char_share < 0.15 && empty_ratio > 0.5 && !column_has_own_header {
+                    if column_is_a_sparse_fragment_for_ocr(col_chars, total_chars_asym, empty_in_col, data_row_count)
+                        && !column_has_own_header
+                    {
                         tracing::debug!(
                             target: "xberg::table_reconstruct",
                             reason = "content_asymmetry_sparse_column",
@@ -1358,6 +1389,66 @@ fn merge_interior_column(table: &mut [Vec<String>], column: usize) {
 /// and the rejection bar can never drift apart (xberg-io/xberg#1797).
 fn column_is_sparse_for_ocr(empty_count: usize, data_row_count: usize) -> bool {
     empty_count * 4 > data_row_count * 3
+}
+
+/// Count the trimmed data characters in one column, excluding the header row. Keeping these
+/// counts beside the fold loop avoids rescanning the complete grid once per column. ~keep
+fn column_data_char_count(table: &[Vec<String>], column: usize) -> usize {
+    table[1..]
+        .iter()
+        .map(|row| row.get(column).map_or(0, |cell| cell.trim().len()))
+        .sum()
+}
+
+/// Whether the populated data cells of `column` are values ([`crate::table_core::is_cell_value_text`])
+/// by majority. A column is the kind of cell most of its cells are, as `table_core`'s column
+/// fold reads its tracks: a scanned value column carries the odd token OCR read from a rule. ~keep
+fn column_reads_as_values(table: &[Vec<String>], column: usize) -> bool {
+    let populated: Vec<&str> = table[1..]
+        .iter()
+        .filter_map(|row| row.get(column))
+        .map(|cell| cell.trim())
+        .filter(|cell| !cell.is_empty())
+        .collect();
+    let values = populated
+        .iter()
+        .filter(|cell| crate::table_core::is_cell_value_text(cell))
+        .count();
+    values > populated.len() - values
+}
+
+/// Whether two data columns never both contain text in the same row. Digit-width drift splits one
+/// logical value between tracks; coexisting values prove that the tracks are distinct. ~keep
+fn columns_are_row_disjoint(table: &[Vec<String>], left: usize, right: usize) -> bool {
+    table[1..].iter().all(|row| {
+        let left_empty = row.get(left).is_none_or(|cell| cell.trim().is_empty());
+        let right_empty = row.get(right).is_none_or(|cell| cell.trim().is_empty());
+        left_empty || right_empty
+    })
+}
+
+/// Whether an OCR-path (`!layout_guided`) column reads as a stray fragment rather than a column:
+/// it holds under 15% of the grid's data characters and is empty in more than half of the data
+/// rows (xberg-io/xberg#1649). The `content_asymmetry_sparse_column` gate rejects the whole table
+/// over such a column when it has no header. When the column and its left neighbour both hold
+/// values without coexisting in one row, the fold loop in `post_process_table_inner` folds it into
+/// that neighbour first, as [`column_is_sparse_for_ocr`] pairs that loop with the `column_sparsity`
+/// gate: that is an amount column OCR split by digit width, and the fold bar alone sat above this
+/// gate's bar, so a correct row merge elsewhere in the grid moved such a column from "nearly empty,
+/// folded" to "half empty, rejected" and the whole table fell back to plain text. One function
+/// keeps the fold's bar and the gate's bar from drifting apart. ~keep
+fn column_is_a_sparse_fragment_for_ocr(
+    column_chars: usize,
+    total_chars: usize,
+    empty_count: usize,
+    data_row_count: usize,
+) -> bool {
+    if total_chars == 0 || data_row_count == 0 {
+        return false;
+    }
+    let char_share = column_chars as f64 / total_chars as f64;
+    let empty_ratio = empty_count as f64 / data_row_count as f64;
+    char_share < 0.15 && empty_ratio > 0.5
 }
 
 /// Whether `cell` reads as label/word content -- as opposed to a numeric/currency amount
@@ -5243,17 +5334,129 @@ mod tests {
         );
     }
 
-    /// Negative control for xberg-io/xberg#1649's `column_sparsity`/`content_asymmetry_sparse_column`
-    /// fix: a column that is just as sparse but carries no header label of its own is exactly the
-    /// noise those gates exist to catch, and must still be rejected.
+    /// xberg-io/xberg#1649 read an unnamed, mostly-empty column as the noise the
+    /// `content_asymmetry_sparse_column` gate exists to catch, and rejected the whole table over
+    /// it. Since xberg-io/xberg#1797 a column that gate would reject the table on is folded into
+    /// its neighbour instead, so the table survives and no amount is lost: the unnamed deposit
+    /// column joins the withdrawal column, and every deposit stays on the row of its transaction.
+    /// ~keep
     #[test]
-    fn issue_1649_unnamed_sparse_column_is_still_rejected() {
+    fn issue_1649_unnamed_sparse_column_is_folded_into_its_neighbour() {
         let mut table = bank_statement_transaction_table();
         table[0][3] = String::new();
 
+        let processed = post_process_table(table, false, false)
+            .expect("an unnamed, mostly-empty column folds into its neighbour instead of rejecting the table");
+
+        assert_eq!(
+            processed[0].len(),
+            4,
+            "the unnamed column is folded away: {processed:?}"
+        );
+        for (description, deposit) in [
+            ("ACH Deposit - EMPLOYER INC", "$2,500.00"),
+            ("ACH Deposit - CONSULTING", "$5,000.00"),
+        ] {
+            let row = processed
+                .iter()
+                .find(|row| row.iter().any(|cell| cell == description))
+                .unwrap_or_else(|| panic!("the row of {description} survives: {processed:?}"));
+            assert!(
+                row.iter().any(|cell| cell == deposit),
+                "the deposit {deposit} stays on the row of {description}: {row:?}"
+            );
+        }
+    }
+
+    /// A six-column grid whose third value column OCR split by digit width: the short amounts sit
+    /// in a headerless column of their own, empty in two thirds of the rows, and the wide amounts
+    /// stay in the headed column, which is empty in those rows. Every other cell is filled. ~keep
+    fn value_table_with_a_drift_split_column() -> Vec<Vec<String>> {
+        let header = ["Item", "Year 1", "Year 2", "Year 3", "", "Year 4", "Year 5"];
+        let mut table = vec![header.iter().map(|cell| cell.to_string()).collect::<Vec<String>>()];
+        for row in 0..12u32 {
+            let wide = |base: u32| format!("{},{:03}", base + row, 10 * row + 6);
+            let (year_3, short) = if row % 3 == 2 {
+                (String::new(), (300 + 7 * row).to_string())
+            } else {
+                (wide(80), String::new())
+            };
+            table.push(vec![
+                format!("Item {}", row + 1),
+                wide(40),
+                wide(60),
+                year_3,
+                short,
+                wide(20),
+                wide(30),
+            ]);
+        }
+        table
+    }
+
+    /// A headerless value column beside a value column that is half empty and holds few
+    /// characters used to reject the whole table (`content_asymmetry_sparse_column`), while the
+    /// same column a little emptier was folded into its neighbour and the table kept. The fold
+    /// now covers both, so the short amounts return to the column they were split from. ~keep
+    #[test]
+    fn a_half_empty_unnamed_drift_column_is_folded_instead_of_rejecting_the_table() {
+        let table = value_table_with_a_drift_split_column();
+
+        let processed = post_process_table(table, false, false)
+            .expect("a drift-split amount column must not reject the whole table");
+
+        let expected = [
+            ["Item", "Year 1", "Year 2", "Year 3", "Year 4", "Year 5"],
+            ["Item 1", "40,006", "60,006", "80,006", "20,006", "30,006"],
+            ["Item 2", "41,016", "61,016", "81,016", "21,016", "31,016"],
+            ["Item 3", "42,026", "62,026", "314", "22,026", "32,026"],
+            ["Item 4", "43,036", "63,036", "83,036", "23,036", "33,036"],
+            ["Item 5", "44,046", "64,046", "84,046", "24,046", "34,046"],
+            ["Item 6", "45,056", "65,056", "335", "25,056", "35,056"],
+            ["Item 7", "46,066", "66,066", "86,066", "26,066", "36,066"],
+            ["Item 8", "47,076", "67,076", "87,076", "27,076", "37,076"],
+            ["Item 9", "48,086", "68,086", "356", "28,086", "38,086"],
+            ["Item 10", "49,096", "69,096", "89,096", "29,096", "39,096"],
+            ["Item 11", "50,106", "70,106", "90,106", "30,106", "40,106"],
+            ["Item 12", "51,116", "71,116", "377", "31,116", "41,116"],
+        ]
+        .map(|row| row.map(str::to_string).to_vec())
+        .to_vec();
+        assert_eq!(processed, expected);
+    }
+
+    /// A sparse unnamed value column is not a digit-width split when its values coexist with the
+    /// values to its left. Folding it would silently join two distinct cells on those rows. ~keep
+    #[test]
+    fn an_overlapping_sparse_value_column_is_not_folded_into_its_left_neighbour() {
+        let mut table = value_table_with_a_drift_split_column();
+        for row in table.iter_mut().skip(1).filter(|row| !row[4].is_empty()) {
+            row[3] = "900,000".to_string();
+        }
+
         assert!(
             post_process_table(table, false, false).is_none(),
-            "an unnamed, mostly-empty column must still be treated as noise, not preserved"
+            "a sparse value column that overlaps its neighbour must remain eligible for rejection"
+        );
+    }
+
+    /// Folding the unnamed column of a two-column grid would collapse it to one column, so a value
+    /// column that is empty in more than half of its rows still reads as noise and is rejected. ~keep
+    #[test]
+    fn a_two_column_grid_with_a_more_than_half_empty_unnamed_column_is_still_rejected() {
+        let mut table = vec![vec!["Description".to_string(), String::new()]];
+        for row in 0..10u32 {
+            let value = if row < 4 { (row + 3).to_string() } else { String::new() };
+            table.push(vec![format!("Line item number {}", row + 1), value]);
+        }
+
+        let value_chars = column_data_char_count(&table, 1);
+        let total_chars = value_chars + column_data_char_count(&table, 0);
+        assert!(column_is_a_sparse_fragment_for_ocr(value_chars, total_chars, 6, 10));
+
+        assert!(
+            post_process_table(table, false, false).is_none(),
+            "an unnamed column that is empty in more than half its rows is still noise"
         );
     }
 
