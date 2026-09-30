@@ -454,6 +454,49 @@ fn group_indices_into_rows(all_spans: &[TextSpan], indices: &[usize]) -> Vec<Vec
     rows
 }
 
+// How far from the page's own column gutter (`ReadingOrderContext::column_gutter`, from
+// `PdfDocument::detect_column_gutter`) a fallback valley's cut may lie. ~keep
+const FALLBACK_GUTTER_TOLERANCE_PT: f32 = 24.0;
+
+thread_local! {
+    /// The page gutter of the `apply` / `partition_region` call in progress, for the
+    /// valley fallback deep in the recursion. ~keep
+    static PAGE_GUTTER: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
+}
+
+/// Sets [`PAGE_GUTTER`] for one ordering call and restores the previous value. ~keep
+struct PageGutterScope(Option<f32>);
+
+impl PageGutterScope {
+    fn set(gutter: Option<f32>) -> Self {
+        Self(PAGE_GUTTER.with(|cell| cell.replace(gutter)))
+    }
+}
+
+impl Drop for PageGutterScope {
+    fn drop(&mut self) {
+        PAGE_GUTTER.with(|cell| cell.set(self.0));
+    }
+}
+
+/// Both sides of a cut at `split_x` are at least a column wide (60 pt, the same floor as
+/// [`XYCutStrategy::column_cut_at`]'s own check, which it repeats). ~keep
+fn leaves_two_columns(all_spans: &[TextSpan], indices: &[usize], split_x: f32) -> bool {
+    const MIN_RESULT_WIDTH_PT: f32 = 60.0;
+    let (mut left_min, mut left_max, mut right_min, mut right_max) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+    for &i in indices {
+        let (l, r) = (all_spans[i].bbox.left(), all_spans[i].bbox.right());
+        if l < split_x {
+            left_min = left_min.min(l);
+            left_max = left_max.max(r);
+        } else {
+            right_min = right_min.min(l);
+            right_max = right_max.max(r);
+        }
+    }
+    left_max - left_min >= MIN_RESULT_WIDTH_PT && right_max - right_min >= MIN_RESULT_WIDTH_PT
+}
+
 impl Default for XYCutStrategy {
     fn default() -> Self {
         Self {
@@ -535,6 +578,7 @@ impl XYCutStrategy {
     /// folding a heading that opens the other column into a wrapped
     /// heading's run (GH#1757). `None` leaves that fold unconditional.
     pub fn partition_region(&self, spans: &[TextSpan], column_gutter: Option<f32>) -> Vec<Vec<TextSpan>> {
+        let _gutter = PageGutterScope::set(column_gutter);
         let heading_runs = self.find_heading_runs(spans, column_gutter);
         if heading_runs.is_empty() {
             // Hot path: no headings found, skip the synthesize/expand
@@ -2083,9 +2127,29 @@ impl XYCutStrategy {
     ) -> Option<(f32, Vec<usize>, Vec<usize>)> {
         let profile = self.horizontal_projection_indexed(all_spans, indices)?;
 
-        let split_x = if let Some((vs, ve, vw)) = self.find_valley(&profile) {
+        // A valley whose cut leaves either side narrower than a column is no gutter
+        // but the region's own edge: the projection counts each span's ink as 0.45 em per
+        // character, so a column of long lines "ends" well before its real right edge, and
+        // with a stray header number past it (Soluble p6: `12 (2026) 100361` at x 507-558)
+        // that shoulder is an interior valley wider than the real 16 pt gutter. Only the
+        // widest valley used to be tried; its cut was refused for width, the page got no
+        // column cut and was read by y, the table note line by line into the right column's
+        // prose. When the page has a column gutter of its own, such valleys are skipped and
+        // the next valley is taken -- but only if its cut lies at that gutter. Without a page
+        // gutter, or with a cut elsewhere, the search ends as it always did: on a
+        // single-column page or a table the next valley is a gap between cells or words, and
+        // taking it tore sentences and table rows. A widest valley that makes or refuses a
+        // cut on any other ground decides exactly as before. ~keep
+        let valleys = self.interior_valleys(&profile);
+        if valleys.is_empty() {
+            let split_x = self.find_split_between_peaks(&profile)?;
+            return self.column_cut_at(all_spans, indices, split_x);
+        }
+        let page_gutter = PAGE_GUTTER.with(|cell| cell.get());
+        let mut skipped = false;
+        for (vs, ve, vw) in valleys {
             if vw < self.min_valley_width {
-                return None;
+                break;
             }
             // Deepest point within the valley run, not its midpoint
             // (GH#1763) — see `deepest_valley_point` for why. ~keep
@@ -2097,11 +2161,28 @@ impl XYCutStrategy {
                     bbox.left() < x && x < bbox.right()
                 })
             };
-            x_min + deepest_valley_point(&profile.density, vs, ve, &split_is_clear)
-        } else {
-            self.find_split_between_peaks(&profile)?
-        };
+            let split_x = x_min + deepest_valley_point(&profile.density, vs, ve, &split_is_clear);
+            if !leaves_two_columns(all_spans, indices, split_x) {
+                // Without a page gutter of its own the search ends here, as it always did.
+                page_gutter?;
+                skipped = true;
+                continue;
+            }
+            if skipped && !page_gutter.is_some_and(|gutter| (split_x - gutter).abs() <= FALLBACK_GUTTER_TOLERANCE_PT) {
+                return None;
+            }
+            return self.column_cut_at(all_spans, indices, split_x);
+        }
+        None
+    }
 
+    /// The column cut at `split_x`, if it passes every check a column gutter must. ~keep
+    fn column_cut_at(
+        &self,
+        all_spans: &[TextSpan],
+        indices: &[usize],
+        split_x: f32,
+    ) -> Option<(f32, Vec<usize>, Vec<usize>)> {
         // Reject splits where either resulting sub-column would be
         // narrower than ~60 pt (about 6 body-text characters at
         // 10 pt). Without this check, XY-cut recursion sub-splits
@@ -2482,19 +2563,23 @@ impl XYCutStrategy {
     /// outside the actual content extent) are ignored; they represent
     /// page margins, not column gutters, and picking them would produce
     /// meaningless splits.
-    fn find_valley(&self, profile: &ProjectionProfile) -> Option<(usize, usize, f32)> {
+    fn interior_valleys(&self, profile: &ProjectionProfile) -> Vec<(usize, usize, f32)> {
         if profile.density.is_empty() {
-            return None;
+            return Vec::new();
         }
 
         let peak = profile.density.iter().copied().fold(0.0, f32::max);
 
         if peak == 0.0 {
-            return None;
+            return Vec::new();
         }
 
-        let first_nonzero = profile.density.iter().position(|&d| d > 0.0)?;
-        let last_nonzero = profile.density.iter().rposition(|&d| d > 0.0)?;
+        let (Some(first_nonzero), Some(last_nonzero)) = (
+            profile.density.iter().position(|&d| d > 0.0),
+            profile.density.iter().rposition(|&d| d > 0.0),
+        ) else {
+            return Vec::new();
+        };
 
         let threshold = peak * self.valley_threshold;
         let mut valleys = Vec::new();
@@ -2538,10 +2623,19 @@ impl XYCutStrategy {
             }
             merged.push(seg);
         }
-        merged
+        // Widest first; among equals the LATER valley first, the one `max_by` picks, so
+        // `find_valley` is unchanged. ~keep
+        let mut valleys: Vec<(usize, usize, f32)> = merged
             .into_iter()
             .map(|(start, end)| (start, end, (end - start) as f32))
-            .max_by(|a, b| crate::utils::safe_float_cmp(a.2, b.2))
+            .collect();
+        valleys.sort_by(|a, b| crate::utils::safe_float_cmp(b.2, a.2).then(b.0.cmp(&a.0)));
+        valleys
+    }
+
+    /// The widest interior valley (see [`Self::interior_valleys`]). ~keep
+    fn find_valley(&self, profile: &ProjectionProfile) -> Option<(usize, usize, f32)> {
+        self.interior_valleys(profile).into_iter().next()
     }
 
     /// Test-only wrapper exposing `deepest_valley_point` (a free function)
@@ -2646,6 +2740,7 @@ impl ReadingOrderStrategy for XYCutStrategy {
         // each wrapped heading as a single atomic block. When no
         // headings are found we use the original index-only path that
         // avoids span clones during recursion. ~keep
+        let _gutter = PageGutterScope::set(context.column_gutter);
         let heading_runs = self.find_heading_runs(&spans, context.column_gutter);
 
         let index_groups: Vec<Vec<usize>> = if heading_runs.is_empty() {
@@ -5386,5 +5481,366 @@ mod tests {
             last_text < first_chart,
             "the text column is woven into the chart: {order:?}"
         );
+    }
+
+    /// A two-column journal page, a sparse table in the left column (Soluble p6). The
+    /// widest interior valley is the right column's shoulder at x ~ 520-545 -- the 0.45 em ink
+    /// estimate ends its lines early, and header numbers stand past it -- and its cut is too
+    /// narrow on the right; the real gutter (~16 pt) is the next valley. With only the widest
+    /// tried the page got no column cut and was read by y, the table note line by line into the
+    /// right column's prose. Every span of the page, geometry verbatim, letters replaced by lorem
+    /// ipsum of the same length. ~keep
+    #[test]
+    fn a_column_cut_falls_back_to_the_next_valley() {
+        use crate::layout::FontWeight;
+        let strategy = XYCutStrategy::new();
+        #[rustfmt::skip]
+        let page: &[(f32, f32, f32, f32, bool, &str)] = &[
+            (37.59, 752.43, 463.75, 6.38, false, "R. Eetdolore ma gn.                                                                                                                                                                                                                               "),
+            (400.27, 752.42, 20.35, 6.38, false, "Dipisci"),
+            (420.62, 752.42, 1.87, 6.38, false, " "),
+            (422.48, 752.42, 5.28, 6.38, false, "ng"),
+            (427.76, 752.42, 1.87, 6.38, false, " "),
+            (429.62, 752.42, 35.42, 6.38, false, "Elitseddoeius"),
+            (465.04, 752.42, 1.87, 6.38, false, " "),
+            (466.91, 752.42, 37.90, 6.38, false, "Modtemporinc"),
+            (504.81, 752.42, 1.87, 6.38, false, " "),
+            (506.68, 752.42, 7.09, 6.38, false, "45"),
+            (513.77, 752.42, 1.87, 6.38, false, " "),
+            (515.64, 752.42, 19.52, 6.38, false, "(5359)"),
+            (535.15, 752.42, 1.87, 6.38, false, " "),
+            (537.02, 752.42, 21.27, 6.38, false, "433694"),
+            (558.29, 752.42, 1.87, 6.38, false, " "),
+            (37.59, 732.59, 27.29, 7.17, true, "Lorem 5 "),
+            (37.59, 723.00, 195.27, 7.17, false, "Psumdolo rsitametco nsecteturadipis ci Nge litseddo: Eiusmod (t "),
+            (232.78, 723.00, 5.52, 7.17, false, "~"),
+            (240.32, 723.00, 50.45, 7.17, false, "68), Emporincidi "),
+            (37.59, 713.42, 43.84, 7.17, false, "Ipsumdolo (r "),
+            (81.52, 713.42, 5.52, 7.17, false, "~"),
+            (89.18, 713.42, 93.34, 7.17, false, "47), sit Ametcons ec Tetu (r "),
+            (182.55, 713.42, 5.52, 7.17, false, "~"),
+            (190.26, 713.42, 12.78, 7.17, false, "54)."),
+            (43.60, 700.33, 32.75, 6.38, false, "Adipiscing "),
+            (96.72, 700.33, 16.99, 6.38, false, "Aal i "),
+            (113.72, 700.33, 4.91, 6.38, false, "~"),
+            (120.58, 700.33, 7.18, 6.38, false, "68"),
+            (157.78, 700.33, 31.70, 6.38, false, "Duntutlabor "),
+            (202.84, 700.33, 11.48, 6.38, false, "Agn "),
+            (260.90, 700.33, 20.87, 6.38, false, "a-aliqu"),
+            (43.60, 691.71, 40.45, 6.38, false, "elitseddoeiusmo"),
+            (157.78, 691.71, 34.91, 6.38, false, "eetdolore m "),
+            (202.84, 691.71, 46.41, 6.38, false, "Aloremip sumd o "),
+            (157.78, 683.15, 4.91, 6.38, false, "~"),
+            (164.63, 683.15, 7.18, 6.38, false, "47"),
+            (202.84, 683.15, 4.91, 6.38, false, "~"),
+            (209.65, 683.15, 7.18, 6.38, false, "54"),
+            (43.60, 670.00, 32.42, 6.38, true, "Dte, mp/O"),
+            (116.45, 670.00, 13.88, 6.38, false, "5 (6)"),
+            (157.78, 670.00, 17.47, 6.38, false, "7 (48)"),
+            (218.95, 670.00, 13.94, 6.38, false, "5 (6)"),
+            (265.83, 670.00, 16.14, 6.38, false, "3.437"),
+            (43.60, 661.44, 38.17, 6.38, true, "rin58,C/id"),
+            (109.25, 661.44, 28.26, 6.38, false, "787 (752)"),
+            (157.78, 661.44, 28.26, 6.38, false, "076 (026)"),
+            (211.80, 661.44, 28.26, 6.38, false, "693 (549)"),
+            (260.90, 661.44, 4.78, 6.38, true, "<"),
+            (265.68, 661.44, 17.00, 6.38, true, "3.334"),
+            (43.60, 652.88, 35.10, 6.38, true, "id-untut, "),
+            (109.25, 652.88, 28.26, 6.38, false, "899 (613)"),
+            (157.78, 652.88, 28.26, 6.38, false, "820 (760)"),
+            (211.80, 652.88, 28.26, 6.38, false, "832 (608)"),
+            (265.83, 652.88, 16.14, 6.38, false, "3.759"),
+            (49.55, 644.32, 22.20, 6.38, true, "labo/R"),
+            (43.60, 635.75, 39.53, 6.38, true, "Eetd, ol/or"),
+            (107.43, 635.75, 28.27, 6.38, false, "4.03 (4.4)"),
+            (157.78, 635.75, 28.22, 6.38, false, "5.68 (6.0)"),
+            (209.99, 635.75, 28.27, 6.38, false, "4.93 (4.3)"),
+            (265.72, 635.75, 17.00, 6.38, true, "3.365"),
+            (43.60, 627.19, 36.90, 6.38, true, "emag, na/al"),
+            (49.95, 618.63, 17.90, 6.38, false, "iqual"),
+            (96.72, 618.63, 49.76, 6.38, false, "4518.93 (4483.5)"),
+            (157.78, 618.63, 21.60, 6.38, false, "4848.9 "),
+            (206.42, 618.63, 39.02, 6.38, false, "216.2 (274.1)"),
+            (265.72, 618.63, 17.00, 6.38, true, "3.330"),
+            (157.78, 610.02, 24.53, 6.38, false, "(4908.0)"),
+            (49.95, 601.46, 18.15, 6.38, false, "ore50"),
+            (96.72, 601.46, 49.76, 6.38, false, "6987.63 (5216.4)"),
+            (157.78, 601.46, 21.60, 6.38, false, "7764.2 "),
+            (202.84, 601.46, 46.18, 6.38, false, "6433.3 (5097.4)"),
+            (265.72, 601.46, 17.00, 6.38, true, "3.371"),
+            (157.78, 592.90, 24.53, 6.38, false, "(9054.0)"),
+            (49.95, 584.34, 18.15, 6.38, false, "mip13"),
+            (100.29, 584.34, 39.01, 6.38, false, "401.73 (20.8)"),
+            (157.78, 584.34, 18.01, 6.38, false, "420.2 "),
+            (206.42, 584.34, 39.02, 6.38, false, "476.6 (431.5)"),
+            (265.83, 584.34, 16.14, 6.38, false, "3.568"),
+            (157.78, 575.77, 20.94, 6.38, false, "(511.5)"),
+            (49.95, 567.21, 21.74, 6.38, false, "sum460"),
+            (100.29, 567.21, 39.01, 6.38, false, "477.91 (23.0)"),
+            (157.78, 567.21, 18.01, 6.38, false, "417.1 "),
+            (206.42, 567.21, 35.43, 6.38, false, "432.7 (06.4)"),
+            (265.72, 567.21, 17.00, 6.38, true, "3.335"),
+            (157.78, 558.65, 20.94, 6.38, false, "(458.4)"),
+            (49.95, 550.04, 21.74, 6.38, false, "dol485"),
+            (107.43, 550.04, 31.86, 6.38, false, "77.5 (59.2)"),
+            (157.78, 550.04, 31.81, 6.38, false, "84.1 (58.6)"),
+            (209.99, 550.04, 31.86, 6.38, false, "74.4 (64.9)"),
+            (265.83, 550.04, 16.14, 6.38, false, "3.596"),
+            (49.95, 541.48, 17.03, 6.38, false, "orsit"),
+            (107.43, 541.48, 31.86, 6.38, false, "98.6 (74.5)"),
+            (157.78, 541.48, 31.81, 6.38, false, "00.9 (77.9)"),
+            (209.99, 541.48, 31.86, 6.38, false, "87.6 (79.1)"),
+            (265.72, 541.48, 17.00, 6.38, true, "3.377"),
+            (49.95, 532.91, 13.74, 6.38, false, "amet"),
+            (103.86, 532.91, 35.43, 6.38, false, "17.43 (83.0)"),
+            (157.78, 532.91, 31.81, 6.38, false, "29.7 (82.2)"),
+            (209.99, 532.91, 31.86, 6.38, false, "91.8 (85.0)"),
+            (265.72, 532.91, 17.00, 6.38, true, "3.353"),
+            (49.95, 524.36, 16.11, 6.38, false, "cons6"),
+            (103.86, 524.36, 35.43, 6.38, false, "10.32 (08.1)"),
+            (157.78, 524.36, 18.01, 6.38, false, "446.2 "),
+            (209.99, 524.36, 31.86, 6.38, false, "92.4 (04.5)"),
+            (265.83, 524.36, 16.14, 6.38, false, "3.501"),
+            (157.78, 515.79, 17.35, 6.38, false, "(14.7)"),
+            (49.95, 507.23, 16.30, 6.38, false, "ect-4"),
+            (100.29, 507.23, 39.01, 6.38, false, "436.23 (02.7)"),
+            (157.78, 507.23, 18.01, 6.38, false, "441.9 "),
+            (209.99, 507.23, 31.86, 6.38, false, "18.5 (17.0)"),
+            (265.72, 507.23, 17.00, 6.38, true, "3.371"),
+            (157.78, 498.67, 17.35, 6.38, false, "(05.7)"),
+            (49.95, 490.11, 19.68, 6.38, false, "etu-R5"),
+            (96.72, 490.11, 49.76, 6.38, false, "5751.78 (4951.0)"),
+            (157.78, 490.11, 21.60, 6.38, false, "5624.4 "),
+            (202.84, 490.11, 46.18, 6.38, false, "5751.7 (5326.6)"),
+            (265.83, 490.11, 16.14, 6.38, false, "3.152"),
+            (157.78, 481.50, 24.53, 6.38, false, "(4642.2)"),
+            (49.95, 472.93, 19.34, 6.38, false, "adip-6"),
+            (96.72, 472.93, 49.76, 6.38, false, "5686.63 (4931.4)"),
+            (157.78, 472.93, 21.60, 6.38, false, "5007.2 "),
+            (202.84, 472.93, 46.18, 6.38, false, "5486.4 (4746.2)"),
+            (265.72, 472.93, 17.00, 6.38, true, "3.341"),
+            (306.60, 466.81, 22.48, 7.17, true, "Idi. 6."),
+            (332.67, 466.81, 227.08, 7.17, false, "D-untutl abor eetd olorem agnaal-iq ua loremips umdo lor sitametcons "),
+            (157.78, 464.37, 24.53, 6.38, false, "(4716.2)"),
+            (306.60, 457.23, 248.74, 7.17, false, "ecteturad ipisc ing elitsed doeius modtempori ncididun (tutla) bore etdolor~"),
+            (43.60, 455.81, 53.68, 6.38, true, "Iscingeli, ts/ed"),
+            (306.60, 447.65, 135.52, 7.17, false, "emag naal iq ual oremipsu mdol orsi (t "),
+            (443.68, 447.65, 5.52, 7.17, false, "~"),
+            (452.86, 447.65, 106.91, 7.17, false, "2). Amet: C- ons E-cteturadip "),
+            (49.95, 447.25, 12.62, 6.38, false, "Do4e"),
+            (103.86, 447.25, 35.43, 6.38, false, "3.339 (3.07)"),
+            (157.78, 447.25, 18.01, 6.38, false, "3.334 "),
+            (209.99, 447.25, 31.86, 6.38, false, "3.42 (3.00)"),
+            (265.83, 447.25, 16.14, 6.38, false, "3.414"),
+            (157.78, 438.69, 17.35, 6.38, false, "(3.83)"),
+            (306.60, 438.12, 253.18, 7.17, false, "iscingelit; Se: ddoeius mo dtemporincididu; Ntu: tlaboreetdo 5,6-loremagnaal; "),
+            (49.95, 430.13, 9.08, 6.38, false, "Iu9"),
+            (107.43, 430.13, 31.86, 6.38, false, "0.54 (40.0)"),
+            (157.78, 430.13, 31.81, 6.38, false, "9.14 (40.4)"),
+            (209.99, 430.13, 31.86, 6.38, false, "0.94 (56.0)"),
+            (265.83, 430.13, 16.14, 6.38, false, "3.809"),
+            (306.60, 428.54, 249.20, 7.17, false, "Iq-4: ualoremips umdo lorsi tametco 4; Nse-6: cteturadip iscingelit sedd 6."),
+            (49.95, 421.57, 9.08, 6.38, false, "Sm1"),
+            (107.43, 421.57, 31.86, 6.38, false, "41.1 (45.9)"),
+            (157.78, 421.57, 31.81, 6.38, false, "55.5 (40.8)"),
+            (209.99, 421.57, 28.27, 6.38, false, "49.2 (2.9)"),
+            (265.83, 421.57, 16.14, 6.38, false, "3.492"),
+            (49.95, 412.95, 12.67, 6.38, false, "Od43"),
+            (107.43, 412.95, 28.27, 6.38, false, "5.32 (5.6)"),
+            (157.78, 412.95, 28.22, 6.38, false, "4.91 (5.5)"),
+            (209.99, 412.95, 28.27, 6.38, false, "5.40 (5.6)"),
+            (265.83, 412.95, 16.14, 6.38, false, "3.957"),
+            (306.59, 406.09, 253.37, 7.97, false, "oeiusm odte mpo rincidi duntutlab oreetdol, oremagnaal i qual ore M "),
+            (49.95, 404.39, 12.67, 6.38, false, "Te40"),
+            (107.43, 404.39, 28.27, 6.38, false, "7.75 (1.8)"),
+            (157.78, 404.39, 31.81, 6.38, false, "6.93 (45.5)"),
+            (209.99, 404.39, 28.27, 6.38, false, "7.83 (9.8)"),
+            (265.83, 404.39, 16.14, 6.38, false, "3.130"),
+            (49.95, 395.83, 15.37, 6.38, false, "Mpor"),
+            (103.86, 395.83, 35.43, 6.38, false, "3.334 (3.07)"),
+            (157.78, 395.83, 33.04, 6.38, false, "3.334 (3.60"),
+            (206.42, 395.83, 35.43, 6.38, false, "3.330 (3.00)"),
+            (265.83, 395.83, 16.14, 6.38, false, "3.471"),
+            (306.59, 395.66, 253.38, 7.97, false, "ipsu mdolorsitamet co Nse cteturadipis, cingelitsed do ei u smodtem porinc "),
+            (49.95, 387.27, 19.01, 6.38, false, "Inci2"),
+            (103.86, 387.27, 39.02, 6.38, false, "426.1 (579.2)"),
+            (157.78, 387.27, 18.01, 6.38, false, "592.1 "),
+            (206.42, 387.27, 39.02, 6.38, false, "492.2 (490.7)"),
+            (265.72, 387.27, 17.00, 6.38, true, "3.332"),
+            (306.59, 385.17, 170.70, 7.97, false, "id Idu-ntutlab oreetdolorem agn aaliqu alorem."),
+            (157.78, 378.71, 20.94, 6.38, false, "(755.1)"),
+            (318.55, 374.74, 241.46, 7.97, false, "Ips umdolorsitam etconsec tetura dipi scin geli tseddo eiusmodt "),
+            (49.95, 370.15, 22.60, 6.38, false, "Didu43"),
+            (103.86, 370.15, 39.02, 6.38, false, "752.6 (857.1)"),
+            (157.78, 370.15, 18.01, 6.38, false, "166.5 "),
+            (206.42, 370.15, 39.02, 6.38, false, "690.7 (478.5)"),
+            (265.72, 370.15, 17.00, 6.38, true, "3.365"),
+            (306.59, 364.25, 253.40, 7.97, false, "emporincididu ntutla 9 boreet do loremagnaal iqualoremipsumdol ors "),
+            (157.78, 361.59, 20.94, 6.38, false, "(056.0)"),
+            (306.59, 353.82, 253.38, 7.97, false, "itametco nse ct etu radi, piscingeli tseddoeiu smodtempori nc ididun "),
+            (49.95, 353.03, 22.60, 6.38, false, "Ntut46"),
+            (107.43, 353.03, 31.86, 6.38, false, "83.5 (62.6)"),
+            (157.78, 353.03, 31.81, 6.38, false, "87.1 (50.7)"),
+            (209.99, 353.03, 31.86, 6.38, false, "76.9 (75.0)"),
+            (265.83, 353.03, 16.14, 6.38, false, "3.677"),
+            (49.95, 344.41, 15.84, 6.38, false, "Labo"),
+            (107.43, 344.41, 31.86, 6.38, false, "60.3 (61.8)"),
+            (157.78, 344.41, 31.81, 6.38, false, "87.4 (66.4)"),
+            (209.99, 344.41, 31.86, 6.38, false, "51.5 (52.1)"),
+            (265.72, 344.41, 17.00, 6.38, true, "3.350"),
+            (306.59, 343.33, 253.42, 7.97, false, "tutl aboreetdol. Or emagnaal, iqualorem ipsumdol orsita, metconsect etur "),
+            (306.59, 332.90, 248.53, 7.97, false, "adipi sci ng elit seddoeius modtempori nc ididuntut laboreet. Dolor~"),
+            (37.59, 330.29, 253.21, 7.17, false, "Lorsita metc Ons ect eturadipi. Scin: G elit seddoeiusm odtemp; Orin: C- idi D- "),
+            (306.59, 322.41, 253.39, 7.97, false, "emagna, aliqu alor emipsumd 9 olo 45 rsitam etcon secteturad ip isc "),
+            (37.59, 320.71, 253.17, 7.17, false, "untutlabor eetdolorem; Ag: naaliqu al oremipsumdolors; Ita: m-etconsec teturad; "),
+            (306.59, 311.98, 253.38, 7.97, false, "ingel-itse Ddoe iusmo. Dte mporincidid un tutlabo reet dolore ma gnaal "),
+            (37.59, 311.13, 253.19, 7.17, false, "ip-iscin: gelitseddoeiusmo-dtemporincidid Untutl Abo Reetdol; Orem: "),
+            (37.59, 301.61, 248.78, 7.17, false, "agnaaliqualore-mipsumd Olor-sitamet consect; Etur: adipiscinge litse ddoe~"),
+            (306.59, 301.49, 253.40, 7.97, false, "iqual orem ipsumd, ol ors itametc on secteturadi piscing el itseddoe "),
+            (37.59, 292.03, 248.81, 7.17, false, "iusm; Odt: emporincididu ntutl; abor: eetdolo remagn aaliqualor; Emi: psumdo~"),
+            (306.59, 291.06, 253.40, 7.97, false, "iusmodtemporin, cididu ntutlab o reetdolor emagnaali-qualore mipsumd "),
+            (37.59, 282.44, 21.61, 7.17, false, "lorsi "),
+            (64.46, 282.44, 55.44, 7.17, false, "5,6-tametconsec; "),
+            (125.18, 282.44, 21.67, 7.17, false, "Tet-6: "),
+            (152.05, 282.44, 39.26, 7.17, false, "uradipisci "),
+            (196.61, 282.44, 33.73, 7.17, false, "ngelitsedd "),
+            (235.56, 282.44, 16.96, 7.17, false, "oeiu "),
+            (257.78, 282.44, 8.15, 7.17, false, "6; "),
+            (271.16, 282.44, 19.59, 7.17, false, "Sm-4: "),
+            (306.59, 280.57, 248.49, 7.97, false, "olorsi. Tametco, nsec teturad ipiscing e lits eddoeiu smodtempori nc id~"),
+            (37.59, 272.92, 253.20, 7.17, false, "odtemporin cidi duntu tlabore 4; Et-D5: oloremagna aliq ualor-emipsu 5; Mdo- "),
+            (306.59, 270.14, 253.38, 7.97, false, "idun tutlabo, reetdolore magn aali qualorem ipsumdolo rsitame tconsec- "),
+            (37.59, 263.34, 253.21, 7.17, false, "6: L-orsi tametconsectet ura dipis cingel 6; its58: eddoeiu smodtempori 5 "),
+            (306.59, 259.65, 253.37, 7.97, false, "teturad ipiscingelits eddoeiusm odtemp orin cididu ntutlabore etdolor. "),
+            (37.59, 253.76, 253.18, 7.17, false, "ncididun; Tutl: aboreetd oloremagnaa liqual oremip. Sumdolors itamet con Sec "),
+            (306.59, 249.22, 253.39, 7.97, false, "Emagn aaliqua loremip sum dolo rs itame tc onsec teturadipi, scingelits ed "),
+            (37.59, 244.23, 5.52, 7.17, false, "<"),
+            (43.11, 244.23, 54.13, 7.17, false, "43 qu/A, lor58 "),
+            (97.28, 244.23, 5.52, 7.17, false, "<"),
+            (104.99, 244.23, 34.77, 7.17, false, "933 E/mi."),
+            (306.59, 238.73, 253.38, 7.97, false, "doeius Mod. Tempo ri ncididunt utl abor eetdolore magnaaliq ual oremip "),
+            (306.59, 228.30, 248.52, 7.97, false, "sumdolorsitame tc Ons, ecteturadi pisc ingelitse Ddo eiusmodte, mporinc~"),
+            (37.59, 221.78, 253.42, 7.97, false, "tetura dip iscingelit seddoei us Mod, tem porinc idid untutlabor "),
+            (306.59, 217.81, 186.26, 7.97, false, "idid un Tutla bor Eetdo, lor emagnaa liqualo remipsu ["),
+            (492.85, 217.81, 4.49, 7.97, false, "7"),
+            (497.34, 217.81, 2.23, 7.97, false, ","),
+            (499.57, 217.81, 8.97, 7.97, false, "69"),
+            (508.55, 217.81, 2.23, 7.97, false, ","),
+            (510.78, 217.81, 8.97, 7.97, false, "60"),
+            (519.75, 217.81, 40.23, 7.97, false, "], mdolors "),
+            (37.59, 211.29, 253.41, 7.97, false, "eetdolor em Agnaa liq Ual-6 oremip su mdolors itametco nsectetura, "),
+            (306.59, 207.33, 253.38, 7.97, false, "ita metco nsect eturadi pis. Cin gelitsed doeiu smodte mpor Inc idid "),
+            (37.59, 200.86, 81.24, 7.97, false, "dipiscinge litseddoeius "),
+            (118.26, 200.86, 49.41, 7.97, false, "modtempori nc "),
+            (167.13, 200.86, 6.39, 7.97, false, "i "),
+            (172.97, 200.86, 33.02, 7.97, false, "didunt ut "),
+            (205.45, 200.86, 30.28, 7.97, false, "laboreet "),
+            (235.16, 200.86, 3.37, 7.97, false, "["),
+            (238.53, 200.86, 8.97, 7.97, false, "65"),
+            (247.50, 200.86, 43.51, 7.97, false, "]. Dolorema, "),
+            (306.59, 196.90, 253.38, 7.97, false, "untu-tlab oreetdoloremagnaa liqual oremipsumd olorsita metco nsec "),
+            (37.59, 190.38, 248.52, 7.97, false, "gnaal iqua loremip s umdolor sita met consect Etu radipisci ng Eli tsed~"),
+            (306.59, 186.41, 49.29, 7.97, false, "tetura dipisc ["),
+            (355.88, 186.41, 4.49, 7.97, false, "8"),
+            (360.37, 186.41, 199.64, 7.97, false, "]. In gel itseddo eiusm, odtemporinc ididunt utl ab oreetdo "),
+            (37.59, 179.94, 253.41, 7.97, false, "doeiusmo dte mporincid idunt ut laboreetd oloremagna al iqualor emipsumd "),
+            (306.59, 175.98, 248.51, 7.97, false, "loremagn aa liq ualo-remi psumd olorsita me tconsect etur adipi, sci~"),
+            (37.59, 169.46, 85.08, 7.97, false, "olo rsitametc onsectet."),
+            (306.59, 165.49, 85.80, 7.97, false, "ngelits edd oeiusmodtempo."),
+            (49.55, 159.03, 241.46, 7.97, false, "Ur adipisci ng E lits eddoeiusmod, T empo rincididuntut lab o reetdolo "),
+            (318.55, 155.06, 241.47, 7.97, false, "Rincidid untutlabore et d olorema gnaaliq ua Lor, emi psumdolor "),
+            (37.59, 148.54, 74.12, 7.97, false, "re Mag naaliqualore ["),
+            (111.71, 148.54, 8.97, 7.97, false, "66"),
+            (120.68, 148.54, 170.32, 7.97, false, "]. Mipsumd O-lors itametconse, cteturadi piscing "),
+            (306.59, 144.57, 31.57, 7.97, false, "sitametc "),
+            (337.55, 144.57, 42.35, 7.97, false, "onsectetur "),
+            (379.27, 144.57, 7.92, 7.97, false, "ad "),
+            (386.58, 144.57, 26.84, 7.97, false, "ipiscing "),
+            (412.83, 144.57, 9.27, 7.97, false, "el "),
+            (421.51, 144.57, 13.53, 7.97, false, "its "),
+            (434.38, 144.57, 47.92, 7.97, false, "eddoeiusmod "),
+            (481.71, 144.57, 9.27, 7.97, false, "te "),
+            (490.39, 144.57, 14.74, 7.97, false, "Mpo "),
+            (504.50, 144.57, 15.41, 7.97, false, "rin "),
+            (519.30, 144.57, 40.72, 7.97, false, "cididuntu "),
+            (37.59, 138.11, 253.42, 7.97, false, "elitse D doei usmodte mpo rincididu nt utlab O reetd, ol oremag na aliq "),
+            (306.59, 134.14, 248.54, 7.97, false, "tlaboreetdol. Oremagn aaliqual oremipsumdol or sit ametconsectet uradi~"),
+            (37.59, 127.62, 89.09, 7.97, false, "ua loremips Umdo lorsit ["),
+            (126.68, 127.62, 8.97, 7.97, false, "67"),
+            (135.65, 127.62, 2.23, 7.97, false, ","),
+            (137.88, 127.62, 8.97, 7.97, false, "68"),
+            (146.86, 127.62, 144.17, 7.97, false, "]. Ame Tcon/Sect-E tura dipis c ingelits "),
+            (306.59, 123.65, 253.40, 7.97, false, "pisc, inge li tseddoeiusm odte (Mp) orincididu ntu Tlabor eetd olor "),
+            (37.59, 117.19, 253.41, 7.97, false, "eddo ei U smod temporinci, diduntut, lab oreetdolor. Emagna Aliq ual "),
+            (306.59, 113.22, 37.22, 7.97, false, "emagnaal ["),
+            (343.81, 113.22, 8.97, 7.97, false, "61"),
+            (352.78, 113.22, 207.24, 7.97, false, "]. Iqu alo remi psumd ol orsitame Tconse cte turadipi "),
+            (37.59, 106.70, 253.39, 7.97, false, "oremip sumdolorsita M etcon sect eturadip isc ingelit sed doeiusmo dt "),
+            (306.59, 102.73, 68.40, 7.97, false, "scingeli tseddoeiu ["),
+            (374.99, 102.73, 4.49, 7.97, false, "1"),
+            (379.48, 102.73, 180.54, 7.97, false, "]. Smo dtempori ncid, id-untut, laboreet doloremagn "),
+            (37.59, 96.27, 248.54, 7.97, false, "emporincidid untutl abore. Et dolor, Emag naaliqua Lor emi Ps-9 umd~"),
+            (306.59, 92.30, 253.38, 7.97, false, "aaliqua L oremipsumd olo rsitamet Con secteturad, ipiscin gelitse "),
+            (37.59, 85.78, 253.42, 7.97, false, "olorsit, ametconse ctet uradipiscing elitseddoe ius mod-temporin "),
+            (306.59, 81.81, 253.41, 7.97, false, "ddoeius M odtemporin ci diduntut lab oreetdol oremagnaa li Qua. Lor "),
+            (37.59, 75.35, 37.78, 7.97, false, "cididuntu ["),
+            (75.37, 75.35, 8.97, 7.97, false, "66"),
+            (84.34, 75.35, 2.23, 7.97, false, ","),
+            (86.58, 75.35, 8.97, 7.97, false, "67"),
+            (95.55, 75.35, 195.44, 7.97, false, "]. Tlaboree tdolore magn aaliqual oremipsu Mdol orsita "),
+            (306.59, 71.38, 253.43, 7.97, false, "emipsumd olor sitametcon se-ctetu ra d ipiscinge li tseddoeiu sm Odt "),
+            (37.59, 64.86, 173.45, 7.97, false, "me Tco, nsecteturadi pi scingeli tsed doei usmodtem ["),
+            (211.04, 64.86, 8.97, 7.97, false, "68"),
+            (220.01, 64.86, 71.02, 7.97, false, "]. Po rinc idid untut "),
+            (306.59, 60.89, 15.41, 7.97, false, "emp "),
+            (321.39, 60.89, 6.39, 7.97, false, "o "),
+            (327.17, 60.89, 33.81, 7.97, false, "rincididu "),
+            (360.39, 60.89, 38.73, 7.97, false, "ntutlabor "),
+            (398.55, 60.89, 12.39, 7.97, false, "eet "),
+            (410.34, 60.89, 14.74, 7.97, false, "Dol "),
+            (424.46, 60.89, 47.92, 7.97, false, "oremagnaali "),
+            (471.79, 60.89, 3.37, 7.97, false, "["),
+            (475.17, 60.89, 4.49, 7.97, false, "0"),
+            (479.65, 60.89, 7.94, 7.97, false, "]. "),
+            (486.99, 60.89, 9.48, 7.97, false, "Qu "),
+            (495.83, 60.89, 13.53, 7.97, false, "alo "),
+            (508.76, 60.89, 28.12, 7.97, false, "remipsu "),
+            (536.31, 60.89, 23.70, 7.97, false, "mdolo, "),
+            (37.59, 54.43, 253.43, 7.97, false, "laboreet, dol orema gnaaliqualor emip Sumd olorsi tametcons ecte tura "),
+            (296.21, 31.62, 3.59, 6.38, false, "9"),
+            (299.80, 31.62, 1.87, 6.38, false, " "),
+        ];
+        let spans: Vec<TextSpan> = page
+            .iter()
+            .map(|&(x, y, w, size, bold, text)| {
+                let mut span = make_span_text(x, y, w, size, text, size);
+                if bold {
+                    span.font_weight = FontWeight::Bold;
+                }
+                span
+            })
+            .collect();
+        let mut context = ReadingOrderContext::new();
+        if let Some(gutter) = crate::document::PdfDocument::detect_column_gutter(&spans) {
+            context = context.with_column_gutter(gutter);
+        }
+        let ordered = strategy.apply(spans.clone(), &context).unwrap();
+        let pos = |i: usize| {
+            ordered
+                .iter()
+                .position(|o| o.span.bbox.x == spans[i].bbox.x && o.span.bbox.y == spans[i].bbox.y)
+                .unwrap()
+        };
+        let below_table = |i: usize| spans[i].bbox.y < 340.0 && spans[i].bbox.y > 60.0;
+        let left: Vec<usize> = (0..spans.len())
+            .filter(|&i| below_table(i) && spans[i].bbox.right() < 295.0)
+            .collect();
+        let right: Vec<usize> = (0..spans.len())
+            .filter(|&i| below_table(i) && spans[i].bbox.left() > 300.0)
+            .collect();
+        assert!(left.len() >= 5 && right.len() >= 5);
+        let last_left = left.iter().map(|&i| pos(i)).max().unwrap();
+        let first_right = right.iter().map(|&i| pos(i)).min().unwrap();
+        assert!(last_left < first_right, "the left column is woven into the right one");
     }
 }
