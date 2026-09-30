@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **(dbf): every row of a dBASE table now keeps its values under the headers they belong to.** Each record was read into a name-keyed `HashMap` and walked in hash order, which differs from record to record and from run to run, so a table with more than one field came back with every row's cells permuted and `metadata.format.fields` could pair a field name with another field's type. Records are now read in field-declaration order, which also keeps both values when two fields share a name instead of dropping one. (GH#1968)
 - **(pdf): preserve grouped table header spans in structured output.** Native span geometry now reaches document nodes, while dense cells and Markdown retain consistent columns. Mixed row/column spans use the shared placement rules, and redaction covers retained native grid text. (GH#1959)
 - **(ocr): Tesseract returns OCR elements when `include_elements` is set without a `min_level`.** The default level is `line`, and Tesseract produced only words, so images and PDFs returned no elements at all. (GH#1978)
 - **(heuristics): the OCR confidence aggregate and the quality-score evidence floor count each recognized word once.** When a result carries words and the lines that hold them, as PaddleOCR and Tesseract results do at `min_level: "word"`, only the finest level is folded. Previously every word counted twice, so ten words reached the 20-word floor of the quality-score cap. (GH#1978)
