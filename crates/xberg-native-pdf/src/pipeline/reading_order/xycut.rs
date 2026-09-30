@@ -287,6 +287,29 @@ const MAX_LEAD_EM: f32 = 4.0;
 // the smallest full-width gap, in typical text heights, that a Y-band peeled
 // ahead of a two-column cut may sit on (see `is_full_width_band_gap`).
 const MIN_BAND_GAP_HEIGHTS: f32 = 1.5;
+// at least this share of a column's line openers being bare numbers makes it a table's
+// value column rather than a second column of prose (see `detect_two_column_prose`).
+const MIN_NUMERIC_OPENER_SHARE: f32 = 0.6;
+
+/// what `detect_two_column_prose` found. ~keep
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TwoColumnProse {
+    /// Two columns of prose, cut at this x.
+    Gutter(f32),
+    /// A label column beside a column of bare numbers: a table without rules.
+    LabelValueTable,
+}
+
+/// a table cell holding a bare number -- digits with at most a decimal point, comma,
+/// percent sign, dash, plus-minus or equals sign, and short. `2.1` alone is one too, which is
+/// why the share is asked of a whole column and not of one line. ~keep
+fn is_bare_number(text: &str) -> bool {
+    text.chars().count() <= 8
+        && text.chars().any(|c| c.is_ascii_digit())
+        && text
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '%' | '-' | '\u{2013}' | '\u{b1}' | '=' | ' '))
+}
 
 /// the right edge of a span's INK, for the whole-line machinery below. An extractor bbox
 /// can reach far past its glyphs (trailing whitespace, a stretched advance width -- a
@@ -879,7 +902,21 @@ impl XYCutStrategy {
         // Classify once and pass to both prose detectors below; each gated on
         // `classify_region_kind == Prose` and re-ran the same line clustering. ~keep
         let region_kind = self.classify_region_kind(all_spans, indices);
-        if let Some(gutter_x) = self.detect_two_column_prose(all_spans, indices, region_kind) {
+        let prose = self.detect_two_column_prose(all_spans, indices, region_kind);
+        // a label column beside a column of bare numbers is a table set without rules
+        // (a parameter table: code | label | values | description). Read it row by row, as a
+        // table: cut as two columns its labels and values were torn apart, and left to the
+        // generic cuts a paragraph above it lost its first line to another band. ~keep
+        if matches!(prose, Some(TwoColumnProse::LabelValueTable)) {
+            return vec![
+                group_indices_into_rows(all_spans, indices)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .collect(),
+            ];
+        }
+        if let Some(TwoColumnProse::Gutter(gutter_x)) = prose {
             if let Some((above, below)) = self
                 .find_vertical_split_indexed(all_spans, indices)
                 .filter(|(above, below)| self.is_full_width_band_gap(all_spans, indices, above, below))
@@ -1331,7 +1368,7 @@ impl XYCutStrategy {
         all_spans: &[TextSpan],
         indices: &[usize],
         region_kind: RegionKind,
-    ) -> Option<f32> {
+    ) -> Option<TwoColumnProse> {
         if indices.len() < 8 {
             return None;
         }
@@ -1487,8 +1524,24 @@ impl XYCutStrategy {
             .copied()
             .filter(|&x| (x - c2_x).abs() <= cluster_radius)
             .fold(c2_x, f32::min);
+        // a column whose lines mostly open on a bare number is a table's value column,
+        // not a second column of prose -- a parameter table (code | label | values |
+        // description) gives two left-edge clusters too, the labels and the first value
+        // column, and read as prose its labels and values were torn apart. Two-column prose
+        // opens its lines on words. ~keep
+        let c2_openers: Vec<&str> = indices
+            .iter()
+            .map(|&i| &all_spans[i])
+            .filter(|s| (s.bbox.left() - c2_x).abs() <= cluster_radius)
+            .map(|s| s.text.trim())
+            .filter(|t| !t.is_empty())
+            .collect();
+        let numeric = c2_openers.iter().filter(|t| is_bare_number(t)).count();
+        if !c2_openers.is_empty() && numeric as f32 >= MIN_NUMERIC_OPENER_SHARE * c2_openers.len() as f32 {
+            return Some(TwoColumnProse::LabelValueTable);
+        }
         let gutter_x = (c2_start - 0.5).max((c1_x + c2_x) * 0.5);
-        Some(gutter_x)
+        Some(TwoColumnProse::Gutter(gutter_x))
     }
 
     /// Second-pass 2-column-prose detector for the narrow-gutter case
@@ -4928,6 +4981,80 @@ mod tests {
                 .map(|&i| (spans[i].bbox.left(), spans[i].bbox.y))
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// a parameter table without rules -- code, label, a value column -- gives
+    /// `detect_two_column_prose` two left-edge clusters, the labels and the values. It is a
+    /// table, read row by row, not two columns cut apart. ~keep
+    #[test]
+    fn a_label_column_beside_a_value_column_is_read_row_by_row() {
+        let strategy = XYCutStrategy::new();
+        // p55 of an installation manual's parameter table, as the region reaches the
+        // detector: code (x 50), label (x 78), value columns 1 and 2 (x 238, x 270).
+        let rows = [
+            ("c.", "Minimum capaciteit modulerende pomp", "50", "50"),
+            ("d", "Minimaal toerental warm water", "25", "25"),
+            ("E", "Minimale aanvoertemperatuur bij OT", "30", "30"),
+            ("E.", "Reactie OT en RF kamerthermostaat", "1", "1"),
+            ("F", "Starttoerental centrale verwarming", "70", "60"),
+            ("F.", "Starttoerental warm water bedrijf", "70", "60"),
+            ("h", "Maximaal toerental van de ventilator", "45", "47"),
+            ("n.", "Warmhoudtemperatuur bij Comfort", "0", "0"),
+        ];
+        let mut spans = Vec::new();
+        for (row, (code, label, v1, v2)) in rows.iter().enumerate() {
+            let y = 700.0 - row as f32 * 22.0;
+            spans.push(make_span_text(50.0, y, 8.0, 8.0, code, 8.0));
+            spans.push(make_span_text(78.0, y, 138.0, 8.0, label, 8.0));
+            spans.push(make_span_text(238.0, y, 11.0, 8.0, v1, 8.0));
+            spans.push(make_span_text(270.0, y, 11.0, 8.0, v2, 8.0));
+        }
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        assert_eq!(
+            strategy.detect_two_column_prose(&spans, &indices, strategy.classify_region_kind(&spans, &indices)),
+            Some(TwoColumnProse::LabelValueTable)
+        );
+        let order: Vec<usize> = strategy
+            .partition_indexed_depth(&spans, &indices, 0)
+            .into_iter()
+            .flatten()
+            .collect();
+        assert_eq!(
+            order,
+            (0..spans.len()).collect::<Vec<_>>(),
+            "each row's code, label and values must stay together"
+        );
+    }
+
+    /// Control: two columns of prose open their lines on words, and stay two columns. ~keep
+    #[test]
+    fn two_columns_of_prose_are_not_a_label_value_table() {
+        let strategy = XYCutStrategy::new();
+        let mut spans = Vec::new();
+        for row in 0..10 {
+            let y = 700.0 - row as f32 * 10.5;
+            spans.push(make_span_text(
+                38.0,
+                y,
+                253.0,
+                8.0,
+                "left column body text of the paper here",
+                8.0,
+            ));
+            spans.push(make_span_text(
+                307.0,
+                y,
+                253.0,
+                8.0,
+                "right column body text of the same paper",
+                8.0,
+            ));
+        }
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        assert!(matches!(
+            strategy.detect_two_column_prose(&spans, &indices, strategy.classify_region_kind(&spans, &indices)),
+            Some(TwoColumnProse::Gutter(_))
+        ));
     }
 
     /// Control for the peel: when each legend line is already ONE span (the reporter's own
