@@ -284,6 +284,9 @@ const MIN_CROSSING_SHARE: f32 = 0.4;
 // a line this many ems of ink wide or less, first on its row, is a lead -- a hanging
 // number, a bullet, a label -- that travels with the line after it (see `partition_lines_at`).
 const MAX_LEAD_EM: f32 = 4.0;
+// the smallest full-width gap, in typical text heights, that a Y-band peeled
+// ahead of a two-column cut may sit on (see `is_full_width_band_gap`).
+const MIN_BAND_GAP_HEIGHTS: f32 = 1.5;
 
 /// the right edge of a span's INK, for the whole-line machinery below. An extractor bbox
 /// can reach far past its glyphs (trailing whitespace, a stretched advance width -- a
@@ -877,7 +880,10 @@ impl XYCutStrategy {
         // `classify_region_kind == Prose` and re-ran the same line clustering. ~keep
         let region_kind = self.classify_region_kind(all_spans, indices);
         if let Some(gutter_x) = self.detect_two_column_prose(all_spans, indices, region_kind) {
-            if let Some((above, below)) = self.find_vertical_split_indexed(all_spans, indices) {
+            if let Some((above, below)) = self
+                .find_vertical_split_indexed(all_spans, indices)
+                .filter(|(above, below)| self.is_full_width_band_gap(all_spans, indices, above, below))
+            {
                 tracing::trace!(
                     above = above.len(),
                     below = below.len(),
@@ -1270,6 +1276,39 @@ impl XYCutStrategy {
         true
     }
 
+    /// a Y-band peeled ahead of a two-column cut must sit on a gap that is empty
+    /// across the region's full width AND at least 1.5x the region's typical text height.
+    /// `find_vertical_split_indexed` looks for a valley in the SUMMED density of both
+    /// columns; where one column has whitespace (above a heading) and the other has text,
+    /// that valley exists, and the split lands on whatever line gap is clear inside it --
+    /// 2.5 pt when both columns share a baseline grid. Peeled there, the body is read in
+    /// bands of one or two line pairs, left then right, and the paragraphs weld. ~keep
+    fn is_full_width_band_gap(
+        &self,
+        all_spans: &[TextSpan],
+        indices: &[usize],
+        above: &[usize],
+        below: &[usize],
+    ) -> bool {
+        let mut heights: Vec<f32> = indices
+            .iter()
+            .map(|&i| all_spans[i].bbox.height.abs())
+            .filter(|h| *h > 0.0)
+            .collect();
+        if heights.is_empty() {
+            return true;
+        }
+        heights.sort_by(f32::total_cmp);
+        let typical = heights[heights.len() / 2];
+        // `bbox.y` is the smaller coordinate; `above` holds the higher spans on the page.
+        let above_floor = above.iter().map(|&i| all_spans[i].bbox.y).fold(f32::MAX, f32::min);
+        let below_ceiling = below
+            .iter()
+            .map(|&i| all_spans[i].bbox.y + all_spans[i].bbox.height.abs())
+            .fold(f32::MIN, f32::max);
+        above_floor - below_ceiling >= MIN_BAND_GAP_HEIGHTS * typical
+    }
+
     /// Two-column-prose probe — does this region look like two
     /// side-by-side columns of prose with a tight gutter (~10-15pt)?
     ///
@@ -1438,7 +1477,17 @@ impl XYCutStrategy {
         // centre as halfway between the two cluster centres — that's
         // close enough; the actual partition uses `bbox.left()` per
         // span so individual spans land cleanly on either side. ~keep
-        let gutter_x = (c1_x + c2_x) * 0.5;
+        // the midpoint between the two columns' left edges is not in the gutter
+        // -- (38 + 307) / 2 = 172.5 sits a third of the way into column 1 -- and the partition
+        // below goes by each SPAN's left edge, so a column-1 fragment that starts mid-line (a
+        // link in its own font run at x 240) crossed to column 2. Cut just left of column 2's
+        // leftmost line start instead: nothing of column 1 starts there. ~keep
+        let c2_start = narrow_lefts
+            .iter()
+            .copied()
+            .filter(|&x| (x - c2_x).abs() <= cluster_radius)
+            .fold(c2_x, f32::min);
+        let gutter_x = (c2_start - 0.5).max((c1_x + c2_x) * 0.5);
         Some(gutter_x)
     }
 
@@ -4835,6 +4884,50 @@ mod tests {
         let (left, right) = strategy.partition_lines_at(&spans, &indices, 120.0);
         assert_eq!(left, vec![0], "{left:?} / {right:?}");
         assert_eq!(right, vec![1]);
+    }
+
+    /// two columns on one baseline grid, one with a heading gap: the body is
+    /// read column by column, and a column-1 fragment starting past the left-edge midpoint
+    /// stays in column 1. ~keep
+    #[test]
+    fn two_column_prose_is_not_read_in_line_bands() {
+        let strategy = XYCutStrategy::new();
+        let mut spans = Vec::new();
+        for row in 0..14 {
+            let y = 700.0 - row as f32 * 10.5;
+            spans.push(make_span_text(
+                38.0,
+                y,
+                200.0,
+                8.0,
+                "left column body text of the paper here",
+                8.0,
+            ));
+            spans.push(make_span_text(240.0, y, 51.0, 8.0, "(Fig. 3).", 8.0));
+            if row != 6 && row != 7 {
+                // the right column has a heading gap two lines tall
+                spans.push(make_span_text(
+                    307.0,
+                    y,
+                    253.0,
+                    8.0,
+                    "right column body text of the same paper",
+                    8.0,
+                ));
+            }
+        }
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        let groups = strategy.partition_indexed_depth(&spans, &indices, 0);
+        let order: Vec<usize> = groups.into_iter().flatten().collect();
+        let first_right = order.iter().position(|&i| spans[i].bbox.left() > 300.0).unwrap();
+        assert!(
+            order[first_right..].iter().all(|&i| spans[i].bbox.left() > 300.0),
+            "every column-1 span must come before column 2: {:?}",
+            order
+                .iter()
+                .map(|&i| (spans[i].bbox.left(), spans[i].bbox.y))
+                .collect::<Vec<_>>()
+        );
     }
 
     /// Control for the peel: when each legend line is already ONE span (the reporter's own
