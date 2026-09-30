@@ -287,6 +287,10 @@ const MAX_LEAD_EM: f32 = 4.0;
 // X8 (#3014): the smallest full-width gap, in typical text heights, that a Y-band peeled
 // ahead of a two-column cut may sit on (see `is_full_width_band_gap`).
 const MIN_BAND_GAP_HEIGHTS: f32 = 1.5;
+// X12 (#3009): white space this many ems wide or more, with the two-column cut inside it,
+// separates a line into its two columns' parts (see `partition_lines_by_start`); a word space
+// is ~0.25 em.
+const MIN_GUTTER_GAP_EM: f32 = 0.5;
 // X11 (#3012): this many lines crossing a column cut (`MIN_CROSSING_SHARE` of their ink on each
 // side), with nothing else beside them on the cut's right, make a band of prose the cut runs
 // through rather than a gutter -- see `prose_band_split`.
@@ -965,10 +969,12 @@ impl XYCutStrategy {
                 result.extend(self.partition_indexed_depth(all_spans, &below, depth + 1));
                 return result;
             }
-            let (left, right): (Vec<usize>, Vec<usize>) = indices
-                .iter()
-                .copied()
-                .partition(|&i| all_spans[i].bbox.left() < gutter_x);
+            // X12 (#3009): whole lines, each on the side it STARTS on. Per span, a line that
+            // runs through the gutter (an author list above the columns, a licence footer, a
+            // legend) was torn at its span boundaries. Not `partition_lines_at`'s ink majority
+            // either: a legend across both columns holds ink near 50/50 on each side, so its
+            // lines scattered over both columns by fractions of a point. ~keep
+            let (left, right) = Self::partition_lines_by_start(all_spans, indices, gutter_x);
             if !left.is_empty() && !right.is_empty() {
                 tracing::trace!(
                     gutter_x,
@@ -976,9 +982,28 @@ impl XYCutStrategy {
                     right = right.len(),
                     "two-column-prose detected"
                 );
-                let mut result = self.partition_indexed_depth(all_spans, &left, depth + 1);
-                result.extend(self.partition_indexed_depth(all_spans, &right, depth + 1));
-                return result;
+                // X12 (#3009): each side of this cut IS one column -- the detector just
+                // established it (two left-edge clusters, prose, the cut in the gutter). Read it
+                // row by row. Recursing instead handed a column to machinery that cannot know it
+                // is one: `is_single_column_region` misses an indented numbered list, the
+                // full-width-line peel then counts every line of the column as full width and
+                // bands it, and a band of a few lines gets a column cut of its own through a line
+                // whose runs sit an em apart -- on the Intergas H22VRM manual a step's
+                // continuation lines read before its first line. A table inside a column still
+                // reads correctly this way: row by row.
+                //
+                // Rows are `group_indices_into_rows`' (anchored on y within 1 pt, x-ordered), not
+                // `sort_indices`' 3 pt bands: a band edge splits two runs of one line 0.2 pt apart
+                // and reads the higher one a line early -- measured on the sweep, `Tas¸kınoglu`
+                // torn into `Tas_ ¸`, a manual's last line read into the sentence above. ~keep
+                let rows = |side: &[usize]| {
+                    group_indices_into_rows(all_spans, side)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .collect::<Vec<usize>>()
+                };
+                return vec![rows(&left), rows(&right)];
             }
         }
 
@@ -1911,6 +1936,47 @@ impl XYCutStrategy {
             .iter()
             .copied()
             .partition(|i| !goes_right.get(i).copied().unwrap_or(false))
+    }
+
+    /// X12 (#3009): `(left, right)` of `indices` at `split_x`, a whole visual line (see
+    /// `group_indices_into_rows`) at a time, each on the side where the line starts. For the
+    /// two-column prose cut, where `split_x` sits just left of column 2.
+    ///
+    /// A line is still cut where `split_x` falls in white space of at least
+    /// `MIN_GUTTER_GAP_EM`: `group_indices_into_rows` joins runs less than an em apart, and a
+    /// brochure's narrow gutter (6 pt at 9 pt) is less than that, so two columns' lines on one
+    /// baseline came out as one line and the right column's went left with it. A word space
+    /// is well under half an em, so an author list or a legend through the gutter stays
+    /// whole. ~keep
+    fn partition_lines_by_start(all_spans: &[TextSpan], indices: &[usize], split_x: f32) -> (Vec<usize>, Vec<usize>) {
+        let mut left = Vec::new();
+        let mut right = Vec::new();
+        for line in group_indices_into_rows(all_spans, indices).into_iter().flatten() {
+            // `group_indices_into_rows` returns each line in x order.
+            let mut pieces: Vec<Vec<usize>> = vec![Vec::new()];
+            let mut ink = f32::MIN;
+            for index in line {
+                let span = &all_spans[index];
+                if let Some(&last) = pieces.last().and_then(|piece| piece.last()) {
+                    let em = all_spans[last].font_size.max(span.font_size);
+                    let gap_holds_cut = ink <= split_x && split_x <= span.bbox.left();
+                    if gap_holds_cut && span.bbox.left() - ink >= em * MIN_GUTTER_GAP_EM {
+                        pieces.push(Vec::new());
+                    }
+                }
+                ink = ink.max(ink_right(span));
+                pieces.last_mut().expect("never empty").push(index);
+            }
+            for piece in pieces {
+                let start = piece.iter().map(|&i| all_spans[i].bbox.left()).fold(f32::MAX, f32::min);
+                if start < split_x {
+                    left.extend(piece);
+                } else {
+                    right.extend(piece);
+                }
+            }
+        }
+        (left, right)
     }
 
     fn is_single_column_region(&self, all_spans: &[TextSpan], indices: &[usize]) -> bool {
@@ -5479,5 +5545,127 @@ mod tests {
             last_text < first_chart,
             "the text column is woven into the chart: {order:?}"
         );
+    }
+
+    /// X12 fixture: one column of body lines, 8 pt text on a 9 pt pitch, top line at `top`.
+    fn x12_column(x: f32, top: f32, rows: usize, width: f32, tag: &str) -> Vec<TextSpan> {
+        (0..rows)
+            .map(|row| {
+                let text = format!("{tag}{row:02} de verbrandingsgasafvoerleiding uitvoeren in rond");
+                make_span_text(x, top - 9.0 * row as f32, width, 8.0, &text, 8.0)
+            })
+            .collect()
+    }
+
+    /// X12 (#3009), Autoantibodies-reactive… p1: an author line across both columns set in
+    /// several runs, one of them starting right of the two-column cut, was torn at the cut --
+    /// `… Felix Poppelaars` left, `Brandon Renner b, …` read after the right column. The line
+    /// goes whole to the side it starts on. ~keep
+    #[test]
+    fn a_line_through_the_gutter_stays_whole_x12() {
+        let strategy = XYCutStrategy::new();
+        let mut spans = x12_column(38.0, 700.0, 12, 253.0, "L");
+        spans.extend(x12_column(307.0, 700.0, 12, 253.0, "R"));
+        // One row re-set as an author line across both columns (no right-column line beside it).
+        spans.retain(|span| !span.text.starts_with("L05") && !span.text.starts_with("R05"));
+        let y = 700.0 - 9.0 * 5.0;
+        spans.push(make_span_text(
+            38.0,
+            y,
+            125.0,
+            8.0,
+            "L05 Vojtech Petr a, Shrey Purohit b,",
+            8.0,
+        ));
+        spans.push(make_span_text(
+            165.0,
+            y,
+            142.0,
+            8.0,
+            "L5b Felix Poppelaars b, Brandon",
+            8.0,
+        ));
+        // A word space (2 pt) before the run that starts just right of column 2's first line.
+        spans.push(make_span_text(
+            309.0,
+            y,
+            150.0,
+            8.0,
+            "L5c Renner b, Jennifer Laskowski b",
+            8.0,
+        ));
+
+        let order: Vec<String> = strategy
+            .partition_region(&spans, None)
+            .into_iter()
+            .flatten()
+            .map(|span| span.text[..3].to_string())
+            .collect();
+        let at = |tag: &str| order.iter().position(|t| t == tag).unwrap();
+        assert_eq!(at("L5b") + 1, at("L5c"), "the author line must stay whole: {order:?}");
+        let first_right = order.iter().position(|t| t.starts_with('R')).unwrap();
+        assert!(at("L5c") < first_right, "{order:?}");
+    }
+
+    /// X12 (#3009): the two-column cut assigns a whole line, to the side it starts on. A legend
+    /// across both columns (ink ~50/50 either side, so an ink majority scatters its lines) and
+    /// an author line set in many runs both stay whole, on the left. ~keep
+    #[test]
+    fn a_line_through_the_gutter_goes_whole_to_the_side_it_starts_on_x12() {
+        let spans = vec![
+            make_span_text(
+                38.0,
+                400.0,
+                250.0,
+                8.0,
+                "Fig. 2. Comparison of estimated treatment",
+                8.0,
+            ),
+            make_span_text(
+                290.0,
+                400.0,
+                270.0,
+                8.0,
+                "effects over time using linear mixed models",
+                8.0,
+            ),
+            make_span_text(38.0, 590.0, 120.0, 8.0, "Vojtech Petr a, Shrey Purohit b,", 8.0),
+            make_span_text(160.0, 590.0, 136.0, 8.0, "Felix Poppelaars b, Brandon", 8.0),
+            make_span_text(298.0, 590.0, 120.0, 8.0, "Renner b, Jennifer Laskowski b", 8.0),
+        ];
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        let (mut left, right) = XYCutStrategy::partition_lines_by_start(&spans, &indices, 297.0);
+        left.sort_unstable();
+        assert_eq!(left, vec![0, 1, 2, 3, 4]);
+        assert!(right.is_empty(), "{right:?}");
+    }
+
+    /// X12 (#3009): a gutter narrower than an em (a brochure: 6 pt at 9 pt) joins the two
+    /// columns' lines on one baseline into one line; white space of half an em or more with
+    /// the cut inside it still separates them. ~keep
+    #[test]
+    fn a_narrow_gutter_still_separates_two_columns_on_one_baseline_x12() {
+        let spans = vec![
+            make_span_text(
+                43.0,
+                430.0,
+                224.0,
+                9.0,
+                "Visit its Singapore History and Living Galleries to",
+                9.0,
+            ),
+            make_span_text(
+                273.0,
+                430.0,
+                219.0,
+                9.0,
+                "510 Upper Jurong Road S638365 Learn more about",
+                9.0,
+            ),
+        ];
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        let (left, right) = XYCutStrategy::partition_lines_by_start(&spans, &indices, 270.0);
+        assert_eq!(left, vec![0]);
+        assert_eq!(right, vec![1]);
     }
 }
