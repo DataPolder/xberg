@@ -338,6 +338,9 @@ fn prose_band_split(all_spans: &[TextSpan], indices: &[usize], split_x: f32) -> 
         let (lo, hi) = extent(i);
         lo < band_top && hi > band_bottom
     };
+    // Membership by set: a `Vec::contains` inside this scan was O(n x m) per region, on every
+    // level of the recursion. ~keep
+    let crossing: std::collections::HashSet<usize> = crossing.into_iter().collect();
     let crowded = indices
         .iter()
         .any(|&i| in_band(i) && all_spans[i].bbox.left() >= split_x && !crossing.contains(&i));
@@ -1074,33 +1077,50 @@ impl XYCutStrategy {
         // table's column, and were read after the next heading. When the cut runs through
         // such a band, peel the band off with whatever lies above and below it instead, and
         // let each part find its own cut. ~keep
-        if let Some((split_x, _, _)) = self.find_horizontal_split_with_x(all_spans, indices)
-            && let Some(parts) = prose_band_split(all_spans, indices, split_x)
+        // The column cut and its prose band are computed once here and reused by the column
+        // split below: `find_horizontal_split_indexed` would redo the projection, the valley
+        // and the band for the same region. ~keep
+        let column = self.find_horizontal_split_with_x(all_spans, indices);
+        let band = column
+            .as_ref()
+            .and_then(|(split_x, _, _)| prose_band_split(all_spans, indices, *split_x));
+        if let Some(parts) = &band
             && parts.len() >= 2
         {
             let mut result = Vec::new();
             for part in parts {
-                result.extend(self.partition_indexed_depth(all_spans, &part, depth + 1));
+                result.extend(self.partition_indexed_depth(all_spans, part, depth + 1));
             }
             return result;
         }
+        // Exactly `find_horizontal_split_indexed`: no column split through a band of prose that
+        // fills the whole region. ~keep
+        let mut column_split = if band.is_some_and(|parts| parts.len() == 1) {
+            None
+        } else {
+            column.map(|(_, left, right)| (left, right))
+        };
 
-        let split_h = |s: &Self, sp: &[TextSpan], idx: &[usize]| s.find_horizontal_split_indexed(sp, idx);
-        let split_v = |s: &Self, sp: &[TextSpan], idx: &[usize]| s.find_vertical_split_indexed(sp, idx);
+        let descend = |s: &Self, (a, b): (Vec<usize>, Vec<usize>)| {
+            let mut result = s.partition_indexed_depth(all_spans, &a, depth + 1);
+            result.extend(s.partition_indexed_depth(all_spans, &b, depth + 1));
+            result
+        };
 
-        let first_split = if self.prefer_horizontal { split_h } else { split_v };
-        let second_split = if self.prefer_horizontal { split_v } else { split_h };
-
-        if let Some((a, b)) = first_split(self, all_spans, indices) {
-            let mut result = self.partition_indexed_depth(all_spans, &a, depth + 1);
-            result.extend(self.partition_indexed_depth(all_spans, &b, depth + 1));
-            return result;
-        }
-
-        if let Some((a, b)) = second_split(self, all_spans, indices) {
-            let mut result = self.partition_indexed_depth(all_spans, &a, depth + 1);
-            result.extend(self.partition_indexed_depth(all_spans, &b, depth + 1));
-            return result;
+        if self.prefer_horizontal {
+            if let Some(split) = column_split.take() {
+                return descend(self, split);
+            }
+            if let Some(split) = self.find_vertical_split_indexed(all_spans, indices) {
+                return descend(self, split);
+            }
+        } else {
+            if let Some(split) = self.find_vertical_split_indexed(all_spans, indices) {
+                return descend(self, split);
+            }
+            if let Some(split) = column_split.take() {
+                return descend(self, split);
+            }
         }
 
         vec![self.sort_indices(all_spans, indices)]
