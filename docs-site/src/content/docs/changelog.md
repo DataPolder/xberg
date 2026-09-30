@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **(rendering): `output_format = "docx"` returns the document as a Word file.** `content` holds the `.docx` package base64-encoded and `metadata.output_format` reads `"docx"`; the CLI's `--content-format docx` writes the file itself to stdout. The package is built from the Markdown rendering after every post-processor has run, so redaction removes a term from the Word file exactly as it does from Markdown output. Headings, paragraphs, emphasis, links, nested lists, tables and code blocks carry over; images are not embedded, and chunks describe the Markdown the file was built from. Requires the `office` feature. (GH#1942)
+
 ### Fixed
 
 - **(ocr): a scanned table whose amount column splits into two tracks is no longer dropped when OCR reads the page's rules as cells.** On a scan, one right-aligned amount column can split into two adjacent columns by digit width. The merge that rejoins them refused whenever a track held a mark read from a rule or a shaded band (`-`, a dash run, `:`, `~`), so the leftover track failed the sparse-column check and the whole table was lost. A cell with no letter or digit now counts as empty when the merge compares the two tracks, such a mark in the header band is no longer a column label, and the merged cell keeps the real amount. A sign, currency sign or bracket in front of an amount still keeps the two tracks apart, so it is never dropped. (GH#1949)
