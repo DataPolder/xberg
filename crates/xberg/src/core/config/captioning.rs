@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
-#[cfg_attr(feature = "alef-meta", alef(since = "1.3.0"))]
+#[cfg_attr(feature = "alef-meta", alef(since = "1.3.1"))]
 pub enum CaptionAltTextMode {
     /// ~keep: Keep existing alternate text, using the caption only when it is absent.
     #[default]
@@ -40,6 +40,7 @@ pub struct CaptioningConfig {
     pub min_image_area: u32,
     /// ~keep: Controls whether generated captions preserve, combine with, or replace
     /// existing image alternate text.
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.3.1"))]
     #[serde(default)]
     pub alt_text: CaptionAltTextMode,
 }
