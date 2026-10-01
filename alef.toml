@@ -1888,7 +1888,17 @@ custom_rust_modules = ["bridge", "engine"]
 # Keep Sceptre out of the default browser artifact; consumers opt into the
 # byte-fed engine when their deployment can host the models. ~keep
 extra_features = ["sceptre-wasm"]
-exclude_types = ["OcrFallbackDecision", "OcrProcessor", "OcrCacheStats", "TessdataManager", "PageLayoutResult"]
+# ~keep: WASM's hand-written JSON entry points consume none of these config input wrappers.
+exclude_types = [
+  "OcrFallbackDecision",
+  "OcrProcessor",
+  "OcrCacheStats",
+  "TessdataManager",
+  "PageLayoutResult",
+  "ExtractionConfig",
+  "OcrConfig",
+  "UrlExtractionConfig",
+]
 exclude_functions = [
   "embed_texts",
   "embed_text",
