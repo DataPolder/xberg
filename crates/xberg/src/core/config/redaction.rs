@@ -60,6 +60,7 @@ pub struct RedactionConfig {
     pub findings: Vec<ExternalRedactionFinding>,
     /// Minimum accepted confidence for scored external findings. Findings without a score remain eligible. ~keep
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "alef-meta", alef(since = "1.3.1"))]
     pub min_score: Option<f32>,
     /// JSON array or JSON Lines file containing external findings. ~keep
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -93,7 +94,7 @@ pub struct ExternalRedactionFinding {
     /// End offset (exclusive) into `content`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<u32>,
-    /// Engine confidence in `[0.0, 1.0]`. Validated, not used for filtering.
+    /// Engine confidence in `[0.0, 1.0]`; filtered by [`RedactionConfig::min_score`] when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub score: Option<f32>,
 }

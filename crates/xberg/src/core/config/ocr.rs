@@ -493,9 +493,9 @@ pub struct OcrPipelineStage {
 
     /// Legacy PaddleOCR config JSON for this stage.
     ///
-    /// Deprecated since 1.3.1 and planned for removal in 2.0. Use
+    /// Deprecated since 1.3.2 and planned for removal in 2.0. Use
     /// [`Self::paddle_ocr_settings`] for typed access.
-    #[deprecated(since = "1.3.1", note = "use paddle_ocr_settings; removal planned for 2.0")]
+    #[deprecated(since = "1.3.2", note = "use paddle_ocr_settings; removal planned for 2.0")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paddle_ocr_config: Option<serde_json::Value>,
 
@@ -855,9 +855,9 @@ pub struct OcrConfig {
 
     /// Legacy PaddleOCR configuration JSON.
     ///
-    /// Deprecated since 1.3.1 and planned for removal in 2.0. Use
+    /// Deprecated since 1.3.2 and planned for removal in 2.0. Use
     /// [`Self::paddle_ocr_settings`] for typed access.
-    #[deprecated(since = "1.3.1", note = "use paddle_ocr_settings; removal planned for 2.0")]
+    #[deprecated(since = "1.3.2", note = "use paddle_ocr_settings; removal planned for 2.0")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paddle_ocr_config: Option<serde_json::Value>,
 

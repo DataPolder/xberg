@@ -42,6 +42,7 @@
 #define XBERG_FEATURE_OCR 1
 #define XBERG_FEATURE_OFFICE 1
 #define XBERG_FEATURE_PADDLE_OCR 1
+#define XBERG_FEATURE_PADDLE_OCR_TYPES 1
 #define XBERG_FEATURE_PDF 1
 #define XBERG_FEATURE_PRESETS 1
 #define XBERG_FEATURE_QR_CODES 1
@@ -228,6 +229,10 @@ typedef struct XBERGCandleDevicePreference XBERGCandleDevicePreference;
  * TrOCR model variant accepted by `candle-trocr` backend options.
  */
 typedef struct XBERGCandleTrocrVariant XBERGCandleTrocrVariant;
+/**
+ * How a generated image caption interacts with existing alternate text.
+ */
+typedef struct XBERGCaptionAltTextMode XBERGCaptionAltTextMode;
 /**
  * Configuration for the VLM captioning post-processor.
  */
@@ -961,6 +966,16 @@ typedef struct XBERGExcelWorkbook XBERGExcelWorkbook;
  * `Auto` (default) selects the best available provider per platform.
  */
 typedef struct XBERGExecutionProviderType XBERGExecutionProviderType;
+/**
+ * One finding reported by an external content-inspection engine.
+ *
+ * Unknown fields are ignored, so an engine's raw output can be passed as is.
+ * Presidio, AWS Comprehend, Azure Language, and GCP DLP payload fields are
+ * accepted as aliases. GCP's ordered likelihood buckets are normalized to
+ * evenly spaced scores from `0.0` through `1.0`; `LIKELIHOOD_UNSPECIFIED`
+ * maps to `0.5`, matching GCP's documented `POSSIBLE` default.
+ */
+typedef struct XBERGExternalRedactionFinding XBERGExternalRedactionFinding;
 /**
  * Unified extraction input for all public extraction entry points.
  */
@@ -2282,6 +2297,10 @@ typedef struct XBERGRedactionConfig XBERGRedactionConfig;
  * One redaction event: which span was rewritten, why, and with what.
  */
 typedef struct XBERGRedactionFinding XBERGRedactionFinding;
+/**
+ * Unit that an external finding's `start` / `end` offsets count in.
+ */
+typedef struct XBERGRedactionOffsetEncoding XBERGRedactionOffsetEncoding;
 /**
  * One user-supplied regex pattern to redact.
  *
@@ -4872,6 +4891,15 @@ char *xberg_captioning_config_prompt(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 uint32_t xberg_captioning_config_min_image_area(XBERGAlefHandle handle);
+
+/**
+ * Get the `alt_text` field from a `CaptioningConfig`.
+ * A non-null returned handle is owned by the caller.
+ * It must be freed with `xberg_caption_alt_text_mode_free`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+XBERGAlefHandle xberg_captioning_config_alt_text(XBERGAlefHandle handle);
 
 /**
  * Default `Self.min_image_area`: 1000 px.
@@ -10710,6 +10738,105 @@ char *xberg_excel_workbook_metadata(XBERGAlefHandle handle);
 char *xberg_excel_workbook_revisions(XBERGAlefHandle handle);
 
 /**
+ * Create a `ExternalRedactionFinding` from a JSON string. Returns null on
+ * failure. # Safety JSON string must be valid UTF-8 and null-terminated.
+ * Returned handle must be freed with `xberg_external_redaction_finding_free`.
+ */
+XBERGAlefHandle xberg_external_redaction_finding_from_json(const char *json);
+
+/**
+ * Serialize a `ExternalRedactionFinding` to a JSON string. Returns null on
+ * failure. # Safety `handle` must be a valid, non-zero handle returned by a
+ * `xberg` function. The returned string must be freed with `xberg_free_string`.
+ */
+char *xberg_external_redaction_finding_to_json(XBERGAlefHandle handle);
+
+/**
+ * Free a `ExternalRedactionFinding` handle.
+ * # Safety
+ * Handle must have been returned by this library, or be zero.
+ */
+void xberg_external_redaction_finding_free(XBERGAlefHandle handle);
+
+/**
+ * Get the `label` field from a `ExternalRedactionFinding`.
+ * A non-null returned pointer is owned by the caller.
+ * It must be freed with `xberg_free_string`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_external_redaction_finding_label(XBERGAlefHandle handle);
+
+/**
+ * Get the `text` field from a `ExternalRedactionFinding`.
+ * A non-null returned pointer is owned by the caller.
+ * It must be freed with `xberg_free_string`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_external_redaction_finding_text(XBERGAlefHandle handle);
+
+/**
+ * Get the `start` field from a `ExternalRedactionFinding`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+uint32_t xberg_external_redaction_finding_start(XBERGAlefHandle handle);
+
+/**
+ * Report whether the `start` field on a `ExternalRedactionFinding` is `Some`.
+ *
+ * `xberg_external_redaction_finding_start` cannot distinguish a `None` field
+ * from a legitimate zero-valued `Some` at the C ABI boundary -- there is no
+ * null representation for a numeric return, so both collapse to the same
+ * sentinel. Call this function first: `1` means the field getter's return value
+ * is meaningful, `0` means the field is absent and the getter's sentinel must
+ * be ignored, `-1` reports an invalid handle (see `xberg_last_error_code`). #
+ * Safety Pointer must be a valid handle returned by this library.
+ */
+int32_t xberg_external_redaction_finding_has_start(XBERGAlefHandle handle);
+
+/**
+ * Get the `end` field from a `ExternalRedactionFinding`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+uint32_t xberg_external_redaction_finding_end(XBERGAlefHandle handle);
+
+/**
+ * Report whether the `end` field on a `ExternalRedactionFinding` is `Some`.
+ *
+ * `xberg_external_redaction_finding_end` cannot distinguish a `None` field from
+ * a legitimate zero-valued `Some` at the C ABI boundary -- there is no null
+ * representation for a numeric return, so both collapse to the same sentinel.
+ * Call this function first: `1` means the field getter's return value is
+ * meaningful, `0` means the field is absent and the getter's sentinel must be
+ * ignored, `-1` reports an invalid handle (see `xberg_last_error_code`). #
+ * Safety Pointer must be a valid handle returned by this library.
+ */
+int32_t xberg_external_redaction_finding_has_end(XBERGAlefHandle handle);
+
+/**
+ * Get the `score` field from a `ExternalRedactionFinding`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+float xberg_external_redaction_finding_score(XBERGAlefHandle handle);
+
+/**
+ * Report whether the `score` field on a `ExternalRedactionFinding` is `Some`.
+ *
+ * `xberg_external_redaction_finding_score` cannot distinguish a `None` field
+ * from a legitimate zero-valued `Some` at the C ABI boundary -- there is no
+ * null representation for a numeric return, so both collapse to the same
+ * sentinel. Call this function first: `1` means the field getter's return value
+ * is meaningful, `0` means the field is absent and the getter's sentinel must
+ * be ignored, `-1` reports an invalid handle (see `xberg_last_error_code`). #
+ * Safety Pointer must be a valid handle returned by this library.
+ */
+int32_t xberg_external_redaction_finding_has_score(XBERGAlefHandle handle);
+
+/**
  * Create a `ExtractInput` from a JSON string. Returns null on failure.
  * # Safety
  * JSON string must be valid UTF-8 and null-terminated.
@@ -12264,7 +12391,7 @@ XBERGAlefHandle xberg_extraction_config_default(void);
  * - `keywords`: the n-gram range contains positive, ordered bounds and
  * `min_score` is a finite `[0.0, 1.0]` value.
  * - `layout`: `confidence_threshold`, when set, is a finite `[0.0, 1.0]` value.
- * - `redaction`: custom terms are non-empty and custom patterns compile.
+ * - `redaction`: custom terms, patterns, and external findings are valid.
  * - `pdf_options`: hierarchy cluster counts and margin fractions are in their
  * supported ranges.
  * - every nested LLM config: sampling ranges and target-specific authentication
@@ -15648,7 +15775,8 @@ int32_t xberg_late_interaction_config_has_max_embed_duration_secs(
  */
 XBERGAlefHandle xberg_late_interaction_config_default(void);
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Create a `LateInteractionMatch` from a JSON string. Returns null on failure.
  * # Safety
@@ -15658,7 +15786,8 @@ XBERGAlefHandle xberg_late_interaction_config_default(void);
 XBERGAlefHandle xberg_late_interaction_match_from_json(const char *json);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Serialize a `LateInteractionMatch` to a JSON string. Returns null on failure.
  * # Safety
@@ -15668,7 +15797,8 @@ XBERGAlefHandle xberg_late_interaction_match_from_json(const char *json);
 char *xberg_late_interaction_match_to_json(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Free a `LateInteractionMatch` handle.
  * # Safety
@@ -15677,7 +15807,8 @@ char *xberg_late_interaction_match_to_json(XBERGAlefHandle handle);
 void xberg_late_interaction_match_free(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `index` field from a `LateInteractionMatch`.
  * # Safety
@@ -15686,7 +15817,8 @@ void xberg_late_interaction_match_free(XBERGAlefHandle handle);
 uintptr_t xberg_late_interaction_match_index(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `score` field from a `LateInteractionMatch`.
  * # Safety
@@ -15695,7 +15827,8 @@ uintptr_t xberg_late_interaction_match_index(XBERGAlefHandle handle);
 float xberg_late_interaction_match_score(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Create a `LateInteractionPreset` from a JSON string. Returns null on failure.
  * # Safety
@@ -15705,7 +15838,8 @@ float xberg_late_interaction_match_score(XBERGAlefHandle handle);
 XBERGAlefHandle xberg_late_interaction_preset_from_json(const char *json);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Serialize a `LateInteractionPreset` to a JSON string. Returns null on
  * failure. # Safety `handle` must be a valid, non-zero handle returned by a
@@ -15714,7 +15848,8 @@ XBERGAlefHandle xberg_late_interaction_preset_from_json(const char *json);
 char *xberg_late_interaction_preset_to_json(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Free a `LateInteractionPreset` handle.
  * # Safety
@@ -15723,7 +15858,8 @@ char *xberg_late_interaction_preset_to_json(XBERGAlefHandle handle);
 void xberg_late_interaction_preset_free(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `name` field from a `LateInteractionPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -15734,7 +15870,8 @@ void xberg_late_interaction_preset_free(XBERGAlefHandle handle);
 char *xberg_late_interaction_preset_name(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `model_repo` field from a `LateInteractionPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -15745,7 +15882,8 @@ char *xberg_late_interaction_preset_name(XBERGAlefHandle handle);
 char *xberg_late_interaction_preset_model_repo(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `model_file` field from a `LateInteractionPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -15756,7 +15894,8 @@ char *xberg_late_interaction_preset_model_repo(XBERGAlefHandle handle);
 char *xberg_late_interaction_preset_model_file(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `additional_files` field from a `LateInteractionPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -15767,7 +15906,8 @@ char *xberg_late_interaction_preset_model_file(XBERGAlefHandle handle);
 char *xberg_late_interaction_preset_additional_files(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `max_length` field from a `LateInteractionPreset`.
  * # Safety
@@ -15776,7 +15916,8 @@ char *xberg_late_interaction_preset_additional_files(XBERGAlefHandle handle);
 uintptr_t xberg_late_interaction_preset_max_length(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `query_max_length` field from a `LateInteractionPreset`.
  * # Safety
@@ -15786,7 +15927,8 @@ uintptr_t
 xberg_late_interaction_preset_query_max_length(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `dim` field from a `LateInteractionPreset`.
  * # Safety
@@ -15795,7 +15937,8 @@ xberg_late_interaction_preset_query_max_length(XBERGAlefHandle handle);
 uintptr_t xberg_late_interaction_preset_dim(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `description` field from a `LateInteractionPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -17446,7 +17589,8 @@ char *xberg_model_paths_rec_model(XBERGAlefHandle handle);
  */
 char *xberg_model_paths_dict_file(XBERGAlefHandle handle);
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Create a `MultiVectorEmbedding` from a JSON string. Returns null on failure.
  * # Safety
@@ -17456,7 +17600,8 @@ char *xberg_model_paths_dict_file(XBERGAlefHandle handle);
 XBERGAlefHandle xberg_multi_vector_embedding_from_json(const char *json);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Serialize a `MultiVectorEmbedding` to a JSON string. Returns null on failure.
  * # Safety
@@ -17466,7 +17611,8 @@ XBERGAlefHandle xberg_multi_vector_embedding_from_json(const char *json);
 char *xberg_multi_vector_embedding_to_json(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Free a `MultiVectorEmbedding` handle.
  * # Safety
@@ -17475,7 +17621,8 @@ char *xberg_multi_vector_embedding_to_json(XBERGAlefHandle handle);
 void xberg_multi_vector_embedding_free(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `num_tokens` field from a `MultiVectorEmbedding`.
  * # Safety
@@ -17484,7 +17631,8 @@ void xberg_multi_vector_embedding_free(XBERGAlefHandle handle);
 uint32_t xberg_multi_vector_embedding_num_tokens(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `dim` field from a `MultiVectorEmbedding`.
  * # Safety
@@ -17493,7 +17641,8 @@ uint32_t xberg_multi_vector_embedding_num_tokens(XBERGAlefHandle handle);
 uint32_t xberg_multi_vector_embedding_dim(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Get the `data` field from a `MultiVectorEmbedding`.
  * A non-null returned pointer is owned by the caller.
@@ -17504,7 +17653,8 @@ uint32_t xberg_multi_vector_embedding_dim(XBERGAlefHandle handle);
 char *xberg_multi_vector_embedding_data(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS)
+#if (defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
 /**
  * Returns `true` if `data` holds exactly `num_tokens * dim` values â i.e.
  * the flat buffer matches the declared shape.
@@ -17913,12 +18063,21 @@ XBERGAlefHandle xberg_ocr_config_output_format(XBERGAlefHandle handle);
 
 /**
  * Get the `paddle_ocr_config` field from a `OcrConfig`.
+ * A non-null returned pointer is owned by the caller.
+ * It must be freed with `xberg_free_string`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_ocr_config_paddle_ocr_config(XBERGAlefHandle handle);
+
+/**
+ * Get the `paddle_ocr_settings` field from a `OcrConfig`.
  * A non-null returned handle is owned by the caller.
  * It must be freed with `xberg_paddle_ocr_config_free`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
-XBERGAlefHandle xberg_ocr_config_paddle_ocr_config(XBERGAlefHandle handle);
+XBERGAlefHandle xberg_ocr_config_paddle_ocr_settings(XBERGAlefHandle handle);
 
 /**
  * Get the `backend_options` field from a `OcrConfig`.
@@ -18423,13 +18582,22 @@ xberg_ocr_pipeline_stage_tesseract_config(XBERGAlefHandle handle);
 
 /**
  * Get the `paddle_ocr_config` field from a `OcrPipelineStage`.
+ * A non-null returned pointer is owned by the caller.
+ * It must be freed with `xberg_free_string`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_ocr_pipeline_stage_paddle_ocr_config(XBERGAlefHandle handle);
+
+/**
+ * Get the `paddle_ocr_settings` field from a `OcrPipelineStage`.
  * A non-null returned handle is owned by the caller.
  * It must be freed with `xberg_paddle_ocr_config_free`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
  */
 XBERGAlefHandle
-xberg_ocr_pipeline_stage_paddle_ocr_config(XBERGAlefHandle handle);
+xberg_ocr_pipeline_stage_paddle_ocr_settings(XBERGAlefHandle handle);
 
 /**
  * Get the `vlm_config` field from a `OcrPipelineStage`.
@@ -22375,6 +22543,54 @@ char *xberg_redaction_config_custom_terms(XBERGAlefHandle handle);
 char *xberg_redaction_config_custom_patterns(XBERGAlefHandle handle);
 
 /**
+ * Get the `findings` field from a `RedactionConfig`.
+ * A non-null returned pointer is owned by the caller.
+ * It must be freed with `xberg_free_string`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_redaction_config_findings(XBERGAlefHandle handle);
+
+/**
+ * Get the `min_score` field from a `RedactionConfig`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+float xberg_redaction_config_min_score(XBERGAlefHandle handle);
+
+/**
+ * Report whether the `min_score` field on a `RedactionConfig` is `Some`.
+ *
+ * `xberg_redaction_config_min_score` cannot distinguish a `None` field from a
+ * legitimate zero-valued `Some` at the C ABI boundary -- there is no null
+ * representation for a numeric return, so both collapse to the same sentinel.
+ * Call this function first: `1` means the field getter's return value is
+ * meaningful, `0` means the field is absent and the getter's sentinel must be
+ * ignored, `-1` reports an invalid handle (see `xberg_last_error_code`). #
+ * Safety Pointer must be a valid handle returned by this library.
+ */
+int32_t xberg_redaction_config_has_min_score(XBERGAlefHandle handle);
+
+/**
+ * Get the `findings_path` field from a `RedactionConfig`.
+ * A non-null returned pointer is owned by the caller.
+ * It must be freed with `xberg_free_string`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_redaction_config_findings_path(XBERGAlefHandle handle);
+
+/**
+ * Get the `findings_offset_encoding` field from a `RedactionConfig`.
+ * A non-null returned handle is owned by the caller.
+ * It must be freed with `xberg_redaction_offset_encoding_free`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+XBERGAlefHandle
+xberg_redaction_config_findings_offset_encoding(XBERGAlefHandle handle);
+
+/**
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
  * Returned pointers must be freed with the appropriate free function.
  */
@@ -22701,7 +22917,9 @@ uintptr_t xberg_registry_extend_from_dir(XBERGAlefHandle this_,
                                          const char *dir);
 #endif
 
-#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
+#if ((defined(XBERG_FEATURE_RERANKER_PRESETS) ||                               \
+      defined(XBERG_FEATURE_RERANKER)) ||                                      \
+     !defined(XBERG_FEATURE_RERANKER_PRESETS))
 /**
  * Create a `RerankedDocument` from a JSON string. Returns null on failure.
  * # Safety
@@ -22711,7 +22929,9 @@ uintptr_t xberg_registry_extend_from_dir(XBERGAlefHandle this_,
 XBERGAlefHandle xberg_reranked_document_from_json(const char *json);
 #endif
 
-#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
+#if ((defined(XBERG_FEATURE_RERANKER_PRESETS) ||                               \
+      defined(XBERG_FEATURE_RERANKER)) ||                                      \
+     !defined(XBERG_FEATURE_RERANKER_PRESETS))
 /**
  * Serialize a `RerankedDocument` to a JSON string. Returns null on failure.
  * # Safety
@@ -22721,7 +22941,9 @@ XBERGAlefHandle xberg_reranked_document_from_json(const char *json);
 char *xberg_reranked_document_to_json(XBERGAlefHandle handle);
 #endif
 
-#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
+#if ((defined(XBERG_FEATURE_RERANKER_PRESETS) ||                               \
+      defined(XBERG_FEATURE_RERANKER)) ||                                      \
+     !defined(XBERG_FEATURE_RERANKER_PRESETS))
 /**
  * Free a `RerankedDocument` handle.
  * # Safety
@@ -22730,7 +22952,9 @@ char *xberg_reranked_document_to_json(XBERGAlefHandle handle);
 void xberg_reranked_document_free(XBERGAlefHandle handle);
 #endif
 
-#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
+#if ((defined(XBERG_FEATURE_RERANKER_PRESETS) ||                               \
+      defined(XBERG_FEATURE_RERANKER)) ||                                      \
+     !defined(XBERG_FEATURE_RERANKER_PRESETS))
 /**
  * Get the `index` field from a `RerankedDocument`.
  * # Safety
@@ -22739,7 +22963,9 @@ void xberg_reranked_document_free(XBERGAlefHandle handle);
 uintptr_t xberg_reranked_document_index(XBERGAlefHandle handle);
 #endif
 
-#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
+#if ((defined(XBERG_FEATURE_RERANKER_PRESETS) ||                               \
+      defined(XBERG_FEATURE_RERANKER)) ||                                      \
+     !defined(XBERG_FEATURE_RERANKER_PRESETS))
 /**
  * Get the `score` field from a `RerankedDocument`.
  * # Safety
@@ -22748,7 +22974,9 @@ uintptr_t xberg_reranked_document_index(XBERGAlefHandle handle);
 float xberg_reranked_document_score(XBERGAlefHandle handle);
 #endif
 
-#if (defined(XBERG_FEATURE_RERANKER_PRESETS) || defined(XBERG_FEATURE_RERANKER))
+#if ((defined(XBERG_FEATURE_RERANKER_PRESETS) ||                               \
+      defined(XBERG_FEATURE_RERANKER)) ||                                      \
+     !defined(XBERG_FEATURE_RERANKER_PRESETS))
 /**
  * Get the `document` field from a `RerankedDocument`.
  * A non-null returned pointer is owned by the caller.
@@ -23405,7 +23633,8 @@ char *xberg_sitemap_url_changefreq(XBERGAlefHandle handle);
  */
 char *xberg_sitemap_url_priority(XBERGAlefHandle handle);
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Create a `SparseEmbedding` from a JSON string. Returns null on failure.
  * # Safety
@@ -23415,7 +23644,8 @@ char *xberg_sitemap_url_priority(XBERGAlefHandle handle);
 XBERGAlefHandle xberg_sparse_embedding_from_json(const char *json);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Serialize a `SparseEmbedding` to a JSON string. Returns null on failure.
  * # Safety
@@ -23425,7 +23655,8 @@ XBERGAlefHandle xberg_sparse_embedding_from_json(const char *json);
 char *xberg_sparse_embedding_to_json(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Free a `SparseEmbedding` handle.
  * # Safety
@@ -23434,7 +23665,8 @@ char *xberg_sparse_embedding_to_json(XBERGAlefHandle handle);
 void xberg_sparse_embedding_free(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Get the `indices` field from a `SparseEmbedding`.
  * A non-null returned pointer is owned by the caller.
@@ -23445,7 +23677,8 @@ void xberg_sparse_embedding_free(XBERGAlefHandle handle);
 char *xberg_sparse_embedding_indices(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Get the `values` field from a `SparseEmbedding`.
  * A non-null returned pointer is owned by the caller.
@@ -23558,7 +23791,8 @@ int32_t xberg_sparse_embedding_config_has_max_embed_duration_secs(
  */
 XBERGAlefHandle xberg_sparse_embedding_config_default(void);
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Create a `SparseEmbeddingPreset` from a JSON string. Returns null on failure.
  * # Safety
@@ -23568,7 +23802,8 @@ XBERGAlefHandle xberg_sparse_embedding_config_default(void);
 XBERGAlefHandle xberg_sparse_embedding_preset_from_json(const char *json);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Serialize a `SparseEmbeddingPreset` to a JSON string. Returns null on
  * failure. # Safety `handle` must be a valid, non-zero handle returned by a
@@ -23577,7 +23812,8 @@ XBERGAlefHandle xberg_sparse_embedding_preset_from_json(const char *json);
 char *xberg_sparse_embedding_preset_to_json(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Free a `SparseEmbeddingPreset` handle.
  * # Safety
@@ -23586,7 +23822,8 @@ char *xberg_sparse_embedding_preset_to_json(XBERGAlefHandle handle);
 void xberg_sparse_embedding_preset_free(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Get the `name` field from a `SparseEmbeddingPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -23597,7 +23834,8 @@ void xberg_sparse_embedding_preset_free(XBERGAlefHandle handle);
 char *xberg_sparse_embedding_preset_name(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Get the `model_repo` field from a `SparseEmbeddingPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -23608,7 +23846,8 @@ char *xberg_sparse_embedding_preset_name(XBERGAlefHandle handle);
 char *xberg_sparse_embedding_preset_model_repo(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Get the `model_file` field from a `SparseEmbeddingPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -23619,7 +23858,8 @@ char *xberg_sparse_embedding_preset_model_repo(XBERGAlefHandle handle);
 char *xberg_sparse_embedding_preset_model_file(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Get the `additional_files` field from a `SparseEmbeddingPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -23630,7 +23870,8 @@ char *xberg_sparse_embedding_preset_model_file(XBERGAlefHandle handle);
 char *xberg_sparse_embedding_preset_additional_files(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Get the `max_length` field from a `SparseEmbeddingPreset`.
  * # Safety
@@ -23639,7 +23880,8 @@ char *xberg_sparse_embedding_preset_additional_files(XBERGAlefHandle handle);
 uintptr_t xberg_sparse_embedding_preset_max_length(XBERGAlefHandle handle);
 #endif
 
-#if defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS)
+#if (defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS) ||                        \
+     !defined(XBERG_FEATURE_SPARSE_EMBEDDING_PRESETS))
 /**
  * Get the `description` field from a `SparseEmbeddingPreset`.
  * A non-null returned pointer is owned by the caller.
@@ -26372,6 +26614,20 @@ int32_t xberg_candle_trocr_variant_from_i32(int32_t value);
 int32_t xberg_candle_trocr_variant_from_str(const char *name);
 
 /**
+ * Convert an integer to a `CaptionAltTextMode` variant. Returns -1 on invalid
+ * input. # Safety Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+int32_t xberg_caption_alt_text_mode_from_i32(int32_t value);
+
+/**
+ * Convert a `CaptionAltTextMode` serde wire value (C string) to its integer
+ * discriminant. Returns -1 on invalid input. # Safety Caller must ensure `ptr`
+ * is a valid pointer to a `c_char` or null.
+ */
+int32_t xberg_caption_alt_text_mode_from_str(const char *name);
+
+/**
  * Convert an integer to a `ChunkSizing` variant. Returns -1 on invalid input.
  * # Safety
  * Caller must ensure all pointer arguments are valid or null.
@@ -27352,6 +27608,20 @@ int32_t xberg_processing_stage_from_i32(int32_t value);
 int32_t xberg_processing_stage_from_str(const char *name);
 
 /**
+ * Convert an integer to a `RedactionOffsetEncoding` variant. Returns -1 on
+ * invalid input. # Safety Caller must ensure all pointer arguments are valid or
+ * null. Returned pointers must be freed with the appropriate free function.
+ */
+int32_t xberg_redaction_offset_encoding_from_i32(int32_t value);
+
+/**
+ * Convert a `RedactionOffsetEncoding` serde wire value (C string) to its
+ * integer discriminant. Returns -1 on invalid input. # Safety Caller must
+ * ensure `ptr` is a valid pointer to a `c_char` or null.
+ */
+int32_t xberg_redaction_offset_encoding_from_str(const char *name);
+
+/**
  * Convert an integer to a `RedactionStrategy` variant. Returns -1 on invalid
  * input. # Safety Caller must ensure all pointer arguments are valid or null.
  * Returned pointers must be freed with the appropriate free function.
@@ -27992,6 +28262,31 @@ char *xberg_candle_trocr_variant_to_json(XBERGAlefHandle handle);
  */
 char *xberg_candle_trocr_variant_to_string(XBERGAlefHandle handle);
 #endif
+
+/**
+ * Free a `CaptionAltTextMode` handle.
+ * # Safety
+ * Handle must have been returned by this library, or be zero.
+ */
+void xberg_caption_alt_text_mode_free(XBERGAlefHandle handle);
+
+/**
+ * Serialize a `CaptionAltTextMode` to a JSON string. Returns null on failure.
+ * # Safety
+ * `handle` must be a valid, non-zero handle returned by a `xberg` function.
+ * The returned string must be freed with `xberg_free_string`.
+ */
+char *xberg_caption_alt_text_mode_to_json(XBERGAlefHandle handle);
+
+/**
+ * Render a `CaptionAltTextMode` as its string representation
+ * (the unit-variant name as serialized by serde — e.g. `"completed"`,
+ * without surrounding JSON quotes).
+ * # Safety
+ * `handle` must be a valid, non-zero handle returned by a `xberg` function.
+ * The returned string must be freed with `xberg_free_string`.
+ */
+char *xberg_caption_alt_text_mode_to_string(XBERGAlefHandle handle);
 
 /**
  * Free a `ChunkSizing` handle.
@@ -29320,6 +29615,30 @@ char *xberg_probe_status_to_json(XBERGAlefHandle handle);
 char *xberg_probe_status_to_string(XBERGAlefHandle handle);
 
 /**
+ * Free a `RedactionOffsetEncoding` handle.
+ * # Safety
+ * Handle must have been returned by this library, or be zero.
+ */
+void xberg_redaction_offset_encoding_free(XBERGAlefHandle handle);
+
+/**
+ * Serialize a `RedactionOffsetEncoding` to a JSON string. Returns null on
+ * failure. # Safety `handle` must be a valid, non-zero handle returned by a
+ * `xberg` function. The returned string must be freed with `xberg_free_string`.
+ */
+char *xberg_redaction_offset_encoding_to_json(XBERGAlefHandle handle);
+
+/**
+ * Render a `RedactionOffsetEncoding` as its string representation
+ * (the unit-variant name as serialized by serde — e.g. `"completed"`,
+ * without surrounding JSON quotes).
+ * # Safety
+ * `handle` must be a valid, non-zero handle returned by a `xberg` function.
+ * The returned string must be freed with `xberg_free_string`.
+ */
+char *xberg_redaction_offset_encoding_to_string(XBERGAlefHandle handle);
+
+/**
  * Free a `RedactionStrategy` handle.
  * # Safety
  * Handle must have been returned by this library, or be zero.
@@ -29899,6 +30218,23 @@ XBERGAlefHandle xberg_extract(XBERGAlefHandle input, XBERGAlefHandle config);
  */
 XBERGAlefHandle xberg_extract_batch(const char *inputs, XBERGAlefHandle config);
 
+#if defined(XBERG_FEATURE_REDACTION)
+/**
+ * Extract one bytes input and redact a JSON array or JSON Lines payload from an
+ * external inspection engine.
+ *
+ * The payload is parsed in Rust so vendor aliases and nested fields remain
+ * intact across language bindings. `offset_encoding` defaults to
+ * `unicode_code_points` and `max_findings` defaults to 10,000 when omitted.
+ * Unknown encodings return a validation error.
+ * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+XBERGAlefHandle xberg_extract_with_external_redaction(
+    XBERGAlefHandle input, XBERGAlefHandle config, const char *findings_json,
+    const char *offset_encoding, uint32_t max_findings);
+#endif
+
 #if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
 /**
  * Find unmarked claims in markdown text.
@@ -30350,6 +30686,25 @@ int32_t xberg_ocr_backend_supports_language_for(const char *backend,
  */
 uintptr_t xberg_pdf_page_count(const uint8_t *pdf_bytes,
                                uintptr_t pdf_bytes_len, const char *password);
+#endif
+
+#if defined(XBERG_FEATURE_REDACTION)
+/**
+ * Redact an owned document using a JSON array or JSON Lines payload from an
+ * external inspection engine.
+ *
+ * The payload is parsed in Rust so vendor aliases and nested fields remain
+ * intact across language bindings. `offset_encoding` defaults to
+ * `unicode_code_points` and `max_findings` defaults to 10,000 when omitted.
+ * Unknown encodings return a validation error.
+ * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+XBERGAlefHandle xberg_redact_external(XBERGAlefHandle document,
+                                      XBERGAlefHandle config,
+                                      const char *findings_json,
+                                      const char *offset_encoding,
+                                      uint32_t max_findings);
 #endif
 
 #if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
