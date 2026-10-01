@@ -32,7 +32,7 @@ where
 {
     std::thread::Builder::new()
         .name("external-redaction-test".to_string())
-        .stack_size(4 * 1024 * 1024)
+        .stack_size(16 * 1024 * 1024)
         .spawn(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -360,27 +360,29 @@ async fn should_enforce_the_security_limit_across_configured_findings() {
     assert_eq!(output.content, "Zarnak Quorlim");
 }
 
-#[tokio::test]
-async fn should_enforce_the_security_limit_across_configured_and_request_findings() {
-    let config = ExtractionConfig {
-        redaction: Some(with_findings(vec![text_finding("PERSON", "Zarnak")])),
-        security_limits: Some(SecurityLimits {
-            max_redaction_findings: 1,
+#[test]
+fn should_enforce_the_security_limit_across_configured_and_request_findings() {
+    run_extraction_test(async {
+        let config = ExtractionConfig {
+            redaction: Some(with_findings(vec![text_finding("PERSON", "Zarnak")])),
+            security_limits: Some(SecurityLimits {
+                max_redaction_findings: 1,
+                ..Default::default()
+            }),
             ..Default::default()
-        }),
-        ..Default::default()
-    };
-    let error = extract_with_external_redaction(
-        ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
-        &config,
-        vec![text_finding("PERSON", "Quorlim")],
-        None,
-        Some(1),
-    )
-    .await
-    .expect_err("the security limit must cap all configured and request findings");
+        };
+        let error = extract_with_external_redaction(
+            ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
+            &config,
+            vec![text_finding("PERSON", "Quorlim")],
+            None,
+            Some(1),
+        )
+        .await
+        .expect_err("the security limit must cap all configured and request findings");
 
-    assert!(error.to_string().contains("max_redaction_findings"), "{error}");
+        assert!(error.to_string().contains("max_redaction_findings"), "{error}");
+    });
 }
 
 #[test]
@@ -418,47 +420,51 @@ async fn should_reject_an_unresolvable_span() {
     );
 }
 
-#[tokio::test]
-async fn should_apply_only_external_matchers_when_base_redaction_is_absent() {
-    let output = extract_with_external_redaction(
-        ExtractInput::from_bytes(
-            b"Zarnak Quorlim emailed alice@example.com.".to_vec(),
-            "text/plain",
-            None,
-        ),
-        &ExtractionConfig::default(),
-        vec![text_finding("PERSON", "Zarnak Quorlim")],
-        Some("unicode_code_points"),
-        Some(10),
-    )
-    .await
-    .expect("extraction must succeed");
+#[test]
+fn should_apply_only_external_matchers_when_base_redaction_is_absent() {
+    run_extraction_test(async {
+        let output = extract_with_external_redaction(
+            ExtractInput::from_bytes(
+                b"Zarnak Quorlim emailed alice@example.com.".to_vec(),
+                "text/plain",
+                None,
+            ),
+            &ExtractionConfig::default(),
+            vec![text_finding("PERSON", "Zarnak Quorlim")],
+            Some("unicode_code_points"),
+            Some(10),
+        )
+        .await
+        .expect("extraction must succeed");
 
-    assert_eq!(output.results[0].content, format!("{MASK} emailed alice@example.com."));
+        assert_eq!(output.results[0].content, format!("{MASK} emailed alice@example.com."));
+    });
 }
 
-#[tokio::test]
-async fn should_combine_external_findings_with_per_input_redaction() {
-    let mut input = ExtractInput::from_bytes(b"Zarnak Quorlim met Blorp Nazzle.".to_vec(), "text/plain", None);
-    input.config = Some(xberg::FileExtractionConfig {
-        redaction: Some(RedactionConfig {
-            custom_terms: vec![xberg::RedactionTerm::labeled("inspection_term", "Blorp Nazzle")],
+#[test]
+fn should_combine_external_findings_with_per_input_redaction() {
+    run_extraction_test(async {
+        let mut input = ExtractInput::from_bytes(b"Zarnak Quorlim met Blorp Nazzle.".to_vec(), "text/plain", None);
+        input.config = Some(xberg::FileExtractionConfig {
+            redaction: Some(RedactionConfig {
+                custom_terms: vec![xberg::RedactionTerm::labeled("inspection_term", "Blorp Nazzle")],
+                ..Default::default()
+            }),
             ..Default::default()
-        }),
-        ..Default::default()
+        });
+
+        let output = extract_with_external_redaction(
+            input,
+            &ExtractionConfig::default(),
+            vec![text_finding("PERSON", "Zarnak Quorlim")],
+            Some("unicode_code_points"),
+            Some(10),
+        )
+        .await
+        .expect("extraction must succeed");
+
+        assert_eq!(output.results[0].content, format!("{MASK} met {MASK}."));
     });
-
-    let output = extract_with_external_redaction(
-        input,
-        &ExtractionConfig::default(),
-        vec![text_finding("PERSON", "Zarnak Quorlim")],
-        Some("unicode_code_points"),
-        Some(10),
-    )
-    .await
-    .expect("extraction must succeed");
-
-    assert_eq!(output.results[0].content, format!("{MASK} met {MASK}."));
 }
 
 #[test]
@@ -524,117 +530,125 @@ impl CacheBackend for CountingCache {
     }
 }
 
-#[tokio::test]
-async fn should_bypass_engine_and_extraction_caches_for_scoped_findings() {
-    let cached = xberg::ExtractionResult::single(document("CACHED UNREDACTED RESULT"));
-    let cache = Arc::new(CountingCache {
-        cached: Some(serde_json::to_vec(&cached).expect("cached result JSON")),
-        ..Default::default()
-    });
-    let engine = Engine::builder().with_cache_backend(cache.clone()).build();
-
-    let output = engine
-        .extract_with_external_redaction(
-            ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
-            &ExtractionConfig::default(),
-            vec![text_finding("PERSON", "Zarnak Quorlim")],
-            RedactionOffsetEncoding::UnicodeCodePoints,
-            Some(10),
-        )
-        .await
-        .expect("extraction must succeed");
-
-    assert_eq!(output.results[0].content, MASK);
-    assert_eq!(cache.gets.load(Ordering::SeqCst), 0);
-    assert_eq!(cache.puts.load(Ordering::SeqCst), 0);
-
-    let second = engine
-        .extract_with_external_redaction(
-            ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
-            &ExtractionConfig::default(),
-            vec![text_finding("PERSON", "Quorlim")],
-            RedactionOffsetEncoding::UnicodeCodePoints,
-            Some(10),
-        )
-        .await
-        .expect("second extraction must succeed");
-    assert_eq!(second.results[0].content, "Zarnak [REDACTED]");
-    assert_eq!(cache.gets.load(Ordering::SeqCst), 0);
-    assert_eq!(cache.puts.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
-async fn should_fail_closed_when_the_late_processor_is_disabled() {
-    let config = ExtractionConfig {
-        postprocessor: Some(xberg::PostProcessorConfig {
-            enabled: false,
+#[test]
+fn should_bypass_engine_and_extraction_caches_for_scoped_findings() {
+    run_extraction_test(async {
+        let cached = xberg::ExtractionResult::single(document("CACHED UNREDACTED RESULT"));
+        let cache = Arc::new(CountingCache {
+            cached: Some(serde_json::to_vec(&cached).expect("cached result JSON")),
             ..Default::default()
-        }),
-        ..Default::default()
-    };
-    let error = extract_with_external_redaction(
-        ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
-        &config,
-        vec![text_finding("PERSON", "Zarnak Quorlim")],
-        Some("unicode_code_points"),
-        Some(10),
-    )
-    .await
-    .expect_err("an unconsumed request must fail");
+        });
+        let engine = Engine::builder().with_cache_backend(cache.clone()).build();
 
-    assert!(
-        error.to_string().contains("did not reach the Late processor"),
-        "{error}"
-    );
+        let output = engine
+            .extract_with_external_redaction(
+                ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
+                &ExtractionConfig::default(),
+                vec![text_finding("PERSON", "Zarnak Quorlim")],
+                RedactionOffsetEncoding::UnicodeCodePoints,
+                Some(10),
+            )
+            .await
+            .expect("extraction must succeed");
+
+        assert_eq!(output.results[0].content, MASK);
+        assert_eq!(cache.gets.load(Ordering::SeqCst), 0);
+        assert_eq!(cache.puts.load(Ordering::SeqCst), 0);
+
+        let second = engine
+            .extract_with_external_redaction(
+                ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
+                &ExtractionConfig::default(),
+                vec![text_finding("PERSON", "Quorlim")],
+                RedactionOffsetEncoding::UnicodeCodePoints,
+                Some(10),
+            )
+            .await
+            .expect("second extraction must succeed");
+        assert_eq!(second.results[0].content, "Zarnak [REDACTED]");
+        assert_eq!(cache.gets.load(Ordering::SeqCst), 0);
+        assert_eq!(cache.puts.load(Ordering::SeqCst), 0);
+    });
 }
 
-#[tokio::test]
-async fn should_reject_uri_input_and_leave_no_scope_after_an_error() {
-    let error = extract_with_external_redaction(
-        ExtractInput::from_uri("document.txt"),
-        &ExtractionConfig::default(),
-        vec![text_finding("PERSON", "Zarnak")],
-        Some("unicode_code_points"),
-        Some(10),
-    )
-    .await
-    .expect_err("URI input must be rejected");
-    assert!(error.to_string().contains("one bytes input"), "{error}");
+#[test]
+fn should_fail_closed_when_the_late_processor_is_disabled() {
+    run_extraction_test(async {
+        let config = ExtractionConfig {
+            postprocessor: Some(xberg::PostProcessorConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let error = extract_with_external_redaction(
+            ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
+            &config,
+            vec![text_finding("PERSON", "Zarnak Quorlim")],
+            Some("unicode_code_points"),
+            Some(10),
+        )
+        .await
+        .expect_err("an unconsumed request must fail");
 
-    let ordinary = extract(
-        ExtractInput::from_bytes(b"Zarnak".to_vec(), "text/plain", None),
-        &ExtractionConfig::default(),
-    )
-    .await
-    .expect("ordinary extraction after error");
-    assert_eq!(ordinary.results[0].content, "Zarnak");
+        assert!(
+            error.to_string().contains("did not reach the Late processor"),
+            "{error}"
+        );
+    });
 }
 
-#[tokio::test]
-async fn should_leave_no_scope_after_cancellation() {
-    let token = xberg::cancellation::CancellationToken::new();
-    token.cancel();
-    let config = ExtractionConfig {
-        cancel_token: Some(token),
-        ..Default::default()
-    };
-    extract_with_external_redaction(
-        ExtractInput::from_bytes(b"Zarnak".to_vec(), "text/plain", None),
-        &config,
-        vec![text_finding("PERSON", "Zarnak")],
-        Some("unicode_code_points"),
-        Some(10),
-    )
-    .await
-    .expect_err("cancelled extraction must fail");
+#[test]
+fn should_reject_uri_input_and_leave_no_scope_after_an_error() {
+    run_extraction_test(async {
+        let error = extract_with_external_redaction(
+            ExtractInput::from_uri("document.txt"),
+            &ExtractionConfig::default(),
+            vec![text_finding("PERSON", "Zarnak")],
+            Some("unicode_code_points"),
+            Some(10),
+        )
+        .await
+        .expect_err("URI input must be rejected");
+        assert!(error.to_string().contains("one bytes input"), "{error}");
 
-    let ordinary = extract(
-        ExtractInput::from_bytes(b"Zarnak".to_vec(), "text/plain", None),
-        &ExtractionConfig::default(),
-    )
-    .await
-    .expect("ordinary extraction after cancellation");
-    assert_eq!(ordinary.results[0].content, "Zarnak");
+        let ordinary = extract(
+            ExtractInput::from_bytes(b"Zarnak".to_vec(), "text/plain", None),
+            &ExtractionConfig::default(),
+        )
+        .await
+        .expect("ordinary extraction after error");
+        assert_eq!(ordinary.results[0].content, "Zarnak");
+    });
+}
+
+#[test]
+fn should_leave_no_scope_after_cancellation() {
+    run_extraction_test(async {
+        let token = xberg::cancellation::CancellationToken::new();
+        token.cancel();
+        let config = ExtractionConfig {
+            cancel_token: Some(token),
+            ..Default::default()
+        };
+        extract_with_external_redaction(
+            ExtractInput::from_bytes(b"Zarnak".to_vec(), "text/plain", None),
+            &config,
+            vec![text_finding("PERSON", "Zarnak")],
+            Some("unicode_code_points"),
+            Some(10),
+        )
+        .await
+        .expect_err("cancelled extraction must fail");
+
+        let ordinary = extract(
+            ExtractInput::from_bytes(b"Zarnak".to_vec(), "text/plain", None),
+            &ExtractionConfig::default(),
+        )
+        .await
+        .expect("ordinary extraction after cancellation");
+        assert_eq!(ordinary.results[0].content, "Zarnak");
+    });
 }
 
 #[test]
