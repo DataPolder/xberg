@@ -1797,6 +1797,37 @@ mod tests {
     }
 
     #[test]
+    fn issue_2010_legacy_paddle_ocr_config_accepts_known_camel_case_keys() {
+        let legacy = serde_json::json!({
+            "useAngleCls": true,
+            "enableTableDetection": true,
+            "modelTier": "server",
+            "detDbBoxThresh": 0.97,
+        });
+        let resolved = resolve_paddle_ocr_settings(None, Some(&legacy))
+            .unwrap()
+            .expect("known legacy camelCase settings must resolve");
+
+        assert!(resolved.use_angle_cls);
+        assert!(resolved.enable_table_detection);
+        assert_eq!(resolved.model_tier, "server");
+        assert!((resolved.det_db_box_thresh - 0.97).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn legacy_paddle_ocr_config_prefers_existing_snake_case_over_alias() {
+        let legacy = serde_json::json!({
+            "enable_table_detection": false,
+            "enableTableDetection": true,
+        });
+        let resolved = resolve_paddle_ocr_settings(None, Some(&legacy))
+            .unwrap()
+            .expect("legacy settings must resolve");
+
+        assert!(!resolved.enable_table_detection);
+    }
+
+    #[test]
     fn should_ignore_unknown_legacy_paddle_ocr_config_keys() {
         let legacy = serde_json::json!({
             "model_tier": "server",

@@ -156,6 +156,21 @@ const PADDLE_OCR_CONFIG_FIELD_NAMES: &[&str] = &[
     "inference_backend",
 ];
 
+const LEGACY_CAMEL_CASE_FIELD_ALIASES: &[(&str, &str)] = &[
+    ("cacheDir", "cache_dir"),
+    ("useAngleCls", "use_angle_cls"),
+    ("enableTableDetection", "enable_table_detection"),
+    ("detDbThresh", "det_db_thresh"),
+    ("detDbBoxThresh", "det_db_box_thresh"),
+    ("detDbUnclipRatio", "det_db_unclip_ratio"),
+    ("detLimitSideLen", "det_limit_side_len"),
+    ("recBatchNum", "rec_batch_num"),
+    ("dropScore", "drop_score"),
+    ("modelTier", "model_tier"),
+    ("modelVersion", "model_version"),
+    ("inferenceBackend", "inference_backend"),
+];
+
 /// Which concrete ONNX inference engine PaddleOCR model loading uses.
 ///
 /// Mirrors `sceptre::Backend` for the PaddleOCR backend: `Ort` is the native,
@@ -172,10 +187,18 @@ pub enum PaddleInferenceBackend {
 }
 
 impl PaddleOcrConfig {
-    /// Deserialize the deprecated raw JSON field while preserving its unknown-key tolerance. ~keep
+    /// Deserialize the deprecated raw JSON field while preserving its unknown-key tolerance and
+    /// the camelCase keys accepted by the former hand-written Node binding. ~keep
     pub(crate) fn from_legacy_value(value: &serde_json::Value) -> serde_json::Result<Self> {
         let mut value = value.clone();
         if let serde_json::Value::Object(fields) = &mut value {
+            for &(alias, canonical) in LEGACY_CAMEL_CASE_FIELD_ALIASES {
+                if fields.contains_key(canonical) {
+                    fields.remove(alias);
+                } else if let Some(value) = fields.remove(alias) {
+                    fields.insert(canonical.to_string(), value);
+                }
+            }
             fields.retain(|name, _| PADDLE_OCR_CONFIG_FIELD_NAMES.contains(&name.as_str()));
         }
         serde_json::from_value(value)
