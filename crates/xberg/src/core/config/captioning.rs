@@ -7,18 +7,18 @@
 
 use serde::{Deserialize, Serialize};
 
-/// How a generated image caption interacts with existing alternate text.
+/// ~keep: How a generated image caption interacts with existing alternate text.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "alef-meta", alef(since = "1.3.0"))]
 pub enum CaptionAltTextMode {
-    /// Keep existing alternate text, using the caption only when it is absent.
+    /// ~keep: Keep existing alternate text, using the caption only when it is absent.
     #[default]
     Preserve,
-    /// Join existing alternate text and the generated caption with `: `.
+    /// ~keep: Join existing alternate text and the generated caption with `: `.
     Combine,
-    /// Use the generated caption even when alternate text is present.
+    /// ~keep: Use the generated caption even when alternate text is present.
     Replace,
 }
 
@@ -38,7 +38,7 @@ pub struct CaptioningConfig {
     /// Default `1_000` filters out icons and decorations.
     #[serde(default = "CaptioningConfig::default_min_image_area")]
     pub min_image_area: u32,
-    /// Controls whether generated captions preserve, combine with, or replace
+    /// ~keep: Controls whether generated captions preserve, combine with, or replace
     /// existing image alternate text.
     #[serde(default)]
     pub alt_text: CaptionAltTextMode,

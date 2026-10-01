@@ -97,7 +97,7 @@ pub struct PptxExtractionOptions {
 pub(crate) struct PptxInternalExtraction {
     pub(crate) result: PptxExtractionResult,
     pub(crate) slide_contents: Vec<(u32, String)>,
-    /// Relationship target and extracted-image index for each rendered image
+    /// ~keep: Relationship target and extracted-image index for each rendered image
     /// placeholder. The index is `None` when the target could not be read.
     pub(crate) image_placeholders: Vec<(String, Option<u32>)>,
     /// `(latex, is_display)` for every math run, in slide order. The text
