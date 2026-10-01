@@ -61,6 +61,7 @@ pub async fn redact(result: &mut ExtractedDocument, config: &RedactionConfig) ->
 ///
 /// `offset_encoding` defaults to `unicode_code_points` and `max_findings` defaults to
 /// 10,000 when omitted. Unknown encodings return a validation error.
+#[cfg_attr(feature = "alef-meta", alef(since = "1.3.1"))]
 pub async fn redact_external(
     mut document: ExtractedDocument,
     config: RedactionConfig,

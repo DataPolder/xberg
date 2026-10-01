@@ -79,6 +79,7 @@ pub struct RedactionConfig {
 /// maps to `0.5`, matching GCP's documented `POSSIBLE` default. ~keep
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "alef-meta", alef(since = "1.3.1"))]
 pub struct ExternalRedactionFinding {
     /// Engine category, surfaced as `PiiCategory::Custom(label)`.
     pub label: String,
@@ -269,6 +270,7 @@ impl ExternalRedactionFinding {
 /// Unit that an external finding's `start` / `end` offsets count in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "alef-meta", alef(since = "1.3.1"))]
 #[serde(rename_all = "snake_case")]
 pub enum RedactionOffsetEncoding {
     /// UTF-8 byte offsets.
