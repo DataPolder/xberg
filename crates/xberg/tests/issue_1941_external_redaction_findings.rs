@@ -356,7 +356,10 @@ async fn should_enforce_the_security_limit_across_configured_findings() {
         .process(&mut output, &config)
         .await
         .expect_err("the security limit must cap configured findings");
-    assert!(error.to_string().contains("max_iterations"), "{error}");
+    assert!(
+        error.to_string().contains("effective redaction finding limit (1)"),
+        "{error}"
+    );
     assert_eq!(output.content, "Zarnak Quorlim");
 }
 
@@ -382,12 +385,12 @@ async fn should_accept_configured_findings_at_the_iteration_limit() {
 }
 
 #[test]
-fn should_enforce_the_security_limit_across_configured_and_request_findings() {
+fn should_enforce_the_request_limit_across_configured_and_request_findings() {
     run_extraction_test(async {
         let config = ExtractionConfig {
             redaction: Some(with_findings(vec![text_finding("PERSON", "Zarnak")])),
             security_limits: Some(SecurityLimits {
-                max_iterations: 1,
+                max_iterations: 10,
                 ..Default::default()
             }),
             ..Default::default()
@@ -400,9 +403,12 @@ fn should_enforce_the_security_limit_across_configured_and_request_findings() {
             Some(1),
         )
         .await
-        .expect_err("the security limit must cap all configured and request findings");
+        .expect_err("the request limit must cap configured and request findings together");
 
-        assert!(error.to_string().contains("max_iterations"), "{error}");
+        assert!(
+            error.to_string().contains("effective redaction finding limit (1)"),
+            "{error}"
+        );
     });
 }
 
@@ -412,7 +418,7 @@ fn should_accept_configured_and_request_findings_at_the_iteration_limit() {
         let config = ExtractionConfig {
             redaction: Some(with_findings(vec![text_finding("PERSON", "Zarnak")])),
             security_limits: Some(SecurityLimits {
-                max_iterations: 2,
+                max_iterations: 10,
                 ..Default::default()
             }),
             ..Default::default()

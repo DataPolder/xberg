@@ -74,8 +74,11 @@ pub async fn redact_external(
     redact_counted(
         &mut document,
         &config,
-        &external_terms,
-        findings.len(),
+        CompiledExternalFindings {
+            terms: &external_terms,
+            count: findings.len(),
+            limit: Some(max_findings as usize),
+        },
         true,
         &SecurityLimits::default(),
     )
@@ -88,7 +91,7 @@ pub(crate) async fn redact_with_security_limits(
     config: &RedactionConfig,
     limits: &SecurityLimits,
 ) -> Result<()> {
-    redact_counted(result, config, &[], 0, true, limits)
+    redact_counted(result, config, CompiledExternalFindings::default(), true, limits)
         .await
         .map(|_counter| ())
 }
@@ -108,8 +111,11 @@ pub(crate) async fn redact_with_external_findings(
     redact_counted(
         result,
         config,
-        &external_terms,
-        request.findings.len(),
+        CompiledExternalFindings {
+            terms: &external_terms,
+            count: request.findings.len(),
+            limit: Some(request.max_findings as usize),
+        },
         request.include_configured_sources,
         limits,
     )
@@ -128,7 +134,14 @@ pub async fn redact_capturing_rehydration_map(
     result: &mut ExtractedDocument,
     config: &RedactionConfig,
 ) -> Result<super::rehydration::RehydrationMap> {
-    let counter = redact_counted(result, config, &[], 0, true, &SecurityLimits::default()).await?;
+    let counter = redact_counted(
+        result,
+        config,
+        CompiledExternalFindings::default(),
+        true,
+        &SecurityLimits::default(),
+    )
+    .await?;
     Ok(counter.rehydration_map())
 }
 
@@ -155,11 +168,17 @@ pub fn redact_with_entities(
 
 /// Shared body for [`redact`] and the map-capturing variant: runs the full
 /// pass and hands back the token counter it used.
+#[derive(Default)]
+struct CompiledExternalFindings<'a> {
+    terms: &'a [(PiiCategory, regex::Regex)],
+    count: usize,
+    limit: Option<usize>,
+}
+
 async fn redact_counted(
     result: &mut ExtractedDocument,
     config: &RedactionConfig,
-    external_terms: &[(PiiCategory, regex::Regex)],
-    external_finding_count: usize,
+    external: CompiledExternalFindings<'_>,
     include_configured_sources: bool,
     limits: &SecurityLimits,
 ) -> Result<TokenCounter> {
@@ -168,15 +187,18 @@ async fn redact_counted(
     let configured = compile_configured_findings_async(&result.content, config, limits).await?;
     #[cfg(not(feature = "tokio-runtime"))]
     let configured = compile_configured_findings(&result.content, config, limits)?;
-    let total_findings = configured.count.saturating_add(external_finding_count);
-    if total_findings > limits.max_iterations {
+    let total_findings = configured.count.saturating_add(external.count);
+    let security_limit = super::external::security_finding_limit(limits);
+    let limit = external
+        .limit
+        .map_or(security_limit, |request_limit| security_limit.min(request_limit));
+    if total_findings > limit {
         return Err(crate::XbergError::validation(format!(
-            "RedactionConfig: {total_findings} findings exceed SecurityLimits.max_iterations ({})",
-            limits.max_iterations
+            "RedactionConfig: {total_findings} findings exceed the effective redaction finding limit ({limit})"
         )));
     }
     let mut all_external_terms = configured.terms;
-    all_external_terms.extend_from_slice(external_terms);
+    all_external_terms.extend_from_slice(external.terms);
 
     #[cfg(feature = "ner")]
     let entities: Vec<Entity> = match (include_configured_sources, &config.ner) {

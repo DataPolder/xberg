@@ -17,6 +17,10 @@ use super::engine::literal_regex;
 
 pub(crate) const DEFAULT_MAX_FINDINGS: u32 = 10_000;
 
+pub(crate) fn security_finding_limit(limits: &crate::extractors::security::SecurityLimits) -> usize {
+    limits.max_iterations.min(DEFAULT_MAX_FINDINGS as usize)
+}
+
 #[derive(Clone)]
 pub(crate) struct ExternalRedactionRequest {
     pub(crate) findings: Arc<[ExternalRedactionFinding]>,
@@ -214,10 +218,10 @@ fn configured_finding_capacity(
     inline_count: usize,
     limits: &crate::extractors::security::SecurityLimits,
 ) -> Result<usize> {
-    limits.max_iterations.checked_sub(inline_count).ok_or_else(|| {
+    let limit = security_finding_limit(limits);
+    limit.checked_sub(inline_count).ok_or_else(|| {
         XbergError::validation(format!(
-            "RedactionConfig: {inline_count} findings exceed SecurityLimits.max_iterations ({})",
-            limits.max_iterations
+            "RedactionConfig: {inline_count} findings exceed the effective redaction finding limit ({limit})"
         ))
     })
 }
@@ -230,27 +234,21 @@ fn compile_configured_with_loaded(
 ) -> Result<CompiledConfiguredFindings> {
     let inline_count = config.findings.len();
     let total = inline_count.saturating_add(loaded.len());
-    if total > limits.max_iterations {
+    let limit = security_finding_limit(limits);
+    if total > limit {
         return Err(XbergError::validation(format!(
-            "RedactionConfig: {total} findings exceed SecurityLimits.max_iterations ({})",
-            limits.max_iterations
+            "RedactionConfig: {total} findings exceed the effective redaction finding limit ({limit})"
         )));
     }
     let mut findings = config.findings.clone();
     findings.extend(loaded);
-    let terms = compile_findings(
-        content,
-        &findings,
-        config.findings_offset_encoding,
-        limits.max_iterations,
-        |index| {
-            if index < inline_count {
-                format!("RedactionConfig.findings[{index}]")
-            } else {
-                format!("RedactionConfig.findings_path entry {}", index - inline_count)
-            }
-        },
-    )?;
+    let terms = compile_findings(content, &findings, config.findings_offset_encoding, limit, |index| {
+        if index < inline_count {
+            format!("RedactionConfig.findings[{index}]")
+        } else {
+            format!("RedactionConfig.findings_path entry {}", index - inline_count)
+        }
+    })?;
     Ok(CompiledConfiguredFindings { terms, count: total })
 }
 
@@ -479,6 +477,27 @@ mod tests {
             1,
             false,
         )
+    }
+
+    #[test]
+    fn default_security_limit_caps_findings_at_the_fixed_maximum() {
+        let limits = crate::extractors::security::SecurityLimits::default();
+        assert_eq!(security_finding_limit(&limits), DEFAULT_MAX_FINDINGS as usize);
+    }
+
+    #[test]
+    fn max_iterations_can_lower_but_not_raise_the_finding_limit() {
+        let lower = crate::extractors::security::SecurityLimits {
+            max_iterations: 2,
+            ..Default::default()
+        };
+        assert_eq!(security_finding_limit(&lower), 2);
+
+        let higher = crate::extractors::security::SecurityLimits {
+            max_iterations: DEFAULT_MAX_FINDINGS as usize + 1,
+            ..Default::default()
+        };
+        assert_eq!(security_finding_limit(&higher), DEFAULT_MAX_FINDINGS as usize);
     }
 
     #[tokio::test]
