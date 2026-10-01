@@ -1382,6 +1382,7 @@ error_type = "XbergError"
 error_constructor = "xberg::XbergError::Other({msg})"
 version_from = "Cargo.toml"
 workspace_root = "."
+crate_attributes = ["allow(deprecated)"]
 sources = [
   "crates/xberg/src/lib.rs",
   "crates/xberg/src/error.rs",

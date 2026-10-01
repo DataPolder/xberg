@@ -17,7 +17,7 @@
 //! that no build compiled them. The two tests that need no candle or paddle feature at all live
 //! in `issue_1829_per_page_failure_keeps_native_text.rs`. ~keep
 
-#![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
+#![allow(deprecated, clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(all(
     feature = "ocr",
     feature = "pdf",
@@ -236,4 +236,21 @@ async fn should_fail_before_any_page_when_pipeline_legacy_paddle_ocr_config_is_i
     .await;
 
     expect_validation_error(result, "paddle_ocr_config");
+}
+
+#[tokio::test]
+async fn should_extract_when_legacy_paddle_ocr_config_has_unknown_extension_keys() {
+    let result = extract_plain_text(OcrConfig {
+        backend: "paddle-ocr".to_string(),
+        paddle_ocr_config: Some(serde_json::json!({
+            "model_tier": "server",
+            "vendor_extension": {"enabled": true}
+        })),
+        ..Default::default()
+    })
+    .await
+    .expect("unknown legacy PaddleOCR extension keys must remain compatible");
+
+    assert_eq!(result.results.len(), 1);
+    assert_eq!(result.results[0].content, PLAIN_TEXT);
 }

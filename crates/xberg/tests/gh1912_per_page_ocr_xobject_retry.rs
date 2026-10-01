@@ -9,6 +9,7 @@
 //! carries the raster, so a retry that reads the wrong page recovers nothing. OCR of extracted
 //! embedded images is off, so the retry is the only call that sees the raster.
 
+#![allow(deprecated)]
 #![cfg(all(feature = "pdf", feature = "ocr"))]
 
 mod helpers;

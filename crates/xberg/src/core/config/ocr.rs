@@ -493,7 +493,9 @@ pub struct OcrPipelineStage {
 
     /// Legacy PaddleOCR config JSON for this stage.
     ///
-    /// Kept for patch-line compatibility. Prefer [`Self::paddle_ocr_settings`] for typed access.
+    /// Deprecated since 1.3.1 and planned for removal in 2.0. Use
+    /// [`Self::paddle_ocr_settings`] for typed access.
+    #[deprecated(since = "1.3.1", note = "use paddle_ocr_settings; removal planned for 2.0")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paddle_ocr_config: Option<serde_json::Value>,
 
@@ -853,7 +855,9 @@ pub struct OcrConfig {
 
     /// Legacy PaddleOCR configuration JSON.
     ///
-    /// Kept for patch-line compatibility. Prefer [`Self::paddle_ocr_settings`] for typed access.
+    /// Deprecated since 1.3.1 and planned for removal in 2.0. Use
+    /// [`Self::paddle_ocr_settings`] for typed access.
+    #[deprecated(since = "1.3.1", note = "use paddle_ocr_settings; removal planned for 2.0")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paddle_ocr_config: Option<serde_json::Value>,
 
@@ -1403,7 +1407,7 @@ pub(crate) fn resolve_paddle_ocr_settings(
     }
     paddle_ocr_config
         .map(|value| {
-            serde_json::from_value(value.clone()).map_err(|error| XbergError::Validation {
+            crate::paddle_ocr::PaddleOcrConfig::from_legacy_value(value).map_err(|error| XbergError::Validation {
                 message: format!("Failed to deserialize paddle_ocr_config: {error}"),
                 source: None,
             })
@@ -1790,6 +1794,54 @@ mod tests {
 
         assert_eq!(resolved.model_tier, "server");
         assert!(resolved.enable_table_detection);
+    }
+
+    #[test]
+    fn should_ignore_unknown_legacy_paddle_ocr_config_keys() {
+        let legacy = serde_json::json!({
+            "model_tier": "server",
+            "enable_table_detection": true,
+            "vendor_extension": {"enabled": true}
+        });
+        let resolved = resolve_paddle_ocr_settings(None, Some(&legacy))
+            .expect("unknown legacy keys must be ignored")
+            .expect("legacy settings must resolve");
+
+        assert_eq!(resolved.model_tier, "server");
+        assert!(resolved.enable_table_detection);
+    }
+
+    #[test]
+    fn should_reject_invalid_known_legacy_paddle_ocr_config_values() {
+        let legacy = serde_json::json!({
+            "det_db_thresh": "not a number",
+            "vendor_extension": true
+        });
+        let error =
+            resolve_paddle_ocr_settings(None, Some(&legacy)).expect_err("invalid known legacy values must still fail");
+
+        assert!(
+            matches!(&error, XbergError::Validation { .. }),
+            "known legacy type errors must remain validation errors: {error}"
+        );
+        assert!(error.to_string().contains("expected f32"), "{error}");
+    }
+
+    #[cfg(paddle_ocr)]
+    #[test]
+    fn should_validate_legacy_paddle_ocr_config_with_unknown_extension_keys() {
+        let config = OcrConfig {
+            backend: "paddle-ocr".to_string(),
+            paddle_ocr_config: Some(serde_json::json!({
+                "model_tier": "server",
+                "vendor_extension": true
+            })),
+            ..Default::default()
+        };
+
+        config
+            .validate()
+            .expect("unknown legacy extension keys must not fail validation");
     }
 
     #[test]

@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **(ocr): Tesseract returns line elements next to its word elements.** Each line holds its words' text in reading order, the union of their boxes and their word-count-weighted mean confidence. A caller who requests `min_level: "word"` now gets the lines first, then the words, so element positions and the ids from `build_hierarchy` shift. With `layout` configured, image OCR text is now assembled from these lines, so it reads in the source's word order instead of a per-word position sort. (GH#1978)
 
+### Deprecated
+
+- **(ocr): raw `paddle_ocr_config` fields and the `paddle-ocr-types` Cargo feature are deprecated.** Use typed `paddle_ocr_settings` on `OcrConfig` and `OcrPipelineStage`. The raw JSON fields remain lenient toward unknown extension keys for compatibility, while invalid values for known settings still fail validation. The Cargo feature remains accepted as a no-op alias. Both are planned for removal in 2.0. (GH#2010)
+
 ### Fixed
 
 - **(ocr): PaddleOCR's selected-page PDF route keeps embedded-image prose beside recovered tables in Markdown.** When a page render was blank, the embedded-image retry recovered both prose and a table, but document restructuring rebuilt the page from an empty paragraph list and retained only the table. The retry's non-table text now feeds that restructuring pass, matching plain output without duplicating table text. (GH#2021)

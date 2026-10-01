@@ -13,6 +13,7 @@
 //! Every case runs `force_ocr` with one Tesseract pipeline stage, which keeps PaddleOCR out
 //! when it is compiled in.
 
+#![allow(deprecated)]
 #![cfg(all(feature = "pdf", feature = "ocr"))]
 
 mod helpers;

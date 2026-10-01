@@ -33,6 +33,8 @@
 
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 #![cfg_attr(test, allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
+// Deprecated public compatibility fields remain wired internally until their planned 2.0 removal. ~keep
+#![allow(deprecated)]
 #![deny(unsafe_code)]
 
 #[cfg(all(

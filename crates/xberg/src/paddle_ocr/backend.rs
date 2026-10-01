@@ -2563,6 +2563,29 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn should_process_unknown_legacy_config_keys_past_backend_validation() {
+        let backend = PaddleOcrBackend::new().unwrap();
+        let config = OcrConfig {
+            backend: "paddle-ocr".to_string(),
+            paddle_ocr_config: Some(serde_json::json!({
+                "model_tier": "server",
+                "vendor_extension": true
+            })),
+            ..Default::default()
+        };
+
+        match backend.process_image(b"not an image", &config).await {
+            Err(crate::XbergError::Validation { message, .. })
+                if message.contains("Failed to deserialize paddle_ocr_config") =>
+            {
+                panic!("unknown legacy keys must not fail backend config parsing: {message}")
+            }
+            Err(_) => {}
+            Ok(_) => panic!("invalid image bytes must still fail after config parsing"),
+        }
+    }
+
     #[test]
     fn test_paddle_ocr_probe_rejects_invalid_legacy_config() {
         let backend = PaddleOcrBackend::new().unwrap();

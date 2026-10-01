@@ -116,8 +116,8 @@ fields. Xberg 1.3 and earlier took `paddle_ocr_config` as raw JSON. Every Xberg 
 exposes typed `paddle_ocr_settings` through `PaddleOcrConfig`, with the field names that the language
 uses. A typed object has only the fields it declares, so the Node and TypeScript
 `paddleOcrSettings` object ignores any other property, as every other typed config does. The legacy
-`paddle_ocr_config` JSON field remains available for compatibility; typed settings take precedence
-when both are set.
+`paddle_ocr_config` JSON field remains available, ignores unknown extension keys, and is deprecated
+for removal in Xberg 2.0; typed settings take precedence when both are set.
 
 Config files, JSON configs, and the REST and MCP request bodies keep the snake_case keys, such as
 `use_angle_cls` and `model_tier`. In these, an unknown key in `paddle_ocr_settings` fails validation.

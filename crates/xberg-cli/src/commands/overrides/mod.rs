@@ -18,6 +18,8 @@
 //! to route through the right sub-struct, a large, purely mechanical, and error-prone
 //! diff for a lint-only benefit that is not worth the risk. ~keep
 
+#![allow(deprecated)]
+
 use anyhow::Result;
 use xberg::ExtractionConfig;
 

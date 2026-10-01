@@ -202,8 +202,8 @@ heic = ["dep:xberg-libheif", "dep:image", "dep:nom-exif", "image-encode"]
 # WordPerfect (.wpd) extraction via the vendored libwpd/librevenge shim in
 # xberg-libwpd. Native C++ dependency (vendors boost), same shape as `heic`.
 wordperfect = ["dep:xberg-libwpd"]
-# PaddleOCR type definitions only — pure-Rust config structs, no ORT dependency.
-# Retained as a compatibility alias now that the config types compile in every build.
+# Deprecated no-op compatibility alias; PaddleOCR config types compile in every build.
+# Planned for removal in 2.0.
 paddle-ocr-types = []
 # Candle-based VLM OCR backends. Pure-Rust transformer inference via candle —
 # no ORT, no native binaries. Compatible with `ort-bundled` / `paddle-ocr`;

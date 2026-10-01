@@ -139,6 +139,23 @@ pub struct PaddleOcrConfig {
     pub inference_backend: Option<PaddleInferenceBackend>,
 }
 
+const PADDLE_OCR_CONFIG_FIELD_NAMES: &[&str] = &[
+    "language",
+    "cache_dir",
+    "use_angle_cls",
+    "enable_table_detection",
+    "det_db_thresh",
+    "det_db_box_thresh",
+    "det_db_unclip_ratio",
+    "det_limit_side_len",
+    "rec_batch_num",
+    "padding",
+    "drop_score",
+    "model_tier",
+    "model_version",
+    "inference_backend",
+];
+
 /// Which concrete ONNX inference engine PaddleOCR model loading uses.
 ///
 /// Mirrors `sceptre::Backend` for the PaddleOCR backend: `Ort` is the native,
@@ -155,6 +172,15 @@ pub enum PaddleInferenceBackend {
 }
 
 impl PaddleOcrConfig {
+    /// Deserialize the deprecated raw JSON field while preserving its unknown-key tolerance. ~keep
+    pub(crate) fn from_legacy_value(value: &serde_json::Value) -> serde_json::Result<Self> {
+        let mut value = value.clone();
+        if let serde_json::Value::Object(fields) = &mut value {
+            fields.retain(|name, _| PADDLE_OCR_CONFIG_FIELD_NAMES.contains(&name.as_str()));
+        }
+        serde_json::from_value(value)
+    }
+
     /// Creates a new PaddleOCR configuration with specified language.
     ///
     /// # Arguments
@@ -564,6 +590,35 @@ mod tests {
         let err = serde_json::from_value::<PaddleOcrConfig>(serde_json::json!({"enableTableDetection": true}))
             .expect_err("a camelCase key must not be dropped silently");
         assert!(err.to_string().contains("enableTableDetection"), "{err}");
+    }
+
+    #[test]
+    fn should_preserve_every_known_field_while_ignoring_legacy_extensions() {
+        let expected = PaddleOcrConfig {
+            language: "deu".to_string(),
+            cache_dir: Some(PathBuf::from("/tmp/paddle-cache")),
+            use_angle_cls: true,
+            enable_table_detection: true,
+            det_db_thresh: 0.4,
+            det_db_box_thresh: 0.6,
+            det_db_unclip_ratio: 1.8,
+            det_limit_side_len: 1536,
+            rec_batch_num: 12,
+            padding: 24,
+            drop_score: 0.7,
+            model_tier: "server".to_string(),
+            model_version: "pp-ocrv5".to_string(),
+            inference_backend: Some(PaddleInferenceBackend::Tract),
+        };
+        let mut legacy = serde_json::to_value(&expected).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .insert("vendor_extension".to_string(), serde_json::json!({"enabled": true}));
+
+        let resolved = PaddleOcrConfig::from_legacy_value(&legacy).unwrap();
+
+        assert_eq!(resolved, expected);
     }
 
     #[test]
