@@ -8,7 +8,8 @@
 
 use crate::Result;
 use crate::types::redaction::{PiiCategory, RedactionStrategy};
-use serde::{Deserialize, Serialize};
+use serde::de;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -69,27 +70,169 @@ pub struct RedactionConfig {
 /// One finding reported by an external content-inspection engine.
 ///
 /// Unknown fields are ignored, so an engine's raw output can be passed as is.
-/// Presidio's `entity_type` and AWS Comprehend's `Type`, `Text`,
-/// `BeginOffset`, `EndOffset` and `Score` are accepted as aliases.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+/// Presidio, AWS Comprehend, Azure Language, and GCP DLP payload fields are
+/// accepted as aliases. GCP's ordered likelihood buckets are normalized to
+/// evenly spaced scores from `0.0` through `1.0`; `LIKELIHOOD_UNSPECIFIED`
+/// maps to `0.5`, matching GCP's documented `POSSIBLE` default. ~keep
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
 #[cfg_attr(feature = "api", derive(utoipa::ToSchema))]
 pub struct ExternalRedactionFinding {
     /// Engine category, surfaced as `PiiCategory::Custom(label)`.
-    #[serde(alias = "entity_type", alias = "Type")]
     pub label: String,
     /// Literal value to redact. When absent, it is read from `content` at
     /// `start..end` under the requested [`RedactionOffsetEncoding`].
-    #[serde(default, alias = "Text", skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     /// Start offset (inclusive) into `content`.
-    #[serde(default, alias = "BeginOffset", skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start: Option<u32>,
     /// End offset (exclusive) into `content`.
-    #[serde(default, alias = "EndOffset", skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<u32>,
     /// Engine confidence in `[0.0, 1.0]`. Validated, not used for filtering.
-    #[serde(default, alias = "Score", skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub score: Option<f32>,
+}
+
+#[derive(Deserialize)]
+struct ExternalRedactionFindingWire {
+    #[serde(default, alias = "entity_type", alias = "Type", alias = "category")]
+    label: Option<String>,
+    #[serde(default, alias = "Text")]
+    text: Option<String>,
+    #[serde(default, alias = "BeginOffset", alias = "offset")]
+    start: Option<VendorOffset>,
+    #[serde(default, alias = "EndOffset")]
+    end: Option<VendorOffset>,
+    #[serde(default, alias = "Score", alias = "confidenceScore")]
+    score: Option<f32>,
+    #[serde(default)]
+    length: Option<VendorOffset>,
+    #[serde(default, rename = "infoType")]
+    info_type: Option<GcpInfoType>,
+    #[serde(default)]
+    location: Option<GcpLocation>,
+    #[serde(default)]
+    likelihood: Option<GcpLikelihood>,
+}
+
+#[derive(Deserialize)]
+struct GcpInfoType {
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GcpLocation {
+    #[serde(default, rename = "codepointRange")]
+    codepoint_range: Option<GcpCodepointRange>,
+}
+
+#[derive(Deserialize)]
+struct GcpCodepointRange {
+    start: Option<VendorOffset>,
+    end: Option<VendorOffset>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum VendorOffset {
+    Number(u64),
+    String(String),
+}
+
+impl VendorOffset {
+    fn into_u32<E>(self, field: &str) -> std::result::Result<u32, E>
+    where
+        E: de::Error,
+    {
+        let value = match self {
+            Self::Number(value) => value,
+            Self::String(value) => value
+                .parse::<u64>()
+                .map_err(|_| E::custom(format!("{field} must be a non-negative integer")))?,
+        };
+        u32::try_from(value).map_err(|_| E::custom(format!("{field} exceeds the supported u32 range")))
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum GcpLikelihood {
+    LikelihoodUnspecified,
+    VeryUnlikely,
+    Unlikely,
+    Possible,
+    Likely,
+    VeryLikely,
+}
+
+impl GcpLikelihood {
+    fn normalized_score(self) -> f32 {
+        match self {
+            Self::VeryUnlikely => 0.0,
+            Self::Unlikely => 0.25,
+            Self::LikelihoodUnspecified | Self::Possible => 0.5,
+            Self::Likely => 0.75,
+            Self::VeryLikely => 1.0,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ExternalRedactionFinding {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let ExternalRedactionFindingWire {
+            label,
+            text,
+            start,
+            end,
+            score,
+            length,
+            info_type,
+            location,
+            likelihood,
+        } = ExternalRedactionFindingWire::deserialize(deserializer)?;
+        let (nested_start, nested_end) = location
+            .and_then(|location| location.codepoint_range)
+            .map(|range| (range.start, range.end))
+            .unwrap_or_default();
+
+        let label = label
+            .or_else(|| info_type.and_then(|info_type| info_type.name))
+            .ok_or_else(|| de::Error::missing_field("label"))?;
+        let start = start
+            .or(nested_start)
+            .map(|offset| offset.into_u32::<D::Error>("start"))
+            .transpose()?;
+        let mut end = end.map(|offset| offset.into_u32::<D::Error>("end")).transpose()?;
+
+        if end.is_none()
+            && let Some(length) = length
+        {
+            let length = length.into_u32::<D::Error>("length")?;
+            let offset = start.ok_or_else(|| de::Error::custom("length requires offset"))?;
+            end = Some(
+                offset
+                    .checked_add(length)
+                    .ok_or_else(|| de::Error::custom("offset + length exceeds the supported u32 range"))?,
+            );
+        }
+        if end.is_none() {
+            end = nested_end
+                .map(|offset| offset.into_u32::<D::Error>("end"))
+                .transpose()?;
+        }
+
+        Ok(Self {
+            label,
+            text,
+            start,
+            end,
+            score: score.or_else(|| likelihood.map(GcpLikelihood::normalized_score)),
+        })
+    }
 }
 
 impl ExternalRedactionFinding {
@@ -287,5 +430,111 @@ impl RedactionConfig {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExternalRedactionFinding;
+
+    #[test]
+    fn should_deserialize_raw_azure_language_finding() {
+        let finding: ExternalRedactionFinding = serde_json::from_str(
+            r#"{
+                "category": "Person",
+                "text": "Ada",
+                "offset": 7,
+                "length": 3,
+                "confidenceScore": 0.97,
+                "warnings": []
+            }"#,
+        )
+        .expect("raw Azure Language finding should deserialize");
+
+        assert_eq!(finding.label, "Person");
+        assert_eq!(finding.text.as_deref(), Some("Ada"));
+        assert_eq!(finding.start, Some(7));
+        assert_eq!(finding.end, Some(10));
+        assert_eq!(finding.score, Some(0.97));
+        finding
+            .validate("Azure finding")
+            .expect("Azure finding should validate");
+    }
+
+    #[test]
+    fn should_deserialize_raw_gcp_dlp_finding() {
+        let finding: ExternalRedactionFinding = serde_json::from_str(
+            r#"{
+                "infoType": {"name": "EMAIL_ADDRESS"},
+                "likelihood": "VERY_LIKELY",
+                "location": {
+                    "codepointRange": {"start": "4", "end": "21"},
+                    "byteRange": {"start": "4", "end": "21"}
+                },
+                "quote": "ada@example.test"
+            }"#,
+        )
+        .expect("raw GCP DLP finding should deserialize");
+
+        assert_eq!(finding.label, "EMAIL_ADDRESS");
+        assert_eq!(finding.text, None);
+        assert_eq!(finding.start, Some(4));
+        assert_eq!(finding.end, Some(21));
+        assert_eq!(finding.score, Some(1.0));
+        finding.validate("GCP finding").expect("GCP finding should validate");
+    }
+
+    #[test]
+    fn should_normalize_gcp_likelihood_buckets_monotonically() {
+        let cases = [
+            ("VERY_UNLIKELY", 0.0),
+            ("UNLIKELY", 0.25),
+            ("POSSIBLE", 0.5),
+            ("LIKELIHOOD_UNSPECIFIED", 0.5),
+            ("LIKELY", 0.75),
+            ("VERY_LIKELY", 1.0),
+        ];
+
+        for (likelihood, expected) in cases {
+            let json = format!(
+                r#"{{"infoType":{{"name":"PERSON_NAME"}},"likelihood":"{likelihood}","location":{{"codepointRange":{{"start":"0","end":"3"}}}}}}"#
+            );
+            let finding: ExternalRedactionFinding =
+                serde_json::from_str(&json).expect("known GCP likelihood should deserialize");
+
+            assert_eq!(finding.score, Some(expected), "likelihood {likelihood}");
+        }
+    }
+
+    #[test]
+    fn should_preserve_canonical_external_finding_serialization() {
+        let finding: ExternalRedactionFinding =
+            serde_json::from_str(r#"{"label":"PERSON","text":"Ada","start":2,"end":5,"score":0.8}"#)
+                .expect("canonical finding should deserialize");
+
+        assert_eq!(
+            serde_json::to_value(finding).expect("canonical finding should serialize"),
+            serde_json::json!({
+                "label": "PERSON",
+                "text": "Ada",
+                "start": 2,
+                "end": 5,
+                "score": 0.8_f32
+            })
+        );
+    }
+
+    #[test]
+    fn should_reject_azure_offset_length_overflow() {
+        let error =
+            serde_json::from_str::<ExternalRedactionFinding>(r#"{"category":"PERSON","offset":4294967295,"length":1}"#)
+                .expect_err("overflowing Azure range should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("offset + length exceeds the supported u32 range"),
+            "unexpected error: {error}"
+        );
     }
 }
