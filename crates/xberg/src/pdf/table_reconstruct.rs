@@ -471,6 +471,26 @@ fn is_list_marker_content(text: &str) -> bool {
     tokens.peek().is_some() && tokens.all(is_list_marker_cell)
 }
 
+/// Whether a cell reads as an annotation continuing the title to its left, rather than as a
+/// standalone column label. Parentheses mark an annotation directly; otherwise require a
+/// multiword phrase introduced by a connective so case alone cannot turn `debit` into one. ~keep
+fn reads_as_title_continuation(text: &str) -> bool {
+    let trimmed = text.trim();
+    if let Some(parenthesized) = trimmed.strip_prefix('(').and_then(|rest| rest.strip_suffix(')')) {
+        return parenthesized.chars().any(char::is_alphabetic);
+    }
+
+    let mut words = trimmed.split_whitespace();
+    let Some(first) = words.next() else {
+        return false;
+    };
+    words.next().is_some()
+        && matches!(
+            first.to_ascii_lowercase().as_str(),
+            "as" | "at" | "by" | "for" | "from" | "in" | "of" | "per" | "to" | "with" | "without"
+        )
+}
+
 fn post_process_table_inner(
     mut table: Vec<Vec<String>>,
     min_columns: usize,
@@ -643,9 +663,10 @@ fn post_process_table_inner(
 
     // The GH#1832 title continuation and its numeric data share one OCR track, while the
     // following period header occupies the next track on a lower header row. Preserve that
-    // pre-merge geometry, but require the first-row text to read as a continuation rather than a
-    // standalone column label. Geometry alone cannot distinguish "in thousands" from "Debit",
-    // and folding the latter silently moves its values under the next column (#2029). ~keep
+    // pre-merge geometry, but require the first-row text to read as a title annotation rather
+    // than a standalone column label. Geometry alone cannot distinguish "In thousands" from
+    // "debit", and folding the latter silently moves its values under the next column (#2029).
+    // ~keep
     let mut split_title_value_columns: Vec<bool> = (0..column_count)
         .map(|column| {
             header_rows.len() >= 2
@@ -657,7 +678,7 @@ fn post_process_table_inner(
                 && header_rows[0].get(column).is_some_and(|cell| !cell.trim().is_empty())
                 && header_rows[0]
                     .get(column)
-                    .is_some_and(|cell| cell.trim().chars().next().is_some_and(char::is_lowercase))
+                    .is_some_and(|cell| reads_as_title_continuation(cell))
                 && header_rows[0].get(column + 1).is_none_or(|cell| cell.trim().is_empty())
                 && header_rows
                     .iter()
@@ -5691,6 +5712,38 @@ mod tests {
     }
 
     #[test]
+    fn a_title_continuation_folds_regardless_of_case_or_parentheses() {
+        for continuation in ["In thousands", "(in thousands)"] {
+            let mut table = vec![
+                vec!["Summary".into(), continuation.into(), String::new(), String::new()],
+                vec![String::new(), String::new(), "Year 1".into(), "Year 2".into()],
+            ];
+            for row in 0..12u32 {
+                let (short, year_1) = if row % 3 == 2 {
+                    ((300 + row).to_string(), String::new())
+                } else {
+                    (String::new(), format!("{},000", 40 + row))
+                };
+                table.push(vec![
+                    format!("Item {}", row + 1),
+                    short,
+                    year_1,
+                    format!("{},000", 60 + row),
+                ]);
+            }
+
+            let processed =
+                post_process_table(table, false, false).expect("the split title/value track must not reject the table");
+
+            assert_eq!(
+                processed[0],
+                [format!("Summary {continuation}"), "Year 1".into(), "Year 2".into()]
+            );
+            assert_eq!(processed[3], ["Item 3", "302", "62,000"]);
+        }
+    }
+
+    #[test]
     fn issue_2028_structural_period_headers_remain_above_table_data() {
         let period_headers = [
             ["2031", "2032", "2033"],
@@ -5810,6 +5863,33 @@ mod tests {
         let processed = post_process_table(table, false, false).expect("the staggered ledger must survive");
 
         assert_eq!(processed[0], ["Date", "Description", "Debit", "Credit"]);
+        assert_eq!(processed[1], ["2031-01-01", "Entry 1", "10.25", ""]);
+        assert_eq!(processed[2], ["2031-01-02", "Entry 2", "", "21.50"]);
+    }
+
+    #[test]
+    fn issue_2029_lowercase_standalone_header_keeps_its_value_column() {
+        let mut table = vec![
+            vec!["Date".into(), "Description".into(), "debit".into(), String::new()],
+            vec![String::new(), String::new(), String::new(), "Credit".into()],
+        ];
+        for row in 0..12u32 {
+            let (debit, credit) = if row % 4 == 0 {
+                (format!("{}.25", 10 + row), String::new())
+            } else {
+                (String::new(), format!("{}.50", 20 + row))
+            };
+            table.push(vec![
+                format!("2031-01-{:02}", row + 1),
+                format!("Entry {}", row + 1),
+                debit,
+                credit,
+            ]);
+        }
+
+        let processed = post_process_table(table, false, false).expect("the staggered ledger must survive");
+
+        assert_eq!(processed[0], ["Date", "Description", "debit", "Credit"]);
         assert_eq!(processed[1], ["2031-01-01", "Entry 1", "10.25", ""]);
         assert_eq!(processed[2], ["2031-01-02", "Entry 2", "", "21.50"]);
     }
