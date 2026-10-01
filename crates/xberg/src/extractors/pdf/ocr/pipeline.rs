@@ -13,7 +13,7 @@ use super::document::resolved_ocr_layout_dimensions;
 #[cfg(any(feature = "ocr", feature = "ocr-pipeline"))]
 use super::document::{
     accepted_ocr_page_replacements, apply_ocr_page_replacements, apply_ocr_text_list_fallback,
-    fill_unstructured_ocr_pages, heuristically_restructured_ocr_pages, ocr_pages_with_tables,
+    fill_unstructured_ocr_pages, heuristically_restructured_ocr_pages,
 };
 // Read only by the two OCR-paragraph assembly blocks below -- one gated on
 // `layout-detection` *with* `ocr`/`ocr-wasm`, the other on `not(layout-detection)`. With
@@ -657,6 +657,9 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
         ahash::AHashMap::new();
     let mut structured_ocr_pages: ahash::AHashMap<u32, crate::types::internal::InternalDocument> =
         ahash::AHashMap::with_capacity(total);
+    // Table-only embedded-image retries have no flat text replacement, but their structured
+    // page must survive the acceptance pass and count as recovered content. ~keep
+    let mut table_only_xobject_recovery_pages: ahash::AHashSet<u32> = ahash::AHashSet::new();
     // Bare, unclassified per-page paragraphs for every OCR'd page, real 1-indexed page
     // number -> that page's paragraphs. Collected across both the pipeline and
     // single-backend routes below so the document-global heading/list heuristic
@@ -1378,6 +1381,7 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
             let mut recovered = false;
             if let Some(XObjectRecoveryOutcome {
                 text,
+                text_outside_tables,
                 attempted,
                 images,
                 mut llm_usage,
@@ -1386,6 +1390,8 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                 image_preprocessing,
             }) = recovery
             {
+                let recovered_tables = !tables.is_empty();
+                let recovered_text_is_empty = text.trim().is_empty();
                 if should_adopt_xobject_retry_text(page_text, &text) {
                     // The render's paragraphs, confidence and word count describe the blank
                     // render, not the recovered text.
@@ -1393,7 +1399,11 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     page_mean_confidence.remove(&page_number);
                     page_word_count.remove(&page_number);
                     page_dictionary_invalid_word_ratio.remove(&page_number);
-                    structured_ocr_pages.insert(page_number, super::document::flat_ocr_page_document(&text));
+                    // The recovered tables print themselves beside these paragraphs (#2014).
+                    structured_ocr_pages.insert(
+                        page_number,
+                        super::document::flat_ocr_page_document(&text_outside_tables),
+                    );
                     ocr_results.insert(page_number, text);
                     recovered = true;
                 }
@@ -1403,7 +1413,11 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                         .entry(page_number)
                         .or_insert_with(|| super::document::flat_ocr_page_document(current_text));
                     super::document::attach_page_ocr_payload(page_doc, tables, Vec::new(), page_number);
+                    if recovered_text_is_empty {
+                        table_only_xobject_recovery_pages.insert(page_number);
+                    }
                 }
+                recovered |= recovered_tables;
                 accumulated_llm_usage.append(&mut llm_usage);
                 accumulated_formulas.append(&mut formulas);
                 if let Some(metadata) = image_preprocessing {
@@ -1420,10 +1434,18 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
                     failed_page_errors.insert(*page_idx, error);
                     continue;
                 }
+                let recovered_kind = if ocr_results
+                    .get(&page_number)
+                    .is_some_and(|text| !text.trim().is_empty())
+                {
+                    "text"
+                } else {
+                    "content"
+                };
                 accumulated_warnings.push(crate::types::ProcessingWarning {
                     source: std::borrow::Cow::Borrowed("ocr"),
                     message: std::borrow::Cow::Owned(format!(
-                        "OCR of page {page_number} failed ({error}); its text was recovered from the page's \
+                        "OCR of page {page_number} failed ({error}); its {recovered_kind} was recovered from the page's \
                          embedded image XObjects instead."
                     )),
                 });
@@ -1514,7 +1536,8 @@ async fn extract_mixed_ocr_native_with_layout_inputs(
 
     let accepted_replacements =
         accepted_ocr_page_replacements(native_text, boundaries, &ocr_results, &ocr_output_thresholds);
-    structured_ocr_pages.retain(|page, _| accepted_replacements.contains_key(page));
+    structured_ocr_pages
+        .retain(|page, _| accepted_replacements.contains_key(page) || table_only_xobject_recovery_pages.contains(page));
     retain_ocr_formulas_for_accepted_pages(&mut accumulated_formulas, &accepted_replacements);
 
     // Document-global heading/list heuristic (same font-clustering pass the OCR-only
@@ -2240,6 +2263,22 @@ pub(super) async fn extract_with_ocr_for_page(
         allow(unused_mut)
     )]
     let mut ocr_page_heights = vec![0.0_f32; total_pages];
+    // Written by the same two assembly blocks as `ocr_page_heights`, from each page backend
+    // report that detected tables claimed all of its text (#1571).
+    #[cfg_attr(
+        all(feature = "layout-detection", not(feature = "ocr"), not(feature = "ocr-wasm")),
+        allow(unused_mut)
+    )]
+    let mut pages_text_claimed_by_tables = vec![false; total_pages];
+    // The embedded-image retry text of each page that adopted it, without the lines the retry's
+    // tables carry (#2014). The page text keeps every recovered line, as a backend's own page
+    // text does, so the quality checks and the pipeline score see the tables' text; the page's
+    // paragraphs are built from this instead, beside the tables printed on their own.
+    #[cfg_attr(
+        all(feature = "layout-detection", not(feature = "ocr"), not(feature = "ocr-wasm")),
+        allow(unused_mut)
+    )]
+    let mut retry_texts_outside_tables: Vec<Option<String>> = vec![None; total_pages];
     #[allow(unused_mut)]
     let mut collected_tables: Vec<crate::types::Table> = Vec::new();
     let mut all_ocr_elements: Vec<crate::types::OcrElement> = Vec::new();
@@ -2273,6 +2312,9 @@ pub(super) async fn extract_with_ocr_for_page(
     // (`tracing::warn!("... output is empty")`, `Ok` rather than `Err`). Distinguishes, on the
     // failure paths below, "the retry never ran" from "the retry ran and recovered nothing".
     let mut pages_with_empty_xobject_retry: Vec<u32> = Vec::new();
+    // A retry can recover only structured payload (most importantly a table), leaving the flat
+    // page text empty. That still prevents a wholesale failure and keeps the structured page. ~keep
+    let mut pages_with_recovered_xobject_payload = vec![false; total_pages];
 
     #[cfg(feature = "pdf")]
     let mut margin_filter_warnings: Vec<crate::types::ProcessingWarning> = Vec::new();
@@ -2833,6 +2875,7 @@ pub(super) async fn extract_with_ocr_for_page(
                 {
                     let XObjectRecoveryOutcome {
                         text,
+                        text_outside_tables,
                         attempted,
                         images,
                         mut llm_usage,
@@ -2840,11 +2883,22 @@ pub(super) async fn extract_with_ocr_for_page(
                         mut formulas,
                         image_preprocessing,
                     } = recovery;
+                    let recovered_tables = !tables.is_empty();
+                    let recovered_payload = !text.trim().is_empty() || recovered_tables || !formulas.is_empty();
                     if should_adopt_xobject_retry_text(&ocr_result.content, &text) {
                         ocr_result.content = text;
-                    } else if attempted > 0 && text.is_empty() {
+                        retry_texts_outside_tables[page_idx] = Some(text_outside_tables);
+                        // The page text is now the retry text, not the lines the tables of this
+                        // pass claimed.
+                        if let Some(document) = ocr_result.ocr_internal_document.as_mut() {
+                            document.ocr_text_claimed_by_tables = false;
+                        }
+                    } else if recovered_tables {
+                        retry_texts_outside_tables[page_idx] = Some(text_outside_tables);
+                    } else if attempted > 0 && !recovered_payload {
                         xobject_retry_ran_empty = true;
                     }
+                    pages_with_recovered_xobject_payload[page_idx] = recovered_payload;
                     accumulated_llm_usage.append(&mut llm_usage);
                     collected_tables.append(&mut tables);
                     accumulated_formulas.append(&mut formulas);
@@ -2866,15 +2920,20 @@ pub(super) async fn extract_with_ocr_for_page(
             // its chance to recover it (#1444). Either way the failure is visible: a page
             // that vanishes silently is the defect this replaces.
             if let Some(error) = batch_page_errors[offset].take() {
-                let recovered = !ocr_result.content.trim().is_empty();
+                let recovered = !ocr_result.content.trim().is_empty() || pages_with_recovered_xobject_payload[page_idx];
                 if !recovered && xobject_retry_ran_empty {
                     pages_with_empty_xobject_retry.push(document_page_number);
                 }
                 page_failure_warnings.push(crate::types::ProcessingWarning {
                     source: std::borrow::Cow::Borrowed("ocr"),
                     message: std::borrow::Cow::Owned(if recovered {
+                        let recovered_kind = if ocr_result.content.trim().is_empty() {
+                            "content"
+                        } else {
+                            "text"
+                        };
                         format!(
-                            "OCR of page {} failed ({error}); its text was recovered from the page's \
+                            "OCR of page {} failed ({error}); its {recovered_kind} was recovered from the page's \
                              embedded image XObjects instead.",
                             document_page_number
                         )
@@ -3087,6 +3146,7 @@ pub(super) async fn extract_with_ocr_for_page(
                     );
 
                     all_page_paragraphs[page_idx] = Some(paragraphs);
+                    pages_text_claimed_by_tables[page_idx] = ocr_doc.ocr_text_claimed_by_tables;
                 }
 
                 if capture_rasters {
@@ -3170,6 +3230,7 @@ pub(super) async fn extract_with_ocr_for_page(
                     }
                 }
                 all_page_paragraphs[page_idx] = Some(paragraphs);
+                pages_text_claimed_by_tables[page_idx] = ocr_doc.ocr_text_claimed_by_tables;
             }
 
             let _ = page_idx;
@@ -3241,6 +3302,7 @@ pub(super) async fn extract_with_ocr_for_page(
     if !page_backend_errors.is_empty()
         && page_backend_errors.len() == total_pages
         && page_texts.iter().all(|text| text.trim().is_empty())
+        && pages_with_recovered_xobject_payload.iter().all(|recovered| !recovered)
     {
         let (_, first_error) = &page_backend_errors[0];
         let message = if pages_with_empty_xobject_retry.is_empty() {
@@ -3306,18 +3368,27 @@ pub(super) async fn extract_with_ocr_for_page(
         page_index_offset,
     );
 
-    let pages_with_tables = ocr_pages_with_tables(&collected_tables, all_page_paragraphs.len(), page_index_offset);
-    fill_unstructured_ocr_pages(&mut all_page_paragraphs, &page_texts, &pages_with_tables);
+    // A page that adopted the retry text is refilled from the retry lines no recovered table
+    // carries, and is claimed by its tables when they carry every line (#2014).
+    let mut refill_texts = std::borrow::Cow::Borrowed(page_texts.as_slice());
+    for (page_idx, text_outside_tables) in retry_texts_outside_tables.into_iter().enumerate() {
+        if let Some(text_outside_tables) = text_outside_tables
+            && !rejected_pages[page_idx]
+        {
+            pages_text_claimed_by_tables[page_idx] = text_outside_tables.trim().is_empty();
+            refill_texts.to_mut()[page_idx] = text_outside_tables;
+        }
+    }
+    fill_unstructured_ocr_pages(&mut all_page_paragraphs, &refill_texts, &pages_text_claimed_by_tables);
 
     let (ocr_doc, raw_page_paragraphs) = {
-        let has_structured = all_page_paragraphs
-            .iter()
-            .zip(&pages_with_tables)
-            .any(|(paragraphs, has_tables)| {
-                paragraphs
-                    .as_ref()
-                    .is_some_and(|paragraphs| !paragraphs.is_empty() || *has_tables)
-            });
+        let has_structured =
+            all_page_paragraphs
+                .iter()
+                .zip(&pages_text_claimed_by_tables)
+                .any(|(paragraphs, claimed_by_tables)| {
+                    paragraphs.as_ref().is_some_and(|paragraphs| !paragraphs.is_empty()) || *claimed_by_tables
+                });
         if has_structured {
             let pages: Vec<Vec<crate::pdf::structure::types::PdfParagraph>> = all_page_paragraphs
                 .into_iter()
@@ -4022,7 +4093,8 @@ pub(super) async fn collect_pipeline_xobject_pages(
         };
         let recovered_payload =
             !recovery.text.is_empty() || !recovery.tables.is_empty() || !recovery.formulas.is_empty();
-        outcome.page_texts[page_idx] = std::mem::take(&mut recovery.text);
+        // The returned document is built from this text beside the recovered tables (#2014).
+        outcome.page_texts[page_idx] = std::mem::take(&mut recovery.text_outside_tables);
         if recovered_payload {
             outcome
                 .warnings
