@@ -135,8 +135,8 @@ let output = xberg::extract_with_external_redaction(
     input,
     &config,
     findings,
-    xberg::RedactionOffsetEncoding::UnicodeCodePoints,
-    10_000,
+    Some("unicode_code_points"),
+    Some(10_000),
 ).await?;
 ```
 
