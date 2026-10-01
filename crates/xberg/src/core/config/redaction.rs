@@ -58,6 +58,9 @@ pub struct RedactionConfig {
     /// Findings supplied inline by an external inspection engine. ~keep
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<ExternalRedactionFinding>,
+    /// Minimum accepted confidence for scored external findings. Findings without a score remain eligible. ~keep
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_score: Option<f32>,
     /// JSON array or JSON Lines file containing external findings. ~keep
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "api", schema(value_type = Option<String>))]
@@ -378,6 +381,7 @@ impl Default for RedactionConfig {
             custom_terms: Vec::new(),
             custom_patterns: Vec::new(),
             findings: Vec::new(),
+            min_score: None,
             findings_path: None,
             findings_offset_encoding: RedactionOffsetEncoding::default(),
         }
@@ -393,6 +397,13 @@ impl RedactionConfig {
     /// Pure terms (regex-escaped) cannot fail to compile, but the function
     /// still rejects empty values to avoid degenerate zero-length matches.
     pub fn validate(&self) -> Result<()> {
+        if let Some(min_score) = self.min_score
+            && !(min_score.is_finite() && (0.0..=1.0).contains(&min_score))
+        {
+            return Err(crate::XbergError::validation(format!(
+                "RedactionConfig.min_score must be between 0.0 and 1.0, got {min_score}"
+            )));
+        }
         for term in &self.custom_terms {
             if term.value.is_empty() {
                 return Err(crate::XbergError::validation(format!(

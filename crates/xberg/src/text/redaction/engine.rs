@@ -81,8 +81,14 @@ pub async fn redact_external(
         };
         return Err(crate::XbergError::validation(message));
     }
-    let external_terms =
-        compile_external_findings(&document.content, &findings, offset_encoding, effective_limit as u32)?;
+    config.validate()?;
+    let external_terms = compile_external_findings(
+        &document.content,
+        &findings,
+        offset_encoding,
+        effective_limit as u32,
+        config.min_score,
+    )?;
     redact_counted(
         &mut document,
         &config,
@@ -114,11 +120,13 @@ pub(crate) async fn redact_with_external_findings(
     request: &ExternalRedactionRequest,
     limits: &SecurityLimits,
 ) -> Result<()> {
+    config.validate()?;
     let external_terms = compile_external_findings(
         &result.content,
         &request.findings,
         request.offset_encoding,
         request.max_findings,
+        config.min_score,
     )?;
     redact_counted(
         result,

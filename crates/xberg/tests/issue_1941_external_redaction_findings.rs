@@ -313,7 +313,7 @@ fn should_redact_every_text_field_and_populate_the_report() {
 #[test]
 fn should_read_findings_from_config_json() {
     let config: ExtractionConfig = serde_json::from_str(
-        r#"{"redaction":{"findings":[{"entity_type":"PERSON","text":"Zarnak","score":0.92,"vendor":{}}],"findings_offset_encoding":"unicode_code_points"}}"#,
+        r#"{"redaction":{"findings":[{"entity_type":"PERSON","text":"Zarnak","score":0.92,"vendor":{}}],"min_score":0.8,"findings_offset_encoding":"unicode_code_points"}}"#,
     )
     .expect("external findings must parse from ExtractionConfig JSON");
     let redaction = config.redaction.expect("redaction config");
@@ -328,6 +328,7 @@ fn should_read_findings_from_config_json() {
         redaction.findings_offset_encoding,
         RedactionOffsetEncoding::UnicodeCodePoints
     );
+    assert_eq!(redaction.min_score, Some(0.8));
 }
 
 #[test]

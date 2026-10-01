@@ -174,10 +174,16 @@ pub(super) fn compile_external_findings(
     findings: &[ExternalRedactionFinding],
     offset_encoding: RedactionOffsetEncoding,
     max_findings: u32,
+    min_score: Option<f32>,
 ) -> Result<Vec<(PiiCategory, regex::Regex)>> {
-    compile_findings(content, findings, offset_encoding, max_findings as usize, |index| {
-        format!("external findings[{index}]")
-    })
+    compile_findings(
+        content,
+        findings,
+        offset_encoding,
+        max_findings as usize,
+        min_score,
+        |index| format!("external findings[{index}]"),
+    )
 }
 
 pub(super) struct CompiledConfiguredFindings {
@@ -242,13 +248,20 @@ fn compile_configured_with_loaded(
     }
     let mut findings = config.findings.clone();
     findings.extend(loaded);
-    let terms = compile_findings(content, &findings, config.findings_offset_encoding, limit, |index| {
-        if index < inline_count {
-            format!("RedactionConfig.findings[{index}]")
-        } else {
-            format!("RedactionConfig.findings_path entry {}", index - inline_count)
-        }
-    })?;
+    let terms = compile_findings(
+        content,
+        &findings,
+        config.findings_offset_encoding,
+        limit,
+        config.min_score,
+        |index| {
+            if index < inline_count {
+                format!("RedactionConfig.findings[{index}]")
+            } else {
+                format!("RedactionConfig.findings_path entry {}", index - inline_count)
+            }
+        },
+    )?;
     Ok(CompiledConfiguredFindings { terms, count: total })
 }
 
@@ -257,6 +270,7 @@ fn compile_findings<F>(
     findings: &[ExternalRedactionFinding],
     offset_encoding: RedactionOffsetEncoding,
     max_findings: usize,
+    min_score: Option<f32>,
     location: F,
 ) -> Result<Vec<(PiiCategory, regex::Regex)>>
 where
@@ -271,6 +285,7 @@ where
 
     let mut wanted: Vec<usize> = findings
         .iter()
+        .filter(|finding| finding_meets_min_score(finding, min_score))
         .filter(|finding| finding.text.is_none())
         .flat_map(|finding| [finding.start, finding.end])
         .flatten()
@@ -282,6 +297,9 @@ where
     let mut seen: HashSet<(PiiCategory, &str)> = HashSet::new();
     let mut output = Vec::new();
     for (index, finding) in findings.iter().enumerate() {
+        if !finding_meets_min_score(finding, min_score) {
+            continue;
+        }
         let location = location(index);
         let (literal, anchor) = resolve_literal(content, finding, &byte_offsets, offset_encoding, &location)?;
         let regex = match compiled.get(literal) {
@@ -312,6 +330,13 @@ where
         }
     }
     Ok(output)
+}
+
+fn finding_meets_min_score(finding: &ExternalRedactionFinding, min_score: Option<f32>) -> bool {
+    match (finding.score, min_score) {
+        (Some(score), Some(min_score)) => score >= min_score,
+        _ => true,
+    }
 }
 
 fn resolve_literal<'a>(
