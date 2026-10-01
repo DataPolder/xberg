@@ -1682,7 +1682,36 @@ fn redirect_split_out_of_content(
         !corridor_is_hanging_label_indent(spans, search_lines, max_label_width, corridor)
             && both_sides_are_columns(spans, search_lines, furniture_width, (corridor.0 + corridor.1) / 2.0)
     };
+    // GH#1800 follow-up (datapolder #2950): the column test alone does not tell a sparse
+    // table's cell gap from the gutter -- prose plus the table's first columns reads as a
+    // column on one side, the sparse last column does not pair row for row on the other --
+    // and the cap is measured from a median the table's own rows put inside the table, so
+    // the real gutter can lie past it (156/151pt against 148.8 on the reporter's pages).
+    // A corridor that runs through the middle of the band's content and passes both
+    // corridor tests IS that band's gutter: it wins over a wider corridor and is not
+    // bound by the distance cap, which exists for hanging-label indents
+    // (`corridor_is_hanging_label_indent`), and those lie inside a column, not through
+    // its middle. Only a corridor as narrow as a gutter -- an empty stretch of a brochure
+    // or a drawing page can run through the middle too -- and only with a column of prose
+    // on at least one side: a full-width statement's label|value gap can sit at the
+    // middle as well (`Cash $ 9,982 …`), and its labels are short and ragged. ~keep
+    let content_centre = band_content_centre(spans, search_lines, furniture_width);
+    let max_centre_gutter = page_width * MAX_CENTRE_GUTTER_FRACTION;
+    let band_spans: Vec<usize> = search_lines
+        .iter()
+        .filter(|&line| !line_has_width_furniture(spans, line, furniture_width))
+        .flat_map(|line| line.iter().copied())
+        .filter(|&index| span_has_ink(&spans[index]))
+        .collect();
     let widest_within_reach = |corridors: Vec<(f32, f32)>| {
+        if let Some(centre) = content_centre
+            && let Some(gutter) = corridors
+                .iter()
+                .find(|&&(left, right)| left <= centre && right >= centre && right - left <= max_centre_gutter)
+            && side_of_gutter_is_a_prose_column(spans, &band_spans, (gutter.0 + gutter.1) / 2.0)
+        {
+            return Some((gutter.0 + gutter.1) / 2.0);
+        }
         corridors
             .into_iter()
             .max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0)))
@@ -1729,6 +1758,77 @@ fn redirect_split_out_of_content(
     .filter(qualifies)
     .collect();
     widest_within_reach(corridors).unwrap_or(split_x)
+}
+
+// GH#1800 follow-up (datapolder #2950): the widest corridor through the middle of a band
+// that is still read as its gutter. Journal gutters measure 13-24pt on A4 (2.2-4.0% of
+// 595pt); corridors through the middle of a brochure, a price book or a drawing page run
+// from 32pt to 270pt. 5% (29.8pt on A4) sits between the two. ~keep
+const MAX_CENTRE_GUTTER_FRACTION: f32 = 0.05;
+
+// GH#1800 follow-up (datapolder #2950): a side of a gutter is a column of prose when it
+// reads as a column (`classify_region`) and at least this share of its rows runs across
+// at least `PROSE_COLUMN_ROW_SPAN_FRACTION` of its width -- justified lines do; a
+// statement's labels (`Cash $`, `Money market funds`) do not. ~keep
+const MIN_PROSE_COLUMN_FULL_ROW_FRACTION: f32 = 0.5;
+const PROSE_COLUMN_ROW_SPAN_FRACTION: f32 = 0.75;
+
+/// True if the spans of `band` left of `x`, or those right of it, are a column of prose
+/// (see `MIN_PROSE_COLUMN_FULL_ROW_FRACTION`). ~keep
+fn side_of_gutter_is_a_prose_column(spans: &[xberg_native_pdf::layout::TextSpan], band: &[usize], x: f32) -> bool {
+    let (left, right): (Vec<usize>, Vec<usize>) = band.iter().copied().partition(|&index| spans[index].bbox.x < x);
+    [left, right].iter().any(|side| {
+        if side.is_empty() || !xberg_native_pdf::layout::classify_region(spans, side).is_reorderable_column() {
+            return false;
+        }
+        let side_left = side
+            .iter()
+            .map(|&index| spans[index].bbox.left())
+            .fold(f32::INFINITY, f32::min);
+        let side_right = side
+            .iter()
+            .map(|&index| spans[index].bbox.right())
+            .fold(f32::NEG_INFINITY, f32::max);
+        let width = side_right - side_left;
+        let rows = region_rows(spans, side);
+        if rows.is_empty() || width <= 0.0 {
+            return false;
+        }
+        let full = rows
+            .iter()
+            .filter(|row| {
+                let row_left = row
+                    .iter()
+                    .map(|&index| spans[index].bbox.left())
+                    .fold(f32::INFINITY, f32::min);
+                let row_right = row
+                    .iter()
+                    .map(|&index| spans[index].bbox.right())
+                    .fold(f32::NEG_INFINITY, f32::max);
+                row_right - row_left >= width * PROSE_COLUMN_ROW_SPAN_FRACTION
+            })
+            .count();
+        full as f32 >= rows.len() as f32 * MIN_PROSE_COLUMN_FULL_ROW_FRACTION
+    })
+}
+
+/// The middle of `lines`' inked content: halfway between the leftmost left edge and the
+/// rightmost right edge of their spans, leaving out full-width furniture (a span at least
+/// `furniture_width` wide). `None` without inked content. ~keep
+fn band_content_centre(
+    spans: &[xberg_native_pdf::layout::TextSpan],
+    lines: &[SpanLine],
+    furniture_width: f32,
+) -> Option<f32> {
+    let (left, right) = lines
+        .iter()
+        .flatten()
+        .map(|&index| &spans[index])
+        .filter(|span| span_has_ink(span) && span.bbox.width < furniture_width)
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(left, right), span| {
+            (left.min(span.bbox.left()), right.max(span.bbox.right()))
+        });
+    (left < right).then_some((left + right) / 2.0)
 }
 
 /// True if a split at `x` is one `reorder_band_columns` would actually accept once it
@@ -7148,5 +7248,73 @@ mod tests {
             "expected the 18pt true gutter (mid 139), got {redirected} -- \
              the 40pt table cell gap (mid 85) must not win merely for being wider"
         );
+    }
+
+    /// GH#1800 follow-up (datapolder #2950): the sparse-table-in-one-column report's
+    /// reproducer pages as xberg extracts them -- the carrier pages' geometry span for
+    /// span, text lorem ipsum. x, y, width, height, font size, text; tab-separated.
+    fn gh1800_spans(tsv: &str) -> Vec<TextSpan> {
+        tsv.lines()
+            .map(|line| {
+                let fields: Vec<&str> = line.splitn(6, '\t').collect();
+                let number = |index: usize| fields[index].parse::<f32>().expect("number");
+                span_with_width(fields[5], number(0), number(1), number(2), number(3), number(4))
+            })
+            .collect()
+    }
+
+    const GH1800_PAGE_WIDTH: f32 = 595.276;
+
+    fn gh1800_final_split(spans: &[TextSpan]) -> f32 {
+        let order = spans_sorted_top_to_bottom(spans);
+        let lines = group_into_lines(spans, &order);
+        let detected = detect_split_x(spans, &lines, GH1800_PAGE_WIDTH).expect("the page votes");
+        let snapped = snap_split_left_of_hanging_labels(spans, &lines, GH1800_PAGE_WIDTH, detected);
+        redirect_split_out_of_content(spans, &lines, GH1800_PAGE_WIDTH, snapped)
+    }
+
+    /// The page's gutter, x 291.0-312.6 on p4 and 282.7-306.6 on p5. ~keep
+    fn gh1800_split_is_in_the_gutter(split: f32) -> bool {
+        (282.7..=312.6).contains(&split)
+    }
+
+    /// GH#1800 follow-up (datapolder #2950), reproducer page 2 (carrier Exploring p4):
+    /// `Table 2` in the right column, a sparse table whose rows fill one to three of
+    /// five cells. Its cell gaps cast the vote (median 458.0); in the band the redirect
+    /// searches, the gap before the last column (466.0-518.5) passes both corridor tests
+    /// and is the widest, and the gutter (291.0-312.6) lies 156.2pt away, past the cap.
+    /// The gutter runs through the middle of the band's content and passes both tests:
+    /// it is the split. ~keep
+    #[test]
+    fn a_sparse_table_beside_prose_leaves_the_split_in_the_gutter_gh1800_p4() {
+        let spans = gh1800_spans(include_str!(
+            "../../../tests/fixtures/pdf/gh1800_exploring_p4_spans.tsv"
+        ));
+        let split = gh1800_final_split(&spans);
+        assert!(gh1800_split_is_in_the_gutter(split), "split {split} is not the gutter");
+    }
+
+    /// GH#1800 follow-up (datapolder #2950), reproducer page 1 (carrier Exploring p5):
+    /// `Table 2 (continued)` at the top of the left column, prose under it and in the
+    /// right column. Median 143.6; the table's gap 212.6-249.6 passes both corridor
+    /// tests, the gutter (282.7-306.6) lies 151.0pt away. With the split in the gutter
+    /// the left column's `3.2.2.` is read before the right column's `3.3.` ·
+    /// `3.3.1.` · `3.3.2.`, not between them. ~keep
+    #[test]
+    fn a_sparse_table_above_prose_leaves_the_split_in_the_gutter_gh1800_p5() {
+        let mut spans = gh1800_spans(include_str!(
+            "../../../tests/fixtures/pdf/gh1800_exploring_p5_spans.tsv"
+        ));
+        let split = gh1800_final_split(&spans);
+        assert!(gh1800_split_is_in_the_gutter(split), "split {split} is not the gutter");
+
+        assert!(reorder_dense_two_column_page(&mut spans, GH1800_PAGE_WIDTH));
+        let headings: Vec<&str> = spans
+            .iter()
+            .map(|span| span.text.as_str())
+            .filter(|text| text.starts_with("3.2.2.") || text.starts_with("3.3."))
+            .map(|text| text.split(' ').next().unwrap_or(text))
+            .collect();
+        assert_eq!(headings, ["3.2.2.", "3.3.", "3.3.1.", "3.3.2."]);
     }
 }
