@@ -75,12 +75,15 @@ impl PostProcessor for RedactionProcessor {
             Some(request) => redact_with_external_findings(result, redaction_config, request, limits).await,
             None => redact_with_security_limits(result, redaction_config, limits).await,
         };
+        // Redaction is security processing: every failure must abort instead of becoming a warning. ~keep
         let outcome = outcome.map_err(|err| match err {
-            crate::XbergError::Validation { .. } => crate::XbergError::Plugin {
-                message: err.to_string(),
+            fatal @ (crate::XbergError::Io(_)
+            | crate::XbergError::LockPoisoned(_)
+            | crate::XbergError::Plugin { .. }) => fatal,
+            other => crate::XbergError::Plugin {
+                message: other.to_string(),
                 plugin_name: self.name().to_string(),
             },
-            other => other,
         });
         if outcome.is_ok()
             && let Some(request) = external
