@@ -677,6 +677,79 @@ mod tests {
         }));
     }
 
+    #[tokio::test]
+    async fn test_image_placeholders_follow_visual_order_not_xml_order() {
+        use crate::core::config::{ExtractionConfig, ImageExtractionConfig, OutputFormat};
+        use crate::plugins::InternalDocumentExtractor;
+        use crate::types::internal::ElementKind;
+
+        let slide_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+    <p:cSld><p:spTree>
+        <p:pic>
+            <p:nvPicPr><p:cNvPr id="2" name="Bottom" descr="Bottom alt"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>
+            <p:blipFill><a:blip r:embed="rId2"/></p:blipFill>
+            <p:spPr><a:xfrm><a:off x="0" y="2000000"/><a:ext cx="1000000" cy="1000000"/></a:xfrm></p:spPr>
+        </p:pic>
+        <p:pic>
+            <p:nvPicPr><p:cNvPr id="3" name="Top" descr="Top alt"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>
+            <p:blipFill><a:blip r:embed="rId3"/></p:blipFill>
+            <p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1000000" cy="1000000"/></a:xfrm></p:spPr>
+        </p:pic>
+    </p:spTree></p:cSld>
+</p:sld>"#;
+        let slide_rels_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/bottom.png"/>
+    <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/top.png"/>
+</Relationships>"#;
+        let bottom_bytes = b"bottom image bytes";
+        let top_bytes = b"top image bytes";
+        let pptx = crate::extraction::pptx::tests::build_single_slide_pptx(
+            slide_xml,
+            Some(slide_rels_xml),
+            &[("ppt/media/bottom.png", bottom_bytes), ("ppt/media/top.png", top_bytes)],
+        );
+        let config = ExtractionConfig {
+            images: Some(ImageExtractionConfig::default()),
+            output_format: OutputFormat::Markdown,
+            ..Default::default()
+        };
+
+        let extractor = PptxExtractor::new();
+        let mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        let mut document = extractor
+            .extract_content(&pptx, mime, &config)
+            .await
+            .expect("two-image PPTX should extract");
+
+        assert_eq!(document.images.len(), 2);
+        assert_eq!(document.images[0].data.as_ref(), top_bytes);
+        assert_eq!(document.images[0].description.as_deref(), Some("Top alt"));
+        assert_eq!(document.images[1].data.as_ref(), bottom_bytes);
+        assert_eq!(document.images[1].description.as_deref(), Some("Bottom alt"));
+        let image_indices: Vec<u32> = document
+            .elements
+            .iter()
+            .filter_map(|element| match element.kind {
+                ElementKind::Image { image_index } => Some(image_index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(image_indices, vec![0, 1]);
+
+        document.images[0].description = Some("Top caption".to_string());
+        document.images[1].description = Some("Bottom caption".to_string());
+        let markdown = crate::rendering::render_markdown(&document);
+        let top = markdown.find("Top caption").expect("top image caption should render");
+        let bottom = markdown
+            .find("Bottom caption")
+            .expect("bottom image caption should render");
+        assert!(top < bottom, "captions must stay attached in visual order: {markdown}");
+    }
+
     /// A slide with math: the LaTeX must reach `ExtractedDocument.formulas`, not
     /// only the text. The deck holds display math in its own shape, inline math
     /// beside text, and a `$` amount that is not math at all.

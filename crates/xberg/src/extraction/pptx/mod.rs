@@ -220,19 +220,18 @@ fn extract_slide_images<R: std::io::Read + std::io::Seek>(
         return;
     };
 
-    // Pair each image element with its bytes by relationship ID, not by
-    // iteration position: `image_data` is a hash map, so its iteration
-    // order is unrelated to the document order of `slide.elements`.
-    // Indexing into a separately-collected, document-ordered Vec by a
-    // hash-map enumeration index silently mismatched dimensions/alt-text
-    // with the wrong shape whenever a slide had more than one image (#91).
-    for (img_ref, pos) in slide.elements.iter().filter_map(|e| {
-        if let SlideElement::Image(img_ref, pos) = e {
-            Some((img_ref, pos))
-        } else {
-            None
-        }
-    }) {
+    let mut image_elements: Vec<_> = slide
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            SlideElement::Image(image, position) => Some((image, position)),
+            _ => None,
+        })
+        .collect();
+    image_elements.sort_by_key(|(_, position)| (position.y, position.x));
+
+    // Keep image indices and placeholders in Slide::to_markdown's stable visual order. ~keep
+    for (img_ref, pos) in image_elements {
         let target = slide
             .images
             .iter()
