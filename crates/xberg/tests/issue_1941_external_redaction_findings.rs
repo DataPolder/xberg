@@ -5,8 +5,8 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use xberg::engine::Engine;
@@ -528,6 +528,86 @@ impl CacheBackend for CountingCache {
     async fn put(&self, _key: &str, _value: Vec<u8>, _ttl: Option<std::time::Duration>) {
         self.puts.fetch_add(1, Ordering::SeqCst);
     }
+}
+
+#[derive(Default)]
+struct MemoryCache {
+    values: Mutex<std::collections::HashMap<String, Vec<u8>>>,
+}
+
+#[async_trait]
+impl CacheBackend for MemoryCache {
+    async fn get(&self, key: &str) -> Option<Vec<u8>> {
+        self.values.lock().expect("memory cache lock").get(key).cloned()
+    }
+
+    async fn put(&self, key: &str, value: Vec<u8>, _ttl: Option<std::time::Duration>) {
+        self.values
+            .lock()
+            .expect("memory cache lock")
+            .insert(key.to_string(), value);
+    }
+}
+
+fn findings_file_config(path: &std::path::Path) -> ExtractionConfig {
+    ExtractionConfig {
+        redaction: Some(RedactionConfig {
+            findings_path: Some(path.to_path_buf()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn should_not_reuse_single_input_cache_when_findings_file_changes() {
+    run_extraction_test(async {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("findings.json");
+        let cache = Arc::new(MemoryCache::default());
+        let engine = Engine::builder().with_cache_backend(cache).build();
+        let config = findings_file_config(&path);
+
+        std::fs::write(&path, r#"[{"label":"PERSON","text":"Zarnak"}]"#).expect("first findings");
+        let first = engine
+            .extract(
+                ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
+                &config,
+            )
+            .await
+            .expect("first extraction");
+        assert_eq!(first.results[0].content, format!("{MASK} Quorlim"));
+
+        std::fs::write(&path, r#"[{"label":"PERSON","text":"Quorlim"}]"#).expect("second findings");
+        let second = engine
+            .extract(
+                ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
+                &config,
+            )
+            .await
+            .expect("second extraction");
+        assert_eq!(second.results[0].content, format!("Zarnak {MASK}"));
+    });
+}
+
+#[test]
+fn should_not_reuse_batch_cache_when_findings_file_changes() {
+    run_extraction_test(async {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = directory.path().join("findings.json");
+        let cache = Arc::new(MemoryCache::default());
+        let engine = Engine::builder().with_cache_backend(cache).build();
+        let config = findings_file_config(&path);
+        let inputs = || vec![ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None)];
+
+        std::fs::write(&path, r#"[{"label":"PERSON","text":"Zarnak"}]"#).expect("first findings");
+        let first = engine.extract_batch(inputs(), &config).await.expect("first batch");
+        assert_eq!(first.results[0].content, format!("{MASK} Quorlim"));
+
+        std::fs::write(&path, r#"[{"label":"PERSON","text":"Quorlim"}]"#).expect("second findings");
+        let second = engine.extract_batch(inputs(), &config).await.expect("second batch");
+        assert_eq!(second.results[0].content, format!("Zarnak {MASK}"));
+    });
 }
 
 #[test]

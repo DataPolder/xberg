@@ -195,6 +195,14 @@ fn content_cache_key(input: &ExtractInput, base_config: &ExtractionConfig) -> Op
     }
     let bytes = input.bytes.as_deref()?;
     let resolved_config = resolve_input_config(input, base_config);
+    // A findings file is mutable external input whose contents are absent from the cache key. ~keep
+    if resolved_config
+        .redaction
+        .as_ref()
+        .is_some_and(|redaction| redaction.findings_path.is_some())
+    {
+        return None;
+    }
     let config_json = serde_json::to_vec(&resolved_config).ok()?;
 
     let mut hasher = blake3::Hasher::new();
