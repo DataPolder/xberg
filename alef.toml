@@ -3560,7 +3560,7 @@ streaming = false
 args = [
   { name = "input", field = "input", type = "json_object", owned = true, go_type = "ExtractInput", element_type = "ExtractInput" },
   { name = "config", field = "config", type = "json_object" },
-  { name = "findings", field = "input.findings", type = "json_object", owned = true, go_type = "ExternalRedactionFinding", element_type = "ExternalRedactionFinding" },
+  { name = "findings_json", field = "input.findings_json", type = "string" },
   { name = "offset_encoding", field = "input.offset_encoding", type = "string", optional = true },
   { name = "max_findings", field = "input.max_findings", type = "u32", optional = true },
 ]

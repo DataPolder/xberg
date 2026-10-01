@@ -27,7 +27,7 @@
 use std::collections::HashSet;
 
 use crate::Result;
-use crate::core::config::redaction::{ExternalRedactionFinding, RedactionConfig};
+use crate::core::config::redaction::{ExternalRedactionFinding, RedactionConfig, RedactionOffsetEncoding};
 use crate::extractors::security::SecurityLimits;
 use crate::types::ExtractedDocument;
 use crate::types::entity::{Entity, EntityCategory};
@@ -57,19 +57,37 @@ pub async fn redact(result: &mut ExtractedDocument, config: &RedactionConfig) ->
     redact_with_security_limits(result, config, &SecurityLimits::default()).await
 }
 
-/// Redact an owned document using findings from an external inspection engine.
+/// Redact an owned document using a JSON array or JSON Lines payload from an external inspection engine.
 ///
-/// `offset_encoding` defaults to `unicode_code_points` and `max_findings` defaults to
-/// 10,000 when omitted. Unknown encodings return a validation error.
+/// The payload is parsed in Rust so vendor aliases and nested fields remain intact across language bindings.
+/// `offset_encoding` defaults to `unicode_code_points` and `max_findings` defaults to 10,000 when omitted.
+/// Unknown encodings return a validation error.
 #[cfg_attr(feature = "alef-meta", alef(since = "1.3.1"))]
 pub async fn redact_external(
-    mut document: ExtractedDocument,
+    document: ExtractedDocument,
     config: RedactionConfig,
-    findings: Vec<ExternalRedactionFinding>,
+    findings_json: &str,
     offset_encoding: Option<&str>,
     max_findings: Option<u32>,
 ) -> Result<ExtractedDocument> {
     let offset_encoding = offset_encoding.unwrap_or("unicode_code_points").parse()?;
+    let requested_limit = max_findings.unwrap_or(super::external::DEFAULT_MAX_FINDINGS);
+    let default_limits = SecurityLimits::default();
+    let security_limit = super::external::security_finding_limit(&default_limits);
+    let effective_limit = u32::try_from(security_limit.min(requested_limit as usize)).map_err(|_| {
+        crate::XbergError::validation("effective redaction finding limit exceeds the supported u32 range".to_string())
+    })?;
+    let findings = super::external::parse_external_findings_bounded(findings_json, effective_limit)?;
+    redact_external_with_findings(document, config, findings, offset_encoding, max_findings).await
+}
+
+pub(crate) async fn redact_external_with_findings(
+    mut document: ExtractedDocument,
+    config: RedactionConfig,
+    findings: Vec<ExternalRedactionFinding>,
+    offset_encoding: RedactionOffsetEncoding,
+    max_findings: Option<u32>,
+) -> Result<ExtractedDocument> {
     let requested_limit = max_findings.unwrap_or(super::external::DEFAULT_MAX_FINDINGS);
     let default_limits = SecurityLimits::default();
     let security_limit = super::external::security_finding_limit(&default_limits);

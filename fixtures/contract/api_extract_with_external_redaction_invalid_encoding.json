@@ -20,13 +20,7 @@
 			"filename": "external-findings-invalid.txt",
 			"mime_type": "text/plain"
 		},
-		"findings": [
-			{
-				"label": "inspection_person",
-				"text": "Zarnak",
-				"score": 0.99
-			}
-		],
+		"findings_json": "[{\"category\":\"inspection_person\",\"text\":\"Zarnak\",\"confidenceScore\":0.99,\"warnings\":[]}]",
 		"offset_encoding": "bytes-ish",
 		"max_findings": 8
 	},

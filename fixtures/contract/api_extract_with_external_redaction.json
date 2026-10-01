@@ -20,13 +20,7 @@
 			"filename": "external-findings.txt",
 			"mime_type": "text/plain"
 		},
-		"findings": [
-			{
-				"label": "inspection_token",
-				"text": "token-7429",
-				"score": 0.99
-			}
-		],
+		"findings_json": "[{\"Type\":\"inspection_token\",\"Text\":\"token-7429\",\"Score\":0.99,\"Attributes\":{\"provider\":\"aws\"}}]",
 		"offset_encoding": "unicode_code_points",
 		"max_findings": 8
 	},

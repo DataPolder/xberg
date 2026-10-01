@@ -19,8 +19,9 @@ use xberg::types::redaction::PiiCategory;
 use xberg::types::tables::Table;
 use xberg::types::{Chunk, ChunkMetadata, ChunkType};
 use xberg::{
-    ExternalRedactionFinding, ExtractInput, ExtractedDocument, ExtractionConfig, RedactionConfig,
-    RedactionOffsetEncoding, extract, extract_with_external_redaction, redact_external,
+    ExternalRedactionFinding, ExtractInput, ExtractedDocument, ExtractionConfig, ExtractionResult, RedactionConfig,
+    RedactionOffsetEncoding, extract, extract_with_external_redaction as extract_with_external_redaction_json,
+    redact_external as redact_external_json,
 };
 
 const MASK: &str = "[REDACTED]";
@@ -76,6 +77,28 @@ fn with_findings(findings: Vec<ExternalRedactionFinding>) -> RedactionConfig {
     }
 }
 
+async fn extract_with_external_redaction(
+    input: ExtractInput,
+    config: &ExtractionConfig,
+    findings: Vec<ExternalRedactionFinding>,
+    offset_encoding: Option<&str>,
+    max_findings: Option<u32>,
+) -> xberg::Result<ExtractionResult> {
+    let findings_json = serde_json::to_string(&findings).expect("serialize typed findings");
+    extract_with_external_redaction_json(input, config, &findings_json, offset_encoding, max_findings).await
+}
+
+async fn redact_external(
+    document: ExtractedDocument,
+    config: RedactionConfig,
+    findings: Vec<ExternalRedactionFinding>,
+    offset_encoding: Option<&str>,
+    max_findings: Option<u32>,
+) -> xberg::Result<ExtractedDocument> {
+    let findings_json = serde_json::to_string(&findings).expect("serialize typed findings");
+    redact_external_json(document, config, &findings_json, offset_encoding, max_findings).await
+}
+
 fn categories(document: &ExtractedDocument) -> HashSet<PiiCategory> {
     document
         .redaction_report
@@ -114,13 +137,10 @@ fn chunk(content: &str) -> Chunk {
 
 #[tokio::test]
 async fn should_redact_presidio_offsets_through_the_owned_request_api() {
-    let findings = parse_external_findings_bounded(r#"[{"entity_type":"PERSON","start":0,"end":11,"score":0.85}]"#, 10)
-        .expect("Presidio output must parse");
-
-    let redacted = redact_external(
+    let redacted = redact_external_json(
         document("Zoë Quorlim called alice@example.com."),
         RedactionConfig::default(),
-        findings,
+        r#"[{"entity_type":"PERSON","start":0,"end":11,"score":0.85,"analysis_explanation":{"recognizer":"spacy"}}]"#,
         Some("unicode_code_points"),
         Some(10),
     )
@@ -167,10 +187,7 @@ async fn should_enforce_the_fixed_ceiling_before_compiling_direct_findings() {
     .await
     .expect_err("the caller limit must not raise the fixed safety ceiling");
 
-    assert!(
-        error.to_string().contains("effective redaction finding limit (10000)"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("maximum of 10000"), "{error}");
 }
 
 #[tokio::test]

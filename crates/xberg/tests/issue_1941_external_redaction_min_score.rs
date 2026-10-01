@@ -96,10 +96,10 @@ async fn should_filter_request_scoped_findings_below_the_score_threshold() {
     let output = extract_with_external_redaction(
         ExtractInput::from_bytes(b"Zarnak Quorlim met Blorp Nazzle.".to_vec(), "text/plain", None),
         &config,
-        vec![
-            finding("LOW", "Zarnak Quorlim", Some(0.7)),
-            finding("HIGH", "Blorp Nazzle", Some(0.9)),
-        ],
+        r#"[
+            {"category":"LOW","text":"Zarnak Quorlim","confidenceScore":0.7,"warnings":[]},
+            {"category":"HIGH","text":"Blorp Nazzle","confidenceScore":0.9,"providerMetadata":{"model":"v2"}}
+        ]"#,
         None,
         Some(10),
     )
