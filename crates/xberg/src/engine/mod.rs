@@ -126,6 +126,10 @@ impl Engine {
         #[cfg(feature = "tokio-runtime")]
         {
             let max_findings = max_findings.unwrap_or(crate::text::redaction::external::DEFAULT_MAX_FINDINGS);
+            let security_max = config.security_limits.as_ref().map_or_else(
+                || crate::extractors::security::SecurityLimits::default().max_redaction_findings,
+                |limits| limits.max_redaction_findings,
+            );
             if input.kind != ExtractInputKind::Bytes {
                 return Err(crate::XbergError::validation(
                     "external redaction extraction accepts one bytes input; read URI input first".to_string(),
@@ -134,6 +138,11 @@ impl Engine {
             if findings.len() > max_findings as usize {
                 return Err(crate::XbergError::validation(format!(
                     "redaction findings exceed maximum of {max_findings}"
+                )));
+            }
+            if findings.len() > security_max {
+                return Err(crate::XbergError::validation(format!(
+                    "redaction findings exceed SecurityLimits.max_redaction_findings ({security_max})"
                 )));
             }
 

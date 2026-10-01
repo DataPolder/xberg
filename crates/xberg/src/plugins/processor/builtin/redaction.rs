@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use crate::Result;
 use crate::core::config::ExtractionConfig;
 use crate::plugins::{Plugin, PostProcessor, ProcessingStage, register_post_processor};
-use crate::text::redaction::engine::{redact, redact_with_external_findings};
+use crate::text::redaction::engine::{redact_with_external_findings, redact_with_security_limits};
 use crate::types::ExtractedDocument;
 
 /// Redaction post-processor.
@@ -62,19 +62,18 @@ impl PostProcessor for RedactionProcessor {
             "running redaction pipeline"
         );
 
-        let outcome = match external.as_ref() {
-            Some(request) => {
-                redact_with_external_findings(
-                    result,
-                    redaction_config,
-                    &request.findings,
-                    request.offset_encoding,
-                    request.max_findings,
-                    request.include_configured_sources,
-                )
-                .await
+        let default_limits;
+        let limits = match config.security_limits.as_ref() {
+            Some(limits) => limits,
+            None => {
+                default_limits = crate::extractors::security::SecurityLimits::default();
+                &default_limits
             }
-            None => redact(result, redaction_config).await,
+        };
+
+        let outcome = match external.as_ref() {
+            Some(request) => redact_with_external_findings(result, redaction_config, request, limits).await,
+            None => redact_with_security_limits(result, redaction_config, limits).await,
         };
         let outcome = outcome.map_err(|err| match err {
             crate::XbergError::Validation { .. } => crate::XbergError::Plugin {

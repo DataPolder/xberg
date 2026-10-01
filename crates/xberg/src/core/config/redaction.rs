@@ -10,6 +10,7 @@ use crate::Result;
 use crate::types::redaction::{PiiCategory, RedactionStrategy};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 /// Configuration for the redaction post-processor.
@@ -53,6 +54,16 @@ pub struct RedactionConfig {
     /// at config-construction time via [`RedactionConfig::validate`].
     #[serde(default)]
     pub custom_patterns: Vec<RedactionPattern>,
+    /// Findings supplied inline by an external inspection engine. ~keep
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<ExternalRedactionFinding>,
+    /// JSON array or JSON Lines file containing external findings. ~keep
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "api", schema(value_type = Option<String>))]
+    pub findings_path: Option<PathBuf>,
+    /// Unit used by configured findings that derive their text from offsets. ~keep
+    #[serde(default)]
+    pub findings_offset_encoding: RedactionOffsetEncoding,
 }
 
 /// One finding reported by an external content-inspection engine.
@@ -223,6 +234,9 @@ impl Default for RedactionConfig {
             preserve_offsets: true,
             custom_terms: Vec::new(),
             custom_patterns: Vec::new(),
+            findings: Vec::new(),
+            findings_path: None,
+            findings_offset_encoding: RedactionOffsetEncoding::default(),
         }
     }
 }
@@ -262,6 +276,15 @@ impl RedactionConfig {
                     pattern.label
                 )));
             }
+        }
+        for (index, finding) in self.findings.iter().enumerate() {
+            finding.validate(&format!("RedactionConfig.findings[{index}]"))?;
+        }
+        #[cfg(target_arch = "wasm32")]
+        if self.findings_path.is_some() {
+            return Err(crate::XbergError::validation(
+                "RedactionConfig.findings_path is not supported on wasm32; pass findings inline".to_string(),
+            ));
         }
         Ok(())
     }

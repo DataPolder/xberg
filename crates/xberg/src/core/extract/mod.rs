@@ -28,7 +28,7 @@ pub async fn extract(input: ExtractInput, config: &ExtractionConfig) -> Result<E
 
 /// Extract one bytes input and redact findings from an external inspection engine.
 ///
-/// `offset_encoding` defaults to `utf8_bytes` and `max_findings` defaults to
+/// `offset_encoding` defaults to `unicode_code_points` and `max_findings` defaults to
 /// 10,000 when omitted. Unknown encodings return a validation error.
 #[cfg(feature = "redaction")]
 pub async fn extract_with_external_redaction(
@@ -38,7 +38,7 @@ pub async fn extract_with_external_redaction(
     offset_encoding: Option<&str>,
     max_findings: Option<u32>,
 ) -> Result<ExtractionResult> {
-    let offset_encoding = offset_encoding.unwrap_or("utf8_bytes").parse()?;
+    let offset_encoding = offset_encoding.unwrap_or("unicode_code_points").parse()?;
     DEFAULT_ENGINE
         .extract_with_external_redaction(input, config, findings, offset_encoding, max_findings)
         .await

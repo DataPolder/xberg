@@ -27,14 +27,17 @@
 use std::collections::HashSet;
 
 use crate::Result;
-use crate::core::config::redaction::{ExternalRedactionFinding, RedactionConfig, RedactionOffsetEncoding};
+use crate::core::config::redaction::{ExternalRedactionFinding, RedactionConfig};
+use crate::extractors::security::SecurityLimits;
 use crate::types::ExtractedDocument;
 use crate::types::entity::{Entity, EntityCategory};
 use crate::types::metadata::FormatMetadata;
 use crate::types::redaction::{PiiCategory, RedactionFinding, RedactionReport};
 use crate::types::revisions::{DiffLine, RevisionAnchor};
 
-use super::external::compile_external_findings;
+#[cfg(feature = "tokio-runtime")]
+use super::external::compile_configured_findings_async;
+use super::external::{ExternalRedactionRequest, compile_configured_findings, compile_external_findings};
 use super::patterns::{PatternMatch, scan_text};
 use super::strategy::{TokenCounter, apply_strategy};
 
@@ -51,12 +54,12 @@ const MAX_BLOCK_NESTING_DEPTH: usize = 32;
 /// Run pattern redaction (and optional NER-driven redaction) over `result` and
 /// rewrite every textual field. Populates `result.redaction_report`.
 pub async fn redact(result: &mut ExtractedDocument, config: &RedactionConfig) -> Result<()> {
-    redact_counted(result, config, &[], true).await.map(|_counter| ())
+    redact_with_security_limits(result, config, &SecurityLimits::default()).await
 }
 
 /// Redact an owned document using findings from an external inspection engine.
 ///
-/// `offset_encoding` defaults to `utf8_bytes` and `max_findings` defaults to
+/// `offset_encoding` defaults to `unicode_code_points` and `max_findings` defaults to
 /// 10,000 when omitted. Unknown encodings return a validation error.
 pub async fn redact_external(
     mut document: ExtractedDocument,
@@ -65,25 +68,53 @@ pub async fn redact_external(
     offset_encoding: Option<&str>,
     max_findings: Option<u32>,
 ) -> Result<ExtractedDocument> {
-    let offset_encoding = offset_encoding.unwrap_or("utf8_bytes").parse()?;
+    let offset_encoding = offset_encoding.unwrap_or("unicode_code_points").parse()?;
     let max_findings = max_findings.unwrap_or(super::external::DEFAULT_MAX_FINDINGS);
     let external_terms = compile_external_findings(&document.content, &findings, offset_encoding, max_findings)?;
-    redact_counted(&mut document, &config, &external_terms, true).await?;
+    redact_counted(
+        &mut document,
+        &config,
+        &external_terms,
+        findings.len(),
+        true,
+        &SecurityLimits::default(),
+    )
+    .await?;
     Ok(document)
+}
+
+pub(crate) async fn redact_with_security_limits(
+    result: &mut ExtractedDocument,
+    config: &RedactionConfig,
+    limits: &SecurityLimits,
+) -> Result<()> {
+    redact_counted(result, config, &[], 0, true, limits)
+        .await
+        .map(|_counter| ())
 }
 
 pub(crate) async fn redact_with_external_findings(
     result: &mut ExtractedDocument,
     config: &RedactionConfig,
-    findings: &[ExternalRedactionFinding],
-    offset_encoding: RedactionOffsetEncoding,
-    max_findings: u32,
-    include_configured_sources: bool,
+    request: &ExternalRedactionRequest,
+    limits: &SecurityLimits,
 ) -> Result<()> {
-    let external_terms = compile_external_findings(&result.content, findings, offset_encoding, max_findings)?;
-    redact_counted(result, config, &external_terms, include_configured_sources)
-        .await
-        .map(|_counter| ())
+    let external_terms = compile_external_findings(
+        &result.content,
+        &request.findings,
+        request.offset_encoding,
+        request.max_findings,
+    )?;
+    redact_counted(
+        result,
+        config,
+        &external_terms,
+        request.findings.len(),
+        request.include_configured_sources,
+        limits,
+    )
+    .await
+    .map(|_counter| ())
 }
 
 /// Like [`redact`], additionally returning the token to original-text map for
@@ -97,7 +128,7 @@ pub async fn redact_capturing_rehydration_map(
     result: &mut ExtractedDocument,
     config: &RedactionConfig,
 ) -> Result<super::rehydration::RehydrationMap> {
-    let counter = redact_counted(result, config, &[], true).await?;
+    let counter = redact_counted(result, config, &[], 0, true, &SecurityLimits::default()).await?;
     Ok(counter.rehydration_map())
 }
 
@@ -117,7 +148,8 @@ pub fn redact_with_entities(
     entities: &[Entity],
 ) -> Result<()> {
     config.validate()?;
-    redact_pass(result, config, entities, &[], true);
+    let configured = compile_configured_findings(&result.content, config, &SecurityLimits::default())?;
+    redact_pass(result, config, entities, &configured.terms, true);
     Ok(())
 }
 
@@ -127,9 +159,24 @@ async fn redact_counted(
     result: &mut ExtractedDocument,
     config: &RedactionConfig,
     external_terms: &[(PiiCategory, regex::Regex)],
+    external_finding_count: usize,
     include_configured_sources: bool,
+    limits: &SecurityLimits,
 ) -> Result<TokenCounter> {
     config.validate()?;
+    #[cfg(feature = "tokio-runtime")]
+    let configured = compile_configured_findings_async(&result.content, config, limits).await?;
+    #[cfg(not(feature = "tokio-runtime"))]
+    let configured = compile_configured_findings(&result.content, config, limits)?;
+    let total_findings = configured.count.saturating_add(external_finding_count);
+    if total_findings > limits.max_redaction_findings {
+        return Err(crate::XbergError::validation(format!(
+            "RedactionConfig: {total_findings} findings exceed SecurityLimits.max_redaction_findings ({})",
+            limits.max_redaction_findings
+        )));
+    }
+    let mut all_external_terms = configured.terms;
+    all_external_terms.extend_from_slice(external_terms);
 
     #[cfg(feature = "ner")]
     let entities: Vec<Entity> = match (include_configured_sources, &config.ner) {
@@ -145,7 +192,7 @@ async fn redact_counted(
         result,
         config,
         &entities,
-        external_terms,
+        &all_external_terms,
         include_configured_sources,
     ))
 }

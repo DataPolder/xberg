@@ -86,10 +86,19 @@ pub(crate) fn external_redaction_is_scoped() -> bool {
     false
 }
 
-/// Parse at most `max_findings` findings from a JSON array or JSON Lines.
+/// Parse findings from a JSON array or JSON Lines using the default safety cap. ~keep
+#[cfg_attr(alef, alef(skip))]
+pub fn parse_external_findings(text: &str) -> Result<Vec<ExternalRedactionFinding>> {
+    parse_external_findings_with_limit(text, DEFAULT_MAX_FINDINGS as usize)
+}
+
+/// Parse at most `max_findings` findings from a JSON array or JSON Lines. ~keep
 #[cfg_attr(alef, alef(skip))]
 pub fn parse_external_findings_bounded(text: &str, max_findings: u32) -> Result<Vec<ExternalRedactionFinding>> {
-    let max_findings = max_findings as usize;
+    parse_external_findings_with_limit(text, max_findings as usize)
+}
+
+fn parse_external_findings_with_limit(text: &str, max_findings: usize) -> Result<Vec<ExternalRedactionFinding>> {
     if text.trim_start().starts_with('[') {
         let mut deserializer = serde_json::Deserializer::from_str(text);
         let findings = deserializer
@@ -162,11 +171,104 @@ pub(super) fn compile_external_findings(
     offset_encoding: RedactionOffsetEncoding,
     max_findings: u32,
 ) -> Result<Vec<(PiiCategory, regex::Regex)>> {
-    if findings.len() > max_findings as usize {
-        return Err(finding_limit_error(max_findings as usize));
+    compile_findings(content, findings, offset_encoding, max_findings as usize, |index| {
+        format!("external findings[{index}]")
+    })
+}
+
+pub(super) struct CompiledConfiguredFindings {
+    pub(super) terms: Vec<(PiiCategory, regex::Regex)>,
+    pub(super) count: usize,
+}
+
+pub(super) fn compile_configured_findings(
+    content: &str,
+    config: &crate::core::config::redaction::RedactionConfig,
+    limits: &crate::extractors::security::SecurityLimits,
+) -> Result<CompiledConfiguredFindings> {
+    let inline_count = config.findings.len();
+    let remaining = configured_finding_capacity(inline_count, limits)?;
+    let loaded = match &config.findings_path {
+        Some(path) => load_findings(path, limits, remaining)?,
+        None => Vec::new(),
+    };
+    compile_configured_with_loaded(content, config, limits, loaded)
+}
+
+#[cfg(feature = "tokio-runtime")]
+pub(super) async fn compile_configured_findings_async(
+    content: &str,
+    config: &crate::core::config::redaction::RedactionConfig,
+    limits: &crate::extractors::security::SecurityLimits,
+) -> Result<CompiledConfiguredFindings> {
+    let inline_count = config.findings.len();
+    let remaining = configured_finding_capacity(inline_count, limits)?;
+    let loaded = match &config.findings_path {
+        Some(path) => load_findings_async(path, limits, remaining).await?,
+        None => Vec::new(),
+    };
+    compile_configured_with_loaded(content, config, limits, loaded)
+}
+
+fn configured_finding_capacity(
+    inline_count: usize,
+    limits: &crate::extractors::security::SecurityLimits,
+) -> Result<usize> {
+    limits.max_redaction_findings.checked_sub(inline_count).ok_or_else(|| {
+        XbergError::validation(format!(
+            "RedactionConfig: {inline_count} findings exceed SecurityLimits.max_redaction_findings ({})",
+            limits.max_redaction_findings
+        ))
+    })
+}
+
+fn compile_configured_with_loaded(
+    content: &str,
+    config: &crate::core::config::redaction::RedactionConfig,
+    limits: &crate::extractors::security::SecurityLimits,
+    loaded: Vec<ExternalRedactionFinding>,
+) -> Result<CompiledConfiguredFindings> {
+    let inline_count = config.findings.len();
+    let total = inline_count.saturating_add(loaded.len());
+    if total > limits.max_redaction_findings {
+        return Err(XbergError::validation(format!(
+            "RedactionConfig: {total} findings exceed SecurityLimits.max_redaction_findings ({})",
+            limits.max_redaction_findings
+        )));
+    }
+    let mut findings = config.findings.clone();
+    findings.extend(loaded);
+    let terms = compile_findings(
+        content,
+        &findings,
+        config.findings_offset_encoding,
+        limits.max_redaction_findings,
+        |index| {
+            if index < inline_count {
+                format!("RedactionConfig.findings[{index}]")
+            } else {
+                format!("RedactionConfig.findings_path entry {}", index - inline_count)
+            }
+        },
+    )?;
+    Ok(CompiledConfiguredFindings { terms, count: total })
+}
+
+fn compile_findings<F>(
+    content: &str,
+    findings: &[ExternalRedactionFinding],
+    offset_encoding: RedactionOffsetEncoding,
+    max_findings: usize,
+    location: F,
+) -> Result<Vec<(PiiCategory, regex::Regex)>>
+where
+    F: Fn(usize) -> String,
+{
+    if findings.len() > max_findings {
+        return Err(finding_limit_error(max_findings));
     }
     for (index, finding) in findings.iter().enumerate() {
-        finding.validate(&format!("external findings[{index}]"))?;
+        finding.validate(&location(index))?;
     }
 
     let mut wanted: Vec<usize> = findings
@@ -182,7 +284,7 @@ pub(super) fn compile_external_findings(
     let mut seen: HashSet<(PiiCategory, &str)> = HashSet::new();
     let mut output = Vec::new();
     for (index, finding) in findings.iter().enumerate() {
-        let location = format!("external findings[{index}]");
+        let location = location(index);
         let (literal, anchor) = resolve_literal(content, finding, &byte_offsets, offset_encoding, &location)?;
         let regex = match compiled.get(literal) {
             Some(regex) => regex.clone(),
@@ -286,6 +388,80 @@ fn byte_offsets(content: &str, encoding: RedactionOffsetEncoding, wanted: &mut V
         }
     }
     map
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_findings(
+    path: &std::path::Path,
+    limits: &crate::extractors::security::SecurityLimits,
+    max_findings: usize,
+) -> Result<Vec<ExternalRedactionFinding>> {
+    use std::io::Read;
+
+    let unreadable = |error: std::io::Error| {
+        XbergError::validation(format!("RedactionConfig.findings_path could not be read: {error}"))
+    };
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .map_err(unreadable)?
+        .take(limits.max_content_size as u64 + 1)
+        .read_to_string(&mut text)
+        .map_err(unreadable)?;
+    if text.len() > limits.max_content_size {
+        return Err(XbergError::validation(format!(
+            "RedactionConfig.findings_path exceeds SecurityLimits.max_content_size ({} bytes)",
+            limits.max_content_size
+        )));
+    }
+    parse_external_findings_with_limit(&text, max_findings)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "tokio-runtime"))]
+async fn load_findings_async(
+    path: &std::path::Path,
+    limits: &crate::extractors::security::SecurityLimits,
+    max_findings: usize,
+) -> Result<Vec<ExternalRedactionFinding>> {
+    use tokio::io::AsyncReadExt;
+
+    let unreadable = |error: std::io::Error| {
+        XbergError::validation(format!("RedactionConfig.findings_path could not be read: {error}"))
+    };
+    let file = tokio::fs::File::open(path).await.map_err(unreadable)?;
+    let mut text = String::new();
+    file.take(limits.max_content_size as u64 + 1)
+        .read_to_string(&mut text)
+        .await
+        .map_err(unreadable)?;
+    if text.len() > limits.max_content_size {
+        return Err(XbergError::validation(format!(
+            "RedactionConfig.findings_path exceeds SecurityLimits.max_content_size ({} bytes)",
+            limits.max_content_size
+        )));
+    }
+    parse_external_findings_with_limit(&text, max_findings)
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "tokio-runtime"))]
+async fn load_findings_async(
+    _path: &std::path::Path,
+    _limits: &crate::extractors::security::SecurityLimits,
+    _max_findings: usize,
+) -> Result<Vec<ExternalRedactionFinding>> {
+    Err(XbergError::validation(
+        "RedactionConfig.findings_path is not supported on wasm32; pass findings inline".to_string(),
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_findings(
+    _path: &std::path::Path,
+    _limits: &crate::extractors::security::SecurityLimits,
+    _max_findings: usize,
+) -> Result<Vec<ExternalRedactionFinding>> {
+    Err(XbergError::validation(
+        "RedactionConfig.findings_path is not supported on wasm32; pass findings inline".to_string(),
+    ))
 }
 
 #[cfg(all(test, feature = "tokio-runtime"))]

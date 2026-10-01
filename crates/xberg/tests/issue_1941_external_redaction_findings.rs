@@ -3,6 +3,7 @@
 #![cfg(all(feature = "redaction", feature = "tokio-runtime"))]
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -10,7 +11,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use xberg::engine::Engine;
 use xberg::engine::seams::CacheBackend;
-use xberg::text::redaction::parse_external_findings_bounded;
+use xberg::extractors::security::SecurityLimits;
+use xberg::plugins::PostProcessor;
+use xberg::plugins::processor::builtin::redaction::RedactionProcessor;
+use xberg::text::redaction::{parse_external_findings, parse_external_findings_bounded, redact_with_entities};
+use xberg::types::redaction::PiiCategory;
+use xberg::types::tables::Table;
+use xberg::types::{Chunk, ChunkMetadata, ChunkType};
 use xberg::{
     ExternalRedactionFinding, ExtractInput, ExtractedDocument, ExtractionConfig, RedactionConfig,
     RedactionOffsetEncoding, extract, extract_with_external_redaction, redact_external,
@@ -62,20 +69,51 @@ fn span_finding(label: &str, start: u32, end: u32) -> ExternalRedactionFinding {
     }
 }
 
-#[test]
-fn should_preserve_the_exhaustive_redaction_config_struct_literal() {
-    let _config = RedactionConfig {
-        categories: Default::default(),
-        strategy: Default::default(),
-        ner: None,
-        preserve_offsets: true,
-        custom_terms: Vec::new(),
-        custom_patterns: Vec::new(),
-    };
+fn with_findings(findings: Vec<ExternalRedactionFinding>) -> RedactionConfig {
+    RedactionConfig {
+        findings,
+        ..Default::default()
+    }
+}
+
+fn categories(document: &ExtractedDocument) -> HashSet<PiiCategory> {
+    document
+        .redaction_report
+        .as_ref()
+        .expect("redaction report")
+        .findings
+        .iter()
+        .map(|finding| finding.category.clone())
+        .collect()
+}
+
+fn chunk(content: &str) -> Chunk {
+    Chunk {
+        content: content.to_string(),
+        chunk_type: ChunkType::Unknown,
+        embedding: None,
+        sparse_embedding: None,
+        late_interaction: None,
+        metadata: ChunkMetadata {
+            byte_start: 0,
+            byte_end: content.len(),
+            token_count: None,
+            chunk_index: 0,
+            total_chunks: 1,
+            first_page: None,
+            last_page: None,
+            heading_context: None,
+            heading_path: Vec::new(),
+            image_indices: Vec::new(),
+            node_ids: Vec::new(),
+            page_spans: Vec::new(),
+            classifications: Vec::new(),
+        },
+    }
 }
 
 #[tokio::test]
-async fn should_redact_presidio_offsets_without_changing_core_config_shape() {
+async fn should_redact_presidio_offsets_through_the_owned_request_api() {
     let findings = parse_external_findings_bounded(r#"[{"entity_type":"PERSON","start":0,"end":11,"score":0.85}]"#, 10)
         .expect("Presidio output must parse");
 
@@ -118,16 +156,16 @@ async fn should_default_the_limit_and_enforce_explicit_zero() {
 }
 
 #[tokio::test]
-async fn should_default_to_utf8_offsets_and_reject_unknown_encodings() {
+async fn should_default_to_unicode_code_point_offsets_and_reject_unknown_encodings() {
     let redacted = redact_external(
         document("Zoë Quorlim"),
         RedactionConfig::default(),
-        vec![span_finding("PERSON", 0, 4)],
+        vec![span_finding("PERSON", 0, 3)],
         None,
         Some(10),
     )
     .await
-    .expect("omitted encoding must use UTF-8 byte offsets");
+    .expect("omitted encoding must use Unicode code-point offsets");
     assert_eq!(redacted.content, format!("{MASK} Quorlim"));
 
     let error = redact_external(
@@ -143,6 +181,206 @@ async fn should_default_to_utf8_offsets_and_reject_unknown_encodings() {
         error.to_string().contains("unsupported redaction offset encoding"),
         "{error}"
     );
+}
+
+#[test]
+fn should_accept_aws_comprehend_aliases() {
+    let findings = parse_external_findings(
+        r#"[{"Score":0.99,"Type":"NAME","Text":"Zarnak Quorlim","BeginOffset":6,"EndOffset":20}]"#,
+    )
+    .expect("AWS Comprehend output must parse");
+
+    assert_eq!(findings[0].label, "NAME");
+    assert_eq!(findings[0].text.as_deref(), Some("Zarnak Quorlim"));
+    assert_eq!((findings[0].start, findings[0].end), (Some(6), Some(20)));
+    assert_eq!(findings[0].score, Some(0.99));
+}
+
+#[test]
+fn should_derive_utf16_spans_and_reject_surrogate_boundaries() {
+    let content = "\u{1F600} Zarnak smiled.";
+    let mut valid = document(content);
+    let valid_config = RedactionConfig {
+        findings: vec![span_finding("PERSON", 3, 9)],
+        findings_offset_encoding: RedactionOffsetEncoding::Utf16CodeUnits,
+        ..Default::default()
+    };
+    redact_with_entities(&mut valid, &valid_config, &[]).expect("UTF-16 code-unit span must resolve");
+    assert_eq!(valid.content, format!("\u{1F600} {MASK} smiled."));
+
+    let mut invalid = document(content);
+    let invalid_config = RedactionConfig {
+        findings: vec![span_finding("PERSON", 1, 9)],
+        findings_offset_encoding: RedactionOffsetEncoding::Utf16CodeUnits,
+        ..Default::default()
+    };
+    let error =
+        redact_with_entities(&mut invalid, &invalid_config, &[]).expect_err("a span inside a surrogate pair must fail");
+    assert!(error.to_string().contains("RedactionConfig.findings[0]"), "{error}");
+    assert_eq!(invalid.content, content);
+}
+
+#[test]
+fn should_parse_json_lines_and_report_a_malformed_line() {
+    let findings = parse_external_findings(
+        "{\"entity_type\":\"PERSON\",\"text\":\"Zarnak\"}\n\n{\"Type\":\"CITY\",\"Text\":\"Quorlim\"}\n",
+    )
+    .expect("JSON Lines findings must parse");
+    assert_eq!(findings.len(), 2);
+
+    let error = parse_external_findings("{\"entity_type\":\"PERSON\",\"text\":\"Zarnak\"}\nnot-json\n")
+        .expect_err("malformed JSON Lines must fail");
+    assert!(error.to_string().contains("line 2"), "{error}");
+}
+
+#[test]
+fn should_validate_every_configured_finding() {
+    for finding in [
+        text_finding(" ", "Zarnak"),
+        text_finding("PERSON", "  "),
+        ExternalRedactionFinding {
+            label: "PERSON".to_string(),
+            start: Some(4),
+            ..Default::default()
+        },
+        span_finding("PERSON", 8, 8),
+        ExternalRedactionFinding {
+            score: Some(1.5),
+            ..text_finding("PERSON", "Zarnak")
+        },
+    ] {
+        assert!(
+            with_findings(vec![finding.clone()]).validate().is_err(),
+            "must reject {finding:?}"
+        );
+    }
+}
+
+#[test]
+fn should_redact_every_text_field_and_populate_the_report() {
+    let name = "Zarnak Quorlim";
+    let mut output = document(&format!("{name} signed. Witness: {name}."));
+    output.formatted_content = Some(format!("# {name}\n\nSigned by {name}."));
+    output.chunks = Some(vec![chunk(&format!("{name} signed."))]);
+    output.tables = vec![Table {
+        cells: vec![vec!["Signatory".into(), name.into()]],
+        markdown: format!("| Signatory | {name} |"),
+        page_number: 1,
+        ..Default::default()
+    }];
+    output.metadata.subject = Some(format!("Agreement with {name}"));
+
+    redact_with_entities(&mut output, &with_findings(vec![text_finding("PERSON", name)]), &[])
+        .expect("configured finding must redact");
+
+    assert_eq!(output.content, format!("{MASK} signed. Witness: {MASK}."));
+    assert_eq!(
+        output.formatted_content.as_deref(),
+        Some(format!("# {MASK}\n\nSigned by {MASK}.").as_str())
+    );
+    assert_eq!(
+        output.chunks.as_ref().expect("chunks")[0].content,
+        format!("{MASK} signed.")
+    );
+    assert_eq!(output.tables[0].cells[0][1], MASK);
+    assert_eq!(output.tables[0].markdown, format!("| Signatory | {MASK} |"));
+    assert_eq!(output.metadata.subject, Some(format!("Agreement with {MASK}")));
+    assert_eq!(
+        categories(&output),
+        HashSet::from([PiiCategory::Custom("PERSON".to_string())])
+    );
+    assert_eq!(output.redaction_report.as_ref().expect("report").total_redacted, 8);
+}
+
+#[test]
+fn should_read_findings_from_config_json() {
+    let config: ExtractionConfig = serde_json::from_str(
+        r#"{"redaction":{"findings":[{"entity_type":"PERSON","text":"Zarnak","score":0.92,"vendor":{}}],"findings_offset_encoding":"unicode_code_points"}}"#,
+    )
+    .expect("external findings must parse from ExtractionConfig JSON");
+    let redaction = config.redaction.expect("redaction config");
+    assert_eq!(
+        redaction.findings,
+        vec![ExternalRedactionFinding {
+            score: Some(0.92),
+            ..text_finding("PERSON", "Zarnak")
+        }]
+    );
+    assert_eq!(
+        redaction.findings_offset_encoding,
+        RedactionOffsetEncoding::UnicodeCodePoints
+    );
+}
+
+#[test]
+fn should_load_json_and_json_lines_findings_files() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let array = directory.path().join("findings.json");
+    std::fs::write(&array, r#"[{"entity_type":"PERSON","start":0,"end":14}]"#).expect("write array");
+    let lines = directory.path().join("findings.jsonl");
+    std::fs::write(
+        &lines,
+        "{\"entity_type\":\"PERSON\",\"start\":0,\"end\":14}\n{\"Type\":\"CITY\",\"Text\":\"Quorlim City\"}\n",
+    )
+    .expect("write JSON Lines");
+
+    for (path, expected) in [
+        (array, format!("{MASK} moved to Quorlim City.")),
+        (lines, format!("{MASK} moved to {MASK}.")),
+    ] {
+        let mut output = document("Zarnak Quorlim moved to Quorlim City.");
+        let config = RedactionConfig {
+            findings_path: Some(path),
+            ..Default::default()
+        };
+        redact_with_entities(&mut output, &config, &[]).expect("file findings must redact");
+        assert_eq!(output.content, expected);
+    }
+}
+
+#[tokio::test]
+async fn should_enforce_the_security_limit_across_configured_findings() {
+    let config = ExtractionConfig {
+        redaction: Some(with_findings(vec![
+            text_finding("PERSON", "Zarnak"),
+            text_finding("PERSON", "Quorlim"),
+        ])),
+        security_limits: Some(SecurityLimits {
+            max_redaction_findings: 1,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut output = document("Zarnak Quorlim");
+    let error = RedactionProcessor
+        .process(&mut output, &config)
+        .await
+        .expect_err("the security limit must cap configured findings");
+    assert!(error.to_string().contains("max_redaction_findings"), "{error}");
+    assert_eq!(output.content, "Zarnak Quorlim");
+}
+
+#[tokio::test]
+async fn should_enforce_the_security_limit_across_configured_and_request_findings() {
+    let config = ExtractionConfig {
+        redaction: Some(with_findings(vec![text_finding("PERSON", "Zarnak")])),
+        security_limits: Some(SecurityLimits {
+            max_redaction_findings: 1,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let error = extract_with_external_redaction(
+        ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
+        &config,
+        vec![text_finding("PERSON", "Quorlim")],
+        None,
+        Some(1),
+    )
+    .await
+    .expect_err("the security limit must cap all configured and request findings");
+
+    assert!(error.to_string().contains("max_redaction_findings"), "{error}");
 }
 
 #[test]
