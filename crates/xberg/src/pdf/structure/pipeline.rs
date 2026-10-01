@@ -2787,8 +2787,30 @@ impl HeadingRun {
                 ((line_left - title_left).abs() <= self.tolerance(line) && !is_body)
                     || self.continues_at_margin(prev, line, line_right, beneath)
             }
-            None => heading_wraps_onto(prev, line) || self.continues_at_margin(prev, line, line_right, beneath),
+            None => {
+                (heading_wraps_onto(prev, line) && self.keeps_the_heading_face(prev, line))
+                    || self.continues_at_margin(prev, line, line_right, beneath)
+            }
         }
+    }
+
+    /// Whether `line` may still continue a heading SET APART in bold or italic, as far
+    /// as its face goes: at the first wrap always, past it only in the face of the
+    /// heading line it follows.
+    ///
+    /// [`heading_wraps_onto`] reads right edges only, which says nothing about where a
+    /// heading ends once its LAST line happens to stop near the column edge: the body
+    /// line beneath then ends near it too. On the Oral-paratuberculosis carrier `4.1.`
+    /// wraps onto an italic second line ending at x 548.9, and the upright body line
+    /// beneath (ending 557.6, 8.7pt on) was taken as a third heading line, the
+    /// paragraph after it too. A heading set apart does not change face mid-title;
+    /// past its first wrap that change is where it ends -- the scope
+    /// [`Self::continues_at_margin`] already applies. A heading in body type is not
+    /// set apart and is left as it was. ~keep
+    fn keeps_the_heading_face(&self, prev: &SegmentData, line: &SegmentData) -> bool {
+        self.continuations == 0
+            || !(prev.is_bold || prev.is_italic)
+            || (line.is_bold == prev.is_bold && line.is_italic == prev.is_italic)
     }
 
     /// Whether `line` continues this heading at the page MARGIN: no hanging indent
@@ -3009,16 +3031,17 @@ pub(super) fn heading_fills_column(prev: &SegmentData, next_right_edge: f32) -> 
 /// 8pt -- so every one of those genuine wraps was refused and its last line handed
 /// to the body.
 ///
-/// ~keep The first word's width is ESTIMATED, proportionally, from the
-/// continuation's own mean character width (`width / chars`). True per-word advance
+/// ~keep The first word's width is ESTIMATED from the continuation's own width,
+/// shared out over its characters by relative advance
+/// ([`estimated_leading_word_width`]). True per-word advance
 /// widths are not reachable here: `SegmentData` carries whole-segment geometry only
 /// (`pdf/hierarchy/types.rs`), and a span's chars and glyph widths are dropped
 /// where it is built (`pdf/native/hierarchy.rs`). The estimate is defensible
-/// because the mean is taken over the SAME line as the word it measures -- same
-/// font, same size. Checked against Helvetica's own advance widths on GH#1758's
-/// reproducer it lands within -14%/+24% (`patches` 28.02pt true against 25.78pt
-/// estimated), and [`heading_fills_column`] stays as a FLOOR, so a face or a line
-/// shape the estimate serves badly is never worse off than before.
+/// because its scale is taken from the SAME line as the word it measures -- same
+/// font, same size. On GH#1758's reproducer (set in Helvetica) it is exact:
+/// `patches` 28.02pt true and estimated, where an equal share per character gave
+/// 25.78pt. [`heading_fills_column`] stays as a FLOOR, so a face or a line shape
+/// the estimate serves badly is never worse off than before.
 fn heading_line_ran_out_of_room(prev: &SegmentData, continuation: &SegmentData, column_right_edge: f32) -> bool {
     if heading_fills_column(prev, column_right_edge) {
         return true;
@@ -3037,20 +3060,76 @@ fn heading_line_ran_out_of_room(prev: &SegmentData, continuation: &SegmentData, 
     prev_end + word_space + leading_word_width > column_right_edge
 }
 
-/// The width the segment's first whitespace-delimited word would have taken,
-/// estimated from the segment's own mean character width. `None` when the segment
-/// carries no usable geometry or no text.
+/// The width the segment's first whitespace-delimited word would have taken, or
+/// `None` when the segment carries no usable geometry or no text.
+///
+/// Two estimates, both scaled to the segment's own measured width, and the WIDER
+/// is taken: an equal share per character, and a share in proportion to each
+/// character's [`relative_advance`]. ~keep
+///
+/// The equal share counts the line's spaces, apostrophes and narrow letters as wide
+/// as the word's own letters, so a word of wide letters on a line of narrow ones
+/// comes out short. On the Oral-paratuberculosis carrier (Charis SIL italic,
+/// 7.97pt) that is the whole margin: `immune` is 26.4pt of glyph advance and was
+/// estimated at 19.6pt, `reprogramming` 50.3pt at 45.8pt, so both read as "would
+/// have fitted" against 24.9pt and 48.8pt of room and both genuine wraps were handed
+/// to the body. Weighted, they come out at 26.7pt and 51.2pt.
+///
+/// The weights are Helvetica's, and a serif italic sets its narrow letters wider
+/// than Helvetica does: on the same journal's `efficiently` (34.8pt, 31.8pt of room)
+/// the weighted share is 31.6pt and the equal one 35.2pt. Neither estimate is right
+/// on every word; each errs SHORT where the other does not, and a short estimate is
+/// what refuses a genuine wrap. So the wider of the two is the answer, which can
+/// only ever accept a continuation the equal share alone already accepted or one
+/// whose first word is too wide by the letters' own proportions.
+///
+/// The table only sets proportions WITHIN the line -- the line's measured width
+/// still sets the scale -- so the font's size or a condensed cut drop out. A
+/// monospace line keeps the equal share alone, which is exact for it.
 fn estimated_leading_word_width(segment: &SegmentData) -> Option<f32> {
     if !segment.width.is_finite() || segment.width <= 0.0 {
         return None;
     }
-    let character_count = segment.text.chars().count();
-    if character_count == 0 {
-        return None;
+    // Untrimmed: a span's width includes its trailing space's advance, and the
+    // count the equal share has always used includes it too.
+    let text = segment.text.as_str();
+    let leading_word = text.split_whitespace().next()?;
+    let equal_share = segment.width / text.chars().count() as f32 * leading_word.chars().count() as f32;
+    if segment.is_monospace {
+        return Some(equal_share);
     }
-    let leading_word = segment.text.split_whitespace().next()?;
-    let mean_character_width = segment.width / character_count as f32;
-    Some(mean_character_width * leading_word.chars().count() as f32)
+    let line_advance: f32 = text.chars().map(relative_advance).sum();
+    if line_advance <= 0.0 {
+        return Some(equal_share);
+    }
+    let word_advance: f32 = leading_word.chars().map(relative_advance).sum();
+    Some(equal_share.max(segment.width * word_advance / line_advance))
+}
+
+/// Helvetica's advance widths, in thousandths of an em, for U+0020 (space) through
+/// U+007E (`~`): the standard-14 metrics every PDF reader ships.
+const HELVETICA_ASCII_ADVANCES: [u16; 95] = [
+    278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, // ' '..'/'
+    556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, // '0'..'?'
+    1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, // '@'..'O'
+    667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, // 'P'..'_'
+    333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, // '`'..'o'
+    556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584, // 'p'..'~'
+];
+
+/// A character's advance relative to the others on its line, for
+/// [`estimated_leading_word_width`]: Helvetica's width for ASCII and the typographic
+/// quotes, a space's for any other whitespace, and an average lowercase letter's
+/// (556) for anything else -- an accented letter, a Greek or Cyrillic one.
+fn relative_advance(c: char) -> f32 {
+    let advance = match c {
+        ' '..='~' => HELVETICA_ASCII_ADVANCES[c as usize - ' ' as usize],
+        '\u{2018}' | '\u{2019}' => 222,
+        '\u{201C}' | '\u{201D}' => 333,
+        _ if c.is_whitespace() => 278,
+        _ => 556,
+    };
+    f32::from(advance)
 }
 
 /// The widest right edge of the visual line beneath `after_idx`'s heading run, and
