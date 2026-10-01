@@ -6,7 +6,7 @@ description: Use when splitting extracted text into chunks for LLM context windo
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
 Content-Hash: blake3:0b5cd4bec9d2a8f3452e07139ef56d6b87f9f7990714d15483a03435e751af59
-Source-Hash: blake3:f3d838138e5107fcb7c3f2611c7ad23b0bd6a1fb4670ef739d99ca59c14b81ad
+Source-Hash: blake3:8ee478c8e66f6bea6352f167d9d73267ecdb70efc3cc0c00ef558ffa6217fa88
 Schema-Version: v1
 -->
 
