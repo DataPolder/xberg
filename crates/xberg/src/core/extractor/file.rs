@@ -303,9 +303,15 @@ pub(in crate::core::extractor) async fn extract_file_with_extractor(
         && let Ok(Some(data)) = cache.get(&cache_key, path.to_str(), namespace, config.cache_ttl_secs)
     {
         match deserialize_extraction_cache_entry(&data) {
-            Ok(result) => {
-                tracing::debug!(cache_key = %cache_key, "Extraction cache hit");
-                return Ok(result);
+            Ok(entry) => {
+                let (post_processor_generation, validator_generation) = lifecycle_registry_generations();
+                if entry.post_processor_generation == post_processor_generation
+                    && entry.validator_generation == validator_generation
+                {
+                    tracing::debug!(cache_key = %cache_key, "Extraction cache hit");
+                    return Ok(entry.result);
+                }
+                tracing::debug!(cache_key = %cache_key, "Extraction cache entry has stale plugin lifecycle state");
             }
             Err(error) => {
                 tracing::warn!(
@@ -319,10 +325,14 @@ pub(in crate::core::extractor) async fn extract_file_with_extractor(
         }
     }
 
+    let lifecycle_generations_before = lifecycle_registry_generations();
     let result = Box::pin(extract_file_uncached(path, mime_type, config)).await?;
+    let lifecycle_generations_after = lifecycle_registry_generations();
 
-    if let Some(cache) = get_extraction_cache() {
-        match serialize_extraction_cache_entry(&result) {
+    if lifecycle_generations_before == lifecycle_generations_after
+        && let Some(cache) = get_extraction_cache()
+    {
+        match serialize_extraction_cache_entry(&result, lifecycle_generations_after) {
             Ok(data) => {
                 let _ = cache.set(&cache_key, data, path.to_str(), namespace, config.cache_ttl_secs);
             }
@@ -341,15 +351,44 @@ pub(in crate::core::extractor) async fn extract_file_with_extractor(
     Ok(result)
 }
 
-fn serialize_extraction_cache_entry(
-    result: &ExtractedDocument,
-) -> std::result::Result<Vec<u8>, rmp_serde::encode::Error> {
-    // Named fields preserve internally tagged document nodes. The format-agnostic decoder also accepts any
-    // legacy compact payload whose schema remains deserializable. ~keep
-    rmp_serde::to_vec_named(result)
+#[derive(serde::Deserialize)]
+struct ExtractionCacheEntry {
+    result: ExtractedDocument,
+    post_processor_generation: u64,
+    validator_generation: u64,
 }
 
-fn deserialize_extraction_cache_entry(data: &[u8]) -> std::result::Result<ExtractedDocument, rmp_serde::decode::Error> {
+#[derive(serde::Serialize)]
+struct ExtractionCacheEntryRef<'a> {
+    result: &'a ExtractedDocument,
+    post_processor_generation: u64,
+    validator_generation: u64,
+}
+
+fn lifecycle_registry_generations() -> (u64, u64) {
+    let post_processor_generation = crate::plugins::registry::get_post_processor_registry()
+        .read()
+        .generation();
+    let validator_generation = crate::plugins::registry::get_validator_registry().read().generation();
+    (post_processor_generation, validator_generation)
+}
+
+fn serialize_extraction_cache_entry(
+    result: &ExtractedDocument,
+    (post_processor_generation, validator_generation): (u64, u64),
+) -> std::result::Result<Vec<u8>, rmp_serde::encode::Error> {
+    // Named fields preserve internally tagged document nodes and keep the lifecycle generations alongside
+    // the result. Schema-version changes make earlier bare payloads unreachable. ~keep
+    rmp_serde::to_vec_named(&ExtractionCacheEntryRef {
+        result,
+        post_processor_generation,
+        validator_generation,
+    })
+}
+
+fn deserialize_extraction_cache_entry(
+    data: &[u8],
+) -> std::result::Result<ExtractionCacheEntry, rmp_serde::decode::Error> {
     rmp_serde::from_slice(data)
 }
 
@@ -539,7 +578,7 @@ mod tests {
         )
         .unwrap();
         let expected = structured_table_document();
-        let encoded = serialize_extraction_cache_entry(&expected).unwrap();
+        let encoded = serialize_extraction_cache_entry(&expected, lifecycle_registry_generations()).unwrap();
         cache.set_default("structured-table", encoded, None).unwrap();
 
         let stored = cache
@@ -549,9 +588,9 @@ mod tests {
         let actual = deserialize_extraction_cache_entry(&stored)
             .expect("a written structured extraction result should be a cache hit");
 
-        assert_eq!(actual.content, expected.content);
-        assert_eq!(actual.document, expected.document);
-        assert_eq!(actual.tables[0].cells, expected.tables[0].cells);
+        assert_eq!(actual.result.content, expected.content);
+        assert_eq!(actual.result.document, expected.document);
+        assert_eq!(actual.result.tables[0].cells, expected.tables[0].cells);
     }
 
     #[test]
@@ -580,15 +619,15 @@ mod tests {
         cache
             .set_default(
                 "legacy-compact",
-                serialize_extraction_cache_entry(&expected).unwrap(),
+                serialize_extraction_cache_entry(&expected, lifecycle_registry_generations()).unwrap(),
                 None,
             )
             .unwrap();
         let replacement = cache.get_default("legacy-compact", None).unwrap().unwrap();
         let actual = deserialize_extraction_cache_entry(&replacement).unwrap();
 
-        assert_eq!(actual.content, expected.content);
-        assert_eq!(actual.mime_type, expected.mime_type);
+        assert_eq!(actual.result.content, expected.content);
+        assert_eq!(actual.result.mime_type, expected.mime_type);
     }
 
     #[tokio::test]
