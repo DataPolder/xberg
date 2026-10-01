@@ -69,18 +69,30 @@ pub async fn redact_external(
     max_findings: Option<u32>,
 ) -> Result<ExtractedDocument> {
     let offset_encoding = offset_encoding.unwrap_or("unicode_code_points").parse()?;
-    let max_findings = max_findings.unwrap_or(super::external::DEFAULT_MAX_FINDINGS);
-    let external_terms = compile_external_findings(&document.content, &findings, offset_encoding, max_findings)?;
+    let requested_limit = max_findings.unwrap_or(super::external::DEFAULT_MAX_FINDINGS);
+    let default_limits = SecurityLimits::default();
+    let security_limit = super::external::security_finding_limit(&default_limits);
+    let effective_limit = security_limit.min(requested_limit as usize);
+    if findings.len() > effective_limit {
+        let message = if requested_limit as usize <= security_limit {
+            format!("redaction findings exceed maximum of {requested_limit}")
+        } else {
+            format!("redaction findings exceed the effective redaction finding limit ({effective_limit})")
+        };
+        return Err(crate::XbergError::validation(message));
+    }
+    let external_terms =
+        compile_external_findings(&document.content, &findings, offset_encoding, effective_limit as u32)?;
     redact_counted(
         &mut document,
         &config,
         CompiledExternalFindings {
             terms: &external_terms,
             count: findings.len(),
-            limit: Some(max_findings as usize),
+            limit: Some(effective_limit),
         },
         true,
-        &SecurityLimits::default(),
+        &default_limits,
     )
     .await?;
     Ok(document)

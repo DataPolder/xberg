@@ -156,6 +156,24 @@ async fn should_default_the_limit_and_enforce_explicit_zero() {
 }
 
 #[tokio::test]
+async fn should_enforce_the_fixed_ceiling_before_compiling_direct_findings() {
+    let error = redact_external(
+        document("Zarnak"),
+        RedactionConfig::default(),
+        vec![ExternalRedactionFinding::default(); 10_001],
+        None,
+        Some(10_001),
+    )
+    .await
+    .expect_err("the caller limit must not raise the fixed safety ceiling");
+
+    assert!(
+        error.to_string().contains("effective redaction finding limit (10000)"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
 async fn should_default_to_unicode_code_point_offsets_and_reject_unknown_encodings() {
     let redacted = redact_external(
         document("Zoë Quorlim"),
