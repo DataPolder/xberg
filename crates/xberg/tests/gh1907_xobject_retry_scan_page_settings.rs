@@ -161,6 +161,7 @@ fn whole_document_config(tesseract_config: Option<TesseractConfig>) -> Extractio
             language: None,
             tesseract_config: None,
             paddle_ocr_config: None,
+            paddle_ocr_settings: None,
             vlm_config: None,
             backend_options: None,
         }],

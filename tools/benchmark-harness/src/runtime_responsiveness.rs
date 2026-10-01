@@ -191,7 +191,7 @@ fn prepare_batch(config: &RuntimeResponsivenessConfig) -> Result<PreparedBatch> 
         .ocr
         .as_ref()
         .map(|ocr| {
-            let paddle = ocr.paddle_ocr_config.as_ref();
+            let paddle = ocr.paddle_ocr_settings.as_ref();
             (
                 Some(ocr.backend.clone()),
                 paddle.map(|value| value.model_version.clone()),

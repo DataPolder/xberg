@@ -1406,8 +1406,11 @@ impl OcrBackend for PaddleOcrBackend {
             });
         }
 
-        let effective_config: Arc<PaddleOcrConfig> = match &config.paddle_ocr_config {
-            Some(overridden) => Arc::new(overridden.clone()),
+        let effective_config: Arc<PaddleOcrConfig> = match crate::core::config::ocr::resolve_paddle_ocr_settings(
+            config.paddle_ocr_settings.as_ref(),
+            config.paddle_ocr_config.as_ref(),
+        )? {
+            Some(overridden) => Arc::new(overridden),
             None => Arc::clone(&self.config),
         };
 
@@ -1612,7 +1615,14 @@ impl OcrBackend for PaddleOcrBackend {
     fn probe(&self, config: &OcrConfig) -> crate::doctor::DoctorCheck {
         use crate::doctor::DoctorCheck;
 
-        let effective_config = config.paddle_ocr_config.as_ref().unwrap_or(self.config.as_ref());
+        let effective_config = match crate::core::config::ocr::resolve_paddle_ocr_settings(
+            config.paddle_ocr_settings.as_ref(),
+            config.paddle_ocr_config.as_ref(),
+        ) {
+            Ok(Some(overridden)) => overridden,
+            Ok(None) => (*self.config).clone(),
+            Err(error) => return DoctorCheck::fail("ocr.paddle-ocr", error.to_string()),
+        };
 
         let languages = config.effective_languages();
         let (paddle_lang, _warnings) = super::select_paddle_language(&languages);
@@ -2534,13 +2544,47 @@ mod tests {
         assert!(result.is_err(), "Should error on empty image");
     }
 
+    #[tokio::test]
+    async fn test_paddle_ocr_process_image_rejects_invalid_legacy_config() {
+        let backend = PaddleOcrBackend::new().unwrap();
+        let config = OcrConfig {
+            backend: "paddle-ocr".to_string(),
+            auto_rotate: true,
+            paddle_ocr_config: Some(serde_json::json!({"det_db_thresh": "not a number"})),
+            ..Default::default()
+        };
+
+        match backend.process_image(b"not an image", &config).await {
+            Err(crate::XbergError::Validation { message, .. }) => assert!(
+                message.contains("Failed to deserialize paddle_ocr_config"),
+                "the page must reject the legacy override: {message}"
+            ),
+            other => panic!("expected a paddle_ocr_config validation error, got {other:?}"),
+        }
+    }
+
     #[test]
-    fn test_paddle_ocr_probe_uses_the_paddle_ocr_config_override() {
+    fn test_paddle_ocr_probe_rejects_invalid_legacy_config() {
+        let backend = PaddleOcrBackend::new().unwrap();
+        let config = OcrConfig {
+            backend: "paddle-ocr".to_string(),
+            paddle_ocr_config: Some(serde_json::json!({"use_angle_cls": "yes"})),
+            ..Default::default()
+        };
+
+        let check = backend.probe(&config);
+
+        assert!(matches!(check.status, crate::doctor::ProbeStatus::Fail), "{check:?}");
+        assert!(check.message.contains("Failed to deserialize paddle_ocr_config"));
+    }
+
+    #[test]
+    fn test_paddle_ocr_probe_uses_the_paddle_ocr_settings_override() {
         let backend = PaddleOcrBackend::new().unwrap();
         let empty_cache = tempfile::tempdir().unwrap();
         let config = OcrConfig {
             backend: "paddle-ocr".to_string(),
-            paddle_ocr_config: Some(PaddleOcrConfig::new("en").with_cache_dir(empty_cache.path().to_path_buf())),
+            paddle_ocr_settings: Some(PaddleOcrConfig::new("en").with_cache_dir(empty_cache.path().to_path_buf())),
             ..Default::default()
         };
 

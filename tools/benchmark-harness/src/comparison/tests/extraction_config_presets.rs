@@ -172,7 +172,7 @@ fn paddle_v6_presets_pin_model_tier_and_layout() {
         let config = build_extraction_config(pipeline);
         let ocr = config.ocr.as_ref().expect("Paddle preset must configure OCR");
         let paddle = ocr
-            .paddle_ocr_config
+            .paddle_ocr_settings
             .as_ref()
             .expect("Paddle preset must pin model identity");
 
@@ -232,7 +232,9 @@ fn paddle_quality_sweep_presets_pin_every_swept_dimension() {
     for (pipeline, expected) in cases {
         let config = build_extraction_config(pipeline);
         let ocr = config.ocr.expect("quality preset must configure OCR");
-        let paddle = ocr.paddle_ocr_config.expect("quality preset must pin Paddle settings");
+        let paddle = ocr
+            .paddle_ocr_settings
+            .expect("quality preset must pin Paddle settings");
 
         assert!(config.force_ocr);
         assert!(config.layout.is_some());
@@ -256,7 +258,7 @@ fn paddle_rotation_presets_differ_only_by_auto_rotate() {
     assert!(auto_ocr.auto_rotate);
     assert!(!no_rotate_ocr.auto_rotate);
     assert_eq!(auto_ocr.backend, no_rotate_ocr.backend);
-    assert_eq!(auto_ocr.paddle_ocr_config, no_rotate_ocr.paddle_ocr_config);
+    assert_eq!(auto_ocr.paddle_ocr_settings, no_rotate_ocr.paddle_ocr_settings);
 }
 
 #[test]
@@ -361,7 +363,7 @@ fn legacy_paddle_server_presets_pin_v5_server_models() {
         let config = build_extraction_config(pipeline);
         let ocr = config.ocr.as_ref().expect("legacy server preset must configure OCR");
         let paddle = ocr
-            .paddle_ocr_config
+            .paddle_ocr_settings
             .as_ref()
             .expect("legacy server preset must pin model identity");
 

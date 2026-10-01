@@ -101,13 +101,18 @@ impl ExtractionConfig {
                 self.ocr = Some(OcrConfig::default());
             }
             if let Some(ref mut ocr) = self.ocr {
-                let paddle = ocr.paddle_ocr_config.get_or_insert_with(Default::default);
+                let mut paddle = super::super::ocr::resolve_paddle_ocr_settings(
+                    ocr.paddle_ocr_settings.as_ref(),
+                    ocr.paddle_ocr_config.as_ref(),
+                )?
+                .unwrap_or_default();
                 if let Some(version) = paddle_model_version {
                     paddle.model_version = version;
                 }
                 if let Some(tier) = paddle_model_tier {
                     paddle.model_tier = tier;
                 }
+                ocr.paddle_ocr_settings = Some(paddle);
             }
         }
 
@@ -644,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    fn paddle_model_env_vars_populate_paddle_ocr_config() {
+    fn paddle_model_env_vars_populate_paddle_ocr_settings() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         clear_paddle_model_env();
         unsafe {
@@ -658,8 +663,8 @@ mod tests {
         let paddle = config
             .ocr
             .as_ref()
-            .and_then(|o| o.paddle_ocr_config.as_ref())
-            .expect("paddle_ocr_config should be populated");
+            .and_then(|o| o.paddle_ocr_settings.as_ref())
+            .expect("paddle_ocr_settings should be populated");
         assert_eq!(paddle.model_version, "pp-ocrv5");
         assert_eq!(paddle.model_tier, "server");
         clear_paddle_model_env();
@@ -672,11 +677,10 @@ mod tests {
         unsafe { std::env::set_var("XBERG_OCR_MODEL_VERSION", "pp-ocrv5") };
         let mut config = ExtractionConfig {
             ocr: Some(OcrConfig {
-                paddle_ocr_config: Some(crate::paddle_ocr::PaddleOcrConfig {
-                    model_version: "pp-ocrv6".to_string(),
-                    drop_score: 0.7,
-                    ..Default::default()
-                }),
+                paddle_ocr_config: Some(serde_json::json!({
+                    "model_version": "pp-ocrv6",
+                    "drop_score": 0.7,
+                })),
                 ..OcrConfig::default()
             }),
             ..ExtractionConfig::default()
@@ -684,7 +688,7 @@ mod tests {
         config
             .apply_env_overrides()
             .expect("paddle model env override should apply");
-        let paddle = config.ocr.as_ref().unwrap().paddle_ocr_config.as_ref().unwrap();
+        let paddle = config.ocr.as_ref().unwrap().paddle_ocr_settings.as_ref().unwrap();
         assert_eq!(paddle.model_version, "pp-ocrv5");
         assert_eq!(paddle.drop_score, 0.7);
         assert_eq!(

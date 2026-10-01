@@ -1079,6 +1079,7 @@ mod cache_key_tests {
                 language: None,
                 tesseract_config: None,
                 paddle_ocr_config: None,
+                paddle_ocr_settings: None,
                 vlm_config: Some(vlm_config),
                 backend_options: None,
             }

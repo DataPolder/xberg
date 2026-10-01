@@ -2892,6 +2892,7 @@ mod tests {
                     language: None,
                     tesseract_config: None,
                     paddle_ocr_config: None,
+                    paddle_ocr_settings: None,
                     vlm_config: None,
                     backend_options: None,
                 }],

@@ -156,6 +156,7 @@ fn per_page_config(with_pipeline: bool) -> ExtractionConfig {
             language: None,
             tesseract_config: None,
             paddle_ocr_config: None,
+            paddle_ocr_settings: None,
             vlm_config: None,
             backend_options: None,
         }],
