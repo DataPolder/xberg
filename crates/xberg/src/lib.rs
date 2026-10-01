@@ -247,7 +247,7 @@ pub use core::extract::{extract, extract_batch};
 pub use core::split::{SplitConfig, SplitSegment, SplitStrategy, split_and_extract};
 
 pub use core::config::{
-    AccelerationConfig, BedrockConfig, CallMode, CaptioningConfig, ChunkClassificationConfig,
+    AccelerationConfig, BedrockConfig, CallMode, CaptionAltTextMode, CaptioningConfig, ChunkClassificationConfig,
     ChunkClassificationDefinition, ChunkSizing, ChunkerType, ChunkingConfig, ConcurrencyConfig, ContentFilterConfig,
     CredentialProviderConfig, CsvConfig, EmailConfig, EmbeddingConfig, EmbeddingModelType, ExecutionProviderType,
     ExtractInput, ExtractInputKind, ExtractionConfig, ExtractionErrorItem, ExtractionResult, ExtractionSummary,

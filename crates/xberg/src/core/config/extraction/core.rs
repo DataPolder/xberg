@@ -1837,6 +1837,7 @@ mod tests {
                 llm,
                 prompt: Some("caption".to_string()),
                 min_image_area: 42,
+                alt_text: Default::default(),
             }),
             qr_codes: Some(true),
             ..Default::default()

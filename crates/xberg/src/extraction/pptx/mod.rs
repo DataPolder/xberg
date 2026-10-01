@@ -97,6 +97,9 @@ pub struct PptxExtractionOptions {
 pub(crate) struct PptxInternalExtraction {
     pub(crate) result: PptxExtractionResult,
     pub(crate) slide_contents: Vec<(u32, String)>,
+    /// Relationship target and extracted-image index for each rendered image
+    /// placeholder. The index is `None` when the target could not be read.
+    pub(crate) image_placeholders: Vec<(String, Option<u32>)>,
     /// `(latex, is_display)` for every math run, in slide order. The text
     /// flattens a math run into its LaTeX, which cannot be told apart from
     /// author text that holds the same characters.
@@ -210,6 +213,7 @@ fn extract_slide_images<R: std::io::Read + std::io::Seek>(
     slide: &elements::Slide,
     iterator: &mut SlideIterator<R>,
     extracted_images: &mut Vec<ExtractedImage>,
+    image_placeholders: &mut Vec<(String, Option<u32>)>,
     warnings: &mut Vec<ProcessingWarning>,
 ) {
     let Ok(image_data) = iterator.get_slide_images(slide) else {
@@ -229,7 +233,14 @@ fn extract_slide_images<R: std::io::Read + std::io::Seek>(
             None
         }
     }) {
+        let target = slide
+            .images
+            .iter()
+            .find(|relationship| relationship.id == img_ref.id)
+            .map(|relationship| relationship.target.clone())
+            .unwrap_or_else(|| img_ref.target.clone());
         let Some(data) = image_data.get(&img_ref.id) else {
+            image_placeholders.push((target, None));
             push_warning(
                 warnings,
                 "pptx",
@@ -243,6 +254,7 @@ fn extract_slide_images<R: std::io::Read + std::io::Seek>(
 
         let format = detect_image_format(data);
         let image_index = extracted_images.len();
+        image_placeholders.push((target, Some(image_index as u32)));
 
         let width = if pos.cx > 0 { Some((pos.cx / 9525) as u32) } else { None };
         let height = if pos.cy > 0 { Some((pos.cy / 9525) as u32) } else { None };
@@ -348,6 +360,7 @@ struct SlideProcessingContext<'a> {
     collected_hyperlinks: &'a mut Vec<(String, Option<String>)>,
     collected_formulas: &'a mut Vec<(String, bool)>,
     extracted_images: &'a mut Vec<ExtractedImage>,
+    image_placeholders: &'a mut Vec<(String, Option<u32>)>,
     total_image_count: &'a mut usize,
     total_table_count: &'a mut usize,
 }
@@ -408,7 +421,7 @@ fn process_one_slide<R: std::io::Read + std::io::Seek>(
     collect_slide_formulas(&slide, ctx.collected_formulas);
 
     if ctx.config.extract_images {
-        extract_slide_images(&slide, iterator, ctx.extracted_images, warnings);
+        extract_slide_images(&slide, iterator, ctx.extracted_images, ctx.image_placeholders, warnings);
     }
 
     *ctx.total_image_count += slide.image_count();
@@ -472,7 +485,7 @@ fn extract_pptx_from_container<R: std::io::Read + std::io::Seek>(
     let mut total_image_count = 0;
     let mut total_table_count = 0;
     let mut slide_contents = Vec::with_capacity(slide_count);
-    let mut extracted_images = Vec::new();
+    let (mut extracted_images, mut image_placeholders) = (Vec::new(), Vec::new());
     let mut collected_hyperlinks: Vec<(String, Option<String>)> = Vec::new();
     let mut collected_formulas: Vec<(String, bool)> = Vec::new();
     let mut doc_builder = if include_structure {
@@ -495,6 +508,7 @@ fn extract_pptx_from_container<R: std::io::Read + std::io::Seek>(
         collected_hyperlinks: &mut collected_hyperlinks,
         collected_formulas: &mut collected_formulas,
         extracted_images: &mut extracted_images,
+        image_placeholders: &mut image_placeholders,
         total_image_count: &mut total_image_count,
         total_table_count: &mut total_table_count,
     };
@@ -524,6 +538,7 @@ fn extract_pptx_from_container<R: std::io::Read + std::io::Seek>(
             revisions,
         },
         slide_contents,
+        image_placeholders,
         formulas: collected_formulas,
         plain_output: options.plain,
     })

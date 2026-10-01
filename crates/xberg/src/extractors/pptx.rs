@@ -145,11 +145,13 @@ impl PptxExtractor {
         slide_count: u32,
         formulas: &[(String, bool)],
         plain_output: bool,
+        image_placeholders: &[(String, Option<u32>)],
         budget: &mut SecurityBudget,
     ) -> Result<InternalDocument> {
         let mut builder = InternalDocumentBuilder::new("pptx");
         let mut saw_title = false;
         let forms = Self::math_forms(formulas);
+        let mut next_image_placeholder = 0_usize;
 
         for (slide_num, content) in slide_contents {
             let mut in_notes = false;
@@ -205,6 +207,28 @@ impl PptxExtractor {
                         continue;
                     }
 
+                    if let Some((alt_text, target)) = Self::markdown_image(lt)
+                        && let Some((expected_target, image_index)) = image_placeholders.get(next_image_placeholder)
+                        && target == expected_target
+                    {
+                        next_image_placeholder += 1;
+                        if let Some(image_index) = *image_index {
+                            if in_list.is_some() {
+                                builder.end_list();
+                                in_list = None;
+                            }
+                            budget.account_text(alt_text.len())?;
+                            let element = crate::types::internal::InternalElement::text(
+                                crate::types::internal::ElementKind::Image { image_index },
+                                alt_text,
+                                0,
+                            )
+                            .with_page(*slide_num);
+                            builder.push_element(element);
+                            continue;
+                        }
+                    }
+
                     let list_match = if let Some(item_text) = lt.strip_prefix("- ") {
                         Some((false, item_text))
                     } else {
@@ -257,6 +281,12 @@ impl PptxExtractor {
         Ok(builder.build())
     }
 
+    fn markdown_image(line: &str) -> Option<(&str, &str)> {
+        let image = line.strip_prefix("![")?;
+        let (alt, target) = image.split_once("](")?;
+        Some((alt, target.strip_suffix(')')?))
+    }
+
     /// Parse a markdown table block into a 2D cell grid.
     fn parse_markdown_table(table_text: &str) -> Vec<Vec<String>> {
         let mut cells = Vec::new();
@@ -288,14 +318,18 @@ impl PptxExtractor {
     /// `budget` is threaded into the internal document builder to enforce
     /// hostile-input limits on the extracted content.
     fn build_document_from_result(
-        pptx_result: crate::types::PptxExtractionResult,
-        slide_contents: &[(u32, String)],
-        formulas: &[(String, bool)],
-        plain_output: bool,
+        pptx_internal: crate::extraction::pptx::PptxInternalExtraction,
         mime_type: &str,
         extract_images: bool,
         budget: &mut SecurityBudget,
     ) -> Result<InternalDocument> {
+        let crate::extraction::pptx::PptxInternalExtraction {
+            result: pptx_result,
+            slide_contents,
+            image_placeholders,
+            formulas,
+            plain_output,
+        } = pptx_internal;
         let mut additional: AHashMap<Cow<'static, str>, serde_json::Value> = AHashMap::new();
 
         let mut pptx_metadata = pptx_result.metadata;
@@ -336,10 +370,11 @@ impl PptxExtractor {
         }
 
         let mut doc = Self::build_internal_document(
-            slide_contents,
+            &slide_contents,
             pptx_result.slide_count as u32,
-            formulas,
+            &formulas,
             plain_output,
+            &image_placeholders,
             budget,
         )?;
         doc.mime_type = mime_type.to_string();
@@ -490,15 +525,7 @@ impl InternalDocumentExtractor for PptxExtractor {
         };
 
         let mut budget = SecurityBudget::from_config(config);
-        let mut doc = Self::build_document_from_result(
-            pptx_internal.result,
-            &pptx_internal.slide_contents,
-            &pptx_internal.formulas,
-            pptx_internal.plain_output,
-            mime_type,
-            extract_images,
-            &mut budget,
-        )?;
+        let mut doc = Self::build_document_from_result(pptx_internal, mime_type, extract_images, &mut budget)?;
         doc.processing_warnings.extend(pptx_warnings);
 
         if config.max_archive_depth > 0 {
@@ -560,15 +587,7 @@ impl InternalDocumentExtractor for PptxExtractor {
         )?;
 
         let mut budget = SecurityBudget::from_config(config);
-        let mut doc = Self::build_document_from_result(
-            pptx_internal.result,
-            &pptx_internal.slide_contents,
-            &pptx_internal.formulas,
-            pptx_internal.plain_output,
-            mime_type,
-            extract_images,
-            &mut budget,
-        )?;
+        let mut doc = Self::build_document_from_result(pptx_internal, mime_type, extract_images, &mut budget)?;
         doc.processing_warnings.extend(pptx_warnings);
         Ok(doc)
     }
@@ -633,6 +652,7 @@ mod tests {
 
         let config = ExtractionConfig {
             ocr: Some(crate::core::config::OcrConfig::default()),
+            output_format: crate::core::config::OutputFormat::Markdown,
             ..Default::default()
         };
 
@@ -649,6 +669,12 @@ mod tests {
             payload.as_bytes(),
             "an OCR-only config must still read the real embedded-image bytes, not skip the image entirely"
         );
+        assert!(internal_doc.elements.iter().any(|element| {
+            matches!(
+                element.kind,
+                crate::types::internal::ElementKind::Image { image_index: 0 }
+            )
+        }));
     }
 
     /// A slide with math: the LaTeX must reach `ExtractedDocument.formulas`, not
@@ -942,8 +968,9 @@ mod tests {
         let content = "# Growth is $$g^{2}$$\n\n- Rate $r$ per year\n- Plain bullet\n";
         let formulas = vec![("g^{2}".to_string(), true), ("r".to_string(), false)];
         let mut budget = SecurityBudget::with_defaults();
-        let doc = PptxExtractor::build_internal_document(&[(1, content.to_string())], 1, &formulas, false, &mut budget)
-            .unwrap();
+        let doc =
+            PptxExtractor::build_internal_document(&[(1, content.to_string())], 1, &formulas, false, &[], &mut budget)
+                .unwrap();
 
         let math: Vec<&str> = doc
             .elements
@@ -968,6 +995,48 @@ mod tests {
             .map(|e| e.text.as_str())
             .collect();
         assert_eq!(headings, vec!["Growth is"], "the heading keeps its words");
+    }
+
+    #[test]
+    fn test_build_internal_document_keeps_image_placeholder_linked_to_extracted_image() {
+        use crate::types::internal::ElementKind;
+
+        let slide_contents = vec![(1, "Text before.\n\n![chart.png](../media/image1.png)".to_string())];
+        let mut budget = SecurityBudget::with_defaults();
+
+        let mut document = PptxExtractor::build_internal_document(
+            &slide_contents,
+            1,
+            &[],
+            false,
+            &[("../media/image1.png".to_string(), Some(0))],
+            &mut budget,
+        )
+        .expect("internal PPTX document should build");
+
+        let image = document
+            .elements
+            .iter()
+            .find(|element| matches!(element.kind, ElementKind::Image { .. }))
+            .expect("PPTX placeholder should become an image element");
+        assert_eq!(image.text, "chart.png");
+        assert!(matches!(image.kind, ElementKind::Image { image_index: 0 }));
+        assert!(
+            !document
+                .elements
+                .iter()
+                .any(|element| { matches!(element.kind, ElementKind::Paragraph) && element.text.starts_with("![") })
+        );
+
+        document.images.push(crate::types::ExtractedImage {
+            format: Cow::Borrowed("png"),
+            description: Some("chart.png".to_string()),
+            ..Default::default()
+        });
+        assert!(crate::rendering::render_markdown(&document).contains("![chart.png](image_0.bin)"));
+
+        document.images[0].description = Some("Quarterly revenue chart".to_string());
+        assert!(crate::rendering::render_markdown(&document).contains("![Quarterly revenue chart](image_0.bin)"));
     }
 
     #[test]
@@ -1013,7 +1082,7 @@ mod tests {
         ];
         let mut budget = SecurityBudget::with_defaults();
 
-        let document = PptxExtractor::build_internal_document(&slide_contents, 3, &[], false, &mut budget)
+        let document = PptxExtractor::build_internal_document(&slide_contents, 3, &[], false, &[], &mut budget)
             .expect("internal PPTX document should build");
 
         assert_eq!(document.tables.len(), 1);
@@ -1052,7 +1121,7 @@ mod tests {
         ];
         let mut budget = SecurityBudget::with_defaults();
 
-        let document = PptxExtractor::build_internal_document(&slide_contents, 2, &[], false, &mut budget)
+        let document = PptxExtractor::build_internal_document(&slide_contents, 2, &[], false, &[], &mut budget)
             .expect("marker-like user text should remain ordinary slide content");
 
         assert_eq!(document.tables.len(), 1);
