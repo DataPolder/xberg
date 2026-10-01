@@ -7098,6 +7098,279 @@ fn stub_line_beneath_a_heading_run_is_not_read_as_the_column_gh1758() {
     assert_eq!(texts[1], "Panel B", "the stub stays out of the heading");
 }
 
+/// A wrapped-heading page measured off a two-column journal article set in Charis
+/// SIL at 7.97pt, italic headings at the body's size: `(text, x, width, baseline,
+/// italic)` per line. The heading lines keep their own text, because the "did the
+/// next word fit?" estimate reads the continuation's letters; the body lines keep
+/// their geometry only.
+fn charis_page(lines: &[(&str, f32, f32, f32, bool)]) -> Vec<SegmentData> {
+    lines
+        .iter()
+        .map(|&(text, x, width, baseline_y, is_italic)| SegmentData {
+            font_size: 7.97,
+            height: 7.97,
+            is_italic,
+            ..column_seg(text, x, width, baseline_y)
+        })
+        .collect()
+}
+
+/// The right column of the carrier's page 12. The heading's first line ends at
+/// x 530.74, 26.9pt short of the column (557.63); the continuation's first word,
+/// `immune`, is 26.4pt of glyph advance and needs 24.9pt after the word space, so
+/// the line is a wrap. Sharing the continuation's width out equally over its 75
+/// characters put `immune` at 19.6pt -- "it would have fitted" -- and the heading
+/// was cut after `memory`, its second line opening the body.
+#[test]
+fn a_wide_first_word_on_a_line_of_narrow_letters_still_wraps_the_heading() {
+    let segments = charis_page(&[
+        ("in the second week.", 306.59, 62.40, 446.91, false),
+        (
+            "4.1. The BacA oral vaccine triggers proinflammatory and memory",
+            306.59,
+            224.15,
+            418.39,
+            true,
+        ),
+        (
+            "immune cell proliferation throughout the small intestine's Peyer's patches",
+            306.59,
+            242.34,
+            407.96,
+            true,
+        ),
+        (
+            "Cell counts were compared between the three groups of the trial and",
+            318.55,
+            239.08,
+            387.04,
+            false,
+        ),
+        (
+            "the gating strategy was applied in the same way to every sample of",
+            306.59,
+            251.08,
+            376.55,
+            false,
+        ),
+        (
+            "the ileum and the jejunum taken at the end of the challenge period.",
+            306.59,
+            231.63,
+            366.12,
+            false,
+        ),
+    ]);
+    let texts: Vec<String> = blocks_to_paragraphs(segments, &[], &[])
+        .iter()
+        .map(paragraph_segment_text)
+        .collect();
+    assert_eq!(texts.len(), 3, "lead-in, heading and body, got {texts:?}");
+    assert_eq!(
+        texts[1],
+        "4.1. The BacA oral vaccine triggers proinflammatory and memory immune cell proliferation \
+         throughout the small intestine's Peyer's patches"
+    );
+    assert!(
+        texts[2].starts_with("Cell counts"),
+        "the body opens with its own line, got {texts:?}"
+    );
+}
+
+/// The left column of the carrier's page 17, the same shape with a long first word:
+/// the heading stops 50.8pt short, and `reprogramming` (50.3pt of advance) needs
+/// 48.8pt. The equal share put it at 45.8pt.
+#[test]
+fn a_long_first_word_that_could_not_have_fitted_still_wraps_the_heading() {
+    let segments = charis_page(&[
+        (
+            "with the samples of the previous trial, and in each of the groups the",
+            37.59,
+            251.11,
+            659.62,
+            false,
+        ),
+        ("same protocol was followed.", 37.59, 161.32, 649.19, false),
+        (
+            "4.6. Difference in regulation of genes involved in epigenetic",
+            37.59,
+            200.29,
+            627.93,
+            true,
+        ),
+        (
+            "reprogramming between vaccinated group and infection control group",
+            37.59,
+            232.39,
+            617.50,
+            true,
+        ),
+        (
+            "Cell counts were compared between the three groups of the trial and",
+            49.55,
+            239.14,
+            596.58,
+            false,
+        ),
+        (
+            "the gating strategy was applied in the same way to every sample of",
+            37.59,
+            251.06,
+            586.09,
+            false,
+        ),
+        (
+            "the ileum and the jejunum taken at the end of the challenge period.",
+            37.59,
+            251.10,
+            575.61,
+            false,
+        ),
+    ]);
+    let texts: Vec<String> = blocks_to_paragraphs(segments, &[], &[])
+        .iter()
+        .map(paragraph_segment_text)
+        .collect();
+    assert_eq!(texts.len(), 3, "lead-in, heading and body, got {texts:?}");
+    assert_eq!(
+        texts[1],
+        "4.6. Difference in regulation of genes involved in epigenetic reprogramming between \
+         vaccinated group and infection control group"
+    );
+    assert!(
+        texts[2].starts_with("Cell counts"),
+        "the body opens with its own line, got {texts:?}"
+    );
+}
+
+/// The other side of the estimate, from the same journal's house style: a serif italic
+/// sets its narrow letters wider than Helvetica's proportions say. `efficiently` is
+/// 34.8pt of glyph advance against 31.8pt of room; weighted by Helvetica it comes out
+/// at 31.6pt -- "it would have fitted" -- and only the equal share (35.2pt) sees the
+/// wrap. The wider of the two keeps this heading whole as it was.
+#[test]
+fn a_first_word_of_narrow_letters_set_wide_still_wraps_the_heading() {
+    let segments = charis_page(&[
+        ("3. Results", 306.60, 39.69, 460.24, false),
+        (
+            "3.1. Both recombinant MPXV antigens and fusion antigens were ",
+            306.60,
+            219.60,
+            439.32,
+            true,
+        ),
+        (
+            "efficiently expressed in E. coli and yeast",
+            306.60,
+            134.21,
+            428.88,
+            true,
+        ),
+        (
+            "Cell counts were compared between the three groups of the trial and",
+            318.56,
+            241.43,
+            407.96,
+            false,
+        ),
+        (
+            "the gating strategy was applied in the same way to every sample of",
+            306.60,
+            253.39,
+            397.48,
+            false,
+        ),
+        (
+            "the ileum and the jejunum taken at the end of the challenge period.",
+            306.60,
+            253.38,
+            387.05,
+            false,
+        ),
+    ]);
+    let texts: Vec<String> = blocks_to_paragraphs(segments, &[], &[])
+        .iter()
+        .map(paragraph_segment_text)
+        .collect();
+    assert!(
+        texts.iter().any(|text| text
+            == "3.1. Both recombinant MPXV antigens and fusion antigens were efficiently expressed in E. \
+                coli and yeast"),
+        "the heading must be whole, got {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text.starts_with("efficiently")),
+        "the heading's second line must not stand alone or open the body, got {texts:?}"
+    );
+}
+
+/// The control for the two above, on page 17's geometry: a complete heading, then a
+/// lowercase line in the heading's own face whose first word (`methylation`, about
+/// 38.6pt) would have fitted in the 48.8pt the heading left. That is no wrap, and
+/// the weighted estimate must not make it one.
+#[test]
+fn a_first_word_that_would_have_fitted_does_not_continue_the_heading() {
+    let segments = charis_page(&[
+        (
+            "with the samples of the previous trial, and in each of the groups the",
+            37.59,
+            251.11,
+            659.62,
+            false,
+        ),
+        ("same protocol was followed.", 37.59, 161.32, 649.19, false),
+        (
+            "4.6. Difference in regulation of genes involved in epigenetic",
+            37.59,
+            200.29,
+            627.93,
+            true,
+        ),
+        (
+            "methylation between vaccinated group and infection control group",
+            37.59,
+            219.82,
+            617.50,
+            true,
+        ),
+        (
+            "Cell counts were compared between the three groups of the trial and",
+            49.55,
+            239.14,
+            596.58,
+            false,
+        ),
+        (
+            "the gating strategy was applied in the same way to every sample of",
+            37.59,
+            251.06,
+            586.09,
+            false,
+        ),
+        (
+            "the ileum and the jejunum taken at the end of the challenge period.",
+            37.59,
+            251.10,
+            575.61,
+            false,
+        ),
+    ]);
+    let texts: Vec<String> = blocks_to_paragraphs(segments, &[], &[])
+        .iter()
+        .map(paragraph_segment_text)
+        .collect();
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == "4.6. Difference in regulation of genes involved in epigenetic"),
+        "the heading keeps only its own line, got {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text.contains("epigenetic methylation")),
+        "the line that could have fitted stays out of the heading, got {texts:?}"
+    );
+}
+
 /// GH#1806: a left column's last line and the right column's first body line, on a page
 /// whose reading order is `TopToBottom`, whose boxes overlap by 2.5pt in y so no
 /// paragraph gap separates them, and which agree on every other break signal (font, role,
