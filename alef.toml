@@ -5589,6 +5589,7 @@ snippets = { basic_extraction = "api/extract.md", async_extraction = "api/extrac
 
 [[crates.trait_bridges]]
 trait_name = "OcrBackend"
+exclude_languages = ["php:callbacks"]
 super_trait = "xberg::plugins::Plugin"
 registry_getter = "xberg::plugins::registry::get_ocr_backend_registry"
 register_fn = "register_ocr_backend"
@@ -5597,6 +5598,7 @@ clear_fn = "clear_ocr_backends"
 
 [[crates.trait_bridges]]
 trait_name = "PostProcessor"
+exclude_languages = ["php:callbacks"]
 super_trait = "xberg::plugins::Plugin"
 registry_getter = "xberg::plugins::registry::get_post_processor_registry"
 register_fn = "register_post_processor"
@@ -5605,6 +5607,7 @@ clear_fn = "clear_post_processors"
 
 [[crates.trait_bridges]]
 trait_name = "Validator"
+exclude_languages = ["php:callbacks"]
 super_trait = "xberg::plugins::Plugin"
 registry_getter = "xberg::plugins::registry::get_validator_registry"
 register_fn = "register_validator"
@@ -5613,6 +5616,7 @@ clear_fn = "clear_validators"
 
 [[crates.trait_bridges]]
 trait_name = "DocumentExtractor"
+exclude_languages = ["php:callbacks"]
 super_trait = "xberg::plugins::Plugin"
 registry_getter = "xberg::plugins::registry::get_document_extractor_registry"
 register_fn = "register_document_extractor"
@@ -5621,6 +5625,7 @@ clear_fn = "clear_document_extractors"
 
 [[crates.trait_bridges]]
 trait_name = "EmbeddingBackend"
+exclude_languages = ["php:callbacks"]
 super_trait = "xberg::plugins::Plugin"
 registry_getter = "xberg::plugins::registry::get_embedding_backend_registry"
 register_fn = "register_embedding_backend"
@@ -5629,6 +5634,7 @@ clear_fn = "clear_embedding_backends"
 
 [[crates.trait_bridges]]
 trait_name = "Renderer"
+exclude_languages = ["php:callbacks"]
 super_trait = "xberg::plugins::Plugin"
 registry_getter = "xberg::plugins::registry::get_renderer_registry"
 register_fn = "register_renderer"
@@ -5637,6 +5643,7 @@ clear_fn = "clear_renderers"
 
 [[crates.trait_bridges]]
 trait_name = "RerankerBackend"
+exclude_languages = ["php:callbacks"]
 super_trait = "xberg::plugins::Plugin"
 registry_getter = "xberg::plugins::registry::get_reranker_backend_registry"
 register_fn = "register_reranker_backend"
@@ -5645,6 +5652,7 @@ clear_fn = "clear_reranker_backends"
 
 [[crates.trait_bridges]]
 trait_name = "TokenizerBackend"
+exclude_languages = ["php:callbacks"]
 super_trait = "xberg::plugins::Plugin"
 registry_getter = "xberg::plugins::registry::get_tokenizer_backend_registry"
 register_fn = "register_tokenizer_backend"
