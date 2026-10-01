@@ -127,8 +127,8 @@ impl Engine {
         {
             let max_findings = max_findings.unwrap_or(crate::text::redaction::external::DEFAULT_MAX_FINDINGS);
             let security_max = config.security_limits.as_ref().map_or_else(
-                || crate::extractors::security::SecurityLimits::default().max_redaction_findings,
-                |limits| limits.max_redaction_findings,
+                || crate::extractors::security::SecurityLimits::default().max_iterations,
+                |limits| limits.max_iterations,
             );
             if input.kind != ExtractInputKind::Bytes {
                 return Err(crate::XbergError::validation(
@@ -142,7 +142,7 @@ impl Engine {
             }
             if findings.len() > security_max {
                 return Err(crate::XbergError::validation(format!(
-                    "redaction findings exceed SecurityLimits.max_redaction_findings ({security_max})"
+                    "redaction findings exceed SecurityLimits.max_iterations ({security_max})"
                 )));
             }
 

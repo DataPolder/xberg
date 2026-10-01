@@ -346,7 +346,7 @@ async fn should_enforce_the_security_limit_across_configured_findings() {
             text_finding("PERSON", "Quorlim"),
         ])),
         security_limits: Some(SecurityLimits {
-            max_redaction_findings: 1,
+            max_iterations: 1,
             ..Default::default()
         }),
         ..Default::default()
@@ -356,8 +356,29 @@ async fn should_enforce_the_security_limit_across_configured_findings() {
         .process(&mut output, &config)
         .await
         .expect_err("the security limit must cap configured findings");
-    assert!(error.to_string().contains("max_redaction_findings"), "{error}");
+    assert!(error.to_string().contains("max_iterations"), "{error}");
     assert_eq!(output.content, "Zarnak Quorlim");
+}
+
+#[tokio::test]
+async fn should_accept_configured_findings_at_the_iteration_limit() {
+    let config = ExtractionConfig {
+        redaction: Some(with_findings(vec![
+            text_finding("PERSON", "Zarnak"),
+            text_finding("PERSON", "Quorlim"),
+        ])),
+        security_limits: Some(SecurityLimits {
+            max_iterations: 2,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut output = document("Zarnak Quorlim");
+    RedactionProcessor
+        .process(&mut output, &config)
+        .await
+        .expect("the exact iteration limit must be accepted");
+    assert_eq!(output.content, format!("{MASK} {MASK}"));
 }
 
 #[test]
@@ -366,7 +387,7 @@ fn should_enforce_the_security_limit_across_configured_and_request_findings() {
         let config = ExtractionConfig {
             redaction: Some(with_findings(vec![text_finding("PERSON", "Zarnak")])),
             security_limits: Some(SecurityLimits {
-                max_redaction_findings: 1,
+                max_iterations: 1,
                 ..Default::default()
             }),
             ..Default::default()
@@ -381,7 +402,32 @@ fn should_enforce_the_security_limit_across_configured_and_request_findings() {
         .await
         .expect_err("the security limit must cap all configured and request findings");
 
-        assert!(error.to_string().contains("max_redaction_findings"), "{error}");
+        assert!(error.to_string().contains("max_iterations"), "{error}");
+    });
+}
+
+#[test]
+fn should_accept_configured_and_request_findings_at_the_iteration_limit() {
+    run_extraction_test(async {
+        let config = ExtractionConfig {
+            redaction: Some(with_findings(vec![text_finding("PERSON", "Zarnak")])),
+            security_limits: Some(SecurityLimits {
+                max_iterations: 2,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let output = extract_with_external_redaction(
+            ExtractInput::from_bytes(b"Zarnak Quorlim".to_vec(), "text/plain", None),
+            &config,
+            vec![text_finding("PERSON", "Quorlim")],
+            None,
+            Some(2),
+        )
+        .await
+        .expect("the exact iteration limit must be accepted");
+
+        assert_eq!(output.results[0].content, format!("{MASK} {MASK}"));
     });
 }
 

@@ -214,10 +214,10 @@ fn configured_finding_capacity(
     inline_count: usize,
     limits: &crate::extractors::security::SecurityLimits,
 ) -> Result<usize> {
-    limits.max_redaction_findings.checked_sub(inline_count).ok_or_else(|| {
+    limits.max_iterations.checked_sub(inline_count).ok_or_else(|| {
         XbergError::validation(format!(
-            "RedactionConfig: {inline_count} findings exceed SecurityLimits.max_redaction_findings ({})",
-            limits.max_redaction_findings
+            "RedactionConfig: {inline_count} findings exceed SecurityLimits.max_iterations ({})",
+            limits.max_iterations
         ))
     })
 }
@@ -230,10 +230,10 @@ fn compile_configured_with_loaded(
 ) -> Result<CompiledConfiguredFindings> {
     let inline_count = config.findings.len();
     let total = inline_count.saturating_add(loaded.len());
-    if total > limits.max_redaction_findings {
+    if total > limits.max_iterations {
         return Err(XbergError::validation(format!(
-            "RedactionConfig: {total} findings exceed SecurityLimits.max_redaction_findings ({})",
-            limits.max_redaction_findings
+            "RedactionConfig: {total} findings exceed SecurityLimits.max_iterations ({})",
+            limits.max_iterations
         )));
     }
     let mut findings = config.findings.clone();
@@ -242,7 +242,7 @@ fn compile_configured_with_loaded(
         content,
         &findings,
         config.findings_offset_encoding,
-        limits.max_redaction_findings,
+        limits.max_iterations,
         |index| {
             if index < inline_count {
                 format!("RedactionConfig.findings[{index}]")

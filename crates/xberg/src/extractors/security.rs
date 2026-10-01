@@ -52,7 +52,7 @@ pub struct SecurityLimits {
     /// document (GH#1721).
     pub max_content_size: usize,
 
-    /// Maximum iterations per operation
+    /// Maximum iterations or externally supplied redaction findings per operation.
     pub max_iterations: usize,
 
     /// Maximum XML depth (1024 levels)
@@ -95,9 +95,6 @@ pub struct SecurityLimits {
     // `Option<usize>` maps cleanly to None/nil/null/undefined everywhere, so the field now
     // generates instead of being skipped.
     pub max_pages: Option<usize>,
-
-    /// Maximum external redaction findings accepted in one run (10,000). ~keep
-    pub max_redaction_findings: usize,
 }
 
 impl Default for SecurityLimits {
@@ -113,7 +110,6 @@ impl Default for SecurityLimits {
             max_xml_depth: 1024,
             max_table_cells: 100_000,
             max_pages: None,
-            max_redaction_findings: 10_000,
         }
     }
 }

@@ -169,10 +169,10 @@ async fn redact_counted(
     #[cfg(not(feature = "tokio-runtime"))]
     let configured = compile_configured_findings(&result.content, config, limits)?;
     let total_findings = configured.count.saturating_add(external_finding_count);
-    if total_findings > limits.max_redaction_findings {
+    if total_findings > limits.max_iterations {
         return Err(crate::XbergError::validation(format!(
-            "RedactionConfig: {total_findings} findings exceed SecurityLimits.max_redaction_findings ({})",
-            limits.max_redaction_findings
+            "RedactionConfig: {total_findings} findings exceed SecurityLimits.max_iterations ({})",
+            limits.max_iterations
         )));
     }
     let mut all_external_terms = configured.terms;

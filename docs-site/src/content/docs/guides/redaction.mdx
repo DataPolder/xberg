@@ -147,7 +147,7 @@ let output = xberg::extract_with_external_redaction(
 - The caller supplies `max_findings`; the bounded parser stops at the first entry beyond that limit instead of allocating the complete input.
 - The one-step operation accepts one bytes input. Read and bound file or standard-input findings at the application boundary, then pass their parsed values to the operation.
 - On the command line, `--redaction-findings findings.json` sets `findings_path`, and `--redaction-findings -` reads them from stdin instead.
-- `SecurityLimits.max_redaction_findings` caps the inline and file findings combined (default 10,000), and a findings file may not exceed `SecurityLimits.max_content_size`. `findings_path` is not supported on WebAssembly.
+- `SecurityLimits.max_iterations` caps the inline and file findings combined (default 10,000,000), and a findings file may not exceed `SecurityLimits.max_content_size`. Request-scoped calls retain their separate 10,000-finding default. `findings_path` is not supported on WebAssembly.
 
 ## Output Shape
 
