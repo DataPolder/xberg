@@ -131,69 +131,9 @@ impl OcrCache {
         result: &OcrExtractionResult,
     ) -> Result<(), OcrError> {
         let cache_key = self.generate_cache_key(image_hash, backend, config, output_format);
-        let cache_path = self.get_cache_path(&cache_key);
-
-        fs::create_dir_all(&self.cache_dir).map_err(|e| {
-            tracing::warn!(
-                { conventions::OPERATION } = conventions::operations::CACHE_WRITE,
-                { conventions::CACHE_KEY } = cache_key.as_str(),
-                error = %e,
-                "Failed to create the OCR cache directory; the result will not be cached"
-            );
-            OcrError::CacheError(format!("Failed to create cache directory: {}", e))
-        })?;
-
-        // Serialize the envelope, not the bare result: the result's own
-        // `Serialize` impl drops `internal_document`.
-        let envelope = CachedOcrResultRef {
-            result,
-            internal_document: &result.internal_document,
-            ocr_text_claimed_by_tables: result
-                .internal_document
-                .as_ref()
-                .is_some_and(|document| document.ocr_text_claimed_by_tables),
-        };
-        let serialized = rmp_serde::to_vec_named(&envelope).map_err(|e| {
-            tracing::warn!(
-                { conventions::OPERATION } = conventions::operations::CACHE_WRITE,
-                { conventions::CACHE_KEY } = cache_key.as_str(),
-                error = %e,
-                "Failed to serialize the OCR result; it will not be cached"
-            );
-            OcrError::CacheError(format!("Failed to serialize result: {}", e))
-        })?;
-
-        let pid = std::process::id();
-        let thread_id = std::thread::current().id();
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let temp_name = format!("{}.tmp.{}.{:?}.{}", cache_key, pid, thread_id, timestamp);
-        let temp_path = self.cache_dir.join(temp_name);
-
-        fs::write(&temp_path, &serialized).map_err(|e| {
-            tracing::warn!(
-                { conventions::OPERATION } = conventions::operations::CACHE_WRITE,
-                { conventions::CACHE_KEY } = cache_key.as_str(),
-                error = %e,
-                "Failed to write the temporary OCR cache file; the result will not be cached"
-            );
-            OcrError::CacheError(format!("Failed to write temp cache file: {}", e))
-        })?;
-
-        fs::rename(&temp_path, &cache_path).map_err(|e| {
-            tracing::warn!(
-                { conventions::OPERATION } = conventions::operations::CACHE_WRITE,
-                { conventions::CACHE_KEY } = cache_key.as_str(),
-                error = %e,
-                "Failed to publish the OCR cache entry; the result will not be cached"
-            );
-            if let Err(e) = fs::remove_file(&temp_path) {
-                tracing::debug!("Failed to clean up the temporary OCR cache file: {}", e);
-            }
-            OcrError::CacheError(format!("Failed to rename cache file: {}", e))
-        })?;
+        self.ensure_cache_dir(&cache_key)?;
+        let serialized = Self::serialize_cached_result(result, &cache_key)?;
+        self.write_cache_file(&cache_key, &serialized)?;
 
         tracing::debug!(
             { conventions::OPERATION } = conventions::operations::CACHE_WRITE,
@@ -203,6 +143,78 @@ impl OcrCache {
             "OCR cache write"
         );
 
+        Ok(())
+    }
+
+    fn ensure_cache_dir(&self, cache_key: &str) -> Result<(), OcrError> {
+        fs::create_dir_all(&self.cache_dir).map_err(|e| {
+            tracing::warn!(
+                { conventions::OPERATION } = conventions::operations::CACHE_WRITE,
+                { conventions::CACHE_KEY } = cache_key,
+                error = %e,
+                "Failed to create the OCR cache directory; the result will not be cached"
+            );
+            OcrError::CacheError(format!("Failed to create cache directory: {}", e))
+        })
+    }
+
+    fn serialize_cached_result(result: &OcrExtractionResult, cache_key: &str) -> Result<Vec<u8>, OcrError> {
+        let envelope = CachedOcrResultRef {
+            result,
+            internal_document: &result.internal_document,
+            ocr_text_claimed_by_tables: result
+                .internal_document
+                .as_ref()
+                .is_some_and(|document| document.ocr_text_claimed_by_tables),
+        };
+        rmp_serde::to_vec_named(&envelope).map_err(|e| {
+            tracing::warn!(
+                { conventions::OPERATION } = conventions::operations::CACHE_WRITE,
+                { conventions::CACHE_KEY } = cache_key,
+                error = %e,
+                "Failed to serialize the OCR result; it will not be cached"
+            );
+            OcrError::CacheError(format!("Failed to serialize result: {}", e))
+        })
+    }
+
+    fn write_cache_file(&self, cache_key: &str, serialized: &[u8]) -> Result<(), OcrError> {
+        let cache_path = self.get_cache_path(cache_key);
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let temp_name = format!(
+            "{}.tmp.{}.{:?}.{}",
+            cache_key,
+            std::process::id(),
+            std::thread::current().id(),
+            timestamp
+        );
+        let temp_path = self.cache_dir.join(temp_name);
+
+        fs::write(&temp_path, serialized).map_err(|e| {
+            tracing::warn!(
+                { conventions::OPERATION } = conventions::operations::CACHE_WRITE,
+                { conventions::CACHE_KEY } = cache_key,
+                error = %e,
+                "Failed to write the temporary OCR cache file; the result will not be cached"
+            );
+            OcrError::CacheError(format!("Failed to write temp cache file: {}", e))
+        })?;
+
+        fs::rename(&temp_path, &cache_path).map_err(|e| {
+            tracing::warn!(
+                { conventions::OPERATION } = conventions::operations::CACHE_WRITE,
+                { conventions::CACHE_KEY } = cache_key,
+                error = %e,
+                "Failed to publish the OCR cache entry; the result will not be cached"
+            );
+            if let Err(e) = fs::remove_file(&temp_path) {
+                tracing::debug!("Failed to clean up the temporary OCR cache file: {}", e);
+            }
+            OcrError::CacheError(format!("Failed to rename cache file: {}", e))
+        })?;
         Ok(())
     }
 

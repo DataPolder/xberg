@@ -77,6 +77,20 @@ fn hash_config_for_schema(config: &TesseractConfig, resolved_tessdata_path: &str
     hasher.update(&config.oem.to_le_bytes());
     hasher.update(&config.min_confidence.to_bits().to_le_bytes());
     hash_bytes(&mut hasher, config.output_format.as_bytes());
+    hash_preprocessing(&mut hasher, config);
+    hasher.update(&[config.enable_table_detection as u8]);
+    hasher.update(&config.table_min_confidence.to_bits().to_le_bytes());
+    hasher.update(&config.table_column_threshold.to_le_bytes());
+    hasher.update(&config.table_row_threshold_ratio.to_bits().to_le_bytes());
+    hash_tesseract_variables(&mut hasher, config);
+    hash_security_limits(&mut hasher, config.security_limits.as_ref());
+    hash_source_context(&mut hasher, config, resolved_tessdata_path);
+
+    let hash = hasher.finalize();
+    hex::encode(&hash.as_bytes()[..16])
+}
+
+fn hash_preprocessing(hasher: &mut blake3::Hasher, config: &TesseractConfig) {
     match config.preprocessing.as_ref() {
         Some(preprocessing) => {
             hasher.update(&[1]);
@@ -94,37 +108,26 @@ fn hash_config_for_schema(config: &TesseractConfig, resolved_tessdata_path: &str
                 // entry already existed. ~keep
                 preprocessing.normalize_shaded_rows as u8,
             ]);
-            hash_bytes(&mut hasher, preprocessing.binarization_method.as_bytes());
+            hash_bytes(hasher, preprocessing.binarization_method.as_bytes());
         }
         None => {
             hasher.update(&[0]);
         }
     }
-    hasher.update(&[config.enable_table_detection as u8]);
-    hasher.update(&config.table_min_confidence.to_bits().to_le_bytes());
-    hasher.update(&config.table_column_threshold.to_le_bytes());
-    hasher.update(&config.table_row_threshold_ratio.to_bits().to_le_bytes());
+}
 
-    // Hash the exact ordered set of engine variables `apply_tesseract_variables` sets on the
-    // Tesseract API — the single source of truth for both. Before this, `hash_config` hashed
-    // an independent, hand-copied list of `TesseractConfig` fields, and `hocr_font_info` (set
-    // unconditionally by `apply_tesseract_variables`, with no `TesseractConfig` field of its
-    // own) was never in it: enabling it in commit 57e414a6db changed hOCR serialization
-    // (font size, boldness) while leaving every existing cache key untouched, so 306 stale
-    // entries kept being served (#687). Routing both call sites through `tesseract_variable_set`
-    // means a future variable added to only one of them is no longer possible.
+/// Hash the exact ordered variable set applied to Tesseract so cache identity cannot drift from
+/// engine configuration as it did for `hocr_font_info` in #687. ~keep
+fn hash_tesseract_variables(hasher: &mut blake3::Hasher, config: &TesseractConfig) {
     for (name, value) in tesseract_variable_set(config) {
-        hash_bytes(&mut hasher, name.as_bytes());
-        hash_bytes(&mut hasher, value.as_bytes());
+        hash_bytes(hasher, name.as_bytes());
+        hash_bytes(hasher, value.as_bytes());
     }
+}
 
-    hash_security_limits(&mut hasher, config.security_limits.as_ref());
-
+/// Hash fields that select the input raster, model directory, or page-stamped output. ~keep
+fn hash_source_context(hasher: &mut blake3::Hasher, config: &TesseractConfig, resolved_tessdata_path: &str) {
     hasher.update(&[config.auto_rotate as u8]);
-    // `source_dpi` selects the scale factor the DPI-normalization step resizes by, so two calls
-    // with byte-identical images but different source resolutions produce different rasters,
-    // different `scan_res` values and different output. Omitting it here would serve one page's
-    // result for another exactly the way `hocr_font_info` did in #687.
     match config.source_dpi {
         Some(dpi) => {
             hasher.update(&[1]);
@@ -134,24 +137,9 @@ fn hash_config_for_schema(config: &TesseractConfig, resolved_tessdata_path: &str
             hasher.update(&[0]);
         }
     }
-    // `known_full_page_scan` (GH#1894) decides whether a page bypasses the pixel-brightness
-    // preprocessing heuristic entirely, so two calls with byte-identical images can take a
-    // different preprocessing path depending on it -- the same collision risk `source_dpi` above
-    // guards against.
     hasher.update(&[config.known_full_page_scan as u8]);
-    // The resolved tessdata directory, not merely the optional override (#1787). Two configs
-    // that leave `tessdata_path` unset can still resolve to different directories through
-    // `TESSDATA_PREFIX`/cache/system fallbacks, and must not collide.
-    hash_bytes(&mut hasher, resolved_tessdata_path.as_bytes());
-    // `page_number` is stamped onto every returned element, table, and `OcrElement` (see
-    // `perform_ocr`), so two calls with byte-identical images but different declared page
-    // numbers produce different output for an unchanged image hash. Omitting it here would
-    // serve one page's result for another exactly the way `source_dpi` and `hocr_font_info`
-    // did in #687.
+    hash_bytes(hasher, resolved_tessdata_path.as_bytes());
     hasher.update(&config.page_number.to_le_bytes());
-
-    let hash = hasher.finalize();
-    hex::encode(&hash.as_bytes()[..16])
 }
 
 fn hash_bytes(hasher: &mut blake3::Hasher, value: &[u8]) {

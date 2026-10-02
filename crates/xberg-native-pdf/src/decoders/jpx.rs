@@ -1073,12 +1073,13 @@ mod tests {
     const RGB_CMAP: [u8; 12] = [0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 2];
     const SRGB_COLR: [u8; 7] = [1, 0, 0, 0, 0, 0, 16];
 
-    /// Each shape the palette reader resolves itself, and each it leaves to the decoder. (GH#1903)
+    fn read(pclr: &[u8], cmap: &[u8], colr: Option<&[u8]>) -> Option<(u8, Vec<u8>)> {
+        super::codestream_palette(&palette_header(pclr, cmap, colr)).map(|p| (p.columns, p.entries))
+    }
+
+    /// Each supported and rejected palette entry shape. (GH#1903) ~keep
     #[test]
     fn codestream_palette_accepts_only_the_shape_it_can_resolve() {
-        let read = |pclr: &[u8], cmap: &[u8], colr: Option<&[u8]>| {
-            super::codestream_palette(&palette_header(pclr, cmap, colr)).map(|p| (p.columns, p.entries))
-        };
         let good = read(&pclr(2, &[7, 7, 7]), &RGB_CMAP, Some(&SRGB_COLR));
         assert_eq!(
             good,
@@ -1105,7 +1106,10 @@ mod tests {
             None,
             "truncated entries"
         );
+    }
 
+    #[test]
+    fn codestream_palette_requires_ordered_channel_maps() {
         let swapped = [0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 2];
         assert_eq!(read(&pclr(2, &[7, 7, 7]), &swapped, None), None, "columns out of order");
         let other_component = [0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 2];
@@ -1128,7 +1132,10 @@ mod tests {
             "a fourth palette channel"
         );
         assert_eq!(read(&pclr(2, &[7, 7, 7]), &RGB_CMAP[..11], None), None, "a ragged cmap");
+    }
 
+    #[test]
+    fn codestream_palette_accepts_only_supported_colour_spaces() {
         assert_eq!(
             read(&pclr(2, &[7, 7, 7]), &RGB_CMAP, Some(&[1, 0, 0, 0, 0, 0, 18])),
             None,

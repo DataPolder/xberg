@@ -2575,14 +2575,15 @@ mod tests {
             ..Default::default()
         };
 
-        match backend.process_image(b"not an image", &config).await {
-            Err(crate::XbergError::Validation { message, .. })
-                if message.contains("Failed to deserialize paddle_ocr_config") =>
-            {
-                panic!("unknown legacy keys must not fail backend config parsing: {message}")
-            }
-            Err(_) => {}
-            Ok(_) => panic!("invalid image bytes must still fail after config parsing"),
+        let error = backend
+            .process_image(b"not an image", &config)
+            .await
+            .expect_err("invalid image bytes must still fail after config parsing");
+        if let crate::XbergError::Validation { message, .. } = error {
+            assert!(
+                !message.contains("Failed to deserialize paddle_ocr_config"),
+                "unknown legacy keys must not fail backend config parsing: {message}"
+            );
         }
     }
 
