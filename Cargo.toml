@@ -120,7 +120,7 @@ sceptre = { version = "0.7.2", default-features = false }
 
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151" }
-serde_toon_format = "0.2"
+serde_toon_format = "0.1"
 sha2 = "0.11"
 similar = "3"
 sqlite-vec = "0.1"
