@@ -470,6 +470,21 @@ pub fn clear_engine_caches() -> usize {
     removed
 }
 
+/// Drop only engines whose sessions use the shared ONNX Runtime session options. ~keep
+#[cfg(feature = "onnx-runtime")]
+pub(crate) fn clear_onnx_engine_caches() -> usize {
+    let removed = 0;
+    #[cfg(feature = "embeddings")]
+    let removed = removed + embeddings::clear_onnx_engine_cache();
+    #[cfg(feature = "reranker")]
+    let removed = removed + reranking::clear_engine_cache();
+    #[cfg(feature = "sparse-embeddings")]
+    let removed = removed + sparse_embeddings::clear_engine_cache();
+    #[cfg(feature = "late-interaction")]
+    let removed = removed + late_interaction::clear_engine_cache();
+    removed
+}
+
 /// Get an embedding preset by name.
 ///
 /// Returns `None` if no preset with the given name exists. Returns an owned

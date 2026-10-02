@@ -496,7 +496,8 @@ pub struct OrtSessionOptions {
     /// Intra-op thread count. `None` (default) uses the standard thread budget
     /// (`min(cores, 8)` or the cgroup quota). Values below 1 are raised to 1. Only the
     /// ORT intra-op pool is changed; `EMBED_SEMAPHORE` and other `resolve_thread_budget`
-    /// callers are unaffected.
+    /// callers are unaffected. ONNX Runtime builds that use OpenMP ignore this setting;
+    /// configure `OMP_NUM_THREADS` for those builds.
     pub max_threads: Option<usize>,
 }
 
@@ -530,7 +531,7 @@ pub fn set_ort_session_options(options: OrtSessionOptions) {
         changed
     };
     if changed {
-        crate::clear_engine_caches();
+        crate::clear_onnx_engine_caches();
     }
 }
 

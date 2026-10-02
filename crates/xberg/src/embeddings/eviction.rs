@@ -72,6 +72,12 @@ pub fn clear_engine_cache() -> usize {
     removed
 }
 
+/// Drop only the ONNX embedding engines affected by ONNX Runtime session options. ~keep
+#[cfg(feature = "embeddings")]
+pub(crate) fn clear_onnx_engine_cache() -> usize {
+    ENGINE_CACHE.clear()
+}
+
 /// Bound the number of embedding engines kept resident, or lift the bound with `None`.
 ///
 /// The bound applies to each backend's cache: at most `max_resident` ONNX engines

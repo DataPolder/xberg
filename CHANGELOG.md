@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **(onnx): `set_ort_session_options` bounds ONNX Runtime memory for embedding, reranking, sparse-embedding and late-interaction sessions (Rust API only).** `OrtSessionOptions { memory_pattern, cpu_arena, max_threads }` (defaults `true`, `true`, `None`, i.e. unchanged behaviour) can disable ORT's memory-pattern planner and CPU arena, which otherwise retain allocations sized by the largest batch, and cap intra-op threads. `cpu_arena` affects the CPU execution provider only, and `max_threads` does not change other thread budgets. Changing the options clears the engine caches so resident engines rebuild with them; layout, table, Whisper, paddle and GLiNER sessions are unaffected.
+- **(onnx): `set_ort_session_options` bounds ONNX Runtime memory for embedding, reranking, sparse-embedding and late-interaction sessions (Rust API only).** `OrtSessionOptions { memory_pattern, cpu_arena, max_threads }` (defaults `true`, `true`, `None`, i.e. unchanged behaviour) can disable ORT's memory-pattern planner and CPU arena, which otherwise retain allocations sized by the largest batch, and set the intra-op thread count. `cpu_arena` affects the CPU execution provider only, and `max_threads` does not change other thread budgets; OpenMP-enabled ORT builds ignore it and must use `OMP_NUM_THREADS`. Changing the options clears only the affected ONNX engine caches so resident engines rebuild with them; static embeddings, layout, table, Whisper, paddle and GLiNER sessions are unaffected.
 
 ### Fixed
 

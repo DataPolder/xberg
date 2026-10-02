@@ -560,6 +560,8 @@ const CUSTOM_MODEL_FILE: &str = "onnx/model.onnx";
 // manifest, and `static-embeddings` is not a binding feature. ~keep
 #[cfg(any(feature = "embeddings", feature = "static-embeddings"))]
 mod eviction;
+#[cfg(feature = "embeddings")]
+pub(crate) use eviction::clear_onnx_engine_cache;
 #[cfg(any(feature = "embeddings", feature = "static-embeddings"))]
 pub use eviction::{clear_engine_cache, evict_model, set_engine_cache_limit};
 
