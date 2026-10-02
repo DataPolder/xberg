@@ -13,7 +13,7 @@ use std::cmp::Ordering;
 use std::io::Cursor;
 use zip::ZipArchive;
 
-use super::metadata::{EpubPackageDocument, ManifestItem};
+use super::metadata::{EpubPackageDocument, EpubSpineItem, ManifestItem};
 use super::parsing::read_file_from_zip;
 
 const EPUB_NAMESPACE: &str = "http://www.idpf.org/2007/ops";
@@ -31,6 +31,143 @@ pub(super) struct EpubSpineDocument {
     pub(super) xhtml: String,
 }
 
+struct ResolvedSpineDocument {
+    file_path: String,
+    idref: String,
+    navigation_candidate: bool,
+}
+
+struct SpineReadContext<'a> {
+    limits: &'a crate::extractors::security::SecurityLimits,
+    depth_limit: usize,
+    warnings: &'a mut Vec<ProcessingWarning>,
+}
+
+fn push_epub_warning(warnings: &mut Vec<ProcessingWarning>, message: String) {
+    warnings.push(ProcessingWarning {
+        source: std::borrow::Cow::Borrowed("epub"),
+        message: std::borrow::Cow::Owned(message),
+    });
+}
+
+fn resolve_spine_document(
+    package: &EpubPackageDocument,
+    spine_item: &EpubSpineItem,
+    warnings: &mut Vec<ProcessingWarning>,
+) -> Option<ResolvedSpineDocument> {
+    let Some(source_item) = package.manifest.get(&spine_item.idref) else {
+        push_epub_warning(
+            warnings,
+            format!("Spine item '{}' references a missing manifest entry", spine_item.idref),
+        );
+        return None;
+    };
+    let render_item = match resolve_renderable_manifest_item(package, &spine_item.idref) {
+        Ok(render_item) => render_item,
+        Err(error) => {
+            push_epub_warning(
+                warnings,
+                format!(
+                    "Skipping spine item '{}' (href '{}'): {}",
+                    spine_item.idref, source_item.raw_href, error
+                ),
+            );
+            return None;
+        }
+    };
+    let file_path = match render_item.resolved_path() {
+        Ok(path) => path.to_owned(),
+        Err(message) => {
+            push_epub_warning(
+                warnings,
+                format!(
+                    "Skipping spine item '{}' (href '{}'): unsafe manifest href: {}",
+                    spine_item.idref, render_item.raw_href, message
+                ),
+            );
+            return None;
+        }
+    };
+    let navigation_candidate = source_item.is_nav()
+        || render_item.is_nav()
+        || source_item
+            .path
+            .as_deref()
+            .is_some_and(|path| package.is_guide_toc_candidate_path(path))
+        || render_item
+            .path
+            .as_deref()
+            .is_some_and(|path| package.is_guide_toc_candidate_path(path));
+    Some(ResolvedSpineDocument {
+        file_path,
+        idref: spine_item.idref.clone(),
+        navigation_candidate,
+    })
+}
+
+fn read_spine_document(
+    archive: &mut ZipArchive<Cursor<Vec<u8>>>,
+    resolved: ResolvedSpineDocument,
+    context: &mut SpineReadContext<'_>,
+) -> Option<EpubSpineDocument> {
+    let raw_xhtml = match read_file_from_zip(archive, &resolved.file_path) {
+        Ok(raw_xhtml) => raw_xhtml,
+        Err(error) => {
+            push_epub_warning(
+                context.warnings,
+                format!(
+                    "Failed to read body spine item '{}' (idref '{}') from EPUB archive: {}",
+                    resolved.file_path, resolved.idref, error
+                ),
+            );
+            return None;
+        }
+    };
+    let normalized_xhtml = normalize_xhtml(&raw_xhtml);
+    if nesting_depth_exceeds(&normalized_xhtml, context.depth_limit) {
+        push_epub_warning(
+            context.warnings,
+            format!(
+                "Spine item '{}' is nested deeper than {} elements; only its plain text was kept",
+                resolved.file_path, context.depth_limit
+            ),
+        );
+        let body = normalized_xhtml
+            .find("<body")
+            .or_else(|| normalized_xhtml.find("<BODY"))
+            .map_or(normalized_xhtml.as_str(), |start| &normalized_xhtml[start..]);
+        let text = strip_html_tags(body);
+        return (!text.is_empty()).then(|| EpubSpineDocument {
+            file_path: resolved.file_path,
+            xhtml: format!("<html><body><p>{}</p></body></html>", html_escape::encode_text(&text)),
+        });
+    }
+    let render_xhtml = strip_embedded_media_elements(&strip_specialized_navigation_sections(&strip_document_head(
+        &normalized_xhtml,
+    )));
+    if resolved.navigation_candidate && looks_like_navigation_document(&render_xhtml) {
+        return None;
+    }
+    let mut gate_budget = SecurityBudget::from_limits(context.limits);
+    let chapter = extract_text_from_xhtml_reporting(&render_xhtml, &mut gate_budget);
+    if let Some(error) = chapter.parse_error {
+        push_epub_warning(
+            context.warnings,
+            format!(
+                "Spine item '{}' is not well-formed XML ({}); its text was recovered by stripping tags",
+                resolved.file_path, error
+            ),
+        );
+    }
+    if chapter.text.is_empty() && !has_image_markup(&render_xhtml) {
+        return None;
+    }
+    Some(EpubSpineDocument {
+        file_path: resolved.file_path,
+        xhtml: render_xhtml,
+    })
+}
+
 /// Read all body documents from the EPUB archive and downgrade per-item I/O
 /// failures into processing warnings.
 pub(super) fn read_body_documents(
@@ -45,140 +182,32 @@ pub(super) fn read_body_documents(
     let mut encrypted_count = 0usize;
 
     for spine_item in &package.spine_items {
-        let Some(source_item) = package.manifest.get(&spine_item.idref) else {
-            warnings.push(ProcessingWarning {
-                source: std::borrow::Cow::Borrowed("epub"),
-                message: std::borrow::Cow::Owned(format!(
-                    "Spine item '{}' references a missing manifest entry",
-                    spine_item.idref
-                )),
-            });
+        let Some(resolved) = resolve_spine_document(package, spine_item, &mut warnings) else {
             continue;
         };
-
-        let render_item = match resolve_renderable_manifest_item(package, &spine_item.idref) {
-            Ok(render_item) => render_item,
-            Err(err) => {
-                warnings.push(ProcessingWarning {
-                    source: std::borrow::Cow::Borrowed("epub"),
-                    message: std::borrow::Cow::Owned(format!(
-                        "Skipping spine item '{}' (href '{}'): {}",
-                        spine_item.idref, source_item.raw_href, err
-                    )),
-                });
-                continue;
-            }
-        };
-
-        let file_path = match render_item.resolved_path() {
-            Ok(path) => path.to_owned(),
-            Err(message) => {
-                warnings.push(ProcessingWarning {
-                    source: std::borrow::Cow::Borrowed("epub"),
-                    message: std::borrow::Cow::Owned(format!(
-                        "Skipping spine item '{}' (href '{}'): unsafe manifest href: {}",
-                        spine_item.idref, render_item.raw_href, message
-                    )),
-                });
-                continue;
-            }
-        };
-        // The package names its navigation documents: `properties="nav"` in
-        // EPUB 3, `<guide><reference type="toc">` in EPUB 2. Only those items
-        // are checked against the content heuristic, because a navigation
-        // document often also carries body prose that must be kept.
-        let navigation_candidate = source_item.is_nav()
-            || render_item.is_nav()
-            || source_item
-                .path
-                .as_deref()
-                .is_some_and(|path| package.is_guide_toc_candidate_path(path))
-            || render_item
-                .path
-                .as_deref()
-                .is_some_and(|path| package.is_guide_toc_candidate_path(path));
-
-        if encrypted_members.contains(&file_path) {
+        if encrypted_members.contains(&resolved.file_path) {
             encrypted_count += 1;
             continue;
         }
-
-        match read_file_from_zip(archive, &file_path) {
-            Ok(raw_xhtml) => {
-                let normalized_xhtml = normalize_xhtml(&raw_xhtml);
-                // `roxmltree` parses recursively, so a chapter past the depth
-                // limit keeps only its plain text and no pass parses its markup.
-                if nesting_depth_exceeds(&normalized_xhtml, depth_limit) {
-                    warnings.push(ProcessingWarning {
-                        source: std::borrow::Cow::Borrowed("epub"),
-                        message: std::borrow::Cow::Owned(format!(
-                            "Spine item '{}' is nested deeper than {} elements; only its plain text was kept",
-                            file_path, depth_limit
-                        )),
-                    });
-                    // The head is not parsed on this path, so drop it by bytes.
-                    let body = normalized_xhtml
-                        .find("<body")
-                        .or_else(|| normalized_xhtml.find("<BODY"))
-                        .map_or(normalized_xhtml.as_str(), |start| &normalized_xhtml[start..]);
-                    let text = strip_html_tags(body);
-                    if !text.is_empty() {
-                        documents.push(EpubSpineDocument {
-                            file_path,
-                            xhtml: format!("<html><body><p>{}</p></body></html>", html_escape::encode_text(&text)),
-                        });
-                    }
-                    continue;
-                }
-                let render_xhtml = strip_embedded_media_elements(&strip_specialized_navigation_sections(
-                    &strip_document_head(&normalized_xhtml),
-                ));
-
-                if navigation_candidate && looks_like_navigation_document(&render_xhtml) {
-                    continue;
-                }
-
-                let mut gate_budget = SecurityBudget::from_limits(limits);
-                let chapter = extract_text_from_xhtml_reporting(&render_xhtml, &mut gate_budget);
-                if let Some(error) = chapter.parse_error {
-                    warnings.push(ProcessingWarning {
-                        source: std::borrow::Cow::Borrowed("epub"),
-                        message: std::borrow::Cow::Owned(format!(
-                            "Spine item '{}' is not well-formed XML ({}); its text was recovered by stripping tags",
-                            file_path, error
-                        )),
-                    });
-                }
-                if chapter.text.is_empty() && !has_image_markup(&render_xhtml) {
-                    continue;
-                }
-
-                documents.push(EpubSpineDocument {
-                    file_path,
-                    xhtml: render_xhtml,
-                });
-            }
-            Err(err) => {
-                warnings.push(ProcessingWarning {
-                    source: std::borrow::Cow::Borrowed("epub"),
-                    message: std::borrow::Cow::Owned(format!(
-                        "Failed to read body spine item '{}' (idref '{}') from EPUB archive: {}",
-                        file_path, spine_item.idref, err
-                    )),
-                });
-            }
+        let mut context = SpineReadContext {
+            limits,
+            depth_limit,
+            warnings: &mut warnings,
+        };
+        if let Some(document) = read_spine_document(archive, resolved, &mut context) {
+            documents.push(document);
         }
     }
 
     if encrypted_count > 0 {
-        warnings.push(ProcessingWarning {
-            source: std::borrow::Cow::Borrowed("epub"),
-            message: std::borrow::Cow::Owned(format!(
+        push_epub_warning(
+            &mut warnings,
+            format!(
                 "The EPUB is encrypted (DRM): {} of {} spine items are listed in META-INF/encryption.xml and were skipped",
                 encrypted_count,
                 package.spine_items.len()
-            )),
-        });
+            ),
+        );
     }
 
     Ok((documents, warnings))
@@ -327,8 +356,6 @@ pub(super) fn resolve_epub_switch_elements(xhtml: &str, supported_namespaces: &[
     resolved
 }
 
-/// True when the document carries an image element. A cover page, a plate, or
-/// a fixed-layout page has no text but still contributes images and alt text.
 pub(super) fn has_image_markup(xhtml: &str) -> bool {
     match roxmltree::Document::parse(xhtml) {
         Ok(doc) => doc.descendants().any(|node| {
@@ -507,11 +534,8 @@ pub(super) fn extract_text_from_xhtml(xhtml: &str) -> String {
     extract_text_from_xhtml_with_budget(xhtml, &mut budget).text
 }
 
-/// Text of a chapter plus what went wrong while reading it.
 pub(super) struct ChapterText {
     pub(super) text: String,
-    /// The XML parse error when the chapter is not well-formed and the text
-    /// came from the tag stripper.
     pub(super) parse_error: Option<String>,
 }
 
@@ -566,11 +590,6 @@ fn extract_text_from_xhtml_with_budget(xhtml: &str, budget: &mut SecurityBudget)
     }
 }
 
-/// Normalize XHTML so downstream HTML/XHTML processing sees chapter markup
-/// without EPUB packaging prelude.
-///
-/// This strips XML declarations and doctypes, which are valid in EPUB chapter
-/// files but should not surface in extracted Markdown or interfere with safe parsing.
 pub(super) fn normalize_xhtml(xml: &str) -> String {
     expand_named_entities(&strip_serialized_mathml_comments(&strip_xml_prelude(xml))).into_owned()
 }

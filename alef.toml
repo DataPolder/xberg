@@ -602,12 +602,12 @@ traineddata = "traineddata"
 "tools/benchmark-harness/baselines/initial_baseline.json" = ["file-too-long"]
 "tools/benchmark-harness/guardrails.json" = ["file-too-long"]
 # --- quality-debt baseline (generated) ---
-# 485 size/complexity rule attachments across 179 files that predate these metrics, listed per file
+# 478 size/complexity rule attachments across 176 files that predate these metrics, listed per file
 # rather than switching the rules off, so the metrics still fire on every file NOT listed
 # here -- new code stays covered, and each path below is one discrete unit of work.
 #
-# These counts describe THIS BLOCK only. A fresh uncached lint run for #1567 reports 1,578
-# suppressed findings across these 179 files; one attachment can suppress many findings.
+# These counts describe THIS BLOCK only. A fresh uncached lint run for #1567 reports 1,568
+# suppressed findings across these 176 files; one attachment can suppress many findings.
 # Prefer a fresh TOML parse and uncached lint run over historical issue counts. ~keep
 # TODO(xberg-io/xberg#1567): pay this down file by file and delete each entry as it goes green.
 # Do not add new paths here without a very good reason. ~keep
@@ -843,7 +843,6 @@ traineddata = "traineddata"
 "crates/xberg/src/extraction/pptx/tests.rs" = ["file-too-long", "function-too-long"]
 "crates/xberg/src/extractors/archive.rs" = ["function-too-long", "too-many-parameters"]
 "crates/xberg/src/extractors/asciidoc.rs" = ["file-too-long"]
-"crates/xberg/src/extractors/bibtex.rs" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep"]
 "crates/xberg/src/extractors/djot_format/extractor.rs" = [
   "cyclomatic-complexity",
   "file-too-long",
@@ -865,8 +864,6 @@ traineddata = "traineddata"
   "too-many-parameters",
 ]
 "crates/xberg/src/extractors/email.rs" = ["cyclomatic-complexity", "file-too-long", "function-too-long"]
-"crates/xberg/src/extractors/epub/content.rs" = ["function-too-long"]
-"crates/xberg/src/extractors/epub/metadata.rs" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep"]
 "crates/xberg/src/extractors/epub/mod.rs" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep"]
 "crates/xberg/src/extractors/excel.rs" = ["file-too-long", "function-too-long", "nesting-too-deep"]
 "crates/xberg/src/extractors/fictionbook.rs" = [

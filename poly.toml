@@ -908,7 +908,6 @@ root = "packages/elixir"
 "crates/xberg/src/extraction/pptx/tests.rs" = ["file-too-long", "function-too-long"]
 "crates/xberg/src/extractors/archive.rs" = ["function-too-long", "too-many-parameters"]
 "crates/xberg/src/extractors/asciidoc.rs" = ["file-too-long"]
-"crates/xberg/src/extractors/bibtex.rs" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep"]
 "crates/xberg/src/extractors/djot_format/extractor.rs" = [
   "cyclomatic-complexity",
   "file-too-long",
@@ -930,8 +929,6 @@ root = "packages/elixir"
   "too-many-parameters",
 ]
 "crates/xberg/src/extractors/email.rs" = ["cyclomatic-complexity", "file-too-long", "function-too-long"]
-"crates/xberg/src/extractors/epub/content.rs" = ["function-too-long"]
-"crates/xberg/src/extractors/epub/metadata.rs" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep"]
 "crates/xberg/src/extractors/epub/mod.rs" = ["cyclomatic-complexity", "function-too-long", "nesting-too-deep"]
 "crates/xberg/src/extractors/excel.rs" = ["file-too-long", "function-too-long", "nesting-too-deep"]
 "crates/xberg/src/extractors/fictionbook.rs" = [

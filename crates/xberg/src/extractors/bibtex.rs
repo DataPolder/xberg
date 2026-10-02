@@ -27,6 +27,145 @@ use biblatex::{Bibliography, ChunksExt};
 /// entries, authors, publication years, and entry type distribution.
 pub struct BibtexExtractor;
 
+#[cfg(feature = "office")]
+#[derive(Default)]
+struct ParsedBibliography {
+    entries: Vec<(String, serde_json::Map<String, serde_json::Value>)>,
+    authors: AHashSet<String>,
+    years: AHashSet<u32>,
+    entry_types: AHashMap<String, i32>,
+    formatted_entries: String,
+}
+
+#[cfg(feature = "office")]
+fn collect_entry_fields(entry: &biblatex::Entry, parsed: &mut ParsedBibliography) -> AHashMap<String, String> {
+    let mut fields = AHashMap::new();
+    fields.insert("entry_type".to_string(), entry.entry_type.to_string());
+    parsed
+        .formatted_entries
+        .push_str(&format!("@{}{{{},\n", entry.entry_type, entry.key));
+
+    for (field_name, field_chunks) in &entry.fields {
+        let field_text = field_chunks.format_verbatim();
+        parsed
+            .formatted_entries
+            .push_str(&format!("  {} = {{{}}},\n", field_name, field_text));
+        fields.insert(field_name.to_lowercase(), field_text.clone());
+
+        match field_name.to_ascii_lowercase().as_str() {
+            "author" => parsed.authors.extend(
+                field_text
+                    .split(" and ")
+                    .map(str::trim)
+                    .filter(|author| !author.is_empty())
+                    .map(str::to_string),
+            ),
+            "year" => {
+                if let Ok(year) = field_text.parse::<u32>() {
+                    parsed.years.insert(year);
+                }
+            }
+            _ => {}
+        }
+    }
+    parsed.formatted_entries.push_str("}\n\n");
+    fields
+}
+
+#[cfg(feature = "office")]
+fn add_entry_links(
+    builder: &mut InternalDocumentBuilder,
+    fields: &AHashMap<String, String>,
+    label: &str,
+) -> Vec<TextAnnotation> {
+    let mut annotations = Vec::new();
+    for (field, citation) in [("url", false), ("doi", true)] {
+        let Some(value) = fields.get(field).filter(|value| !value.is_empty()) else {
+            continue;
+        };
+        let annotation_url = if citation && !value.starts_with("http") {
+            format!("https://doi.org/{value}")
+        } else {
+            value.clone()
+        };
+        if citation {
+            builder.push_uri(ExtractedUri::citation(
+                format!("https://doi.org/{value}"),
+                Some(label.to_string()),
+            ));
+        } else {
+            builder.push_uri(ExtractedUri::hyperlink(value, Some(label.to_string())));
+        }
+        annotations.push(TextAnnotation {
+            start: 0,
+            end: 0,
+            kind: AnnotationKind::Link {
+                url: annotation_url,
+                title: Some(label.to_string()),
+            },
+        });
+    }
+    annotations
+}
+
+#[cfg(feature = "office")]
+fn append_bibliography_entry(
+    entry: &biblatex::Entry,
+    parsed: &mut ParsedBibliography,
+    builder: &mut InternalDocumentBuilder,
+) {
+    let entry_start = parsed.formatted_entries.len();
+    let mut fields = collect_entry_fields(entry, parsed);
+    let label = fields
+        .get("title")
+        .filter(|title| !title.is_empty())
+        .cloned()
+        .unwrap_or_else(|| entry.key.clone());
+    let citation_text = parsed.formatted_entries[entry_start..].trim().to_string();
+    let citation_index = builder.push_citation(&citation_text, &entry.key, None);
+    let mut annotations = add_entry_links(builder, &fields, &label);
+    for annotation in &mut annotations {
+        annotation.end = citation_text.len() as u32;
+    }
+    if !annotations.is_empty() {
+        builder.set_annotations(citation_index, annotations);
+    }
+
+    let fields_json = fields
+        .iter()
+        .map(|(key, value)| (key.clone(), serde_json::json!(value)))
+        .collect();
+    builder.set_attributes(citation_index, std::mem::take(&mut fields));
+    *parsed
+        .entry_types
+        .entry(entry.entry_type.to_string().to_lowercase())
+        .or_insert(0) += 1;
+    parsed.entries.push((entry.key.clone(), fields_json));
+}
+
+#[cfg(feature = "office")]
+fn parse_bibliography(input: &str, builder: &mut InternalDocumentBuilder) -> ParsedBibliography {
+    let mut parsed = ParsedBibliography::default();
+    match Bibliography::parse(input) {
+        Ok(bibliography) => {
+            for entry in bibliography.iter() {
+                append_bibliography_entry(entry, &mut parsed, builder);
+            }
+        }
+        Err(_error) => {
+            #[cfg(feature = "otel")]
+            tracing::warn!("BibTeX parsing failed, returning raw content: {}", _error);
+            builder.add_warning(crate::core::diagnostics::warning(
+                "bibtex",
+                "BibTeX parsing failed; returning raw text as a fallback",
+            ));
+            parsed.formatted_entries = input.to_string();
+            builder.push_code(&parsed.formatted_entries, None, None, None);
+        }
+    }
+    parsed
+}
+
 impl BibtexExtractor {
     /// Create a new BibTeX extractor.
     pub(crate) fn new() -> Self {
@@ -84,177 +223,45 @@ impl InternalDocumentExtractor for BibtexExtractor {
         _config: &ExtractionConfig,
     ) -> Result<InternalDocument> {
         let bibtex_str = String::from_utf8_lossy(content);
-
-        let mut entries_vec = Vec::new();
-        let mut authors_set = AHashSet::new();
-        let mut years_set = AHashSet::new();
-        let mut entry_types_map: AHashMap<String, i32> = AHashMap::new();
-        let mut formatted_entries = String::new();
-
         let mut builder = InternalDocumentBuilder::new("bibtex");
-
-        match Bibliography::parse(&bibtex_str) {
-            Ok(bib) => {
-                for entry in bib.iter() {
-                    let key = entry.key.clone();
-                    let entry_type = entry.entry_type.clone();
-
-                    let entry_start = formatted_entries.len();
-
-                    let mut entry_fields: AHashMap<String, String> = AHashMap::new();
-                    entry_fields.insert("entry_type".to_string(), entry_type.to_string());
-
-                    formatted_entries.push_str(&format!("@{}{{{},\n", entry_type, key));
-
-                    for (field_name, field_chunks) in &entry.fields {
-                        let field_text = field_chunks.format_verbatim();
-                        formatted_entries.push_str(&format!("  {} = {{{}}},\n", field_name, field_text));
-
-                        entry_fields.insert(field_name.to_lowercase(), field_text.clone());
-
-                        if field_name.to_lowercase() == "author" {
-                            for author in field_text.split(" and ") {
-                                let trimmed_author = author.trim().to_string();
-                                if !trimmed_author.is_empty() {
-                                    authors_set.insert(trimmed_author);
-                                }
-                            }
-                        }
-
-                        if field_name.to_lowercase() == "year"
-                            && let Ok(year) = field_text.parse::<u32>()
-                        {
-                            years_set.insert(year);
-                        }
-                    }
-
-                    formatted_entries.push_str("}\n\n");
-
-                    let link_label = entry_fields
-                        .get("title")
-                        .filter(|t| !t.is_empty())
-                        .cloned()
-                        .unwrap_or_else(|| key.clone());
-
-                    if let Some(url) = entry_fields.get("url")
-                        && !url.is_empty()
-                    {
-                        builder.push_uri(ExtractedUri::hyperlink(url.as_str(), Some(link_label.clone())));
-                    }
-                    if let Some(doi) = entry_fields.get("doi")
-                        && !doi.is_empty()
-                    {
-                        builder.push_uri(ExtractedUri::citation(
-                            format!("https://doi.org/{}", doi),
-                            Some(link_label.clone()),
-                        ));
-                    }
-
-                    let citation_text = formatted_entries[entry_start..].trim().to_string();
-                    let idx = builder.push_citation(&citation_text, &key, None);
-
-                    let mut link_annotations = Vec::new();
-                    let text_len = citation_text.len() as u32;
-
-                    if let Some(url) = entry_fields.get("url")
-                        && !url.is_empty()
-                    {
-                        link_annotations.push(TextAnnotation {
-                            start: 0,
-                            end: text_len,
-                            kind: AnnotationKind::Link {
-                                url: url.clone(),
-                                title: Some(link_label.clone()),
-                            },
-                        });
-                    }
-
-                    if let Some(doi) = entry_fields.get("doi")
-                        && !doi.is_empty()
-                    {
-                        let doi_url = if doi.starts_with("http") {
-                            doi.clone()
-                        } else {
-                            format!("https://doi.org/{doi}")
-                        };
-                        link_annotations.push(TextAnnotation {
-                            start: 0,
-                            end: text_len,
-                            kind: AnnotationKind::Link {
-                                url: doi_url,
-                                title: Some(link_label.clone()),
-                            },
-                        });
-                    }
-
-                    if !link_annotations.is_empty() {
-                        builder.set_annotations(idx, link_annotations);
-                    }
-
-                    let fields_json: serde_json::Map<String, serde_json::Value> = entry_fields
-                        .iter()
-                        .map(|(k, v)| (k.clone(), serde_json::json!(v)))
-                        .collect();
-
-                    if !entry_fields.is_empty() {
-                        builder.set_attributes(idx, std::mem::take(&mut entry_fields));
-                    }
-
-                    *entry_types_map
-                        .entry(entry_type.to_string().to_lowercase())
-                        .or_insert(0) += 1;
-
-                    entries_vec.push((key, fields_json));
-                }
-            }
-            Err(_err) => {
-                #[cfg(feature = "otel")]
-                tracing::warn!("BibTeX parsing failed, returning raw content: {}", _err);
-                builder.add_warning(crate::core::diagnostics::warning(
-                    "bibtex",
-                    "BibTeX parsing failed; returning raw text as a fallback",
-                ));
-                formatted_entries = bibtex_str.to_string();
-                builder.push_code(&formatted_entries, None, None, None);
-            }
-        }
-
-        let citation_keys: Vec<String> = entries_vec.iter().map(|(k, _)| k.clone()).collect();
-
-        let mut authors_list: Vec<String> = authors_set.into_iter().collect();
+        let parsed = parse_bibliography(&bibtex_str, &mut builder);
+        let citation_keys = parsed.entries.iter().map(|(key, _)| key.clone()).collect();
+        let mut authors_list: Vec<String> = parsed.authors.into_iter().collect();
         authors_list.sort();
-
-        let year_range = if !years_set.is_empty() {
-            let min_year = years_set.iter().min().copied();
-            let max_year = years_set.iter().max().copied();
-            let mut years: Vec<u32> = years_set.into_iter().collect();
+        let year_range = if parsed.years.is_empty() {
+            None
+        } else {
+            let min_year = parsed.years.iter().min().copied();
+            let max_year = parsed.years.iter().max().copied();
+            let mut years: Vec<u32> = parsed.years.into_iter().collect();
             years.sort_unstable();
             Some(YearRange {
                 min: min_year,
                 max: max_year,
                 years,
             })
-        } else {
-            None
         };
-
-        let entry_types = if !entry_types_map.is_empty() {
-            let typed: BTreeMap<String, usize> = entry_types_map.into_iter().map(|(k, v)| (k, v as usize)).collect();
-            Some(typed)
-        } else {
+        let entry_types = if parsed.entry_types.is_empty() {
             None
+        } else {
+            Some(
+                parsed
+                    .entry_types
+                    .into_iter()
+                    .map(|(key, count)| (key, count as usize))
+                    .collect::<BTreeMap<_, _>>(),
+            )
         };
-
         let bibtex_metadata = BibtexMetadata {
-            entry_count: entries_vec.len(),
+            entry_count: parsed.entries.len(),
             citation_keys,
             authors: authors_list.clone(),
             year_range,
             entry_types,
         };
-
         let mut additional: AHashMap<Cow<'static, str>, serde_json::Value> = AHashMap::new();
-        let entries_metadata: Vec<serde_json::Value> = entries_vec
+        let entries_metadata: Vec<serde_json::Value> = parsed
+            .entries
             .iter()
             .map(|(key, fields)| {
                 let mut entry_obj = serde_json::Map::new();

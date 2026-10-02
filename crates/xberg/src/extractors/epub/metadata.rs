@@ -167,217 +167,256 @@ fn has_renderable_extension(href: &str) -> bool {
         .unwrap_or(false)
 }
 
+struct OpfParseState {
+    package: EpubPackageDocument,
+    manifest: BTreeMap<String, ManifestItem>,
+    warnings: Vec<ProcessingWarning>,
+    budget_depth: usize,
+    dates: Vec<(Option<String>, String)>,
+    titles: Vec<(Option<String>, String)>,
+    main_title_id: Option<String>,
+}
+
+impl OpfParseState {
+    fn new() -> Self {
+        Self {
+            package: EpubPackageDocument {
+                metadata: OepbMetadata::default(),
+                manifest: BTreeMap::new(),
+                spine_items: Vec::new(),
+                guide_toc_paths: BTreeSet::new(),
+            },
+            manifest: BTreeMap::new(),
+            warnings: Vec::new(),
+            budget_depth: 0,
+            dates: Vec::new(),
+            titles: Vec::new(),
+            main_title_id: None,
+        }
+    }
+}
+
+fn account_opf_node(
+    node: roxmltree::Node<'_, '_>,
+    budget: &mut SecurityBudget,
+    budget_depth: &mut usize,
+) -> Result<()> {
+    budget.step()?;
+    if !node.is_element() {
+        return Ok(());
+    }
+    let node_depth = node.ancestors().filter(|ancestor| ancestor.is_element()).count();
+    while *budget_depth > node_depth {
+        budget.leave();
+        *budget_depth -= 1;
+    }
+    while *budget_depth < node_depth {
+        budget.enter()?;
+        *budget_depth += 1;
+    }
+    for attribute in node.attributes() {
+        budget.check_attr(attribute.name(), attribute.value())?;
+    }
+    Ok(())
+}
+
+fn is_package_dublin_core(node: roxmltree::Node<'_, '_>) -> bool {
+    node.tag_name()
+        .namespace()
+        .is_some_and(|namespace| namespace.starts_with(DUBLIN_CORE_NAMESPACE_PREFIX))
+        && !node
+            .ancestors()
+            .any(|ancestor| ancestor.tag_name().name().eq_ignore_ascii_case("collection"))
+}
+
+fn collect_dublin_core_metadata(
+    node: roxmltree::Node<'_, '_>,
+    unique_identifier_id: Option<&str>,
+    budget: &mut SecurityBudget,
+    state: &mut OpfParseState,
+) -> Result<()> {
+    let Some(text) = node.text().map(str::trim).filter(|text| !text.is_empty()) else {
+        return Ok(());
+    };
+    budget.check_entity(text)?;
+    budget.account_text(text.len())?;
+    let text = text.to_string();
+    match node.tag_name().name().to_ascii_lowercase().as_str() {
+        "title" => state.titles.push((node.attribute("id").map(str::to_string), text)),
+        "creator" => state.package.metadata.creators.push(text),
+        "date" => {
+            let event = node
+                .attributes()
+                .find(|attribute| attribute.name() == "event")
+                .map(|attribute| attribute.value().to_ascii_lowercase());
+            state.dates.push((event, text));
+        }
+        "language" => {
+            state.package.metadata.language.get_or_insert(text);
+        }
+        "identifier" => {
+            let is_unique = node.attribute("id").is_some_and(|id| Some(id) == unique_identifier_id);
+            if is_unique {
+                state.package.metadata.identifier = Some(text);
+            } else {
+                state.package.metadata.identifier.get_or_insert(text);
+            }
+        }
+        "publisher" => {
+            state.package.metadata.publisher.get_or_insert(text);
+        }
+        "subject" => state.package.metadata.subjects.push(text),
+        "description" => {
+            state.package.metadata.description.get_or_insert(text);
+        }
+        "rights" => {
+            state.package.metadata.rights.get_or_insert(text);
+        }
+        "coverage" => {
+            state.package.metadata.coverage.get_or_insert(text);
+        }
+        "format" => {
+            state.package.metadata.format.get_or_insert(text);
+        }
+        "relation" => {
+            state.package.metadata.relation.get_or_insert(text);
+        }
+        "source" => {
+            state.package.metadata.source.get_or_insert(text);
+        }
+        "type" => {
+            state.package.metadata.dc_type.get_or_insert(text);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn collect_manifest_item(node: roxmltree::Node<'_, '_>, opf_dir: &str, state: &mut OpfParseState) {
+    let (Some(id), Some(href)) = (node.attribute("id"), node.attribute("href")) else {
+        return;
+    };
+    let (path, path_resolution_error) = match resolve_path(opf_dir, href) {
+        Ok(resolved_href) => (Some(resolved_href.path), None),
+        Err(error) => (None, Some(error.to_string())),
+    };
+    state.manifest.insert(
+        id.to_string(),
+        ManifestItem {
+            raw_href: href.to_string(),
+            path,
+            path_resolution_error,
+            media_type: node.attribute("media-type").map(ToString::to_string),
+            fallback: node.attribute("fallback").map(ToString::to_string),
+            properties: node.attribute("properties").map(ToString::to_string),
+        },
+    );
+}
+
+fn collect_guide_reference(node: roxmltree::Node<'_, '_>, opf_dir: &str, state: &mut OpfParseState) {
+    if !node
+        .attribute("type")
+        .is_some_and(|kind| kind.eq_ignore_ascii_case("toc"))
+    {
+        return;
+    }
+    let Some(href) = node.attribute("href") else {
+        return;
+    };
+    match resolve_path(opf_dir, href) {
+        Ok(resolved_href) => {
+            state.package.guide_toc_paths.insert(resolved_href.path);
+        }
+        Err(error) => state.warnings.push(ProcessingWarning {
+            source: std::borrow::Cow::Borrowed("epub"),
+            message: std::borrow::Cow::Owned(format!("Skipping malformed guide reference '{}': {}", href, error)),
+        }),
+    }
+}
+
+fn collect_package_node(node: roxmltree::Node<'_, '_>, opf_dir: &str, state: &mut OpfParseState) {
+    match node.tag_name().name() {
+        "meta" if node.attribute("property") == Some("title-type") && node.text().map(str::trim) == Some("main") => {
+            if let Some(refined) = node.attribute("refines").and_then(|id| id.strip_prefix('#')) {
+                state.main_title_id.get_or_insert(refined.to_string());
+            }
+        }
+        "item" => collect_manifest_item(node, opf_dir, state),
+        "reference" => collect_guide_reference(node, opf_dir, state),
+        _ => {}
+    }
+}
+
+fn select_cover(root: roxmltree::Node<'_, '_>, state: &mut OpfParseState) {
+    let cover_from_property = state
+        .manifest
+        .values()
+        .find(|item| item.has_property("cover-image"))
+        .filter(|item| item.is_image());
+    let cover_from_meta = root
+        .descendants()
+        .find(|node| node.tag_name().name() == "meta" && node.attribute("name") == Some("cover"))
+        .and_then(|node| node.attribute("content"))
+        .and_then(|id| state.manifest.get(id))
+        .filter(|item| item.is_image());
+    if let Some(path) = cover_from_property
+        .or(cover_from_meta)
+        .and_then(|item| item.resolved_path().ok())
+    {
+        state.package.metadata.cover_image_href = Some(path.to_string());
+    }
+}
+
+fn collect_spine_items(root: roxmltree::Node<'_, '_>, state: &mut OpfParseState) {
+    state.package.spine_items.extend(
+        root.descendants()
+            .filter(|node| node.tag_name().name() == "itemref")
+            .filter_map(|node| node.attribute("idref"))
+            .map(|idref| EpubSpineItem {
+                idref: idref.to_string(),
+            }),
+    );
+}
+
 /// Parse OPF file and extract metadata and spine order
 pub(super) fn parse_opf(
     xml: &str,
     opf_dir: &str,
     budget: &mut SecurityBudget,
 ) -> Result<(EpubPackageDocument, Vec<ProcessingWarning>)> {
-    match super::parsing::parse_packaging_xml(xml) {
-        Ok(doc) => {
-            let root = doc.root();
-
-            let mut warnings = Vec::new();
-            let mut package = EpubPackageDocument {
-                metadata: OepbMetadata::default(),
-                manifest: BTreeMap::new(),
-                spine_items: Vec::new(),
-                guide_toc_paths: BTreeSet::new(),
-            };
-            let mut manifest: BTreeMap<String, ManifestItem> = BTreeMap::new();
-            let mut budget_depth = 0;
-            let mut dates: Vec<(Option<String>, String)> = Vec::new();
-            let mut titles: Vec<(Option<String>, String)> = Vec::new();
-            let mut main_title_id: Option<String> = None;
-            let unique_identifier_id = root
-                .descendants()
-                .find(|node| node.tag_name().name() == "package")
-                .and_then(|node| node.attribute("unique-identifier"));
-
-            for node in root.descendants() {
-                budget.step()?;
-                if node.is_element() {
-                    let node_depth = node.ancestors().filter(|ancestor| ancestor.is_element()).count();
-                    while budget_depth > node_depth {
-                        budget.leave();
-                        budget_depth -= 1;
-                    }
-                    while budget_depth < node_depth {
-                        budget.enter()?;
-                        budget_depth += 1;
-                    }
-                    for attr in node.attributes() {
-                        budget.check_attr(attr.name(), attr.value())?;
-                    }
-                }
-                // Dublin Core elements inside an EPUB 3 <collection> describe the
-                // collection, not the book, so they are not package metadata.
-                let is_dublin_core = node
-                    .tag_name()
-                    .namespace()
-                    .is_some_and(|namespace| namespace.starts_with(DUBLIN_CORE_NAMESPACE_PREFIX))
-                    && !node
-                        .ancestors()
-                        .any(|ancestor| ancestor.tag_name().name().eq_ignore_ascii_case("collection"));
-                if is_dublin_core {
-                    let local_name = node.tag_name().name().to_ascii_lowercase();
-                    let text = match node.text().map(str::trim).filter(|text| !text.is_empty()) {
-                        Some(text) => {
-                            budget.check_entity(text)?;
-                            budget.account_text(text.len())?;
-                            text.to_string()
-                        }
-                        None => continue,
-                    };
-                    let metadata = &mut package.metadata;
-                    match local_name.as_str() {
-                        "title" => {
-                            titles.push((node.attribute("id").map(str::to_string), text));
-                            continue;
-                        }
-                        "creator" => {
-                            metadata.creators.push(text);
-                            continue;
-                        }
-                        "date" => {
-                            let event = node
-                                .attributes()
-                                .find(|attr| attr.name() == "event")
-                                .map(|attr| attr.value());
-                            dates.push((event.map(str::to_ascii_lowercase), text));
-                            continue;
-                        }
-                        "language" => metadata.language.get_or_insert(text),
-                        "identifier" => {
-                            let is_unique = node.attribute("id").is_some_and(|id| Some(id) == unique_identifier_id);
-                            if is_unique {
-                                metadata.identifier = Some(text);
-                            } else {
-                                metadata.identifier.get_or_insert(text);
-                            }
-                            continue;
-                        }
-                        "publisher" => metadata.publisher.get_or_insert(text),
-                        "subject" => {
-                            metadata.subjects.push(text);
-                            continue;
-                        }
-                        "description" => metadata.description.get_or_insert(text),
-                        "rights" => metadata.rights.get_or_insert(text),
-                        "coverage" => metadata.coverage.get_or_insert(text),
-                        "format" => metadata.format.get_or_insert(text),
-                        "relation" => metadata.relation.get_or_insert(text),
-                        "source" => metadata.source.get_or_insert(text),
-                        "type" => metadata.dc_type.get_or_insert(text),
-                        _ => continue,
-                    };
-                    continue;
-                }
-                match node.tag_name().name() {
-                    // EPUB 3 marks the main title with a refining meta element.
-                    "meta" => {
-                        if node.attribute("property") == Some("title-type")
-                            && node.text().map(str::trim) == Some("main")
-                            && let Some(refined) = node.attribute("refines").and_then(|id| id.strip_prefix('#'))
-                        {
-                            main_title_id.get_or_insert(refined.to_string());
-                        }
-                    }
-                    "item" => {
-                        if let Some(id) = node.attribute("id")
-                            && let Some(href) = node.attribute("href")
-                        {
-                            let (path, path_resolution_error) = match resolve_path(opf_dir, href) {
-                                Ok(resolved_href) => (Some(resolved_href.path), None),
-                                Err(err) => (None, Some(err.to_string())),
-                            };
-                            manifest.insert(
-                                id.to_string(),
-                                ManifestItem {
-                                    raw_href: href.to_string(),
-                                    path,
-                                    path_resolution_error,
-                                    media_type: node.attribute("media-type").map(ToString::to_string),
-                                    fallback: node.attribute("fallback").map(ToString::to_string),
-                                    properties: node.attribute("properties").map(ToString::to_string),
-                                },
-                            );
-                        }
-                    }
-                    "reference" => {
-                        if node
-                            .attribute("type")
-                            .is_some_and(|kind| kind.eq_ignore_ascii_case("toc"))
-                            && let Some(href) = node.attribute("href")
-                        {
-                            match resolve_path(opf_dir, href) {
-                                Ok(resolved_href) => {
-                                    package.guide_toc_paths.insert(resolved_href.path);
-                                }
-                                Err(e) => {
-                                    warnings.push(ProcessingWarning {
-                                        source: std::borrow::Cow::Borrowed("epub"),
-                                        message: std::borrow::Cow::Owned(format!(
-                                            "Skipping malformed guide reference '{}': {}",
-                                            href, e
-                                        )),
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            while budget_depth > 0 {
-                budget.leave();
-                budget_depth -= 1;
-            }
-
-            package.metadata.date = select_publication_date(dates);
-            package.metadata.title = titles
-                .iter()
-                .find(|(id, _)| id.is_some() && *id == main_title_id)
-                .or_else(|| titles.first())
-                .map(|(_, text)| text.clone());
-
-            // EPUB 3 marks the cover with a manifest property; EPUB 2 points at it
-            // from a meta element. Either way the item has to be an image: some
-            // producers point the meta at the cover XHTML page instead.
-            let cover_from_property = manifest
-                .values()
-                .find(|item| item.has_property("cover-image"))
-                .filter(|item| item.is_image());
-            let cover_from_meta = root
-                .descendants()
-                .find(|node| node.tag_name().name() == "meta" && node.attribute("name") == Some("cover"))
-                .and_then(|node| node.attribute("content"))
-                .and_then(|id| manifest.get(id))
-                .filter(|item| item.is_image());
-            if let Some(item) = cover_from_property.or(cover_from_meta)
-                && let Ok(path) = item.resolved_path()
-            {
-                package.metadata.cover_image_href = Some(path.to_string());
-            }
-
-            for node in root.descendants() {
-                if node.tag_name().name() == "itemref"
-                    && let Some(idref) = node.attribute("idref")
-                {
-                    package.spine_items.push(EpubSpineItem {
-                        idref: idref.to_string(),
-                    });
-                }
-            }
-
-            package.manifest = manifest;
-            Ok((package, warnings))
+    let document = super::parsing::parse_packaging_xml(xml).map_err(|error| crate::XbergError::Parsing {
+        message: format!("Failed to parse OPF file: {error}"),
+        source: None,
+    })?;
+    let root = document.root();
+    let unique_identifier_id = root
+        .descendants()
+        .find(|node| node.tag_name().name() == "package")
+        .and_then(|node| node.attribute("unique-identifier"));
+    let mut state = OpfParseState::new();
+    for node in root.descendants() {
+        account_opf_node(node, budget, &mut state.budget_depth)?;
+        if is_package_dublin_core(node) {
+            collect_dublin_core_metadata(node, unique_identifier_id, budget, &mut state)?;
+        } else {
+            collect_package_node(node, opf_dir, &mut state);
         }
-        Err(e) => Err(crate::XbergError::Parsing {
-            message: format!("Failed to parse OPF file: {}", e),
-            source: None,
-        }),
     }
+    while state.budget_depth > 0 {
+        budget.leave();
+        state.budget_depth -= 1;
+    }
+    state.package.metadata.date = select_publication_date(std::mem::take(&mut state.dates));
+    state.package.metadata.title = state
+        .titles
+        .iter()
+        .find(|(id, _)| id.is_some() && *id == state.main_title_id)
+        .or_else(|| state.titles.first())
+        .map(|(_, text)| text.clone());
+    select_cover(root, &mut state);
+    collect_spine_items(root, &mut state);
+    state.package.manifest = state.manifest;
+    Ok((state.package, state.warnings))
 }
 
 /// Convert parsed EPUB metadata into the extractor's generic metadata map.
