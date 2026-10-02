@@ -11,8 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-10-02
+
+### Added
+
+- **(onnx): `set_ort_session_options` bounds ONNX Runtime memory for embedding, reranking, sparse-embedding and late-interaction sessions (Rust API only).** `OrtSessionOptions { memory_pattern, cpu_arena, max_threads }` (defaults `true`, `true`, `None`, i.e. unchanged behaviour) can disable ORT's memory-pattern planner and CPU arena, which otherwise retain allocations sized by the largest batch, and set the intra-op thread count. `cpu_arena` affects the CPU execution provider only, and `max_threads` does not change other thread budgets; OpenMP-enabled ORT builds ignore it and must use `OMP_NUM_THREADS`. Changing the options clears only the affected ONNX engine caches so resident engines rebuild with them; static embeddings, layout, table, Whisper, paddle and GLiNER sessions are unaffected.
+- **(wasm): arrays of generated class values expose `copyForTransfer()`.** JavaScript callers can
+  clone handle-backed elements before passing an array into an owning constructor or setter,
+  avoiding invalidating objects they still use. Class-valued getters document that returned
+  values are detached copies and must be reassigned after mutation.
+
 ### Fixed
 
+- **(csharp, java): custom string variants preserve their payloads across JSON.** The generated
+  `EntityCategory`, `OutputFormat`, and `PiiCategory` APIs now use sealed record hierarchies for
+  externally tagged unit and `Custom(String)` variants instead of payload-dropping plain enums.
+  This is a breaking generated API correction in the patch release: callers must construct or
+  match the generated variant records rather than enum constants.
 - **(docx): a table, text box or image after a nested list no longer ends up inside the list.** These blocks closed only the innermost list level and then stopped tracking the rest, so after a list two or more levels deep the block and the content after it rendered under the last list item. They now close every open level, as headings and paragraphs already did. (GH#2035)
 
 ## [1.3.2] - 2026-10-01
