@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **(markdown): DOCX and ODT tabs render as spaces instead of literal `&#9;` entities.** This keeps
+  label-value text and tab-indented lines readable in Markdown output. (GH#2039)
 - **(csharp, java): custom string variants preserve their payloads across JSON.** The generated
   `EntityCategory`, `OutputFormat`, and `PiiCategory` APIs now use sealed record hierarchies for
   externally tagged unit and `Custom(String)` variants instead of payload-dropping plain enums.

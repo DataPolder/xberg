@@ -54,11 +54,11 @@ fn unescape_backslash_sequences<'a>(input: &'a str, targets: &[char]) -> Cow<'a,
     Cow::Owned(out)
 }
 
-/// Single-pass replacement of `&#10;` → space and `&#2;` → removed.
+/// ~keep Single-pass replacement of `&#9;` / `&#10;` → space and `&#2;` → removed.
 ///
-/// Returns [`Cow::Borrowed`] when neither entity appears (zero allocation).
+/// Returns [`Cow::Borrowed`] when none of these entities appear (zero allocation).
 fn replace_html_entities(input: &str) -> Cow<'_, str> {
-    if !input.contains("&#10;") && !input.contains("&#2;") {
+    if !input.contains("&#9;") && !input.contains("&#10;") && !input.contains("&#2;") {
         return Cow::Borrowed(input);
     }
 
@@ -69,7 +69,7 @@ fn replace_html_entities(input: &str) -> Cow<'_, str> {
         if let Some(pos) = rest.find("&#") {
             out.push_str(&rest[..pos]);
             let after = &rest[pos..];
-            if let Some(tail) = after.strip_prefix("&#10;") {
+            if let Some(tail) = after.strip_prefix("&#9;").or_else(|| after.strip_prefix("&#10;")) {
                 out.push(' ');
                 rest = tail;
             } else if let Some(tail) = after.strip_prefix("&#2;") {
@@ -647,6 +647,13 @@ mod tests {
         let result = replace_html_entities("line1&#10;line2");
         assert!(matches!(result, Cow::Owned(_)));
         assert_eq!(result, "line1 line2");
+    }
+
+    #[test]
+    fn replace_html_entities_tab_entity_becomes_space() {
+        let result = replace_html_entities("Name:&#9;Alice Example\n&#9;Indented\nAlpha&#9;Beta");
+        assert!(matches!(result, Cow::Owned(_)));
+        assert_eq!(result, "Name: Alice Example\n Indented\nAlpha Beta");
     }
 
     #[test]
