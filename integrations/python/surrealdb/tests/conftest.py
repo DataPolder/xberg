@@ -10,8 +10,6 @@ import pytest
 # ``ExtractedDocument`` constructor rejects, so build ``Metadata`` from the native
 # module to match the exact shape produced at runtime. ~keep
 from xberg import (
-    Chunk,
-    ChunkMetadata,
     ChunkType,
     ExtractedDocument,
     ExtractionResult,
@@ -20,9 +18,10 @@ from xberg import (
 )
 
 # The native ``ExtractedDocument`` constructor rejects the public ``options`` dataclasses
-# (``Metadata``, ``Table``, ``Entity``, ``DocumentSummary``), so build these from the native
-# module to match the exact shape produced at runtime. ~keep
-from xberg._xberg import DocumentSummary, Entity, EntityCategory, Metadata, SummaryStrategy, Table
+# (``Chunk``, ``ChunkMetadata``, ``Metadata``, ``Table``, ``Entity``,
+# ``DocumentSummary``), so build these from the native module to match the exact shape
+# produced at runtime. ~keep
+from xberg._xberg import Chunk, ChunkMetadata, DocumentSummary, Entity, EntityCategory, Metadata, SummaryStrategy, Table
 
 from surrealdb_xberg import AsyncSurrealQueryable
 from surrealdb_xberg.connector import DocumentConnector

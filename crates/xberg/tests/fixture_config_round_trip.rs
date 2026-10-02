@@ -68,6 +68,16 @@ fn leaves(value: &serde_json::Value, prefix: &str, out: &mut Vec<(String, serde_
                 leaves(child, &path, out);
             }
         }
+        serde_json::Value::Array(items) if !items.is_empty() => {
+            for (index, child) in items.iter().enumerate() {
+                let path = if prefix.is_empty() {
+                    index.to_string()
+                } else {
+                    format!("{prefix}.{index}")
+                };
+                leaves(child, &path, out);
+            }
+        }
         serde_json::Value::Null => {}
         leaf => out.push((prefix.to_string(), leaf.clone())),
     }
@@ -77,7 +87,10 @@ fn leaves(value: &serde_json::Value, prefix: &str, out: &mut Vec<(String, serde_
 fn lookup<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
     let mut current = value;
     for segment in path.split('.') {
-        current = current.get(segment)?;
+        current = match current {
+            serde_json::Value::Array(items) => items.get(segment.parse::<usize>().ok()?)?,
+            _ => current.get(segment)?,
+        };
     }
     Some(current)
 }

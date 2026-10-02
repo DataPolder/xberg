@@ -5,13 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from surrealdb.errors import ServerError
 from xberg import (
-    Chunk,
-    ChunkMetadata,
     ChunkType,
     EmbeddingModelType,
     ExtractedDocument,
     ExtractionResult,
 )
+from xberg._xberg import Chunk, ChunkMetadata
 
 from tests.conftest import EMBEDDING_DIMENSIONS, make_chunk, make_document
 from surrealdb_xberg._base import _check_insert_result
@@ -30,6 +29,17 @@ def _single_result(document: ExtractedDocument) -> ExtractionResult:
 def _probe_result(dimensions: int) -> ExtractionResult:
     chunk = make_chunk(0, embedding=[0.1] * dimensions)
     return ExtractionResult(results=[make_document(chunks=[chunk])])
+
+
+def test_make_document_accepts_runtime_chunk() -> None:
+    chunk = make_chunk(0)
+
+    document = make_document(chunks=[chunk])
+
+    assert document.chunks is not None
+    assert len(document.chunks) == 1
+    assert isinstance(document.chunks[0], Chunk)
+    assert document.chunks[0].content == chunk.content
 
 
 def test_pipeline_defaults(mock_client: AsyncMock) -> None:

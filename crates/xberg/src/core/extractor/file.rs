@@ -293,6 +293,8 @@ pub(in crate::core::extractor) async fn extract_file_with_extractor(
         return extract_file_uncached(path, mime_type, config).await;
     }
 
+    crate::core::pipeline::prepare_extraction_cache_lifecycle(config).await?;
+
     let content_hash = crate::cache::blake3_hash_file(path)?;
     let config_hash = hash_extraction_config(config, mime_type);
     let cache_key = format!("{content_hash}_{config_hash}");

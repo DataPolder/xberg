@@ -43,6 +43,18 @@ use initialization::{builtin_registration_error, initialize_processor_cache_for_
 
 const CAPTIONING_PROCESSOR_NAME: &str = "captioning";
 const BUILTIN_REGISTRATION_SOURCE: &str = "builtin_registration";
+
+pub(crate) async fn prepare_extraction_cache_lifecycle(config: &ExtractionConfig) -> Result<()> {
+    let postprocessing_enabled = config
+        .postprocessor
+        .as_ref()
+        .is_none_or(|processor_config| processor_config.enabled);
+    if postprocessing_enabled {
+        // ~keep Stabilize cold-start built-in registration before taking cache lifecycle snapshots.
+        drop(initialize_processor_cache_for_async_pipeline().await?);
+    }
+    Ok(())
+}
 // `pub(crate)` so `pdf::native::images` can reference this SAME constant when deciding, before
 // any per-image decode, whether a full-page image will end up excluded here anyway (GH#1732) --
 // the two checks must use one number, never two independently-maintained literals. ~keep
