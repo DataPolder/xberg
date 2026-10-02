@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **(html): inline `data:` media handling is configurable across Rust and every generated binding.**
+  `ConversionOptions.inline_data_media` and the new `InlineDataMedia` enum let callers keep the
+  full data URL (the default), emit only alternative text, or drop the element.
 - **(onnx): `set_ort_session_options` bounds ONNX Runtime memory for embedding, reranking, sparse-embedding and late-interaction sessions (Rust API only).** `OrtSessionOptions { memory_pattern, cpu_arena, max_threads }` (defaults `true`, `true`, `None`, i.e. unchanged behaviour) can disable ORT's memory-pattern planner and CPU arena, which otherwise retain allocations sized by the largest batch, and set the intra-op thread count. `cpu_arena` affects the CPU execution provider only, and `max_threads` does not change other thread budgets; OpenMP-enabled ORT builds ignore it and must use `OMP_NUM_THREADS`. Changing the options clears only the affected ONNX engine caches so resident engines rebuild with them; static embeddings, layout, table, Whisper, paddle and GLiNER sessions are unaffected.
 - **(wasm): arrays of generated class values expose `copyForTransfer()`.** JavaScript callers can
   clone handle-backed elements before passing an array into an owning constructor or setter,
@@ -23,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **(markdown): DOCX and ODT tabs render as spaces instead of literal `&#9;` entities.** This keeps
+  label-value text and tab-indented lines readable in Markdown output. (GH#2039)
 - **(csharp, java): custom string variants preserve their payloads across JSON.** The generated
   `EntityCategory`, `OutputFormat`, and `PiiCategory` APIs now use sealed record hierarchies for
   externally tagged unit and `Custom(String)` variants instead of payload-dropping plain enums.

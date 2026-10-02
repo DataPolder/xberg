@@ -410,6 +410,9 @@ exclude = [
 # generator output, not a size regression to fix. ~keep
 file-safety-exclude = [
   "packages/swift/Sources/RustBridge/xberg-swift.swift",
+  # Alef emits the complete Zig API as one generated source file; adding a public type pushed it
+  # past the generic 500 KiB guard, and splitting it requires a generator change. ~keep
+  "packages/zig/src/xberg.zig",
   # alef generates one API reference page per language from the whole public surface, so
   # these grow with the API and have no split option. api-rust.md crossed the 500 KiB limit
   # on the 1.1.4 regen and api-c.md is 12 KiB behind it. Generator output, not a size
