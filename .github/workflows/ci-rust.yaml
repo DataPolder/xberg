@@ -173,6 +173,13 @@ jobs:
         run: cargo clippy --locked -p xberg-candle-ocr --features "trocr,paddleocr-vl,glm-ocr,deepseek-ocr" --all-targets -- -D warnings
         shell: bash
 
+      # The clippy feature matrix leaves several incompatible copies of the dependency graph in
+      # target/. Clear those lint-only artifacts before the equally broad test matrix fills the
+      # runner, while keeping unit tests and doctests adjacent so they still share artifacts. ~keep
+      - name: Reclaim clippy artifacts
+        run: task rust:clean
+        shell: bash
+
       - name: Run tests
         # ~keep `task rust:test:ci` is gated on its exit code alone, which cannot distinguish a
         # real pass from a run that executed nothing: a feature-gating typo that drops an entire
