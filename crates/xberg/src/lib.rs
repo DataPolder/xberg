@@ -111,6 +111,10 @@ pub mod reranking;
 #[cfg(feature = "onnx-runtime")]
 pub(crate) mod onnx;
 
+#[cfg(feature = "onnx-runtime")]
+#[cfg_attr(alef, alef(skip))]
+pub use onnx::{OrtSessionOptions, ort_session_options, set_ort_session_options};
+
 /// Sparse (SPLADE) learned embeddings for hybrid dense+sparse retrieval.
 #[cfg(any(feature = "sparse-embedding-presets", feature = "sparse-embeddings"))]
 pub mod sparse_embeddings;

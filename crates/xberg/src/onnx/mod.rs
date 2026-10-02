@@ -468,10 +468,91 @@ pub(crate) fn load_tokenizer(
     Ok(tokenizer)
 }
 
+/// Process-wide memory and threading options applied to the ONNX Runtime sessions of
+/// embeddings, reranking, sparse embeddings and late-interaction engines. Rust API only.
+///
+/// Other ORT users (layout detection, SLANet, TATR, the inference backend, Whisper,
+/// paddle OCR, GLiNER) build their own sessions and are not affected.
+///
+/// The defaults reproduce the historical behaviour: ORT's memory-pattern planner and
+/// CPU arena stay enabled and the intra-op thread count follows the default thread
+/// budget. Both ORT features retain allocations sized by the largest batch seen, which
+/// is what makes resident memory grow with variable-length embedding batches and never
+/// shrink. Turning them off trades some throughput for a bounded footprint.
+///
+/// Options are read when a session is built. [`set_ort_session_options`] clears the
+/// engine caches when the options change, so resident engines are rebuilt on next use;
+/// a caller still holding an engine keeps its old session until it drops it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(alef, alef(skip))]
+pub struct OrtSessionOptions {
+    /// Enable ORT's memory-pattern optimization. Disable for variable input sizes.
+    /// Default `true`.
+    pub memory_pattern: bool,
+    /// Enable the CPU execution provider's arena allocator. Disable so freed tensors
+    /// return to the system allocator instead of being retained. Applies to the CPU
+    /// execution provider only; CUDA/TensorRT device arenas are unaffected. Default `true`.
+    pub cpu_arena: bool,
+    /// Intra-op thread count. `None` (default) uses the standard thread budget
+    /// (`min(cores, 8)` or the cgroup quota). Values below 1 are raised to 1. Only the
+    /// ORT intra-op pool is changed; `EMBED_SEMAPHORE` and other `resolve_thread_budget`
+    /// callers are unaffected.
+    pub max_threads: Option<usize>,
+}
+
+impl Default for OrtSessionOptions {
+    fn default() -> Self {
+        Self {
+            memory_pattern: true,
+            cpu_arena: true,
+            max_threads: None,
+        }
+    }
+}
+
+static SESSION_OPTIONS: std::sync::RwLock<OrtSessionOptions> = std::sync::RwLock::new(OrtSessionOptions {
+    memory_pattern: true,
+    cpu_arena: true,
+    max_threads: None,
+});
+
+/// Set the [`OrtSessionOptions`] used for ONNX sessions built from now on.
+///
+/// When the options actually change, the embedding, reranking, sparse-embedding and
+/// late-interaction engine caches are cleared so resident engines are rebuilt with the
+/// new options on next use.
+#[cfg_attr(alef, alef(skip))]
+pub fn set_ort_session_options(options: OrtSessionOptions) {
+    let changed = {
+        let mut guard = SESSION_OPTIONS.write().unwrap_or_else(|e| e.into_inner());
+        let changed = *guard != options;
+        *guard = options;
+        changed
+    };
+    if changed {
+        crate::clear_engine_caches();
+    }
+}
+
+/// The [`OrtSessionOptions`] currently in effect.
+#[cfg_attr(alef, alef(skip))]
+pub fn ort_session_options() -> OrtSessionOptions {
+    *SESSION_OPTIONS.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Intra-op thread count for `options`: the explicit cap, else the default budget.
+fn intra_thread_count(options: &OrtSessionOptions) -> usize {
+    match options.max_threads {
+        Some(n) => n.max(1),
+        None => crate::core::config::concurrency::resolve_thread_budget(None),
+    }
+}
+
 /// Build an ORT session for `model_path` with the standard xberg configuration:
 /// `GraphOptimizationLevel::All`, an intra-op thread budget resolved from the
 /// concurrency config, a single inter-op thread, and the execution provider
-/// selected by [`crate::ort_discovery::apply_execution_providers`].
+/// selected by `ort_discovery::apply_execution_providers`, plus the process-wide
+/// [`OrtSessionOptions`].
 ///
 /// The build runs inside `catch_unwind` because ORT can panic on a missing or
 /// incompatible native library; such failures map to
@@ -481,7 +562,18 @@ pub(crate) fn build_session(
     accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
     err: ErrCtor,
 ) -> crate::Result<ort::session::Session> {
-    let thread_budget = crate::core::config::concurrency::resolve_thread_budget(None);
+    build_session_with(&ort_session_options(), accel, err, |b| b.commit_from_file(model_path))
+}
+
+/// [`build_session`] with explicit options and a caller-supplied commit step
+/// (file or memory), so tests never touch the process-global options.
+fn build_session_with(
+    options: &OrtSessionOptions,
+    accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
+    err: ErrCtor,
+    commit: impl FnOnce(&mut ort::session::builder::SessionBuilder) -> ort::Result<ort::session::Session>,
+) -> crate::Result<ort::session::Session> {
+    let thread_budget = intra_thread_count(options);
 
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut builder = ort::session::Session::builder()?;
@@ -494,8 +586,20 @@ pub(crate) fn build_session(
         builder = builder
             .with_inter_threads(1)
             .map_err(|e| ort::Error::new(e.message()))?;
+        if !options.memory_pattern {
+            builder = builder
+                .with_memory_pattern(false)
+                .map_err(|e| ort::Error::new(e.message()))?;
+        }
         builder = crate::ort_discovery::apply_execution_providers(builder, accel)?;
-        builder.commit_from_file(model_path)
+        if !options.cpu_arena {
+            // Only sets the session-wide CPU arena flag; it does not change which
+            // execution providers run the graph.
+            builder = builder
+                .with_execution_providers([ort::ep::CPU::default().with_arena_allocator(false).build()])
+                .map_err(|e| ort::Error::new(e.message()))?;
+        }
+        commit(&mut builder)
     }))
     .map_err(|payload| {
         ort_missing_or(
@@ -512,6 +616,50 @@ mod tests {
 
     fn embed_err(msg: String) -> crate::XbergError {
         crate::XbergError::embedding(msg)
+    }
+
+    #[test]
+    fn session_options_default_preserves_current_behaviour() {
+        let o = OrtSessionOptions::default();
+        assert!(o.memory_pattern && o.cpu_arena && o.max_threads.is_none());
+        assert_eq!(
+            intra_thread_count(&o),
+            crate::core::config::concurrency::resolve_thread_budget(None)
+        );
+    }
+
+    #[test]
+    fn intra_thread_count_honours_cap_and_floors_at_one() {
+        let capped = OrtSessionOptions {
+            max_threads: Some(2),
+            ..Default::default()
+        };
+        assert_eq!(intra_thread_count(&capped), 2);
+        let zero = OrtSessionOptions {
+            max_threads: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(intra_thread_count(&zero), 1);
+    }
+
+    struct RestoreOptions(OrtSessionOptions);
+    impl Drop for RestoreOptions {
+        fn drop(&mut self) {
+            set_ort_session_options(self.0);
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn set_ort_session_options_round_trips() {
+        let _restore = RestoreOptions(ort_session_options());
+        let bounded = OrtSessionOptions {
+            memory_pattern: false,
+            cpu_arena: false,
+            max_threads: Some(3),
+        };
+        set_ort_session_options(bounded);
+        assert_eq!(ort_session_options(), bounded);
     }
 
     #[test]
@@ -574,5 +722,201 @@ mod tests {
         let file = tmp.path().join("model.onnx");
         std::fs::write(&file, b"caller-managed").unwrap();
         verify_downloaded(&[], "model.onnx", &file, embed_err).expect("custom repos have no built-in manifest");
+    }
+
+    // ---- hermetic ORT session tests (need libonnxruntime) ----
+    use crate::core::config::acceleration::{AccelerationConfig, ExecutionProviderType};
+
+    // Minimal protobuf writer (field numbers from onnx.proto3).
+    fn varint(mut v: u64, out: &mut Vec<u8>) {
+        loop {
+            let b = (v & 0x7f) as u8;
+            v >>= 7;
+            if v == 0 {
+                out.push(b);
+                break;
+            }
+            out.push(b | 0x80);
+        }
+    }
+    fn pb_bytes(tag: u64, payload: &[u8]) -> Vec<u8> {
+        let mut o = Vec::new();
+        varint((tag << 3) | 2, &mut o);
+        varint(payload.len() as u64, &mut o);
+        o.extend_from_slice(payload);
+        o
+    }
+    fn pb_varint(tag: u64, v: u64) -> Vec<u8> {
+        let mut o = Vec::new();
+        varint(tag << 3, &mut o);
+        varint(v, &mut o);
+        o
+    }
+    /// Float tensor `value_info` with shape `[N (dim_param), width (dim_value)]`.
+    fn value_info(name: &str, width: u64) -> Vec<u8> {
+        let dim_n = pb_bytes(1, &pb_bytes(2, b"N"));
+        let dim_w = pb_bytes(1, &pb_varint(1, width));
+        let shape = [dim_n, dim_w].concat();
+        let tensor = [pb_varint(1, 1), pb_bytes(2, &shape)].concat();
+        let type_proto = pb_bytes(1, &tensor);
+        [pb_bytes(1, name.as_bytes()), pb_bytes(2, &type_proto)].concat()
+    }
+    fn node(op: &str, ins: &[&str], out: &str, name: &str) -> Vec<u8> {
+        let mut n = Vec::new();
+        for i in ins {
+            n.extend(pb_bytes(1, i.as_bytes()));
+        }
+        n.extend(pb_bytes(2, out.as_bytes()));
+        n.extend(pb_bytes(3, name.as_bytes()));
+        n.extend(pb_bytes(4, op.as_bytes()));
+        n
+    }
+    /// `Y = (X + X) * (X + X) + X` over `[N, width]` floats.
+    fn tiny_model_bytes(width: u64) -> Vec<u8> {
+        let graph = [
+            pb_bytes(1, &node("Add", &["X", "X"], "A", "add0")),
+            pb_bytes(1, &node("Mul", &["A", "A"], "B", "mul0")),
+            pb_bytes(1, &node("Add", &["B", "X"], "Y", "add1")),
+            pb_bytes(2, b"tiny"),
+            pb_bytes(11, &value_info("X", width)),
+            pb_bytes(12, &value_info("Y", width)),
+        ]
+        .concat();
+        [pb_varint(1, 8), pb_bytes(8, &pb_varint(2, 13)), pb_bytes(7, &graph)].concat()
+    }
+
+    fn cpu_accel() -> AccelerationConfig {
+        AccelerationConfig {
+            provider: ExecutionProviderType::Cpu,
+            device_id: 0,
+        }
+    }
+    fn build_tiny(options: &OrtSessionOptions, width: u64) -> crate::Result<ort::session::Session> {
+        crate::ort_discovery::ensure_ort_available();
+        let bytes = tiny_model_bytes(width);
+        build_session_with(options, Some(&cpu_accel()), embed_err, |b| b.commit_from_memory(&bytes))
+    }
+    fn run_batch(session: &mut ort::session::Session, n: usize, width: usize) -> f32 {
+        let t = ort::value::Tensor::from_array(([n, width], vec![1.0f32; n * width])).unwrap();
+        let out = session.run(ort::inputs!["X" => t]).unwrap();
+        let (shape, data) = out["Y"].try_extract_tensor::<f32>().unwrap();
+        assert_eq!(&shape[..], &[n as i64, width as i64]);
+        data[0]
+    }
+
+    #[test]
+    fn session_builds_and_runs_for_every_option_combo() {
+        for (mp, arena, threads) in [
+            (true, true, None),
+            (false, false, Some(1)),
+            (false, true, Some(2)),
+            (true, false, Some(0)),
+        ] {
+            let o = OrtSessionOptions {
+                memory_pattern: mp,
+                cpu_arena: arena,
+                max_threads: threads,
+            };
+            let mut s = build_tiny(&o, 8).unwrap_or_else(|e| panic!("{o:?}: {e}"));
+            assert_eq!(run_batch(&mut s, 3, 8), 5.0, "{o:?}");
+            assert_eq!(run_batch(&mut s, 17, 8), 5.0, "{o:?}");
+        }
+    }
+
+    #[test]
+    fn build_session_rejects_garbage_model_without_panicking() {
+        crate::ort_discovery::ensure_ort_available();
+        let r = build_session_with(&OrtSessionOptions::default(), Some(&cpu_accel()), embed_err, |b| {
+            b.commit_from_memory(b"definitely not onnx")
+        });
+        assert!(r.is_err());
+    }
+
+    #[cfg(not(feature = "cuda"))]
+    #[test]
+    fn unavailable_provider_errors_before_memory_options_are_applied() {
+        crate::ort_discovery::ensure_ort_available();
+        let accel = AccelerationConfig {
+            provider: ExecutionProviderType::Cuda,
+            device_id: 0,
+        };
+        let bytes = tiny_model_bytes(8);
+        let o = OrtSessionOptions {
+            memory_pattern: false,
+            cpu_arena: false,
+            max_threads: Some(1),
+        };
+        let r = build_session_with(&o, Some(&accel), embed_err, |b| b.commit_from_memory(&bytes));
+        assert!(r.is_err());
+    }
+
+    // ---- opt-in behavioural proof: arena off => lower retained RSS ----
+    // Each config runs in a child process: RSS is process-wide and allocators retain
+    // memory, so an in-process A/B comparison is order-dependent.
+    fn rss_kb() -> u64 {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .expect("ps");
+        String::from_utf8_lossy(&out.stdout).trim().parse().expect("rss")
+    }
+
+    /// Child half; does nothing unless `XBERG_ORT_MEM_CHILD` is set by the parent test.
+    #[test]
+    #[ignore = "spawned by ort_arena_off_retains_less_memory"]
+    fn ort_mem_child() {
+        let Ok(mode) = std::env::var("XBERG_ORT_MEM_CHILD") else {
+            return;
+        };
+        let o = OrtSessionOptions {
+            memory_pattern: mode == "on",
+            cpu_arena: mode == "on",
+            max_threads: Some(2),
+        };
+        const W: usize = 1024;
+        let mut s = build_tiny(&o, W as u64).unwrap();
+        run_batch(&mut s, 1, W);
+        let baseline = rss_kb();
+        for n in [64, 8192, 128, 4096, 256, 8192, 16] {
+            run_batch(&mut s, n, W);
+        }
+        println!("RSS_GROWTH_KB={}", rss_kb().saturating_sub(baseline));
+    }
+
+    #[test]
+    #[ignore = "spawns subprocesses and measures RSS; run with --ignored"]
+    fn ort_arena_off_retains_less_memory() {
+        let exe = std::env::current_exe().unwrap();
+        let measure = |mode: &str| -> u64 {
+            let out = std::process::Command::new(&exe)
+                .args([
+                    "--exact",
+                    "onnx::tests::ort_mem_child",
+                    "--ignored",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env("XBERG_ORT_MEM_CHILD", mode)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .find_map(|l| l.split("RSS_GROWTH_KB=").nth(1)) // libtest prefixes `test name ... `
+                .expect("child printed no RSS_GROWTH_KB")
+                .trim()
+                .parse()
+                .unwrap()
+        };
+        let on = measure("on");
+        let off = measure("off");
+        eprintln!("retained growth: arena on = {on} KiB, arena off = {off} KiB");
+        assert!(on > 32 * 1024, "arena-on growth too small to be meaningful: {on} KiB");
+        // Measured on macOS arm64 (malloc keeps freed pages): on ~186 MiB, off ~119 MiB (-36%),
+        // stable across runs. Not measured on Linux.
+        assert!(
+            off * 10 < on * 8,
+            "expected arena off to retain >20% less than arena on: on={on} off={off}"
+        );
     }
 }

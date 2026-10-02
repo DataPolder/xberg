@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **(onnx): `set_ort_session_options` bounds ONNX Runtime memory for embedding, reranking, sparse-embedding and late-interaction sessions (Rust API only).** `OrtSessionOptions { memory_pattern, cpu_arena, max_threads }` (defaults `true`, `true`, `None`, i.e. unchanged behaviour) can disable ORT's memory-pattern planner and CPU arena, which otherwise retain allocations sized by the largest batch, and cap intra-op threads. `cpu_arena` affects the CPU execution provider only, and `max_threads` does not change other thread budgets. Changing the options clears the engine caches so resident engines rebuild with them; layout, table, Whisper, paddle and GLiNER sessions are unaffected.
+
 ### Fixed
 
 - **(docx): a table, text box or image after a nested list no longer ends up inside the list.** These blocks closed only the innermost list level and then stopped tracking the rest, so after a list two or more levels deep the block and the content after it rendered under the last list item. They now close every open level, as headings and paragraphs already did. (GH#2035)
