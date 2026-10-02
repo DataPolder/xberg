@@ -479,6 +479,7 @@ jobs:
     with:
       version: ${{ needs.prepare.outputs.version }}
       dry_run: false
+      ref: ${{ needs.prepare.outputs.tag }}
     secrets: inherit
 
   # A skipped chart publish is invisible: the images push, the release looks green, and the

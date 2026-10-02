@@ -17,6 +17,10 @@ on:
         required: false
         type: boolean
         default: false
+      ref:
+        description: "Git ref to publish; defaults to the caller ref"
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       tag:
@@ -50,8 +54,12 @@ jobs:
       # Required for cosign keyless signing (Sigstore OIDC token). ~keep
       id-token: write
     steps:
+      # The release publisher advances the tag to its checksum commit while Docker is still
+      # running, so a caller-provided tag must override the stale workflow-call SHA. ~keep
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.event.client_payload.tag || github.ref }}
 
       - name: Install Task
         uses: xberg-io/actions/install-task@v1
