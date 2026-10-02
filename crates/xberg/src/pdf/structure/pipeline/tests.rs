@@ -6882,3 +6882,70 @@ fn blocks_to_paragraphs_merges_normally_without_a_column_corridor_gh1806() {
         "with no corridor, the two lines merge as before this fix"
     );
 }
+
+/// #2954 (Machine-learning p6) in lorem: a caption narrower than the furniture bound
+/// (x 63–343 here, x 63–349 on the page) spans the gutter, so the page has no corridor; under it the left column ends on a URL tail
+/// and the right column, already running (its section heading sits beside the left
+/// column's line above), opens its body one line pitch lower.
+fn dp2954_band(with_right_heading: bool) -> Vec<SegmentData> {
+    let mut segments = vec![
+        column_seg(
+            "Fig. 4. Lorem ipsum dolor sit amet consectetur adipiscing elit sed do",
+            63.0,
+            280.0,
+            200.0,
+        ),
+        column_seg(
+            "Lorem ipsum dolor sit amet at https://lorem.example.",
+            38.0,
+            240.0,
+            160.0,
+        ),
+        column_seg("io/lorem_ipsum_app2241/.", 38.0, 95.0, 148.0),
+        column_seg(
+            "Consectetur adipiscing elit developed a clearly interpretable model for",
+            319.0,
+            241.0,
+            136.0,
+        ),
+    ];
+    if with_right_heading {
+        segments.insert(2, column_seg("4. Dolor sit", 307.0, 60.0, 160.0));
+    }
+    segments
+}
+
+/// #2954: with no page-wide corridor, the left column's last line and the right column's
+/// first body line are still two elements. ~keep
+#[test]
+fn blocks_to_paragraphs_does_not_weld_across_a_local_gutter_2954() {
+    let segments = dp2954_band(true);
+    assert_eq!(page_column_corridor(&segments), None, "the caption hides the corridor");
+
+    let paragraphs = blocks_to_paragraphs(segments, &[], &[]);
+    let texts: Vec<String> = paragraphs.iter().map(paragraph_segment_text).collect();
+    assert!(
+        !texts
+            .iter()
+            .any(|text| text.contains("app2241") && text.contains("Consectetur")),
+        "the URL tail and the right column's body must not be one element, got {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|text| text.starts_with("Consectetur adipiscing")),
+        "the right column's body opens its own element, got {texts:?}"
+    );
+}
+
+/// Control for #2954: the same pair with nothing running on the right above it -- a form's
+/// question and its answer on the next row -- stays one element, as before. ~keep
+#[test]
+fn blocks_to_paragraphs_keeps_a_row_without_a_column_above_2954() {
+    let paragraphs = blocks_to_paragraphs(dp2954_band(false), &[], &[]);
+    let texts: Vec<String> = paragraphs.iter().map(paragraph_segment_text).collect();
+    assert!(
+        texts
+            .iter()
+            .any(|text| text.contains("app2241") && text.contains("Consectetur")),
+        "without a right column above, the pair is not split, got {texts:?}"
+    );
+}

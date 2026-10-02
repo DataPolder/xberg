@@ -1999,6 +1999,115 @@ const PARAGRAPH_FULL_WIDTH_FURNITURE_FRACTION: f32 = 0.55;
 /// break vote's absence, never force one -- so a corridor found here that later turns out
 /// not to be a real column gutter can only leave two segments un-merged, never wrongly
 /// merge or reorder anything. ~keep
+/// #2954: whether `line` opens the next column's text rather than continuing `prev`'s.
+///
+/// The shape is the left column's last line followed by the right column's first: the new
+/// line starts entirely RIGHT of where `prev` ended, across a gap no word space spans
+/// (`LOCAL_GUTTER_MIN_GAP_EM`), one line pitch lower (`LOCAL_GUTTER_*_ADVANCE_EM`), and it
+/// is a full line of prose (`LOCAL_GUTTER_MIN_PROSE_WORDS`, `LOCAL_GUTTER_MIN_LINE_EM`),
+/// while both columns already run in the band just above (`both_columns_run_above`).
+///
+/// Each term keeps a shape out that the page-wide corridor never had to consider. Left to
+/// right only: a wrapped form label returns to the LEFT. The pitch: a table cell a few
+/// points lower on its own row is not a new line, and a jump to the page number is not
+/// the next line. Prose: a value cell (`Nee`, `59`) after a label. Both columns above: a
+/// question and its answer on the next row, with nothing to the right above them. ~keep
+fn jumps_a_local_gutter(
+    prev: &SegmentData,
+    line: &SegmentData,
+    line_text: &str,
+    line_right: f32,
+    lines: &[SegmentData],
+) -> bool {
+    if !(prev.is_unrotated() && line.is_unrotated()) {
+        return false;
+    }
+    let font = prev.font_size.max(line.font_size).max(1.0);
+    let advance = prev.upright_baseline() - line.upright_baseline();
+    let (_, prev_right) = prev.upright_advance_extent();
+    let (line_left, _) = line.upright_advance_extent();
+    let gap = LOCAL_GUTTER_MIN_GAP_EM * font;
+    let chars = line_text.chars().filter(|c| !c.is_whitespace()).count().max(1);
+    let alpha = line_text.chars().filter(|c| c.is_alphabetic()).count();
+    let prose = line_text.split_whitespace().count() >= LOCAL_GUTTER_MIN_PROSE_WORDS
+        && alpha as f32 / chars as f32 >= LOCAL_GUTTER_MIN_ALPHA_RATIO;
+    (LOCAL_GUTTER_MIN_ADVANCE_EM * font..=LOCAL_GUTTER_MAX_ADVANCE_EM * font).contains(&advance)
+        && line_left - prev_right >= gap
+        && prose
+        && line_right - line_left >= LOCAL_GUTTER_MIN_LINE_EM * font
+        && both_columns_run_above(prev, line, gap, LOCAL_GUTTER_BAND_ABOVE_EM * font, lines)
+}
+
+/// #2954: the right edge of the printed line `lines[from]` opens -- the segments that
+/// follow it on the same baseline (within `LOCAL_GUTTER_LINE_JITTER_EM`) and within a
+/// word space of each other. Its own copy of the heading run's measure, so this break
+/// needs nothing the heading run brings. ~keep
+fn gutter_line_right_edge(lines: &[SegmentData], from: usize) -> f32 {
+    let mut right = f32::NEG_INFINITY;
+    let mut prev: Option<&SegmentData> = None;
+    for segment in &lines[from..] {
+        if let Some(prev) = prev {
+            let font_size = prev.font_size.max(segment.font_size).max(1.0);
+            let (_, prev_end) = prev.upright_advance_extent();
+            let (start, _) = segment.upright_advance_extent();
+            let gap = start - prev_end;
+            let same_line = segment.has_same_rotation(prev)
+                && (segment.upright_baseline() - prev.upright_baseline()).abs()
+                    <= LOCAL_GUTTER_LINE_JITTER_EM * font_size
+                && gap >= -(font_size * INLINE_STYLE_MAX_OVERLAP_FONT_FACTOR)
+                && gap <= font_size * INLINE_STYLE_MAX_FORWARD_GAP_FONT_FACTOR;
+            if !same_line {
+                break;
+            }
+        }
+        let (_, end) = segment.upright_advance_extent();
+        if end.is_finite() {
+            right = right.max(end);
+        }
+        prev = Some(segment);
+    }
+    right
+}
+
+/// #2954: how far two segments' baselines may differ, in em, and be one printed line. ~keep
+const LOCAL_GUTTER_LINE_JITTER_EM: f32 = 0.2;
+
+/// #2954: the gap, in em of the larger font, that `line` must start right of `prev`'s
+/// end. Measured 1.5 / 3 / 6 em over 940 PDFs; 3 em is where the changes stop being
+/// table and form rows. The carrier's gap is 23 em. ~keep
+const LOCAL_GUTTER_MIN_GAP_EM: f32 = 3.0;
+/// #2954: one line pitch, in em: from a tight 0.8 (a row a few points lower is the same
+/// row) to a loose 1.6 (anything further is a paragraph or a page-region jump). ~keep
+const LOCAL_GUTTER_MIN_ADVANCE_EM: f32 = 0.8;
+const LOCAL_GUTTER_MAX_ADVANCE_EM: f32 = 1.6;
+/// #2954: what makes the new line a line of column text rather than a cell. ~keep
+const LOCAL_GUTTER_MIN_PROSE_WORDS: usize = 4;
+const LOCAL_GUTTER_MIN_ALPHA_RATIO: f32 = 0.7;
+const LOCAL_GUTTER_MIN_LINE_EM: f32 = 15.0;
+/// #2954: how far above the pair, in em, both columns must already be running. ~keep
+const LOCAL_GUTTER_BAND_ABOVE_EM: f32 = 3.0;
+
+/// #2954: whether, in the `band` above the pair, there is text on `prev`'s side clear of
+/// `line`'s column and text on `line`'s side clear of `prev`'s end -- two columns running,
+/// not one row of a form. ~keep
+fn both_columns_run_above(prev: &SegmentData, line: &SegmentData, gap: f32, band: f32, lines: &[SegmentData]) -> bool {
+    let (_, prev_right) = prev.upright_advance_extent();
+    let (line_left, _) = line.upright_advance_extent();
+    let above = |base: f32, segment: &SegmentData| {
+        let delta = segment.upright_baseline() - base;
+        segment.is_unrotated() && !segment.text.trim().is_empty() && delta > 0.0 && delta <= band
+    };
+    let left_runs = lines.iter().any(|segment| {
+        let (_, right) = segment.upright_advance_extent();
+        above(prev.upright_baseline(), segment) && right <= line_left - gap
+    });
+    let right_runs = lines.iter().any(|segment| {
+        let (left, _) = segment.upright_advance_extent();
+        above(line.upright_baseline(), segment) && left >= prev_right + gap
+    });
+    left_runs && right_runs
+}
+
 fn page_column_corridor(lines: &[SegmentData]) -> Option<(f32, f32)> {
     let mut extents: Vec<(f32, f32)> = lines
         .iter()
@@ -2235,6 +2344,21 @@ fn blocks_to_paragraphs(
                     (prev_right <= corridor_left && line_left >= corridor_right)
                         || (line_right <= corridor_left && prev_left >= corridor_right)
                 });
+            // #2954: the same weld on a page that has no page-wide corridor. A figure
+            // caption a little narrower than the furniture bound spans the gutter, so
+            // `page_column_corridor` finds none and the term above cannot fire: on
+            // Machine-learning p6 the left column's last line (`io/…app2241/.`, x 38–134)
+            // and the right column's first body line (x 319–560), one line pitch lower,
+            // became one full-width element. Judged on the pair alone, see
+            // `jumps_a_local_gutter`. ~keep
+            let jumps_a_local_gutter = starts_new_line
+                && jumps_a_local_gutter(
+                    prev,
+                    line,
+                    &visual_line_texts[line_idx],
+                    gutter_line_right_edge(&lines, line_idx),
+                    &lines,
+                );
             rotation_change
                 || font_change
                 || role_change
@@ -2244,6 +2368,7 @@ fn blocks_to_paragraphs(
                 || follows_section
                 || crossed_gap
                 || crosses_column_corridor
+                || jumps_a_local_gutter
         };
 
         if should_break && !current_lines.is_empty() {
