@@ -1513,6 +1513,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ImageType dco_decode_image_type(dynamic raw);
 
   @protected
+  InlineDataMedia dco_decode_inline_data_media(dynamic raw);
+
+  @protected
   InlineElement dco_decode_inline_element(dynamic raw);
 
   @protected
@@ -4438,6 +4441,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ImageType sse_decode_image_type(SseDeserializer deserializer);
+
+  @protected
+  InlineDataMedia sse_decode_inline_data_media(SseDeserializer deserializer);
 
   @protected
   InlineElement sse_decode_inline_element(SseDeserializer deserializer);
@@ -8334,6 +8340,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_image_type(ImageType self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_inline_data_media(
+    InlineDataMedia self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_inline_element(InlineElement self, SseSerializer serializer);

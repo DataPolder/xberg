@@ -1326,6 +1326,29 @@ typedef struct XBERGImagePreprocessingMetadata XBERGImagePreprocessingMetadata;
  */
 typedef struct XBERGImageType XBERGImageType;
 /**
+ * What the output shows for an image, an embedded media element, or a link,
+ * whose address is an inline `data:` URL.
+ *
+ * Applies to `<img>` (including its lazy-load attributes, its `srcset`
+ * candidates and the
+ * `<source>` elements of a `<picture>` around it), `<graphic>`, inline `<svg>`,
+ * `<video>`,
+ * `<audio>` (including their nested `<source>` elements), `<iframe>`, and a
+ * link (`<a href>`) whose own address is a `data:` URL.
+ *
+ * With `AltTextOnly` or `DropElement`, an element that also has an address that
+ * is not `data:` uses that address instead. The document structure follows the
+ * markdown: a dropped image has no node, and an image written as its alt text
+ * has no address. A link whose only content the choice removed is dropped with
+ * it.
+ *
+ * A link has no attribute separate from its own text to use as a caption, so
+ * `AltTextOnly` and `DropElement` do the same thing to a link's `data:`
+ * address: write the link's text with no destination. Unlike an image, a link's
+ * text is never dropped along with the address.
+ */
+typedef struct XBERGInlineDataMedia XBERGInlineDataMedia;
+/**
  * Inline element within a block.
  *
  * Represents text with formatting, links, images, etc.
@@ -6638,6 +6661,16 @@ char *xberg_conversion_options_preserve_tags(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_conversion_options_skip_images(XBERGAlefHandle handle);
+
+/**
+ * Get the `inline_data_media` field from a `ConversionOptions`.
+ * A non-null returned handle is owned by the caller.
+ * It must be freed with `xberg_inline_data_media_free`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+XBERGAlefHandle
+xberg_conversion_options_inline_data_media(XBERGAlefHandle handle);
 
 /**
  * Get the `url_escape_style` field from a `ConversionOptions`.
@@ -27117,6 +27150,20 @@ int32_t xberg_image_type_from_i32(int32_t value);
 int32_t xberg_image_type_from_str(const char *name);
 
 /**
+ * Convert an integer to a `InlineDataMedia` variant. Returns -1 on invalid
+ * input. # Safety Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+int32_t xberg_inline_data_media_from_i32(int32_t value);
+
+/**
+ * Convert a `InlineDataMedia` serde wire value (C string) to its integer
+ * discriminant. Returns -1 on invalid input. # Safety Caller must ensure `ptr`
+ * is a valid pointer to a `c_char` or null.
+ */
+int32_t xberg_inline_data_media_from_str(const char *name);
+
+/**
  * Convert an integer to a `InlineType` variant. Returns -1 on invalid input.
  * # Safety
  * Caller must ensure all pointer arguments are valid or null.
@@ -28973,6 +29020,13 @@ char *xberg_image_type_to_json(XBERGAlefHandle handle);
  * The returned string must be freed with `xberg_free_string`.
  */
 char *xberg_image_type_to_string(XBERGAlefHandle handle);
+
+/**
+ * Free a `InlineDataMedia` handle.
+ * # Safety
+ * Handle must have been returned by this library, or be zero.
+ */
+void xberg_inline_data_media_free(XBERGAlefHandle handle);
 
 /**
  * Free a `InlineType` handle.

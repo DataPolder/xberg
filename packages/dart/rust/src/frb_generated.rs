@@ -12733,6 +12733,7 @@ const _: fn() = || {
         let _: Vec<String> = ConversionOptions.strip_tags;
         let _: Vec<String> = ConversionOptions.preserve_tags;
         let _: bool = ConversionOptions.skip_images;
+        let _: crate::InlineDataMedia = ConversionOptions.inline_data_media;
         let _: crate::UrlEscapeStyle = ConversionOptions.url_escape_style;
         let _: crate::LinkStyle = ConversionOptions.link_style;
         let _: crate::HtmlToMarkdownRsOutputFormat = ConversionOptions.output_format;
@@ -17277,6 +17278,7 @@ impl SseDecode for crate::ConversionOptions {
         let mut var_stripTags = <Vec<String>>::sse_decode(deserializer);
         let mut var_preserveTags = <Vec<String>>::sse_decode(deserializer);
         let mut var_skipImages = <bool>::sse_decode(deserializer);
+        let mut var_inlineDataMedia = <crate::InlineDataMedia>::sse_decode(deserializer);
         let mut var_urlEscapeStyle = <crate::UrlEscapeStyle>::sse_decode(deserializer);
         let mut var_linkStyle = <crate::LinkStyle>::sse_decode(deserializer);
         let mut var_outputFormat = <crate::HtmlToMarkdownRsOutputFormat>::sse_decode(deserializer);
@@ -17322,6 +17324,7 @@ impl SseDecode for crate::ConversionOptions {
             strip_tags: var_stripTags,
             preserve_tags: var_preserveTags,
             skip_images: var_skipImages,
+            inline_data_media: var_inlineDataMedia,
             url_escape_style: var_urlEscapeStyle,
             link_style: var_linkStyle,
             output_format: var_outputFormat,
@@ -19721,6 +19724,19 @@ impl SseDecode for crate::ImageType {
             2 => crate::ImageType::External,
             3 => crate::ImageType::Relative,
             _ => unreachable!("Invalid variant for ImageType: {}", inner),
+        };
+    }
+}
+
+impl SseDecode for crate::InlineDataMedia {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::InlineDataMedia::Keep,
+            1 => crate::InlineDataMedia::AltTextOnly,
+            2 => crate::InlineDataMedia::DropElement,
+            _ => unreachable!("Invalid variant for InlineDataMedia: {}", inner),
         };
     }
 }
@@ -28225,6 +28241,7 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::ConversionOptions> {
             self.0.strip_tags.into_into_dart().into_dart(),
             self.0.preserve_tags.into_into_dart().into_dart(),
             self.0.skip_images.into_into_dart().into_dart(),
+            self.0.inline_data_media.into_into_dart().into_dart(),
             self.0.url_escape_style.into_into_dart().into_dart(),
             self.0.link_style.into_into_dart().into_dart(),
             self.0.output_format.into_into_dart().into_dart(),
@@ -30514,6 +30531,23 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::ImageType> {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::ImageType> {}
 impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::ImageType>> for crate::ImageType {
     fn into_into_dart(self) -> FrbWrapper<crate::ImageType> {
+        self.into()
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::InlineDataMedia> {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self.0 {
+            crate::InlineDataMedia::Keep => 0.into_dart(),
+            crate::InlineDataMedia::AltTextOnly => 1.into_dart(),
+            crate::InlineDataMedia::DropElement => 2.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for FrbWrapper<crate::InlineDataMedia> {}
+impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<crate::InlineDataMedia>> for crate::InlineDataMedia {
+    fn into_into_dart(self) -> FrbWrapper<crate::InlineDataMedia> {
         self.into()
     }
 }
@@ -35746,6 +35780,7 @@ impl SseEncode for crate::ConversionOptions {
         <Vec<String>>::sse_encode(self.strip_tags, serializer);
         <Vec<String>>::sse_encode(self.preserve_tags, serializer);
         <bool>::sse_encode(self.skip_images, serializer);
+        <crate::InlineDataMedia>::sse_encode(self.inline_data_media, serializer);
         <crate::UrlEscapeStyle>::sse_encode(self.url_escape_style, serializer);
         <crate::LinkStyle>::sse_encode(self.link_style, serializer);
         <crate::HtmlToMarkdownRsOutputFormat>::sse_encode(self.output_format, serializer);
@@ -37461,6 +37496,23 @@ impl SseEncode for crate::ImageType {
                 crate::ImageType::InlineSvg => 1,
                 crate::ImageType::External => 2,
                 crate::ImageType::Relative => 3,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::InlineDataMedia {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::InlineDataMedia::Keep => 0,
+                crate::InlineDataMedia::AltTextOnly => 1,
+                crate::InlineDataMedia::DropElement => 2,
                 _ => {
                     unimplemented!("");
                 }
