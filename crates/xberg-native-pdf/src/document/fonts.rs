@@ -119,6 +119,7 @@ impl PdfDocument {
         if !self.font_identity_shared_cache_enabled.load(Ordering::Acquire) {
             return false;
         }
+        #[allow(deprecated, reason = "fetch_update supports the Rust 1.92 MSRV")]
         let reserved = self
             .font_identity_hashed_bytes
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
