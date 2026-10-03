@@ -64,7 +64,7 @@ COPY crates/xberg-candle-ocr/ crates/xberg-candle-ocr/
 COPY crates/xberg-pdfium-render/ crates/xberg-pdfium-render/
 COPY crates/xberg-native-pdf/ crates/xberg-native-pdf/
 
-RUN sed -i '/xberg-py/d; /xberg_rb/d; /xberg-node/d; /xberg-ffi/d; /xberg-jni/d; /xberg-php/d; /xberg-rag/d; /xberg_rustler/d; /xberg_nif/d; /packages\/dart\/rust/d; /packages\/swift\/rust/d; /\"crates\/xberg-wasm\"/d; /^\[profile\.release\.package\.xberg-wasm\]$/,$d; /benchmark-harness/d; /e2e-generator/d; /e2e\/rust/d' Cargo.toml
+RUN sed -i '/xberg-py/d; /xberg_rb/d; /xberg-node/d; /xberg-ffi/d; /xberg-jni/d; /xberg-php/d; /xberg-rag/d; /xberg_rustler/d; /xberg_nif/d; /packages\/dart\/rust/d; /packages\/swift\/rust/d; /\"crates\/xberg-wasm\"/d; /^\[profile\.release\.package\.xberg-wasm\]$/,/^$/d; /benchmark-harness/d; /e2e-generator/d; /e2e\/rust/d' Cargo.toml
 
 # See #1845: `.dockerignore` excludes `**/.git/`, so build.rs's git derivation fails even though
 # `git` is installed above, and XBERG_BUILD_ID falls back to `""` -- collapsing the OCR cache key
@@ -73,8 +73,8 @@ RUN sed -i '/xberg-py/d; /xberg_rb/d; /xberg-node/d; /xberg-ffi/d; /xberg-jni/d;
 ARG XBERG_BUILD_ID
 
 RUN : "${XBERG_BUILD_ID:?must be passed: --build-arg XBERG_BUILD_ID=<commit sha>; see crates/xberg/build.rs}" && \
-    cargo build --release --package xberg-cli --features all && \
-    cp target/release/xberg /build/xberg && \
+    cargo build --profile release-musl --package xberg-cli --features all && \
+    cp target/release-musl/xberg /build/xberg && \
     strip /build/xberg
 
 RUN file /build/xberg && \
