@@ -27,6 +27,7 @@ pub fn batch_command(
     config: ExtractionConfig,
     format: WireFormat,
     output_dir: Option<PathBuf>,
+    content_output_dir: Option<PathBuf>,
 ) -> Result<()> {
     match format {
         WireFormat::Json => {
@@ -35,6 +36,9 @@ pub fn batch_command(
             let inputs = build_batch_inputs(&uris, file_configs_map.as_ref())?;
             let (output, per_file_ms) = run_json_batch_sync(inputs, &config)?;
             let total_ms = total_t0.elapsed().as_secs_f64() * 1000.0;
+            if let Some(dir) = &content_output_dir {
+                write_batch_documents(&uris, &output.results, &config, dir)?;
+            }
             let envelope = BatchEnvelope {
                 results: output.results,
                 total_ms,
@@ -52,31 +56,39 @@ pub fn batch_command(
         }
         WireFormat::Text => {
             let inputs = build_batch_inputs(&uris, file_configs_map.as_ref())?;
-            refuse_binary_text_output(&config, &inputs)?;
-            let output = run_batch_sync(inputs, &config)?;
+            refuse_binary_text_output(&config, &inputs, content_output_dir.is_some())?;
+            let batch_result = run_batch_sync(inputs, &config)?;
+            if let Some(dir) = &content_output_dir {
+                write_batch_documents(&uris, &batch_result.results, &config, dir)?;
+            }
             let dir = output_dir.as_deref().unwrap_or(Path::new("."));
             let mut diagnostics = std::io::stderr().lock();
-            for (i, result) in output.results.iter().enumerate() {
+            for (i, result) in batch_result.results.iter().enumerate() {
                 if let Some(images) = &result.images {
                     write_extracted_images(images, dir)?;
                 }
-                println!("{}", style::header(&format!("=== Document {} ===", i + 1)));
-                println!("{} {}", style::label("MIME Type:"), style::success(&result.mime_type));
-                println!("{}\n{}", style::label("Content:"), result.content);
-                println!();
+                if content_output_dir.is_none() {
+                    println!("{}", style::header(&format!("=== Document {} ===", i + 1)));
+                    println!("{} {}", style::label("MIME Type:"), style::success(&result.mime_type));
+                    println!("{}\n{}", style::label("Content:"), result.content);
+                    println!();
+                }
                 // Warnings go to `stderr` for the same reason as in `extract_command`: the
                 // batch text stream is content, not diagnostics.
                 write_processing_warnings(&result.processing_warnings, &mut diagnostics)
                     .context("Failed to write processing warnings")?;
             }
-            write_batch_errors(&output.errors, &mut diagnostics).context("Failed to write batch errors")?;
-            fail_batch_errors(&output.errors)?;
+            write_batch_errors(&batch_result.errors, &mut diagnostics).context("Failed to write batch errors")?;
+            fail_batch_errors(&batch_result.errors)?;
         }
         WireFormat::Toon => {
             let total_t0 = Instant::now();
             let inputs = build_batch_inputs(&uris, file_configs_map.as_ref())?;
             let (output, per_file_ms) = run_json_batch_sync(inputs, &config)?;
             let total_ms = total_t0.elapsed().as_secs_f64() * 1000.0;
+            if let Some(dir) = &content_output_dir {
+                write_batch_documents(&uris, &output.results, &config, dir)?;
+            }
             let dir = output_dir.as_deref().unwrap_or(Path::new("."));
             for result in &output.results {
                 if let Some(images) = &result.images {
@@ -103,14 +115,20 @@ pub fn batch_command(
 }
 
 /// The batch text output joins documents under headers, which a binary document cannot be.
-fn refuse_binary_text_output<'a>(config: &'a ExtractionConfig, inputs: &'a [ExtractInput]) -> Result<()> {
+fn refuse_binary_text_output<'a>(
+    config: &'a ExtractionConfig,
+    inputs: &'a [ExtractInput],
+    writes_files: bool,
+) -> Result<()> {
     let per_file_binary_format = inputs.iter().find_map(|input| {
         let xberg::OutputFormat::Custom(name) = input.config.as_ref()?.output_format.as_ref()? else {
             return None;
         };
         (name == super::DOCX_CONTENT_FORMAT || name == super::PDF_CONTENT_FORMAT).then_some(name.as_str())
     });
-    if let Some(binary_format) = super::requested_binary_format(config).or(per_file_binary_format) {
+    if let Some(binary_format) = super::requested_binary_format(config).or(per_file_binary_format)
+        && !writes_files
+    {
         anyhow::bail!(
             "--content-format {binary_format} produces one binary document per file, which the text \
              output cannot hold; use --format json, where each result's `content` is the \
@@ -119,6 +137,81 @@ fn refuse_binary_text_output<'a>(config: &'a ExtractionConfig, inputs: &'a [Extr
         );
     }
     Ok(())
+}
+
+fn write_batch_documents(
+    uris: &[String],
+    results: &[ExtractedDocument],
+    config: &ExtractionConfig,
+    output_dir: &Path,
+) -> Result<()> {
+    let mut destinations = Vec::with_capacity(results.len());
+    let mut seen = std::collections::HashSet::with_capacity(results.len());
+    for result in results {
+        let source_index = result
+            .metadata
+            .additional
+            .get("source_index")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|index| usize::try_from(index).ok())
+            .context("Batch extraction result has no valid source_index for file output")?;
+        let uri = uris
+            .get(source_index)
+            .with_context(|| format!("Batch extraction returned invalid source index {source_index}"))?;
+        let stem = Path::new(uri)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .with_context(|| format!("Cannot derive a safe output name from input '{uri}'"))?;
+        let extension = content_extension(result, config);
+        let destination = output_dir.join(format!("{stem}.{extension}"));
+        if !seen.insert(destination.clone()) {
+            anyhow::bail!(
+                "Batch output name collision for '{}'; rename the inputs so each output name is unique",
+                destination.display()
+            );
+        }
+        if destination.exists() {
+            anyhow::bail!("Output file already exists: '{}'", destination.display());
+        }
+        destinations.push(destination);
+    }
+
+    for (result, destination) in results.iter().zip(destinations) {
+        let binary_format = result
+            .metadata
+            .output_format
+            .as_deref()
+            .filter(|name| *name == super::DOCX_CONTENT_FORMAT || *name == super::PDF_CONTENT_FORMAT);
+        super::write_document_file(result, binary_format, &destination)?;
+    }
+    Ok(())
+}
+
+fn content_extension(result: &ExtractedDocument, config: &ExtractionConfig) -> &'static str {
+    let format = result
+        .metadata
+        .output_format
+        .as_deref()
+        .unwrap_or(match &config.output_format {
+            xberg::OutputFormat::Plain => "plain",
+            xberg::OutputFormat::Markdown => "markdown",
+            xberg::OutputFormat::Djot => "djot",
+            xberg::OutputFormat::Html => "html",
+            xberg::OutputFormat::Json => "json",
+            xberg::OutputFormat::DocTags => "doctags",
+            xberg::OutputFormat::Custom(_) => "plain",
+        });
+    match format {
+        "markdown" => "md",
+        "djot" => "dj",
+        "html" => "html",
+        "json" => "json",
+        "doctags" => "doctags",
+        "docx" => "docx",
+        "pdf" => "pdf",
+        _ => "txt",
+    }
 }
 
 /// Run batch extraction using the synchronous batch API for non-JSON output paths.
@@ -144,7 +237,7 @@ mod binary_output_tests {
             ..Default::default()
         }];
 
-        let error = refuse_binary_text_output(&ExtractionConfig::default(), &inputs)
+        let error = refuse_binary_text_output(&ExtractionConfig::default(), &inputs, false)
             .expect_err("a per-file DOCX result cannot be joined into text output");
         assert!(error.to_string().contains("--format json"), "{error}");
     }
@@ -159,9 +252,19 @@ mod binary_output_tests {
             ..Default::default()
         }];
 
-        let error = refuse_binary_text_output(&ExtractionConfig::default(), &inputs)
+        let error = refuse_binary_text_output(&ExtractionConfig::default(), &inputs, false)
             .expect_err("a per-file PDF result cannot be joined into text output");
         assert!(error.to_string().contains("--format json"), "{error}");
+    }
+
+    #[test]
+    fn batch_text_output_accepts_binary_content_when_each_result_is_written_to_a_file() {
+        let config = ExtractionConfig {
+            output_format: OutputFormat::Custom(super::super::PDF_CONTENT_FORMAT.to_string()),
+            ..Default::default()
+        };
+
+        refuse_binary_text_output(&config, &[], true).expect("file output can hold one binary document per result");
     }
 }
 

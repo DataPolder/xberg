@@ -190,6 +190,12 @@ enum Commands {
         #[arg(long)]
         output_dir: Option<PathBuf>,
 
+        /// Write extracted content to this file instead of stdout.
+        ///
+        /// The destination's parent directory must exist. Existing files are never overwritten.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
         /// Extraction configuration overrides
         #[command(flatten)]
         overrides: ExtractionOverrides,
@@ -243,6 +249,13 @@ enum Commands {
         /// The directory must already exist.
         #[arg(long)]
         output_dir: Option<PathBuf>,
+
+        /// Write each extracted document to this directory.
+        ///
+        /// Output names are derived from input names and the content format. The directory must
+        /// already exist; existing files and colliding input names are rejected.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
 
         /// Extraction configuration overrides
         #[command(flatten)]
@@ -763,6 +776,7 @@ fn main() -> Result<()> {
             mime_type,
             format,
             output_dir,
+            output,
             overrides,
         } => {
             let input = resolve_extract_input(
@@ -783,7 +797,7 @@ fn main() -> Result<()> {
             apply_json_overrides(&mut config, config_json, config_json_base64)?;
             overrides.apply(&mut config);
 
-            extract_command(input, config, mime_type, format, output_dir, process_start)?;
+            extract_command(input, config, mime_type, format, output_dir, output, process_start)?;
         }
 
         Commands::Batch {
@@ -796,12 +810,16 @@ fn main() -> Result<()> {
             config_json_base64,
             format,
             output_dir,
+            output,
             overrides,
             file_configs,
         } => {
             let input_uris = resolve_batch_inputs(paths, input, input_format)?;
             validate_batch_input_uris(&input_uris)?;
             if let Some(ref dir) = output_dir {
+                validate_output_dir(dir)?;
+            }
+            if let Some(ref dir) = output {
                 validate_output_dir(dir)?;
             }
             overrides.validate()?;
@@ -826,7 +844,7 @@ fn main() -> Result<()> {
             } else {
                 None
             };
-            batch_command(input_uris, file_configs_map, config, format, output_dir)?;
+            batch_command(input_uris, file_configs_map, config, format, output_dir, output)?;
         }
 
         Commands::Detect { path, format } => {

@@ -91,11 +91,12 @@ pub fn extract_command(
     mime_type: Option<String>,
     format: WireFormat,
     output_dir: Option<PathBuf>,
+    output: Option<PathBuf>,
     process_start: Option<Instant>,
 ) -> Result<()> {
     let emit_stage_timing = stage_timing_requested();
 
-    refuse_binary_output_to_terminal(&config, &format)?;
+    refuse_binary_output_to_terminal(&config, &format, output.is_some())?;
 
     let t0 = Instant::now();
     let result = extract_input_sync(input, mime_type.as_deref(), &config)?;
@@ -104,13 +105,19 @@ pub fn extract_command(
 
     let stage_timings = emit_stage_timing.then(|| build_stage_timings(process_start, t0, extraction_time_ms, &config));
 
+    if let Some(path) = &output {
+        write_document_file(&result, requested_binary_format(&config), path)?;
+    }
+
     match format {
         WireFormat::Text => {
             if let Some(images) = &result.images {
                 let dir = output_dir.as_deref().unwrap_or(Path::new("."));
                 write_extracted_images(images, dir)?;
             }
-            let written = if let Some(binary_format) = requested_binary_format(&config) {
+            let written = if output.is_some() {
+                Ok(())
+            } else if let Some(binary_format) = requested_binary_format(&config) {
                 write_binary_document(&result, binary_format)
             } else {
                 print!("{}", result.content);
@@ -164,9 +171,10 @@ pub fn extract_command(
 }
 
 /// Refuse binary output to a terminal before extracting anything.
-fn refuse_binary_output_to_terminal(config: &ExtractionConfig, format: &WireFormat) -> Result<()> {
+fn refuse_binary_output_to_terminal(config: &ExtractionConfig, format: &WireFormat, writes_file: bool) -> Result<()> {
     if let Some(binary_format) = requested_binary_format(config)
         && matches!(format, WireFormat::Text)
+        && !writes_file
         && std::io::stdout().is_terminal()
     {
         anyhow::bail!(
@@ -183,16 +191,8 @@ fn refuse_binary_output_to_terminal(config: &ExtractionConfig, format: &WireForm
 /// when it was built without the feature that renders `binary_format`), since the caller
 /// is redirecting stdout into a binary file.
 fn write_binary_document(result: &ExtractedDocument, binary_format: &str) -> Result<()> {
+    let document = document_bytes(result, Some(binary_format))?;
     let label = binary_format.to_uppercase();
-    if result.metadata.output_format.as_deref() != Some(binary_format) {
-        anyhow::bail!(
-            "{label} output was requested but the extraction produced {} text instead; see the warnings above",
-            result.metadata.output_format.as_deref().unwrap_or("plain")
-        );
-    }
-    let document = base64::engine::general_purpose::STANDARD
-        .decode(&result.content)
-        .with_context(|| format!("{label} output was not valid base64"))?;
     let mut stdout = std::io::stdout().lock();
     stdout
         .write_all(&document)
@@ -200,6 +200,36 @@ fn write_binary_document(result: &ExtractedDocument, binary_format: &str) -> Res
     stdout
         .flush()
         .with_context(|| format!("Failed to write the {label} document to stdout"))
+}
+
+pub(super) fn write_document_file(result: &ExtractedDocument, binary_format: Option<&str>, path: &Path) -> Result<()> {
+    let bytes = document_bytes(result, binary_format)?;
+    if path.exists() {
+        anyhow::bail!("Output file already exists: '{}'", path.display());
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .with_context(|| format!("Failed to create output file '{}'", path.display()))?;
+    file.write_all(&bytes)
+        .with_context(|| format!("Failed to write output file '{}'", path.display()))
+}
+
+fn document_bytes(result: &ExtractedDocument, binary_format: Option<&str>) -> Result<Vec<u8>> {
+    let Some(binary_format) = binary_format else {
+        return Ok(result.content.as_bytes().to_vec());
+    };
+    let label = binary_format.to_uppercase();
+    if result.metadata.output_format.as_deref() != Some(binary_format) {
+        anyhow::bail!(
+            "{label} output was requested but the extraction produced {} text instead; see the warnings above",
+            result.metadata.output_format.as_deref().unwrap_or("plain")
+        );
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(&result.content)
+        .with_context(|| format!("{label} output was not valid base64"))
 }
 
 fn extract_input_sync(

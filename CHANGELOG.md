@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **(cli): `extract` and `batch` can write converted content directly to files.** Pass
+  `--output <FILE>` to `extract`, or `--output <DIRECTORY>` to `batch` to derive one filename per
+  input from its stem and content format. Existing destinations and colliding batch names are
+  rejected instead of overwritten. (GH#2040)
 - **(html): inline `data:` media handling is configurable across Rust and every generated binding.**
   `ConversionOptions.inline_data_media` and the new `InlineDataMedia` enum let callers keep the
   full data URL (the default), emit only alternative text, or drop the element.
