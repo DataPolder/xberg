@@ -217,6 +217,15 @@ if ! {
     ${gliner_features[@]+"${gliner_features[@]}"} \
     --all-targets --verbose || exit
 
+  # The broad and curated feature legs fill the macOS runner even after CI clears
+  # clippy artifacts before this script. A measured run reached 100% disk and left
+  # libheif's newly linked build script unexecutable, so discard completed test
+  # artifacts before the final isolated crate. Linux runners have a separate disk
+  # cleanup action and retain their warm artifacts. ~keep
+  if [ "$(uname -s)" = "Darwin" ]; then
+    task rust:clean
+  fi
+
   echo "=== cargo test -p xberg-libheif (default features) ==="
   # Default features, not --all-features: `latest` would demand libheif >= 1.21 while
   # CI installs the 1.19.8 the shipped artifacts must load against. ~keep

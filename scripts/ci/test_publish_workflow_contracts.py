@@ -11,6 +11,7 @@ WORKFLOW = Path(__file__).parents[2] / ".github" / "workflows" / "publish.yaml"
 DOCKER_WORKFLOW = Path(__file__).parents[2] / ".github" / "workflows" / "publish-docker.yaml"
 PUBDEV_WORKFLOW = Path(__file__).parents[2] / ".github" / "workflows" / "publish-pubdev.yaml"
 CI_WORKFLOW = Path(__file__).parents[2] / ".github" / "workflows" / "ci-lint.yaml"
+RUST_UNIT_SCRIPT = Path(__file__).parent / "rust" / "run-unit-tests.sh"
 PUBLISHER_BOT = "xberg-dev-publisher[bot]"
 PUBLISH_PUB_SHA = "a25ae95253ee755ac5f691f7e1053dcb104cdee7"
 
@@ -353,6 +354,22 @@ def test_cli_release_enables_metal_only_for_macos_arm64() -> None:
     assert block.count("candle-metal") == 1
 
 
+def test_docker_preflight_checks_out_the_resolved_candidate() -> None:
+    block = job_block(DOCKER_WORKFLOW.read_text(), "check-docker")
+    assert "ref: ${{ needs.prepare.outputs.checkout_ref }}" in block
+    assert "ref: ${{ needs.prepare.outputs.tag }}" not in block
+
+
+def test_macos_unit_tests_reclaim_artifacts_before_libheif() -> None:
+    script = RUST_UNIT_SCRIPT.read_text()
+    gliner = script.index("cargo test --locked --no-fail-fast -p xberg-gliner")
+    cleanup = script.index('if [ "$(uname -s)" = "Darwin" ]; then', gliner)
+    libheif = script.index("cargo test --locked --no-fail-fast -p xberg-libheif", cleanup)
+    assert gliner < cleanup < libheif
+    cleanup_block = script[cleanup:libheif]
+    assert "task rust:clean" in cleanup_block
+
+
 def test_publish_contracts_run_in_ci() -> None:
     assert "python3 scripts/ci/test_publish_workflow_contracts.py" in CI_WORKFLOW.read_text()
 
@@ -367,4 +384,6 @@ if __name__ == "__main__":
     test_glibc_ffi_jobs_build_lzma_statically()
     test_glibc_native_closures_are_strictly_verified()
     test_cli_release_enables_metal_only_for_macos_arm64()
+    test_docker_preflight_checks_out_the_resolved_candidate()
+    test_macos_unit_tests_reclaim_artifacts_before_libheif()
     test_publish_contracts_run_in_ci()
