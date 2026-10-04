@@ -1213,6 +1213,9 @@ pub(crate) const MIN_TABLE_CANDIDATE_WORDS: usize = 6;
 #[cfg(any(feature = "ocr", paddle_ocr))]
 const MAX_ALIGNED_FRAGMENT_GAP_HEIGHT_MULTIPLIER: u32 = 12;
 
+#[cfg(any(feature = "ocr", paddle_ocr))]
+const MAX_ALIGNED_FULL_REGION_GAP_HEIGHT_MULTIPLIER: u32 = 4;
+
 /// Split table-candidate words into vertically separated regions.
 ///
 /// Tesseract's TSV output has no notion of "this is a separate table from
@@ -1280,27 +1283,24 @@ pub(crate) fn cluster_word_indices_into_table_regions(words: &[HocrWord]) -> Vec
         regions.push(current_region);
     }
 
-    merge_small_aligned_regions(&mut regions, words, avg_height);
+    merge_aligned_regions(&mut regions, words, avg_height);
     regions
 }
 
-/// Attach a region smaller than [`MIN_TABLE_CANDIDATE_WORDS`] to an adjacent region it is
-/// column-aligned with.
+/// Attach adjacent table rows when their columns and vertical spacing support continuation.
 ///
 /// A table whose rows are spaced widely enough to exceed the region gap threshold splits into one
 /// region per row. A one-row region holds fewer than the minimum words, so the table branch drops
 /// it entirely and the row's values are lost (xberg-io/xberg#1957: an invoice's trailing line
-/// items). A region below the minimum is not a table on its own, and a genuinely separate table is
-/// at least that size, so attaching the fragment to a column-aligned neighbour preserves its
-/// content without folding two real tables together.
+/// items). A region below the minimum is not a table on its own. A larger row can also continue a
+/// table when three columns align across a short gap; the stricter alignment and distance keep
+/// complete nearby tables separate (xberg-io/xberg#2043). ~keep
 #[cfg(any(feature = "ocr", paddle_ocr))]
-fn merge_small_aligned_regions(regions: &mut Vec<Vec<usize>>, words: &[HocrWord], tolerance: u32) {
+fn merge_aligned_regions(regions: &mut Vec<Vec<usize>>, words: &[HocrWord], tolerance: u32) {
     let mut merged: Vec<Vec<usize>> = Vec::with_capacity(regions.len());
     for region in regions.drain(..) {
-        if region.len() < MIN_TABLE_CANDIDATE_WORDS
-            && let Some(previous) = merged.last_mut()
-            && columns_align(previous, &region, words, tolerance)
-            && regions_are_nearby(previous, &region, words, tolerance)
+        if let Some(previous) = merged.last_mut()
+            && regions_continue(previous, &region, words, tolerance)
         {
             previous.extend(region);
             continue;
@@ -1311,8 +1311,9 @@ fn merge_small_aligned_regions(regions: &mut Vec<Vec<usize>>, words: &[HocrWord]
     let mut index = 0;
     while index + 1 < merged.len() {
         if merged[index].len() < MIN_TABLE_CANDIDATE_WORDS
-            && columns_align(&merged[index + 1], &merged[index], words, tolerance)
-            && regions_are_nearby(&merged[index + 1], &merged[index], words, tolerance)
+            && columns_align(&merged[index + 1], &merged[index], words, tolerance, 2)
+            && region_gap(&merged[index + 1], &merged[index], words)
+                <= tolerance.saturating_mul(MAX_ALIGNED_FRAGMENT_GAP_HEIGHT_MULTIPLIER)
         {
             let fragment = merged.remove(index);
             merged[index].extend(fragment);
@@ -1324,7 +1325,35 @@ fn merge_small_aligned_regions(regions: &mut Vec<Vec<usize>>, words: &[HocrWord]
 }
 
 #[cfg(any(feature = "ocr", paddle_ocr))]
-fn regions_are_nearby(first: &[usize], second: &[usize], words: &[HocrWord], tolerance: u32) -> bool {
+fn regions_continue(first: &[usize], second: &[usize], words: &[HocrWord], tolerance: u32) -> bool {
+    let small = second.len() < MIN_TABLE_CANDIDATE_WORDS;
+    let min_columns = if small { 2 } else { 3 };
+    let max_gap = if small {
+        MAX_ALIGNED_FRAGMENT_GAP_HEIGHT_MULTIPLIER
+    } else {
+        MAX_ALIGNED_FULL_REGION_GAP_HEIGHT_MULTIPLIER
+    };
+    // ~keep A repeated header can align perfectly with a preceding table across the same short
+    // gap. Require two numeric cells in the next region's first row before merging full regions.
+    (small || first_row_has_two_values(second, words, tolerance))
+        && columns_align(first, second, words, tolerance, min_columns)
+        && region_gap(first, second, words) <= tolerance.saturating_mul(max_gap)
+}
+
+#[cfg(any(feature = "ocr", paddle_ocr))]
+fn first_row_has_two_values(region: &[usize], words: &[HocrWord], tolerance: u32) -> bool {
+    let first_top = region.iter().map(|&index| words[index].top).min().unwrap_or(0);
+    region
+        .iter()
+        .filter(|&&index| words[index].top.saturating_sub(first_top) <= tolerance / 2)
+        .filter(|&&index| text_is_value(&words[index].text))
+        .take(2)
+        .count()
+        == 2
+}
+
+#[cfg(any(feature = "ocr", paddle_ocr))]
+fn region_gap(first: &[usize], second: &[usize], words: &[HocrWord]) -> u32 {
     let first_top = first.iter().map(|&index| words[index].top).min().unwrap_or(0);
     let first_bottom = first
         .iter()
@@ -1337,17 +1366,15 @@ fn regions_are_nearby(first: &[usize], second: &[usize], words: &[HocrWord], tol
         .map(|&index| words[index].top.saturating_add(words[index].height))
         .max()
         .unwrap_or(0);
-    let gap = first_top
+    first_top
         .saturating_sub(second_bottom)
-        .max(second_top.saturating_sub(first_bottom));
-    gap <= tolerance.saturating_mul(MAX_ALIGNED_FRAGMENT_GAP_HEIGHT_MULTIPLIER)
+        .max(second_top.saturating_sub(first_bottom))
 }
 
-/// Whether at least two distinct columns of `fragment` line up with a column of `anchor`, within
-/// `tolerance` points. A scan's column jitter is a fraction of a word's height, so callers pass
-/// the region's average word height.
+/// Whether enough distinct columns of `fragment` line up with `anchor` within `tolerance` points.
+/// A scan's column jitter is a fraction of a word's height, so callers pass the average word height.
 #[cfg(any(feature = "ocr", paddle_ocr))]
-fn columns_align(anchor: &[usize], fragment: &[usize], words: &[HocrWord], tolerance: u32) -> bool {
+fn columns_align(anchor: &[usize], fragment: &[usize], words: &[HocrWord], tolerance: u32, minimum: usize) -> bool {
     let mut matched = 0usize;
     let mut seen: Vec<u32> = Vec::new();
     for &fragment_index in fragment {
@@ -1361,7 +1388,7 @@ fn columns_align(anchor: &[usize], fragment: &[usize], words: &[HocrWord], toler
             .any(|&anchor_index| words[anchor_index].left.abs_diff(left) <= tolerance)
         {
             matched += 1;
-            if matched >= 2 {
+            if matched >= minimum {
                 return true;
             }
         }

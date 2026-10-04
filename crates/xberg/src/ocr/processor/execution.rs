@@ -214,6 +214,7 @@ where
 
 const MIN_QUANTITY_COLUMN_SUPPORT: usize = 2;
 const MAX_RETRY_QUANTITY_DIGITS: usize = 8;
+const MIN_SOURCE_QUANTITY_RETRY_CONFIDENCE: f64 = 50.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct QuantityRetryRegion {
@@ -444,6 +445,99 @@ fn recover_blank_quantity_word(
     );
     let _ = api.set_page_seg_mode(TessPageSegMode::from_int(config.psm as i32));
     recovered
+}
+
+fn source_retry_crop(
+    region: &QuantityRetryRegion,
+    processed_width: u32,
+    processed_height: u32,
+    source_width: u32,
+    source_height: u32,
+) -> Option<(u32, u32, u32, u32)> {
+    if processed_width == 0 || processed_height == 0 || source_width == 0 || source_height == 0 {
+        return None;
+    }
+    let scale = |coordinate: u32, source: u32, processed: u32, round_up: bool| {
+        let numerator = u64::from(coordinate) * u64::from(source);
+        let denominator = u64::from(processed);
+        let offset = if round_up { denominator - 1 } else { 0 };
+        u32::try_from((numerator + offset) / denominator)
+            .ok()
+            .map(|value| value.min(source))
+    };
+    let left = scale(region.left, source_width, processed_width, false)?;
+    let top = scale(region.top, source_height, processed_height, false)?;
+    let right = scale(
+        region.left.saturating_add(region.width),
+        source_width,
+        processed_width,
+        true,
+    )?;
+    let bottom = scale(
+        region.top.saturating_add(region.height),
+        source_height,
+        processed_height,
+        true,
+    )?;
+    (right > left && bottom > top).then_some((left, top, right - left, bottom - top))
+}
+
+fn recover_blank_quantity_from_source(
+    image_bytes: &[u8],
+    config: &TesseractConfig,
+    region: &QuantityRetryRegion,
+    processed_width: u32,
+    processed_height: u32,
+    tessdata_path: &str,
+    security_limits: &SecurityLimits,
+) -> Option<HocrWord> {
+    if config.auto_rotate
+        || config
+            .preprocessing
+            .as_ref()
+            .is_some_and(|preprocessing| preprocessing.auto_rotate)
+    {
+        return None;
+    }
+    // ~keep DPI normalization is scale-only; optional deskew can shift glyphs slightly, so the
+    // mapped crop is bounded to the missing cell and accepts only a high-confidence integer.
+    let source = crate::extraction::image::load_image_for_ocr(image_bytes, security_limits)
+        .ok()?
+        .into_rgb8();
+    let (left, top, width, height) = source_retry_crop(
+        region,
+        processed_width,
+        processed_height,
+        source.width(),
+        source.height(),
+    )?;
+    let crop = image::imageops::crop_imm(&source, left, top, width, height).to_image();
+    let api = TesseractAPI::new().ok()?;
+    api.init(tessdata_path, &config.language).ok()?;
+    api.set_page_seg_mode(TessPageSegMode::PSM_SINGLE_LINE).ok()?;
+    api.set_image(
+        crop.as_raw(),
+        i32::try_from(width).ok()?,
+        i32::try_from(height).ok()?,
+        3,
+        i32::try_from(width.checked_mul(3)?).ok()?,
+    )
+    .ok()?;
+    api.recognize().ok()?;
+    let text = api.get_utf8_text().ok()?;
+    let quantity = parse_retry_quantity(&text)?;
+    let confidence = f64::from(api.mean_text_conf().ok()?);
+    if confidence < config.table_min_confidence.max(MIN_SOURCE_QUANTITY_RETRY_CONFIDENCE) {
+        return None;
+    }
+    Some(HocrWord {
+        text: quantity.to_string(),
+        left: region.word_left,
+        top: region.word_top,
+        width: region.word_width,
+        height: region.word_height,
+        confidence,
+    })
 }
 
 fn recognize_quantity_region(
@@ -2230,7 +2324,22 @@ pub(super) fn perform_ocr(
             } else {
                 None
             };
-            let recovered = recover_blank_quantity_word(&api, config, retry_region.as_ref(), width, height);
+            let recovered =
+                recover_blank_quantity_word(&api, config, retry_region.as_ref(), width, height).or_else(|| {
+                    if !prepared_image.apply_pix_preprocessing {
+                        return None;
+                    }
+                    let retry = retry_region.as_ref()?;
+                    recover_blank_quantity_from_source(
+                        image_bytes,
+                        config,
+                        retry,
+                        width,
+                        height,
+                        &tessdata_path,
+                        &security_limits,
+                    )
+                });
             if let Some(recovered) = recovered {
                 region.push(recovered);
                 table = reconstruct_cleaned_table(&region.words, config).0;
@@ -2663,6 +2772,112 @@ mod tests {
         }
         let recovered = recover_quantity_from_image(&multi_digit).expect("multi-digit quantity must be recovered");
         assert_eq!(recovered.text, "555");
+    }
+
+    #[test]
+    fn source_retry_crop_maps_processed_cell_into_original_pixels() {
+        let region = QuantityRetryRegion {
+            row: 3,
+            column: 1,
+            left: 1_662,
+            top: 1_828,
+            width: 164,
+            height: 81,
+            word_left: 1_699,
+            word_top: 1_850,
+            word_width: 73,
+            word_height: 37,
+        };
+        assert_eq!(
+            source_retry_crop(&region, 3_200, 4_089, 1_800, 2_300),
+            Some((934, 1_028, 94, 46))
+        );
+        assert_eq!(source_retry_crop(&region, 0, 4_089, 1_800, 2_300), None);
+    }
+
+    #[test]
+    #[cfg(feature = "bundle-tessdata-eng")]
+    fn source_quantity_retry_reads_native_pixels_and_rejects_blank_pixels() {
+        let tessdata = tempfile::tempdir().expect("temporary tessdata directory");
+        std::fs::write(
+            tessdata.path().join("eng.traineddata"),
+            xberg_tesseract::bundled_eng_traineddata().expect("bundled English tessdata"),
+        )
+        .expect("write tessdata");
+        let path = tessdata.path().to_str().expect("UTF-8 tessdata path");
+        let region = QuantityRetryRegion {
+            row: 0,
+            column: 0,
+            left: 180,
+            top: 30,
+            width: 120,
+            height: 120,
+            word_left: 212,
+            word_top: 50,
+            word_width: 48,
+            word_height: 72,
+        };
+        let source = include_bytes!("../../../test_data/ocr/isolated_quantity_cell.png");
+        let config = TesseractConfig::default();
+        let recovered =
+            recover_blank_quantity_from_source(source, &config, &region, 340, 182, path, &SecurityLimits::default())
+                .expect("native crop recovers the digit");
+        assert_eq!(recovered.text, "5");
+        assert!(recovered.confidence >= MIN_SOURCE_QUANTITY_RETRY_CONFIDENCE);
+
+        let mut rotated_config = config.clone();
+        rotated_config.preprocessing = Some(crate::types::ImagePreprocessingConfig {
+            auto_rotate: true,
+            ..Default::default()
+        });
+        assert!(
+            recover_blank_quantity_from_source(
+                source,
+                &rotated_config,
+                &region,
+                340,
+                182,
+                path,
+                &SecurityLimits::default(),
+            )
+            .is_none(),
+            "source coordinates must not be reused after auto-rotation"
+        );
+
+        let mut strict_config = config.clone();
+        strict_config.table_min_confidence = recovered.confidence + 1.0;
+        assert!(
+            recover_blank_quantity_from_source(
+                source,
+                &strict_config,
+                &region,
+                340,
+                182,
+                path,
+                &SecurityLimits::default(),
+            )
+            .is_none(),
+            "a digit below the configured confidence threshold must stay blank"
+        );
+
+        let blank = image::RgbImage::from_pixel(170, 91, image::Rgb([255, 255, 255]));
+        let mut blank_png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(blank)
+            .write_to(&mut blank_png, image::ImageFormat::Png)
+            .expect("encode blank PNG");
+        assert!(
+            recover_blank_quantity_from_source(
+                blank_png.get_ref(),
+                &config,
+                &region,
+                340,
+                182,
+                path,
+                &SecurityLimits::default(),
+            )
+            .is_none(),
+            "a blank quantity must remain blank"
+        );
     }
 
     #[test]
@@ -3503,6 +3718,102 @@ mod tests {
             3,
             "every line item's quantity must survive: {table:?}"
         );
+    }
+
+    fn invoice_rows_with_full_sized_fragments() -> Vec<crate::table_core::HocrWord> {
+        let row = |top, values: &[(u32, u32, &str)]| {
+            values
+                .iter()
+                .map(|&(left, width, text)| word_at(left, top, width, 20, text))
+                .collect::<Vec<_>>()
+        };
+        let mut words = row(
+            775,
+            &[
+                (157, 173, "DESCRIPTION"),
+                (956, 50, "QTY"),
+                (1179, 59, "UNIT"),
+                (1248, 76, "PRICE"),
+                (1498, 55, "LINE"),
+                (1563, 80, "TOTAL"),
+            ],
+        );
+        words.extend(row(
+            857,
+            &[
+                (158, 113, "Widget"),
+                (281, 77, "Premium"),
+                (367, 116, "Blend"),
+                (494, 77, "Large"),
+                (978, 28, "10"),
+                (1241, 84, "$45.00"),
+                (1543, 100, "$450.00"),
+            ],
+        ));
+        words.extend(row(
+            949,
+            &[
+                (157, 150, "Cups"),
+                (317, 65, "with"),
+                (391, 17, "&"),
+                (417, 50, "Lids"),
+                (961, 45, "200"),
+                (1256, 69, "$1.20"),
+                (1543, 100, "$240.00"),
+            ],
+        ));
+        words.extend(row(
+            1041,
+            &[
+                (157, 107, "Cleaning"),
+                (274, 88, "Tablets"),
+                (993, 13, "5"),
+                (1241, 84, "$18.50"),
+                (1559, 84, "$92.50"),
+            ],
+        ));
+        words
+    }
+
+    #[test]
+    fn invoice_full_sized_rows_keep_four_columns_and_every_quantity() {
+        let words = invoice_rows_with_full_sized_fragments();
+        let regions = cluster_words_into_table_regions(&words);
+        assert_eq!(regions.len(), 1, "one invoice table must stay one region: {regions:?}");
+
+        let (grid, _) = reconstruct_cleaned_table(&regions[0], &TesseractConfig::default());
+        assert_eq!(grid.len(), 4, "header and three item rows: {grid:?}");
+        assert_eq!(grid[0], ["DESCRIPTION", "QTY", "UNIT PRICE", "LINE TOTAL"]);
+        assert_eq!(grid[1][1], "10");
+        assert_eq!(grid[2][1], "200");
+        assert_eq!(grid[3], ["Cleaning Tablets", "5", "$18.50", "$92.50"]);
+    }
+
+    #[test]
+    fn nearby_aligned_complete_tables_remain_separate() {
+        let mut words = table_grid_words(100, 100, 2, 4);
+        words.extend(table_grid_words(100, 270, 2, 4));
+
+        let regions = cluster_words_into_table_regions(&words);
+        assert_eq!(regions.len(), 2, "a table-sized gap separates two complete grids");
+        assert_eq!(regions[0].len(), 8);
+        assert_eq!(regions[1].len(), 8);
+    }
+
+    #[test]
+    fn adjacent_aligned_tables_with_repeated_headers_remain_separate() {
+        let mut first = invoice_rows_with_full_sized_fragments();
+        first.truncate(13);
+        let mut second = first.clone();
+        for word in &mut second {
+            word.top += 172;
+        }
+        first.extend(second);
+
+        let regions = cluster_words_into_table_regions(&first);
+        assert_eq!(regions.len(), 2, "a new header begins a separate aligned table");
+        assert_eq!(regions[0].len(), 13);
+        assert_eq!(regions[1].len(), 13);
     }
 
     const TSV_HEADER: &str =
