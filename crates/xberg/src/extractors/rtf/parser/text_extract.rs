@@ -11,6 +11,9 @@ use crate::extractors::rtf::formatting::{map_offset, normalize_whitespace_with_m
 use crate::extractors::rtf::images::RtfImage;
 use crate::extractors::rtf::tables::TableState;
 use crate::types::Table;
+use std::collections::HashMap;
+use std::iter::Peekable;
+use std::str::Chars;
 
 /// Known RTF destination groups whose content should be skipped entirely.
 ///
@@ -146,6 +149,390 @@ fn close_annotation_group(
         *pending_atnid = None;
     }
     annotation_buf.clear();
+}
+
+struct TextEscapeCtx<'a> {
+    result: &'a mut String,
+    table_state: &'a mut Option<TableState>,
+    tables: &'a mut Vec<Table>,
+    images: &'a mut Vec<RtfImage>,
+    ensure_table: &'a dyn Fn(&mut Option<TableState>),
+    finalize_table: &'a dyn Fn(&mut Option<TableState>, &mut Vec<Table>),
+    plain: bool,
+    group_has_text: &'a mut Vec<bool>,
+    cur_heading_level: &'a mut u8,
+    cur_list_level: &'a mut Option<u8>,
+    cur_list_id: &'a mut Option<u16>,
+    cur_ordered: &'a mut bool,
+    para_metas: &'a mut Vec<ParagraphMeta>,
+    para_meta_emitted: &'a mut bool,
+    uc_stack: &'a mut Vec<u8>,
+    ansi_codepage_stack: &'a mut Vec<u32>,
+    footnote_count: &'a mut usize,
+    pending_boundary_space: &'a mut bool,
+    hidden_stack: &'a mut Vec<bool>,
+    fmt_tracker: &'a mut FormattingTracker,
+    font_id_stack: &'a mut Vec<Option<u16>>,
+    default_font_id: &'a mut Option<u16>,
+    font_charsets: &'a HashMap<u16, u32>,
+    group_depth: i32,
+    skip_depth: &'a mut i32,
+    expect_destination: &'a mut bool,
+    ignorable_pending: &'a mut bool,
+    in_fldinst: &'a mut bool,
+    fldinst_depth: &'a mut i32,
+    fldinst_content: &'a mut String,
+    in_fldrslt: &'a mut bool,
+    fldrslt_depth: &'a mut i32,
+    fldrslt_start: &'a mut usize,
+    in_listtext: &'a mut bool,
+    listtext_depth: &'a mut i32,
+    listtext_buf: &'a mut String,
+    in_footnote: &'a mut bool,
+    footnote_depth: &'a mut i32,
+    footnote_buf: &'a mut String,
+    in_shptxt: &'a mut bool,
+    shptxt_depth: &'a mut i32,
+    shptxt_buf: &'a mut String,
+    in_annotation: &'a mut bool,
+    annotation_depth: &'a mut i32,
+    annotation_buf: &'a mut String,
+    pending_atnid: &'a mut Option<i32>,
+}
+
+impl TextEscapeCtx<'_> {
+    fn control_word_ctx(&mut self) -> ControlWordCtx<'_> {
+        ControlWordCtx {
+            result: self.result,
+            table_state: self.table_state,
+            tables: self.tables,
+            images: self.images,
+            ensure_table: self.ensure_table,
+            finalize_table: self.finalize_table,
+            plain: self.plain,
+            group_has_text: self.group_has_text,
+            cur_heading_level: self.cur_heading_level,
+            cur_list_level: self.cur_list_level,
+            cur_list_id: self.cur_list_id,
+            cur_ordered: self.cur_ordered,
+            para_metas: self.para_metas,
+            para_meta_emitted: self.para_meta_emitted,
+            uc_stack: self.uc_stack,
+            ansi_codepage_stack: self.ansi_codepage_stack,
+            footnote_count: self.footnote_count,
+            pending_boundary_space: self.pending_boundary_space,
+            hidden_stack: self.hidden_stack,
+            fmt_tracker: self.fmt_tracker,
+            font_id_stack: self.font_id_stack,
+            default_font_id: self.default_font_id,
+        }
+    }
+
+    fn handle(&mut self, chars: &mut Peekable<Chars<'_>>) {
+        let Some(&next_ch) = chars.peek() else {
+            return;
+        };
+        match next_ch {
+            '\n' | '\r' => self.handle_line_break(next_ch, chars),
+            '\\' | '{' | '}' => self.handle_literal(next_ch, chars),
+            '\'' => self.handle_hex_escape(chars),
+            '*' => {
+                chars.next();
+                *self.ignorable_pending = true;
+            }
+            _ => self.handle_control_word(chars),
+        }
+    }
+
+    fn handle_line_break(&mut self, next_ch: char, chars: &mut Peekable<Chars<'_>>) {
+        chars.next();
+        if next_ch == '\r' && matches!(chars.peek(), Some(&'\n')) {
+            chars.next();
+        }
+        *self.expect_destination = false;
+        if *self.skip_depth > 0 {
+            return;
+        }
+        let mut ctx = self.control_word_ctx();
+        handle_control_word("par", None, chars, &mut ctx);
+    }
+
+    fn handle_literal(&mut self, next_ch: char, chars: &mut Peekable<Chars<'_>>) {
+        chars.next();
+        *self.expect_destination = false;
+        if *self.in_fldinst {
+            self.fldinst_content.push(next_ch);
+        }
+        if *self.in_footnote {
+            self.footnote_buf.push(next_ch);
+        }
+        if *self.in_shptxt {
+            self.shptxt_buf.push(next_ch);
+        }
+        if *self.in_annotation {
+            self.annotation_buf.push(next_ch);
+        }
+        if *self.skip_depth > 0 || self.hidden_stack.last().copied().unwrap_or(false) {
+            return;
+        }
+        if *self.pending_boundary_space
+            && !self.result.is_empty()
+            && !self.result.ends_with(' ')
+            && !self.result.ends_with('\n')
+        {
+            self.result.push(' ');
+        }
+        *self.pending_boundary_space = false;
+        *self.para_meta_emitted = false;
+        self.result.push(next_ch);
+        if let Some(flag) = self.group_has_text.last_mut() {
+            *flag = true;
+        }
+    }
+
+    fn handle_hex_escape(&mut self, chars: &mut Peekable<Chars<'_>>) {
+        chars.next();
+        *self.expect_destination = false;
+        let bytes = parse_hex_escape_bytes(chars);
+        if (*self.in_footnote || *self.in_shptxt || *self.in_annotation) && bytes.is_some() {
+            self.append_hex_to_destinations(bytes.as_deref().unwrap_or_default());
+        }
+        if *self.skip_depth > 0 || self.hidden_stack.last().copied().unwrap_or(false) {
+            return;
+        }
+        let Some(bytes) = bytes.as_deref() else {
+            return;
+        };
+        let decoded = self.decode_ansi(bytes);
+        if let Some(state) = self.table_state.as_mut()
+            && state.in_row
+        {
+            state.current_cell.push_str(&decoded);
+            return;
+        }
+        if *self.pending_boundary_space
+            && !self.result.is_empty()
+            && !self.result.ends_with(' ')
+            && !self.result.ends_with('\n')
+        {
+            self.result.push(' ');
+        }
+        *self.pending_boundary_space = false;
+        *self.para_meta_emitted = false;
+        self.result.push_str(&decoded);
+        if let Some(flag) = self.group_has_text.last_mut() {
+            *flag = true;
+        }
+    }
+
+    fn decode_ansi(&self, bytes: &[u8]) -> String {
+        let codepage = resolve_decode_codepage(
+            self.font_id_stack,
+            *self.default_font_id,
+            self.font_charsets,
+            self.ansi_codepage_stack,
+        );
+        decode_ansi_bytes(bytes, codepage)
+    }
+
+    fn append_hex_to_destinations(&mut self, bytes: &[u8]) {
+        let decoded = self.decode_ansi(bytes);
+        if *self.in_footnote {
+            self.footnote_buf.push_str(&decoded);
+        }
+        if *self.in_shptxt {
+            self.shptxt_buf.push_str(&decoded);
+        }
+        if *self.in_annotation {
+            self.annotation_buf.push_str(&decoded);
+        }
+    }
+
+    fn handle_control_word(&mut self, chars: &mut Peekable<Chars<'_>>) {
+        let (control_word, param) = parse_rtf_control_word(chars);
+        if *self.expect_destination || *self.ignorable_pending {
+            *self.expect_destination = false;
+            if self.handle_destination(&control_word, param) {
+                return;
+            }
+        }
+        if *self.skip_depth > 0 {
+            self.handle_skipped_control_word(&control_word, param, chars);
+            return;
+        }
+        let mut ctx = self.control_word_ctx();
+        handle_control_word(&control_word, param, chars, &mut ctx);
+    }
+
+    fn handle_destination(&mut self, control_word: &str, param: Option<i32>) -> bool {
+        if *self.ignorable_pending {
+            *self.ignorable_pending = false;
+            if self.handle_ignorable_destination(control_word, param) {
+                return true;
+            }
+        }
+        match control_word {
+            "listtext" | "pntext" => {
+                *self.in_listtext = true;
+                *self.listtext_depth = self.group_depth;
+                self.listtext_buf.clear();
+                self.start_skip();
+            }
+            "fldinst" => {
+                *self.in_fldinst = true;
+                *self.fldinst_depth = self.group_depth;
+                self.start_skip();
+            }
+            "fldrslt" => {
+                *self.in_fldrslt = true;
+                *self.fldrslt_depth = self.group_depth;
+                *self.fldrslt_start = self.result.len();
+            }
+            "footnote" => {
+                *self.in_footnote = true;
+                *self.footnote_depth = self.group_depth;
+                self.footnote_buf.clear();
+                self.start_skip();
+            }
+            "shptxt" => {
+                *self.in_shptxt = true;
+                *self.shptxt_depth = self.group_depth;
+                self.shptxt_buf.clear();
+                self.start_skip();
+            }
+            "annotation" => {
+                *self.in_annotation = true;
+                *self.annotation_depth = self.group_depth;
+                self.annotation_buf.clear();
+                self.start_skip();
+            }
+            "atnid" => {
+                if let Some(id) = param {
+                    *self.pending_atnid = Some(id);
+                }
+                self.start_skip();
+            }
+            word if SKIP_DESTINATIONS.contains(&word) => self.start_skip(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn handle_ignorable_destination(&mut self, control_word: &str, param: Option<i32>) -> bool {
+        match control_word {
+            "fldinst" => {
+                *self.in_fldinst = true;
+                *self.fldinst_depth = self.group_depth;
+            }
+            "listtext" | "pntext" => {
+                *self.in_listtext = true;
+                *self.listtext_depth = self.group_depth;
+                self.listtext_buf.clear();
+            }
+            "atnid" => {
+                if let Some(id) = param {
+                    *self.pending_atnid = Some(id);
+                }
+            }
+            "shppict" => return false,
+            _ => {}
+        }
+        self.start_skip();
+        true
+    }
+
+    fn start_skip(&mut self) {
+        if *self.skip_depth == 0 {
+            *self.skip_depth = self.group_depth;
+        }
+    }
+
+    fn handle_skipped_control_word(&mut self, control_word: &str, param: Option<i32>, chars: &mut Peekable<Chars<'_>>) {
+        match control_word {
+            "uc" => {
+                if let Some(value) = param
+                    && let Some(uc) = self.uc_stack.last_mut()
+                {
+                    *uc = value.max(0) as u8;
+                }
+            }
+            "ansicpg" => {
+                if let Some(value) = param
+                    && value > 0
+                    && let Some(codepage) = self.ansi_codepage_stack.last_mut()
+                {
+                    *codepage = value as u32;
+                }
+            }
+            "f" => {
+                if let Some(value) = param
+                    && let Some(font_id) = self.font_id_stack.last_mut()
+                {
+                    *font_id = Some(value.max(0) as u16);
+                }
+            }
+            "deff" => {
+                if let Some(value) = param {
+                    *self.default_font_id = Some(value.max(0) as u16);
+                }
+            }
+            "u" if *self.in_footnote || *self.in_shptxt || *self.in_annotation => {
+                self.append_skipped_unicode(param, chars);
+            }
+            "par" | "line" if *self.in_footnote || *self.in_shptxt || *self.in_annotation => {
+                if *self.in_footnote {
+                    self.footnote_buf.push(' ');
+                }
+                if *self.in_shptxt {
+                    self.shptxt_buf.push(' ');
+                }
+                if *self.in_annotation {
+                    self.annotation_buf.push(' ');
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn append_skipped_unicode(&mut self, param: Option<i32>, chars: &mut Peekable<Chars<'_>>) {
+        let Some(code_num) = param else {
+            return;
+        };
+        let code_u = if code_num < 0 {
+            (code_num + 65536) as u32
+        } else {
+            code_num as u32
+        };
+        if let Some(character) = char::from_u32(code_u) {
+            if *self.in_footnote {
+                self.footnote_buf.push(character);
+            }
+            if *self.in_shptxt {
+                self.shptxt_buf.push(character);
+            }
+            if *self.in_annotation {
+                self.annotation_buf.push(character);
+            }
+        }
+        let uc_count = self.uc_stack.last().copied().unwrap_or(1);
+        for _ in 0..uc_count {
+            if chars.peek().is_some_and(|next| !matches!(next, '\\' | '{' | '}')) {
+                chars.next();
+            }
+        }
+    }
+}
+
+fn parse_hex_escape_bytes(chars: &mut Peekable<Chars<'_>>) -> Option<Vec<u8>> {
+    let (Some(hex1), Some(hex2)) = (chars.next(), chars.next()) else {
+        return None;
+    };
+    let byte = parse_hex_byte(hex1 as u8, hex2 as u8)?;
+    let mut bytes = vec![byte];
+    while let Some(next_byte) = consume_adjacent_hex_escape(chars) {
+        bytes.push(next_byte);
+    }
+    Some(bytes)
 }
 
 /// Extract text and image metadata from RTF document.
@@ -349,395 +736,55 @@ pub(crate) fn extract_text_from_rtf(
                 }
             }
             '\\' => {
-                if let Some(&next_ch) = chars.peek() {
-                    match next_ch {
-                        '\n' | '\r' => {
-                            chars.next();
-                            if next_ch == '\r'
-                                && let Some(&'\n') = chars.peek()
-                            {
-                                chars.next();
-                            }
-                            expect_destination = false;
-                            if skip_depth > 0 {
-                                continue;
-                            }
-                            handle_control_word(
-                                "par",
-                                None,
-                                &mut chars,
-                                &mut ControlWordCtx {
-                                    result: &mut result,
-                                    table_state: &mut table_state,
-                                    tables: &mut tables,
-                                    images: &mut images,
-                                    ensure_table: &ensure_table,
-                                    finalize_table: &finalize_table,
-                                    plain,
-                                    group_has_text: &mut group_has_text,
-                                    cur_heading_level: &mut cur_heading_level,
-                                    cur_list_level: &mut cur_list_level,
-                                    cur_list_id: &mut cur_list_id,
-                                    cur_ordered: &mut cur_ordered,
-                                    para_metas: &mut para_metas,
-                                    para_meta_emitted: &mut para_meta_emitted,
-                                    uc_stack: &mut uc_stack,
-                                    ansi_codepage_stack: &mut ansi_codepage_stack,
-                                    footnote_count: &mut footnote_count,
-                                    pending_boundary_space: &mut pending_boundary_space,
-                                    hidden_stack: &mut hidden_stack,
-                                    fmt_tracker: &mut fmt_tracker,
-                                    font_id_stack: &mut font_id_stack,
-                                    default_font_id: &mut default_font_id,
-                                },
-                            );
-                        }
-                        '\\' | '{' | '}' => {
-                            chars.next();
-                            expect_destination = false;
-                            if in_fldinst {
-                                fldinst_content.push(next_ch);
-                            }
-                            if in_footnote {
-                                footnote_buf.push(next_ch);
-                            }
-                            if in_shptxt {
-                                shptxt_buf.push(next_ch);
-                            }
-                            if in_annotation {
-                                annotation_buf.push(next_ch);
-                            }
-                            if skip_depth > 0 {
-                                continue;
-                            }
-                            if hidden_stack.last().copied().unwrap_or(false) {
-                                continue;
-                            }
-                            if pending_boundary_space
-                                && !result.is_empty()
-                                && !result.ends_with(' ')
-                                && !result.ends_with('\n')
-                            {
-                                result.push(' ');
-                            }
-                            pending_boundary_space = false;
-                            para_meta_emitted = false;
-                            result.push(next_ch);
-                            if let Some(flag) = group_has_text.last_mut() {
-                                *flag = true;
-                            }
-                        }
-                        '\'' => {
-                            chars.next();
-                            expect_destination = false;
-                            let hex1 = chars.next();
-                            let hex2 = chars.next();
-                            let bytes = if let (Some(h1), Some(h2)) = (hex1, hex2)
-                                && let Some(byte) = parse_hex_byte(h1 as u8, h2 as u8)
-                            {
-                                let mut bytes = vec![byte];
-                                while let Some(next_byte) = consume_adjacent_hex_escape(&mut chars) {
-                                    bytes.push(next_byte);
-                                }
-                                Some(bytes)
-                            } else {
-                                None
-                            };
-
-                            if (in_footnote || in_shptxt || in_annotation)
-                                && let Some(bytes) = bytes.as_deref()
-                            {
-                                let codepage = resolve_decode_codepage(
-                                    &font_id_stack,
-                                    default_font_id,
-                                    &font_charsets,
-                                    &ansi_codepage_stack,
-                                );
-                                let decoded = decode_ansi_bytes(bytes, codepage);
-                                if in_footnote {
-                                    footnote_buf.push_str(&decoded);
-                                }
-                                if in_shptxt {
-                                    shptxt_buf.push_str(&decoded);
-                                }
-                                if in_annotation {
-                                    annotation_buf.push_str(&decoded);
-                                }
-                            }
-                            if skip_depth > 0 {
-                                continue;
-                            }
-                            if hidden_stack.last().copied().unwrap_or(false) {
-                                continue;
-                            }
-                            if let Some(bytes) = bytes.as_deref() {
-                                let codepage = resolve_decode_codepage(
-                                    &font_id_stack,
-                                    default_font_id,
-                                    &font_charsets,
-                                    &ansi_codepage_stack,
-                                );
-                                let decoded = decode_ansi_bytes(bytes, codepage);
-                                if let Some(state) = table_state.as_mut()
-                                    && state.in_row
-                                {
-                                    state.current_cell.push_str(&decoded);
-                                } else {
-                                    if pending_boundary_space
-                                        && !result.is_empty()
-                                        && !result.ends_with(' ')
-                                        && !result.ends_with('\n')
-                                    {
-                                        result.push(' ');
-                                    }
-                                    pending_boundary_space = false;
-                                    para_meta_emitted = false;
-                                    result.push_str(&decoded);
-                                    if let Some(flag) = group_has_text.last_mut() {
-                                        *flag = true;
-                                    }
-                                }
-                            }
-                        }
-                        '*' => {
-                            chars.next();
-                            ignorable_pending = true;
-                        }
-                        _ => {
-                            let (control_word, _param) = parse_rtf_control_word(&mut chars);
-
-                            if expect_destination || ignorable_pending {
-                                expect_destination = false;
-
-                                if ignorable_pending {
-                                    ignorable_pending = false;
-                                    if control_word == "fldinst" {
-                                        in_fldinst = true;
-                                        fldinst_depth = group_depth;
-                                        if skip_depth == 0 {
-                                            skip_depth = group_depth;
-                                        }
-                                        continue;
-                                    }
-                                    if control_word == "listtext" || control_word == "pntext" {
-                                        in_listtext = true;
-                                        listtext_depth = group_depth;
-                                        listtext_buf.clear();
-                                        if skip_depth == 0 {
-                                            skip_depth = group_depth;
-                                        }
-                                        continue;
-                                    }
-                                    // `{\*\atnid N}` carries the enclosing comment's id as a plain
-                                    // numeric parameter -- there is no destination content to
-                                    // recurse into, just capture it and skip the (empty) group.
-                                    if control_word == "atnid" {
-                                        if let Some(id) = _param {
-                                            pending_atnid = Some(id);
-                                        }
-                                        if skip_depth == 0 {
-                                            skip_depth = group_depth;
-                                        }
-                                        continue;
-                                    }
-                                    if control_word != "shppict" {
-                                        if skip_depth == 0 {
-                                            skip_depth = group_depth;
-                                        }
-                                        continue;
-                                    }
-                                }
-
-                                if control_word == "listtext" || control_word == "pntext" {
-                                    in_listtext = true;
-                                    listtext_depth = group_depth;
-                                    listtext_buf.clear();
-                                    if skip_depth == 0 {
-                                        skip_depth = group_depth;
-                                    }
-                                    continue;
-                                }
-
-                                if control_word == "fldinst" {
-                                    in_fldinst = true;
-                                    fldinst_depth = group_depth;
-                                    if skip_depth == 0 {
-                                        skip_depth = group_depth;
-                                    }
-                                    continue;
-                                }
-
-                                if control_word == "fldrslt" {
-                                    in_fldrslt = true;
-                                    fldrslt_depth = group_depth;
-                                    fldrslt_start = result.len();
-                                    continue;
-                                }
-
-                                if control_word == "footnote" {
-                                    in_footnote = true;
-                                    footnote_depth = group_depth;
-                                    footnote_buf.clear();
-                                    if skip_depth == 0 {
-                                        skip_depth = group_depth;
-                                    }
-                                    continue;
-                                }
-
-                                // `\shptxt` (drawing-object/text-box text) is a plain destination,
-                                // but real producers nest it inside an ignorable `\*\shp{\*\shpinst
-                                // ...}` ancestor. Setting `skip_depth` only when it is not already
-                                // active (matching `footnote`/`fldinst` above) would still lose this
-                                // content -- an outer skip is already active by the time we get here.
-                                // Buffering unconditionally via `in_shptxt` (checked ahead of every
-                                // `skip_depth` gate below) is what actually rescues the text (#86).
-                                if control_word == "shptxt" {
-                                    in_shptxt = true;
-                                    shptxt_depth = group_depth;
-                                    shptxt_buf.clear();
-                                    if skip_depth == 0 {
-                                        skip_depth = group_depth;
-                                    }
-                                    continue;
-                                }
-
-                                // `\annotation` (Word comment text) is likewise a plain destination
-                                // that this parser previously treated as an unrecognized ignorable
-                                // destination and skipped whole (#86).
-                                if control_word == "annotation" {
-                                    in_annotation = true;
-                                    annotation_depth = group_depth;
-                                    annotation_buf.clear();
-                                    if skip_depth == 0 {
-                                        skip_depth = group_depth;
-                                    }
-                                    continue;
-                                }
-
-                                // Non-ignorable form fallback; the common form is `{\*\atnid N}`,
-                                // handled above under `ignorable_pending`.
-                                if control_word == "atnid" {
-                                    if let Some(id) = _param {
-                                        pending_atnid = Some(id);
-                                    }
-                                    if skip_depth == 0 {
-                                        skip_depth = group_depth;
-                                    }
-                                    continue;
-                                }
-
-                                if SKIP_DESTINATIONS.contains(&control_word.as_str()) {
-                                    if skip_depth == 0 {
-                                        skip_depth = group_depth;
-                                    }
-                                    continue;
-                                }
-                            }
-
-                            if skip_depth > 0 {
-                                if control_word == "uc"
-                                    && let Some(val) = _param
-                                    && let Some(uc) = uc_stack.last_mut()
-                                {
-                                    *uc = val.max(0) as u8;
-                                }
-                                if control_word == "ansicpg"
-                                    && let Some(val) = _param
-                                    && val > 0
-                                    && let Some(codepage) = ansi_codepage_stack.last_mut()
-                                {
-                                    *codepage = val as u32;
-                                }
-                                if control_word == "f"
-                                    && let Some(val) = _param
-                                    && let Some(font_id) = font_id_stack.last_mut()
-                                {
-                                    *font_id = Some(val.max(0) as u16);
-                                }
-                                if control_word == "deff"
-                                    && let Some(val) = _param
-                                {
-                                    default_font_id = Some(val.max(0) as u16);
-                                }
-                                if (in_footnote || in_shptxt || in_annotation)
-                                    && control_word == "u"
-                                    && let Some(code_num) = _param
-                                {
-                                    let code_u = if code_num < 0 {
-                                        (code_num + 65536) as u32
-                                    } else {
-                                        code_num as u32
-                                    };
-                                    if let Some(c) = char::from_u32(code_u) {
-                                        if in_footnote {
-                                            footnote_buf.push(c);
-                                        }
-                                        if in_shptxt {
-                                            shptxt_buf.push(c);
-                                        }
-                                        if in_annotation {
-                                            annotation_buf.push(c);
-                                        }
-                                    }
-                                    let uc_count = uc_stack.last().copied().unwrap_or(1);
-                                    for _ in 0..uc_count {
-                                        if let Some(&next) = chars.peek()
-                                            && next != '\\'
-                                            && next != '{'
-                                            && next != '}'
-                                        {
-                                            chars.next();
-                                        }
-                                    }
-                                }
-                                if (in_footnote || in_shptxt || in_annotation)
-                                    && (control_word == "par" || control_word == "line")
-                                {
-                                    if in_footnote {
-                                        footnote_buf.push(' ');
-                                    }
-                                    if in_shptxt {
-                                        shptxt_buf.push(' ');
-                                    }
-                                    if in_annotation {
-                                        annotation_buf.push(' ');
-                                    }
-                                }
-                                continue;
-                            }
-
-                            handle_control_word(
-                                &control_word,
-                                _param,
-                                &mut chars,
-                                &mut ControlWordCtx {
-                                    result: &mut result,
-                                    table_state: &mut table_state,
-                                    tables: &mut tables,
-                                    images: &mut images,
-                                    ensure_table: &ensure_table,
-                                    finalize_table: &finalize_table,
-                                    plain,
-                                    group_has_text: &mut group_has_text,
-                                    cur_heading_level: &mut cur_heading_level,
-                                    cur_list_level: &mut cur_list_level,
-                                    cur_list_id: &mut cur_list_id,
-                                    cur_ordered: &mut cur_ordered,
-                                    para_metas: &mut para_metas,
-                                    para_meta_emitted: &mut para_meta_emitted,
-                                    uc_stack: &mut uc_stack,
-                                    ansi_codepage_stack: &mut ansi_codepage_stack,
-                                    footnote_count: &mut footnote_count,
-                                    pending_boundary_space: &mut pending_boundary_space,
-                                    hidden_stack: &mut hidden_stack,
-                                    fmt_tracker: &mut fmt_tracker,
-                                    font_id_stack: &mut font_id_stack,
-                                    default_font_id: &mut default_font_id,
-                                },
-                            );
-                        }
-                    }
-                }
+                let mut escape_ctx = TextEscapeCtx {
+                    result: &mut result,
+                    table_state: &mut table_state,
+                    tables: &mut tables,
+                    images: &mut images,
+                    ensure_table: &ensure_table,
+                    finalize_table: &finalize_table,
+                    plain,
+                    group_has_text: &mut group_has_text,
+                    cur_heading_level: &mut cur_heading_level,
+                    cur_list_level: &mut cur_list_level,
+                    cur_list_id: &mut cur_list_id,
+                    cur_ordered: &mut cur_ordered,
+                    para_metas: &mut para_metas,
+                    para_meta_emitted: &mut para_meta_emitted,
+                    uc_stack: &mut uc_stack,
+                    ansi_codepage_stack: &mut ansi_codepage_stack,
+                    footnote_count: &mut footnote_count,
+                    pending_boundary_space: &mut pending_boundary_space,
+                    hidden_stack: &mut hidden_stack,
+                    fmt_tracker: &mut fmt_tracker,
+                    font_id_stack: &mut font_id_stack,
+                    default_font_id: &mut default_font_id,
+                    font_charsets: &font_charsets,
+                    group_depth,
+                    skip_depth: &mut skip_depth,
+                    expect_destination: &mut expect_destination,
+                    ignorable_pending: &mut ignorable_pending,
+                    in_fldinst: &mut in_fldinst,
+                    fldinst_depth: &mut fldinst_depth,
+                    fldinst_content: &mut fldinst_content,
+                    in_fldrslt: &mut in_fldrslt,
+                    fldrslt_depth: &mut fldrslt_depth,
+                    fldrslt_start: &mut fldrslt_start,
+                    in_listtext: &mut in_listtext,
+                    listtext_depth: &mut listtext_depth,
+                    listtext_buf: &mut listtext_buf,
+                    in_footnote: &mut in_footnote,
+                    footnote_depth: &mut footnote_depth,
+                    footnote_buf: &mut footnote_buf,
+                    in_shptxt: &mut in_shptxt,
+                    shptxt_depth: &mut shptxt_depth,
+                    shptxt_buf: &mut shptxt_buf,
+                    in_annotation: &mut in_annotation,
+                    annotation_depth: &mut annotation_depth,
+                    annotation_buf: &mut annotation_buf,
+                    pending_atnid: &mut pending_atnid,
+                };
+                escape_ctx.handle(&mut chars);
             }
             '\n' | '\r' => {}
             ' ' | '\t' => {
@@ -899,65 +946,5 @@ pub(crate) fn extract_text_from_rtf(
 }
 
 #[cfg(test)]
-mod issue_86_destination_tests {
-    use super::extract_text_from_rtf;
-
-    /// #86: `\shptxt` (drawing-object/text-box text) is a plain destination,
-    /// but real producers nest it inside an ignorable `{\*\shp{\*\shpinst
-    /// ...}}` ancestor. Before the fix, the outer ignorable-and-unrecognized
-    /// destination set `skip_depth` for the whole subtree, and the nested
-    /// `\shptxt` group -- despite being recognized -- had no way to escape
-    /// that already-active skip, so its text was dropped.
-    #[test]
-    fn test_shptxt_survives_nested_ignorable_ancestor() {
-        let rtf = r"{\rtf1\ansi
-{\*\shp{\*\shpinst{\sp{\sn shapeType}{\sv202}}{\shptxt Text box content}}}
-Body text after the shape.\par
-}";
-        let (text, _tables, _images, _para_metas, _fmt) = extract_text_from_rtf(rtf, false);
-
-        assert!(
-            text.contains("Text box content"),
-            "text-box content should be extracted, got: {text:?}"
-        );
-        assert!(
-            text.contains("Body text after the shape."),
-            "ordinary body text should be unaffected, got: {text:?}"
-        );
-    }
-
-    /// #86: `\annotation` (Word comment text) was previously treated as an
-    /// unrecognized ignorable destination and skipped whole. `\atnid` carries
-    /// the comment's numeric id and should label the extracted comment.
-    #[test]
-    fn test_annotation_and_atnid_are_extracted_as_labeled_comment() {
-        let rtf = r"{\rtf1\ansi
-Body text.\par
-{\annotation{\*\atnid7}Reviewer comment here}
-}";
-        let (text, _tables, _images, _para_metas, _fmt) = extract_text_from_rtf(rtf, false);
-
-        assert!(
-            text.contains("[Comment 7]: Reviewer comment here"),
-            "comment should be extracted and labeled with its atnid, got: {text:?}"
-        );
-        assert!(
-            text.contains("Body text."),
-            "ordinary body text should be unaffected, got: {text:?}"
-        );
-    }
-
-    /// A comment with no `\atnid` falls back to a running 1-based counter
-    /// rather than being dropped or mislabeled.
-    #[test]
-    fn test_annotation_without_atnid_falls_back_to_counter_label() {
-        let rtf = r"{\rtf1\ansi
-{\annotation First comment}
-{\annotation Second comment}
-}";
-        let (text, _tables, _images, _para_metas, _fmt) = extract_text_from_rtf(rtf, false);
-
-        assert!(text.contains("[Comment 1]: First comment"), "got: {text:?}");
-        assert!(text.contains("[Comment 2]: Second comment"), "got: {text:?}");
-    }
-}
+#[path = "text_extract_tests.rs"]
+mod issue_86_destination_tests;

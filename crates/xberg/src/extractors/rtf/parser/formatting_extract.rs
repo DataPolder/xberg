@@ -9,6 +9,318 @@ use super::{
 use crate::extractors::rtf::encoding::{decode_ansi_bytes, parse_hex_byte, parse_rtf_control_word};
 use crate::types::TextAnnotation;
 use crate::types::document_structure::AnnotationKind;
+use std::collections::HashMap;
+use std::iter::Peekable;
+use std::str::Chars;
+
+#[derive(Clone)]
+struct FmtState {
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    strikethrough: bool,
+    color_idx: u16,
+}
+
+fn push_span_if_open(spans: &mut Vec<RtfFormattingSpan>, span_start: &mut usize, text_offset: usize, fmt: &FmtState) {
+    if text_offset > *span_start {
+        spans.push(RtfFormattingSpan {
+            start: *span_start,
+            end: text_offset,
+            bold: fmt.bold,
+            italic: fmt.italic,
+            underline: fmt.underline,
+            strikethrough: fmt.strikethrough,
+            color_index: fmt.color_idx,
+        });
+    }
+    *span_start = text_offset;
+}
+
+struct FormattingEscapeCtx<'a> {
+    spans: &'a mut Vec<RtfFormattingSpan>,
+    span_start: &'a mut usize,
+    text_offset: &'a mut usize,
+    fmt: &'a mut FmtState,
+    font_charsets: &'a HashMap<u16, u32>,
+    ansi_codepage_stack: &'a mut Vec<u32>,
+    font_id_stack: &'a mut Vec<Option<u16>>,
+    default_font_id: &'a mut Option<u16>,
+    group_has_text: &'a mut Vec<bool>,
+    pending_boundary_space: &'a mut bool,
+    expect_destination: &'a mut bool,
+    ignorable_pending: &'a mut bool,
+    group_depth: i32,
+    skip_depth: &'a mut i32,
+    skip_destinations: &'a [&'a str],
+    in_fldinst: &'a mut bool,
+    fldinst_depth: &'a mut i32,
+    fldinst_content: &'a mut String,
+    in_fldrslt: &'a mut bool,
+    fldrslt_depth: &'a mut i32,
+    fldrslt_start: &'a mut usize,
+    in_header: &'a mut bool,
+    header_depth: &'a mut i32,
+    header_buf: &'a mut String,
+    in_footer: &'a mut bool,
+    footer_depth: &'a mut i32,
+    footer_buf: &'a mut String,
+}
+
+impl FormattingEscapeCtx<'_> {
+    fn handle(&mut self, chars: &mut Peekable<Chars<'_>>) {
+        let Some(&next_ch) = chars.peek() else {
+            return;
+        };
+        match next_ch {
+            '\\' | '{' | '}' => self.handle_literal(next_ch, chars),
+            '\'' => self.handle_hex_escape(chars),
+            '*' => {
+                chars.next();
+                *self.ignorable_pending = true;
+            }
+            _ => self.handle_control_word(chars),
+        }
+    }
+
+    fn handle_literal(&mut self, next_ch: char, chars: &mut Peekable<Chars<'_>>) {
+        chars.next();
+        *self.expect_destination = false;
+        if *self.in_fldinst {
+            self.fldinst_content.push(next_ch);
+        }
+        if *self.skip_depth > 0 {
+            return;
+        }
+        self.add_boundary_space();
+        *self.text_offset += next_ch.len_utf8();
+        if let Some(flag) = self.group_has_text.last_mut() {
+            *flag = true;
+        }
+        if *self.in_header {
+            self.header_buf.push(next_ch);
+        }
+        if *self.in_footer {
+            self.footer_buf.push(next_ch);
+        }
+    }
+
+    fn handle_hex_escape(&mut self, chars: &mut Peekable<Chars<'_>>) {
+        chars.next();
+        *self.expect_destination = false;
+        let bytes = parse_hex_escape_bytes(chars);
+        if *self.skip_depth > 0 {
+            return;
+        }
+        let Some(bytes) = bytes.as_deref() else {
+            return;
+        };
+        let codepage = resolve_decode_codepage(
+            self.font_id_stack,
+            *self.default_font_id,
+            self.font_charsets,
+            self.ansi_codepage_stack,
+        );
+        let decoded = decode_ansi_bytes(bytes, codepage);
+        self.add_boundary_space();
+        *self.text_offset += decoded.len();
+        if let Some(flag) = self.group_has_text.last_mut() {
+            *flag = true;
+        }
+    }
+
+    fn add_boundary_space(&mut self) {
+        if *self.pending_boundary_space && *self.text_offset > 0 {
+            *self.text_offset += 1;
+        }
+        *self.pending_boundary_space = false;
+    }
+
+    fn handle_control_word(&mut self, chars: &mut Peekable<Chars<'_>>) {
+        let (word, param) = parse_rtf_control_word(chars);
+        if *self.expect_destination || *self.ignorable_pending {
+            *self.expect_destination = false;
+            if self.handle_destination(&word) {
+                return;
+            }
+        }
+        if *self.in_fldinst {
+            self.fldinst_content.push_str(&word);
+        }
+        self.update_scope(&word, param);
+        if *self.skip_depth > 0 {
+            return;
+        }
+        if self.update_format(&word, param) {
+            return;
+        }
+        self.emit_control_word(&word, param, chars);
+    }
+
+    fn handle_destination(&mut self, word: &str) -> bool {
+        if *self.ignorable_pending {
+            *self.ignorable_pending = false;
+            if word == "fldinst" {
+                *self.in_fldinst = true;
+                *self.fldinst_depth = self.group_depth;
+            }
+            self.start_skip();
+            return true;
+        }
+        match word {
+            "fldinst" => {
+                *self.in_fldinst = true;
+                *self.fldinst_depth = self.group_depth;
+                self.start_skip();
+            }
+            "fldrslt" => {
+                *self.in_fldrslt = true;
+                *self.fldrslt_depth = self.group_depth;
+                *self.fldrslt_start = *self.text_offset;
+            }
+            destination if self.skip_destinations.contains(&destination) => self.start_skip(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn start_skip(&mut self) {
+        if *self.skip_depth == 0 {
+            *self.skip_depth = self.group_depth;
+        }
+    }
+
+    fn update_scope(&mut self, word: &str, param: Option<i32>) {
+        match word {
+            "ansicpg" => {
+                if let Some(value) = param
+                    && value > 0
+                    && let Some(codepage) = self.ansi_codepage_stack.last_mut()
+                {
+                    *codepage = value as u32;
+                }
+            }
+            "f" => {
+                if let Some(value) = param
+                    && let Some(font_id) = self.font_id_stack.last_mut()
+                {
+                    *font_id = Some(value.max(0) as u16);
+                }
+            }
+            "deff" => {
+                if let Some(value) = param {
+                    *self.default_font_id = Some(value.max(0) as u16);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn update_format(&mut self, word: &str, param: Option<i32>) -> bool {
+        let changed = match word {
+            "b" => self.fmt.bold != (param.unwrap_or(1) != 0),
+            "i" => self.fmt.italic != (param.unwrap_or(1) != 0),
+            "ul" => self.fmt.underline != (param.unwrap_or(1) != 0),
+            "ulnone" => self.fmt.underline,
+            "strike" => self.fmt.strikethrough != (param.unwrap_or(1) != 0),
+            "cf" => self.fmt.color_idx != param.unwrap_or(0) as u16,
+            "plain" => {
+                self.fmt.bold
+                    || self.fmt.italic
+                    || self.fmt.underline
+                    || self.fmt.strikethrough
+                    || self.fmt.color_idx != 0
+            }
+            _ => return false,
+        };
+        if changed {
+            push_span_if_open(self.spans, self.span_start, *self.text_offset, self.fmt);
+        }
+        match word {
+            "b" => self.fmt.bold = param.unwrap_or(1) != 0,
+            "i" => self.fmt.italic = param.unwrap_or(1) != 0,
+            "ul" => self.fmt.underline = param.unwrap_or(1) != 0,
+            "ulnone" => self.fmt.underline = false,
+            "strike" => self.fmt.strikethrough = param.unwrap_or(1) != 0,
+            "cf" => self.fmt.color_idx = param.unwrap_or(0) as u16,
+            "plain" => {
+                self.fmt.bold = false;
+                self.fmt.italic = false;
+                self.fmt.underline = false;
+                self.fmt.strikethrough = false;
+                self.fmt.color_idx = 0;
+            }
+            _ => unreachable!(),
+        }
+        true
+    }
+
+    fn emit_control_word(&mut self, word: &str, param: Option<i32>, chars: &mut Peekable<Chars<'_>>) {
+        match word {
+            "header" | "headerl" | "headerr" | "headerf" => {
+                *self.in_header = true;
+                *self.header_depth = self.group_depth;
+            }
+            "footer" | "footerl" | "footerr" | "footerf" => {
+                *self.in_footer = true;
+                *self.footer_depth = self.group_depth;
+            }
+            "par" | "line" => {
+                *self.text_offset += 1;
+                if *self.in_header {
+                    self.header_buf.push('\n');
+                }
+                if *self.in_footer {
+                    self.footer_buf.push('\n');
+                }
+            }
+            "tab" => *self.text_offset += 1,
+            "bullet" => *self.text_offset += '\u{2022}'.len_utf8(),
+            "lquote" => *self.text_offset += '\u{2018}'.len_utf8(),
+            "rquote" => *self.text_offset += '\u{2019}'.len_utf8(),
+            "ldblquote" => *self.text_offset += '\u{201C}'.len_utf8(),
+            "rdblquote" => *self.text_offset += '\u{201D}'.len_utf8(),
+            "endash" => *self.text_offset += '\u{2013}'.len_utf8(),
+            "emdash" => *self.text_offset += '\u{2014}'.len_utf8(),
+            "u" => self.emit_unicode(param, chars),
+            _ => {}
+        }
+    }
+
+    fn emit_unicode(&mut self, param: Option<i32>, chars: &mut Peekable<Chars<'_>>) {
+        if let Some(code_num) = param {
+            let code_u = if code_num < 0 {
+                (code_num + 65536) as u32
+            } else {
+                code_num as u32
+            };
+            if let Some(character) = char::from_u32(code_u) {
+                *self.text_offset += character.len_utf8();
+                if *self.in_header {
+                    self.header_buf.push(character);
+                }
+                if *self.in_footer {
+                    self.footer_buf.push(character);
+                }
+            }
+        }
+        if chars.peek().is_some_and(|next| !matches!(next, '\\' | '{' | '}')) {
+            chars.next();
+        }
+    }
+}
+
+fn parse_hex_escape_bytes(chars: &mut Peekable<Chars<'_>>) -> Option<Vec<u8>> {
+    let (Some(hex1), Some(hex2)) = (chars.next(), chars.next()) else {
+        return None;
+    };
+    let byte = parse_hex_byte(hex1 as u8, hex2 as u8)?;
+    let mut bytes = vec![byte];
+    while let Some(next_byte) = consume_adjacent_hex_escape(chars) {
+        bytes.push(next_byte);
+    }
+    Some(bytes)
+}
 
 /// Extract formatting metadata from RTF content.
 ///
@@ -40,40 +352,11 @@ pub(crate) fn extract_rtf_formatting(content: &str) -> RtfFormattingData {
     let mut fldrslt_start: usize = 0;
     let mut pending_hyperlink_url: Option<String> = None;
 
-    #[derive(Clone)]
-    struct FmtState {
-        bold: bool,
-        italic: bool,
-        underline: bool,
-        strikethrough: bool,
-        color_idx: u16,
-    }
-
     // Closes the current formatting span (if the output advanced since
     // `span_start`) using `fmt`'s active formatting, then advances
     // `span_start` to `text_offset` unconditionally. Used on `}`, on
     // `\plain`, and by each `update_fmt_field!` invocation below -- all
     // three previously duplicated this exact push-then-advance pattern. ~keep
-    fn push_span_if_open(
-        spans: &mut Vec<RtfFormattingSpan>,
-        span_start: &mut usize,
-        text_offset: usize,
-        fmt: &FmtState,
-    ) {
-        if text_offset > *span_start {
-            spans.push(RtfFormattingSpan {
-                start: *span_start,
-                end: text_offset,
-                bold: fmt.bold,
-                italic: fmt.italic,
-                underline: fmt.underline,
-                strikethrough: fmt.strikethrough,
-                color_index: fmt.color_idx,
-            });
-        }
-        *span_start = text_offset;
-    }
-
     let mut fmt = FmtState {
         bold: false,
         italic: false,
@@ -196,260 +479,36 @@ pub(crate) fn extract_rtf_formatting(content: &str) -> RtfFormattingData {
                 }
             }
             '\\' => {
-                if let Some(&next_ch) = chars.peek() {
-                    match next_ch {
-                        '\\' | '{' | '}' => {
-                            chars.next();
-                            expect_destination = false;
-                            if in_fldinst {
-                                fldinst_content.push(next_ch);
-                            }
-                            if skip_depth > 0 {
-                                continue;
-                            }
-                            if pending_boundary_space && text_offset > 0 {
-                                text_offset += 1;
-                            }
-                            pending_boundary_space = false;
-                            text_offset += next_ch.len_utf8();
-                            if let Some(flag) = group_has_text.last_mut() {
-                                *flag = true;
-                            }
-                            if in_header {
-                                header_buf.push(next_ch);
-                            }
-                            if in_footer {
-                                footer_buf.push(next_ch);
-                            }
-                        }
-                        '\'' => {
-                            chars.next();
-                            expect_destination = false;
-                            let hex1 = chars.next();
-                            let hex2 = chars.next();
-                            let bytes = if let (Some(h1), Some(h2)) = (hex1, hex2)
-                                && let Some(byte) = parse_hex_byte(h1 as u8, h2 as u8)
-                            {
-                                let mut bytes = vec![byte];
-                                while let Some(next_byte) = consume_adjacent_hex_escape(&mut chars) {
-                                    bytes.push(next_byte);
-                                }
-                                Some(bytes)
-                            } else {
-                                None
-                            };
-                            if skip_depth > 0 {
-                                continue;
-                            }
-                            if let Some(bytes) = bytes.as_deref() {
-                                let codepage = resolve_decode_codepage(
-                                    &font_id_stack,
-                                    default_font_id,
-                                    &font_charsets,
-                                    &ansi_codepage_stack,
-                                );
-                                let decoded = decode_ansi_bytes(bytes, codepage);
-                                if pending_boundary_space && text_offset > 0 {
-                                    text_offset += 1;
-                                }
-                                pending_boundary_space = false;
-                                text_offset += decoded.len();
-                                if let Some(flag) = group_has_text.last_mut() {
-                                    *flag = true;
-                                }
-                            }
-                        }
-                        '*' => {
-                            chars.next();
-                            ignorable_pending = true;
-                        }
-                        _ => {
-                            let (word, param) = parse_rtf_control_word(&mut chars);
-
-                            if expect_destination || ignorable_pending {
-                                expect_destination = false;
-
-                                if ignorable_pending {
-                                    ignorable_pending = false;
-                                    if word == "fldinst" {
-                                        in_fldinst = true;
-                                        fldinst_depth = group_depth;
-                                        if skip_depth == 0 {
-                                            skip_depth = group_depth;
-                                        }
-                                        continue;
-                                    }
-                                    if skip_depth == 0 {
-                                        skip_depth = group_depth;
-                                    }
-                                    continue;
-                                }
-
-                                match word.as_str() {
-                                    "fldinst" => {
-                                        in_fldinst = true;
-                                        fldinst_depth = group_depth;
-                                        if skip_depth == 0 {
-                                            skip_depth = group_depth;
-                                        }
-                                        continue;
-                                    }
-                                    "fldrslt" => {
-                                        in_fldrslt = true;
-                                        fldrslt_depth = group_depth;
-                                        fldrslt_start = text_offset;
-                                        continue;
-                                    }
-                                    _ => {}
-                                }
-
-                                if skip_dests.contains(&word.as_str()) {
-                                    if skip_depth == 0 {
-                                        skip_depth = group_depth;
-                                    }
-                                    continue;
-                                }
-                            }
-
-                            if in_fldinst {
-                                fldinst_content.push_str(&word);
-                            }
-                            if word == "ansicpg"
-                                && let Some(val) = param
-                                && val > 0
-                                && let Some(codepage) = ansi_codepage_stack.last_mut()
-                            {
-                                *codepage = val as u32;
-                            }
-                            if word == "f"
-                                && let Some(val) = param
-                                && let Some(font_id) = font_id_stack.last_mut()
-                            {
-                                *font_id = Some(val.max(0) as u16);
-                            }
-                            if word == "deff"
-                                && let Some(val) = param
-                            {
-                                default_font_id = Some(val.max(0) as u16);
-                            }
-                            if skip_depth > 0 {
-                                continue;
-                            }
-
-                            macro_rules! update_fmt_field {
-                                ($field:ident, $new_val:expr) => {
-                                    let new_val = $new_val;
-                                    if new_val != fmt.$field {
-                                        push_span_if_open(&mut spans, &mut span_start, text_offset, &fmt);
-                                        fmt.$field = new_val;
-                                    }
-                                };
-                            }
-
-                            match word.as_str() {
-                                "b" => {
-                                    update_fmt_field!(bold, param.unwrap_or(1) != 0);
-                                }
-                                "i" => {
-                                    update_fmt_field!(italic, param.unwrap_or(1) != 0);
-                                }
-                                "ul" => {
-                                    update_fmt_field!(underline, param.unwrap_or(1) != 0);
-                                }
-                                "ulnone" => {
-                                    update_fmt_field!(underline, false);
-                                }
-                                "strike" => {
-                                    update_fmt_field!(strikethrough, param.unwrap_or(1) != 0);
-                                }
-                                "cf" => {
-                                    update_fmt_field!(color_idx, param.unwrap_or(0) as u16);
-                                }
-                                "plain"
-                                    if (fmt.bold
-                                        || fmt.italic
-                                        || fmt.underline
-                                        || fmt.strikethrough
-                                        || fmt.color_idx != 0) =>
-                                {
-                                    push_span_if_open(&mut spans, &mut span_start, text_offset, &fmt);
-                                    fmt.bold = false;
-                                    fmt.italic = false;
-                                    fmt.underline = false;
-                                    fmt.strikethrough = false;
-                                    fmt.color_idx = 0;
-                                }
-                                "header" | "headerl" | "headerr" | "headerf" => {
-                                    in_header = true;
-                                    header_depth = group_depth;
-                                }
-                                "footer" | "footerl" | "footerr" | "footerf" => {
-                                    in_footer = true;
-                                    footer_depth = group_depth;
-                                }
-                                "par" | "line" => {
-                                    text_offset += 1;
-                                    if in_header {
-                                        header_buf.push('\n');
-                                    }
-                                    if in_footer {
-                                        footer_buf.push('\n');
-                                    }
-                                }
-                                "tab" => {
-                                    text_offset += 1;
-                                }
-                                "bullet" => {
-                                    text_offset += '\u{2022}'.len_utf8();
-                                }
-                                "lquote" => {
-                                    text_offset += '\u{2018}'.len_utf8();
-                                }
-                                "rquote" => {
-                                    text_offset += '\u{2019}'.len_utf8();
-                                }
-                                "ldblquote" => {
-                                    text_offset += '\u{201C}'.len_utf8();
-                                }
-                                "rdblquote" => {
-                                    text_offset += '\u{201D}'.len_utf8();
-                                }
-                                "endash" => {
-                                    text_offset += '\u{2013}'.len_utf8();
-                                }
-                                "emdash" => {
-                                    text_offset += '\u{2014}'.len_utf8();
-                                }
-                                "u" => {
-                                    if let Some(code_num) = param {
-                                        let code_u = if code_num < 0 {
-                                            (code_num + 65536) as u32
-                                        } else {
-                                            code_num as u32
-                                        };
-                                        if let Some(c) = char::from_u32(code_u) {
-                                            text_offset += c.len_utf8();
-                                            if in_header {
-                                                header_buf.push(c);
-                                            }
-                                            if in_footer {
-                                                footer_buf.push(c);
-                                            }
-                                        }
-                                    }
-                                    if let Some(&next) = chars.peek()
-                                        && next != '\\'
-                                        && next != '{'
-                                        && next != '}'
-                                    {
-                                        chars.next();
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
+                let mut escape_ctx = FormattingEscapeCtx {
+                    spans: &mut spans,
+                    span_start: &mut span_start,
+                    text_offset: &mut text_offset,
+                    fmt: &mut fmt,
+                    font_charsets: &font_charsets,
+                    ansi_codepage_stack: &mut ansi_codepage_stack,
+                    font_id_stack: &mut font_id_stack,
+                    default_font_id: &mut default_font_id,
+                    group_has_text: &mut group_has_text,
+                    pending_boundary_space: &mut pending_boundary_space,
+                    expect_destination: &mut expect_destination,
+                    ignorable_pending: &mut ignorable_pending,
+                    group_depth,
+                    skip_depth: &mut skip_depth,
+                    skip_destinations: &skip_dests,
+                    in_fldinst: &mut in_fldinst,
+                    fldinst_depth: &mut fldinst_depth,
+                    fldinst_content: &mut fldinst_content,
+                    in_fldrslt: &mut in_fldrslt,
+                    fldrslt_depth: &mut fldrslt_depth,
+                    fldrslt_start: &mut fldrslt_start,
+                    in_header: &mut in_header,
+                    header_depth: &mut header_depth,
+                    header_buf: &mut header_buf,
+                    in_footer: &mut in_footer,
+                    footer_depth: &mut footer_depth,
+                    footer_buf: &mut footer_buf,
+                };
+                escape_ctx.handle(&mut chars);
             }
             '\n' | '\r' => {}
             ' ' | '\t' => {
