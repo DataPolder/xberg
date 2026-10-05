@@ -1045,16 +1045,49 @@ impl PdfDocument {
             reason: format!("Invalid generation number in header: {}", parts[1]),
         })?;
 
-        // Verify object reference matches (warn but don't fail on mismatch) ~keep
+        // An xref entry that points at another object's valid header must not
+        // poison the cache under the requested reference. Retry once at the
+        // whole-file scan's offset for the requested object, then fail closed
+        // if that header still disagrees. ~keep
         if obj_num != obj_ref.id || gen_num != obj_ref.generation {
+            if !already_corrected
+                && let Ok(scan_offset) = self.scan_for_object(obj_ref)
+                && scan_offset != offset
+            {
+                self.recovery
+                    .file_scan_recoveries
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                tracing::warn!(target: LOG_TARGET,
+                    operation = "load_uncompressed_object",
+                    error_code = "object_reference_mismatch",
+                    error_offset = offset,
+                    recovered_offset = scan_offset,
+                    expected_object_id = obj_ref.id,
+                    expected_generation = obj_ref.generation,
+                    found_object_id = obj_num,
+                    found_generation = gen_num,
+                    "retrying PDF object load at scan-reported offset"
+                );
+                return self.load_uncompressed_object_impl(obj_ref, scan_offset, true);
+            }
+
             tracing::warn!(target: LOG_TARGET,
-                "Object reference mismatch at offset {}: expected {} {} obj, found {} {} obj",
-                offset,
-                obj_ref.id,
-                obj_ref.generation,
-                obj_num,
-                gen_num
+                operation = "load_uncompressed_object",
+                error_code = "object_reference_mismatch",
+                error_offset = offset,
+                expected_object_id = obj_ref.id,
+                expected_generation = obj_ref.generation,
+                found_object_id = obj_num,
+                found_generation = gen_num,
+                "PDF object header does not match requested reference"
             );
+            return Err(Error::ParseError {
+                offset: offset as usize,
+                reason: format!(
+                    "Object reference mismatch: expected {} {} obj, found {} {} obj",
+                    obj_ref.id, obj_ref.generation, obj_num, gen_num
+                ),
+            });
         }
 
         // Check if there's content after "obj" on the same line

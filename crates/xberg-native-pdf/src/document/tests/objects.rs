@@ -3,6 +3,39 @@ use super::common::*;
 use std::collections::BTreeMap;
 use tracing::Level;
 
+fn build_shifted_xref_pdf(first_object: u8) -> Vec<u8> {
+    let stream = b"BT /F1 12 Tf 72 720 Td (Synthetic xref reproduction) Tj ET\n";
+    let objects = [
+        format!(
+            "<< /Length {} >>\nstream\n{}endstream",
+            stream.len(),
+            String::from_utf8_lossy(stream)
+        ),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        "<< /Type /Page /Parent 4 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 2 0 R >> >> /Contents 1 0 R >>"
+            .to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Catalog /Pages 4 0 R >>".to_string(),
+        "<< /Producer (Synthetic reproducer) >>".to_string(),
+    ];
+
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::with_capacity(objects.len());
+    for (index, body) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{}\nendobj\n", index + 1, body).as_bytes());
+    }
+
+    let xref_offset = pdf.len();
+    pdf.extend_from_slice(format!("xref\n{first_object} 7\n").as_bytes());
+    pdf.extend_from_slice(b"0000000000 65535 f \n");
+    for offset in offsets {
+        pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(format!("trailer\n<< /Size 7 /Root 5 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").as_bytes());
+    pdf
+}
+
 // A corrupt/zero startxref forces full-file xref reconstruction.
 // Because reconstruction already scans the whole file for every
 // uncompressed object, the document must pre-seed its object-scan cache
@@ -88,6 +121,108 @@ fn test_load_object_from_cache() {
     let obj2 = doc.load_object(obj_ref).unwrap();
     assert_eq!(obj1.as_dict().unwrap().get("Type").unwrap().as_name(), Some("Catalog"));
     assert_eq!(obj2.as_dict().unwrap().get("Type").unwrap().as_name(), Some("Catalog"));
+}
+
+#[test]
+fn shifted_xref_subsection_recovers_requested_objects_by_header() {
+    let valid = build_shifted_xref_pdf(0);
+    let malformed = build_shifted_xref_pdf(1);
+    assert_eq!(valid.len(), malformed.len());
+    assert_eq!(
+        valid
+            .iter()
+            .zip(&malformed)
+            .filter(|(left, right)| left != right)
+            .count(),
+        1
+    );
+    assert_eq!(PdfDocument::from_bytes(valid).unwrap().page_count().unwrap(), 1);
+
+    let document = PdfDocument::from_bytes(malformed).unwrap();
+    assert_eq!(document.page_count().unwrap(), 1);
+    assert_eq!(
+        document
+            .load_object(ObjectRef::new(5, 0))
+            .unwrap()
+            .as_dict()
+            .and_then(|dict| dict.get("Type"))
+            .and_then(Object::as_name),
+        Some("Catalog")
+    );
+    assert!(
+        document
+            .extract_all_text()
+            .unwrap()
+            .contains("Synthetic xref reproduction")
+    );
+}
+
+#[test]
+fn mismatched_xref_without_requested_header_errors_without_caching() {
+    use crate::xref::XRefEntry;
+
+    let mut document = PdfDocument::from_bytes(build_minimal_pdf(b"")).unwrap();
+    let wrong_offset = document.xref.get(1).unwrap().offset;
+    let requested = ObjectRef::new(99, 0);
+    document
+        .xref
+        .add_entry(requested.id, XRefEntry::uncompressed(wrong_offset, 0));
+
+    let error = document.load_object(requested).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Failed to parse object at byte {wrong_offset}: Object reference mismatch: expected 99 0 obj, found 1 0 obj"
+        )
+    );
+    assert!(document.object_cache.lock_or_recover().get(&requested).is_none());
+}
+
+#[test]
+fn mismatched_generation_after_scan_errors_without_caching() {
+    use crate::xref::XRefEntry;
+
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let catalog_offset = pdf.len();
+    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    let pages_offset = pdf.len();
+    pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+    let mismatched_generation_offset = pdf.len();
+    pdf.extend_from_slice(b"9 1 obj\n<< /Type /Metadata >>\nendobj\n");
+    let xref_offset = pdf.len();
+    pdf.extend_from_slice(b"xref\n0 3\n0000000000 65535 f \n");
+    pdf.extend_from_slice(format!("{catalog_offset:010} 00000 n \n").as_bytes());
+    pdf.extend_from_slice(format!("{pages_offset:010} 00000 n \n").as_bytes());
+    pdf.extend_from_slice(format!("trailer\n<< /Size 10 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").as_bytes());
+
+    let mut document = PdfDocument::from_bytes(pdf).unwrap();
+    let requested = ObjectRef::new(9, 0);
+    document
+        .xref
+        .add_entry(requested.id, XRefEntry::uncompressed(catalog_offset as u64, 0));
+
+    let error = document.load_object(requested).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Failed to parse object at byte {mismatched_generation_offset}: Object reference mismatch: expected 9 0 obj, found 9 1 obj"
+        )
+    );
+    assert!(document.object_cache.lock_or_recover().get(&requested).is_none());
+}
+
+#[test]
+fn genuine_catalog_without_pages_still_errors() {
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let catalog_offset = pdf.len();
+    pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog >>\nendobj\n");
+    let xref_offset = pdf.len();
+    pdf.extend_from_slice(b"xref\n0 2\n0000000000 65535 f \n");
+    pdf.extend_from_slice(format!("{catalog_offset:010} 00000 n \n").as_bytes());
+    pdf.extend_from_slice(format!("trailer\n<< /Size 2 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n").as_bytes());
+
+    let error = PdfDocument::from_bytes(pdf).unwrap().page_count().unwrap_err();
+    assert_eq!(error.to_string(), "Invalid PDF: Catalog missing /Pages entry");
 }
 
 #[test]
