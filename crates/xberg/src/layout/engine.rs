@@ -48,7 +48,7 @@ use crate::layout::models::LayoutModel;
 use crate::layout::models::pp_doclayout_v3::PpDocLayoutV3Model;
 use crate::layout::models::rtdetr::RtDetrModel;
 #[cfg(feature = "layout-detection")]
-use crate::layout::models::yolo::{YoloModel, YoloVariant};
+use crate::layout::models::yolo::{YoloModel, YoloModelConfig, YoloVariant};
 use crate::layout::postprocessing::heuristics;
 use crate::layout::types::DetectionResult;
 /// Which underlying model architecture to use for layout detection.
@@ -444,20 +444,24 @@ fn model_from_custom_variant(
         #[cfg(feature = "layout-detection")]
         CustomModelVariant::YoloDocLayNet => Box::new(YoloModel::from_file(
             &path_str,
-            YoloVariant::DocLayNet,
-            YOLO_DOC_LAY_NET_INPUT_SIDE,
-            YOLO_DOC_LAY_NET_INPUT_SIDE,
-            "Custom-YOLO-DocLayNet",
+            YoloModelConfig::new(
+                YoloVariant::DocLayNet,
+                YOLO_DOC_LAY_NET_INPUT_SIDE,
+                YOLO_DOC_LAY_NET_INPUT_SIDE,
+                "Custom-YOLO-DocLayNet",
+            ),
             accel,
             thread_budget,
         )?),
         #[cfg(feature = "layout-detection")]
         CustomModelVariant::YoloDocStructBench => Box::new(YoloModel::from_file(
             &path_str,
-            YoloVariant::DocStructBench,
-            YOLO_DOC_STRUCT_BENCH_INPUT_SIDE,
-            YOLO_DOC_STRUCT_BENCH_INPUT_SIDE,
-            "Custom-DocLayout-YOLO",
+            YoloModelConfig::new(
+                YoloVariant::DocStructBench,
+                YOLO_DOC_STRUCT_BENCH_INPUT_SIDE,
+                YOLO_DOC_STRUCT_BENCH_INPUT_SIDE,
+                "Custom-DocLayout-YOLO",
+            ),
             accel,
             thread_budget,
         )?),
@@ -467,10 +471,7 @@ fn model_from_custom_variant(
             input_height,
         } => Box::new(YoloModel::from_file(
             &path_str,
-            YoloVariant::Yolox,
-            *input_width,
-            *input_height,
-            "Custom-YOLOX",
+            YoloModelConfig::new(YoloVariant::Yolox, *input_width, *input_height, "Custom-YOLOX"),
             accel,
             thread_budget,
         )?),

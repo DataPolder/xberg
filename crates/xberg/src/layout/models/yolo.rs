@@ -29,6 +29,24 @@ pub enum YoloVariant {
     Yolox,
 }
 
+pub(crate) struct YoloModelConfig<'a> {
+    variant: YoloVariant,
+    input_width: u32,
+    input_height: u32,
+    model_name: &'a str,
+}
+
+impl<'a> YoloModelConfig<'a> {
+    pub(crate) fn new(variant: YoloVariant, input_width: u32, input_height: u32, model_name: &'a str) -> Self {
+        Self {
+            variant,
+            input_width,
+            input_height,
+            model_name,
+        }
+    }
+}
+
 /// YOLO-family layout detection model (YOLOv10, DocLayout-YOLO, YOLOX).
 #[cfg_attr(alef, alef(skip))]
 pub struct YoloModel {
@@ -47,10 +65,7 @@ impl YoloModel {
     /// For YOLOX (unstructuredio), use width=768, height=1024.
     pub(crate) fn from_file(
         path: &str,
-        variant: YoloVariant,
-        input_width: u32,
-        input_height: u32,
-        model_name: &str,
+        config: YoloModelConfig<'_>,
         accel: Option<&crate::core::config::acceleration::AccelerationConfig>,
         thread_budget: usize,
     ) -> Result<Self, LayoutError> {
@@ -59,10 +74,10 @@ impl YoloModel {
         Ok(Self {
             session,
             input_name,
-            variant,
-            input_width,
-            input_height,
-            model_name: model_name.to_string(),
+            variant: config.variant,
+            input_width: config.input_width,
+            input_height: config.input_height,
+            model_name: config.model_name.to_string(),
         })
     }
 
