@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rendered on the date 1899-12-31, a date-only cell gained `00:00:00`, and a `[h]:mm` duration of
   36 hours read as `1900-01-01 12:00:00`. Times of day now render as `HH:MM:SS`, serials with no time
   of day as `YYYY-MM-DD`, other date-times as before, and elapsed-time formats as total hours `H:MM:SS`.
+- **(docx): keep the first footnote and endnote of a Word document.** Word numbers the separator
+  lines in `footnotes.xml`/`endnotes.xml` -1 and 0 and its first real note 1, and the parser skipped
+  id 1 as a separator, so the first footnote and the first endnote were dropped with their markers.
+  Separators are now recognised by their `w:type`; LibreOffice's numbering (separators 0 and 1) is
+  handled as before.
 
 ## [1.3.4] - 2026-10-04
 
