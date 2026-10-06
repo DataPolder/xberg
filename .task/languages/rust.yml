@@ -230,9 +230,15 @@ tasks:
   upgrade:
     desc: "Upgrade Rust dependencies aggressively (cargo upgrade --incompatible), incl. sub-locks"
     cmds:
-      - cargo upgrade --incompatible
+      # crawlberg pins `libc = "=0.2.189"`; raising the workspace requirement past it makes
+      # `cargo update` unresolvable. Drop the exclude once crawlberg relaxes that pin.
+      # harfrust 0.14 replaces the FontRef/ShaperData/UnicodeBuffer API text_rasterizer uses,
+      # and skrifa must share harfrust's read-fonts; both move with that migration. ~keep
+      - cargo upgrade --incompatible --exclude libc --exclude harfrust --exclude skrifa
       - cargo update
-      - for: ["packages/ruby/ext/xberg_rb/native/Cargo.toml", "packages/elixir/native/xberg_nif/Cargo.toml", "crates/xberg-tesseract/Cargo.toml"]
+      # Workspace members are covered above; upgrading one by --manifest-path rewrites the
+      # root manifest again without the exclude. List only excluded/standalone workspaces. ~keep
+      - for: ["packages/ruby/ext/xberg_rb/native/Cargo.toml", "packages/elixir/native/xberg_nif/Cargo.toml"]
         cmd: cargo upgrade --incompatible --manifest-path {{.ITEM}} && cargo update --manifest-path {{.ITEM}}
         ignore_error: true
       # e2e/rust is generated — do NOT rewrite its Cargo.toml; only refresh its lock so its
