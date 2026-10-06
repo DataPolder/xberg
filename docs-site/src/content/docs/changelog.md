@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.6] - 2026-10-06
+
+### Fixed
+
+- **(docx): a footnote and an endnote with the same number are kept apart.** Word numbers footnotes
+  and endnotes independently, and both were keyed `fn<id>`, so in Markdown, HTML and Djot output the
+  first endnote replaced the first footnote and both references pointed at it. Endnotes are now
+  keyed `en<id>`, as in the ODT and WordPerfect extractors.
+- **(pdf): mixed-rotation pages preserve word boundaries in upright text.** Native extraction no longer rewrites an
+  entire page through the rotated-run assembler when the upright content spans multiple rows, which previously joined
+  adjacent words in reports with rotated footer text. (GH#2049)
+
 ## [1.3.5] - 2026-10-06
 
 ### Added
