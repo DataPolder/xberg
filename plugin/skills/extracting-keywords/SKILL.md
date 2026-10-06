@@ -6,7 +6,7 @@ description: Use when extracting keywords (YAKE/RAKE) from documents — and, se
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
 Content-Hash: blake3:0da13ce50f1fef8c192e912e7c2b0d039209a7b676829abe13f4fc86b5ea20bc
-Source-Hash: blake3:866993511d509cc0a787abb0e6ced186c958cf8983890c7e749c84271413c0a1
+Source-Hash: blake3:a87fc164b68044f5536acd076fa4b20ca7da271fa6a02e71b1cf72e8bc2464eb
 Schema-Version: v1
 -->
 

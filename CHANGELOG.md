@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-10-06
+
 ### Added
 
 - **(code): BAML files are recognized as source code.** The tree-sitter language pack now includes BAML grammar and
@@ -23,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **(security): REST and MCP extraction requests preserve operator-owned crawl egress policy.** Untrusted callers can
+  no longer override crawl SSRF limits, proxy and browser launch settings, or document and WARC output paths through
+  global or per-input configuration; caller-owned crawl depth, authentication, and custom headers remain supported.
 - **(api): `KeywordConfig.yake_params`, `KeywordConfig.rake_params` and `TesseractConfig.preprocessing` are described as a direct `$ref` rather than `oneOf[$ref, null]`.** All three are omitted from the payload when unset. GH#1841 annotated the omission-only references in types the OpenAPI document registers, and these two config types are registered by downstream specs that embed them instead. `TesseractConfig.preprocessing` also no longer advertises `"default": null`, which the struct-level `#[serde(default)]` added. Wire payloads and generated bindings do not change. (GH#2041)
 - **(excel): date, time and duration cells read as the sheet shows them.** A time-only cell was
   rendered on the date 1899-12-31, a date-only cell gained `00:00:00`, and a `[h]:mm` duration of

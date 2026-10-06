@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-10-06
+
 ### Added
 
 - **(code): BAML files are recognized as source code.** The tree-sitter language pack now includes BAML grammar and
@@ -25,7 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **(security): REST and MCP extraction requests preserve operator-owned crawl egress policy.** Untrusted callers can
+  no longer override crawl SSRF limits, proxy and browser launch settings, or document and WARC output paths through
+  global or per-input configuration; caller-owned crawl depth, authentication, and custom headers remain supported.
 - **(api): `KeywordConfig.yake_params`, `KeywordConfig.rake_params` and `TesseractConfig.preprocessing` are described as a direct `$ref` rather than `oneOf[$ref, null]`.** All three are omitted from the payload when unset. GH#1841 annotated the omission-only references in types the OpenAPI document registers, and these two config types are registered by downstream specs that embed them instead. `TesseractConfig.preprocessing` also no longer advertises `"default": null`, which the struct-level `#[serde(default)]` added. Wire payloads and generated bindings do not change. (GH#2041)
+- **(excel): date, time and duration cells read as the sheet shows them.** A time-only cell was
+  rendered on the date 1899-12-31, a date-only cell gained `00:00:00`, and a `[h]:mm` duration of
+  36 hours read as `1900-01-01 12:00:00`. Times of day now render as `HH:MM:SS`, serials with no time
+  of day as `YYYY-MM-DD`, other date-times as before, and elapsed-time formats as total hours `H:MM:SS`.
+- **(docx): keep the first footnote and endnote of a Word document.** Word numbers the separator
+  lines in `footnotes.xml`/`endnotes.xml` -1 and 0 and its first real note 1, and the parser skipped
+  id 1 as a separator, so the first footnote and the first endnote were dropped with their markers.
+  Separators are now recognised by their `w:type`; LibreOffice's numbering (separators 0 and 1) is
+  handled as before.
 - **(pdf): malformed classic xref tables no longer cache the wrong indirect object.** When a subsection starts at
   object 1 but includes object 0's free entry, native PDF parsing now recovers each shifted reference from its actual
   object header instead of treating the page tree as the catalog. (GH#2044)

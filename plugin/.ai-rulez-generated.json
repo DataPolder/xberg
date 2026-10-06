@@ -1,15 +1,15 @@
 {
   "schema_version": "v1",
-  "source_hash": "blake3:866993511d509cc0a787abb0e6ced186c958cf8983890c7e749c84271413c0a1",
+  "source_hash": "blake3:a87fc164b68044f5536acd076fa4b20ca7da271fa6a02e71b1cf72e8bc2464eb",
   "outputs": {
     ".claude-plugin/plugin.json": {
-      "content_hash": "blake3:b1602431aa5911488515c9a0e650486a4c854ae30722d3fcd00ebe26b260dc32"
+      "content_hash": "blake3:4f45108933348247f2115609f7362ce5f8d33fdc168e6ca89d6eaab5db40ab5f"
     },
     ".codex-plugin/plugin.json": {
-      "content_hash": "blake3:7a14d552598d3834e7dd6f48f5e63d2fec1dd6e3219ea334695e7cb55c3dd4e8"
+      "content_hash": "blake3:df2a6bde24b7f8ac31fa7be7982078b04bcfd63e17387e5ae76cc8611785c522"
     },
     ".cursor-plugin/plugin.json": {
-      "content_hash": "blake3:0e0b30ada7bb5a57135e56bb5d58eaaa9a3d9eaf729c131998d8d8abb427c036"
+      "content_hash": "blake3:436776ffb77b0ed5c5ace2054479acce014d7fdb481e668894e60f22696ba76c"
     },
     ".cursor-plugin/skills/batch-extraction/SKILL.md": {
       "content_hash": "blake3:3a70b47dd77fcd3f37e83bed3d32b1ad1ea9d6c1642ae8e0ff7b09b55939858a"
@@ -57,19 +57,19 @@
       "content_hash": "blake3:e3c1dcb34a4784efc4f7fd868468061c3bd49d41e7e39792086633dcfe029d63"
     },
     ".factory-plugin/plugin.json": {
-      "content_hash": "blake3:ff7483f0c57244feab1474582d2106119346ee6d1d025cbd6474e69b51ee8d70"
+      "content_hash": "blake3:96463f9f927c9a8804033b6d026dd568d5ec1966a9f778a698fe024dfca86166"
     },
     ".hermes/package/pyproject.toml": {
-      "content_hash": "blake3:027a176bc222a8dd39009633ab22a13e6c8b1bd906150d9800737c89fc9c8463"
+      "content_hash": "blake3:f8fa28412ad309c4d84974971784fcf528dd5d64d2ce6288c02940fdf8156724"
     },
     ".hermes/package/src/xberg_hermes_plugin/__init__.py": {
-      "content_hash": "blake3:3b31f5224217eec5e497758234a9a4d94e0394bdbdcbdeeb215c73811c442a90"
+      "content_hash": "blake3:971005bdcde56b12f56ff0a213b336494a1250a876ea7a1e6c8515c380571bb2"
     },
     ".hermes/package/src/xberg_hermes_plugin/hermes.py": {
       "content_hash": "blake3:0e17ccbd3652cd0f7f07b3b26eb28e3c2944109c5f4d71415198822f2e862a9b"
     },
     ".hermes/package/src/xberg_hermes_plugin/plugin.yaml": {
-      "content_hash": "blake3:ea1195c86723d909d5cb6cbb26568d44971e531ef8f0ca246ebd966dd95c9c33"
+      "content_hash": "blake3:7f04aa82438425d6a5001ff8b76904194ae6be1ae703da69ac330abeb23ea581"
     },
     ".hermes/package/src/xberg_hermes_plugin/skills/batch-extraction/SKILL.md": {
       "content_hash": "blake3:3a70b47dd77fcd3f37e83bed3d32b1ad1ea9d6c1642ae8e0ff7b09b55939858a"
@@ -117,13 +117,13 @@
       "content_hash": "blake3:e3c1dcb34a4784efc4f7fd868468061c3bd49d41e7e39792086633dcfe029d63"
     },
     ".hermes/plugins/xberg/__init__.py": {
-      "content_hash": "blake3:3b31f5224217eec5e497758234a9a4d94e0394bdbdcbdeeb215c73811c442a90"
+      "content_hash": "blake3:971005bdcde56b12f56ff0a213b336494a1250a876ea7a1e6c8515c380571bb2"
     },
     ".hermes/plugins/xberg/hermes.py": {
       "content_hash": "blake3:0e17ccbd3652cd0f7f07b3b26eb28e3c2944109c5f4d71415198822f2e862a9b"
     },
     ".hermes/plugins/xberg/plugin.yaml": {
-      "content_hash": "blake3:ea1195c86723d909d5cb6cbb26568d44971e531ef8f0ca246ebd966dd95c9c33"
+      "content_hash": "blake3:7f04aa82438425d6a5001ff8b76904194ae6be1ae703da69ac330abeb23ea581"
     },
     ".hermes/plugins/xberg/skills/batch-extraction/SKILL.md": {
       "content_hash": "blake3:3a70b47dd77fcd3f37e83bed3d32b1ad1ea9d6c1642ae8e0ff7b09b55939858a"
@@ -183,13 +183,13 @@
       "content_hash": "blake3:057d3fd7b34aa700c881549e15ade8675e71d6ad8601fb431548d2451ed9e375"
     },
     "gemini-extension.json": {
-      "content_hash": "blake3:b12531d3d168ad297af74d09cdee6a012c58caa1441d4c0401d4afe09de5ff77"
+      "content_hash": "blake3:075669976234bb7357ba7128cb19590f564fe9270203fa942b978967c1b80ec6"
     },
     "kimi.plugin.json": {
-      "content_hash": "blake3:1c1c22baf19c65af51c5a17acd740d44257aabfb5cf4eb17a2f52a4d5d9a6c46"
+      "content_hash": "blake3:83ef38d08a61707fbefe3701f04ff169f3c9012e8c5a1bf1d45067f1b5f1a75d"
     },
     "package.json": {
-      "content_hash": "blake3:628ef2aaa44b09945b3c6b9be63dd511b330d190bcdf462d4f68c3daf736b3ca"
+      "content_hash": "blake3:e14d73e6d644bb5217778d89d14e9206e2d8830cfe4918301e723804e873020f"
     },
     "skills/batch-extraction/SKILL.md": {
       "content_hash": "blake3:3a70b47dd77fcd3f37e83bed3d32b1ad1ea9d6c1642ae8e0ff7b09b55939858a"
