@@ -89,6 +89,7 @@ enum HeuristicTableRejection {
     TooFewRows,
     CodeListing,
     NotWellFormed,
+    HangingIndentProse,
     EmptyMarkdown,
 }
 
@@ -1652,6 +1653,10 @@ fn reconstruct_region_table_with_column_gap(
         return Err(HeuristicTableRejection::CodeListing);
     }
 
+    if is_hanging_indent_numbered_prose(&cleaned) {
+        return Err(HeuristicTableRejection::HangingIndentProse);
+    }
+
     // Beyond the text-statistics gate, reject candidates that have no drawn
     // ruling lines AND whose inferred column boundaries are not actually
     // whitespace (xberg-io/xberg#1399): continuous prose bucketed into a wide
@@ -1675,6 +1680,109 @@ fn reconstruct_region_table_with_column_gap(
         bounding_box,
         ..Default::default()
     })
+}
+
+/// Fewest numbered rows a candidate needs before it is read as numbered prose.
+const HANGING_INDENT_MIN_NUMBERED_ROWS: usize = 2;
+/// Words a numbered row's text needs, in at least one row, to be a sentence
+/// rather than a short label such as a table of contents entry. ~keep
+const HANGING_INDENT_MIN_SENTENCE_WORDS: usize = 6;
+/// Words a continuation row needs to be a wrapped line of prose. ~keep
+const HANGING_INDENT_MIN_CONTINUATION_WORDS: usize = 4;
+
+/// Whether a two-column candidate is numbered prose set with a hanging indent,
+/// not a table.
+///
+/// Contracts and terms of use set a heading and its first clause with the
+/// number in the margin and the text tab-aligned beside it (`11.` + tab +
+/// `Term and Termination`, `11.1` + tab + `These Terms of Use commence …`).
+/// Two such lines are two aligned "columns", and the wrapped line under them
+/// is what gives them away: it returns to the left margin, under the number,
+/// so the whole line lands in the first column and the second stays empty. A
+/// table never wraps a cell back across its own column boundary.
+///
+/// All of these must hold:
+/// - exactly two columns;
+/// - every row is either a **numbered row** (first cell a section number such
+///   as `11.`, `11.1` or `2.3.4`, second cell text) or a **continuation row**
+///   (first cell a run of words, second cell empty);
+/// - at least two numbered rows, each number the next one in outline order
+///   after the one before it (`11.` → `11.1` → `11.2`, `11.3` → `12.`);
+/// - at least one numbered row whose text is a sentence;
+/// - at least one continuation row.
+///
+/// A two-column table numbers its rows with values in the first column and
+/// keeps every wrap inside its own cell, so it never matches. Neither does a
+/// table of contents (titles, no sentence, no wrap back to the margin): words
+/// are counted only where they carry a letter, so its dot leaders and page
+/// numbers never make a row a sentence or a wrap.
+fn is_hanging_indent_numbered_prose(cells: &[Vec<String>]) -> bool {
+    if cells.first().is_none_or(|row| row.len() != 2) || cells.iter().any(|row| row.len() != 2) {
+        return false;
+    }
+    let mut numbers: Vec<Vec<u32>> = Vec::new();
+    let mut sentence = false;
+    let mut continuation = false;
+    for row in cells {
+        let (first, second) = (row[0].trim(), row[1].trim());
+        if let Some(number) = section_number_components(first) {
+            if second.is_empty() {
+                return false;
+            }
+            sentence |= letter_words(second) >= HANGING_INDENT_MIN_SENTENCE_WORDS;
+            numbers.push(number);
+        } else if second.is_empty() && letter_words(first) >= HANGING_INDENT_MIN_CONTINUATION_WORDS {
+            continuation = true;
+        } else {
+            return false;
+        }
+    }
+    numbers.len() >= HANGING_INDENT_MIN_NUMBERED_ROWS
+        && sentence
+        && continuation
+        && numbers
+            .windows(2)
+            .all(|pair| follows_in_outline_order(&pair[0], &pair[1]))
+}
+
+/// Words that carry a letter. Dot leaders (`. . . .`) and page numbers do not
+/// count, so a table of contents row is never a sentence.
+fn letter_words(text: &str) -> usize {
+    text.split_whitespace()
+        .filter(|word| word.chars().any(char::is_alphabetic))
+        .count()
+}
+
+/// `11.` → `[11]`, `11.1` → `[11, 1]`: a section number on its own, digits
+/// and dots only, at least one dot (a bare `3` is a value, not a marker).
+fn section_number_components(text: &str) -> Option<Vec<u32>> {
+    if !text.contains('.') || !text.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    let components: Vec<u32> = text
+        .trim_end_matches('.')
+        .split('.')
+        .map(|part| {
+            (!part.is_empty() && part.len() <= 3 && part.bytes().all(|b| b.is_ascii_digit()))
+                .then(|| part.parse::<u32>().ok())
+                .flatten()
+        })
+        .collect::<Option<Vec<u32>>>()?;
+    (!components.is_empty()).then_some(components)
+}
+
+/// Whether `next` is the number that follows `previous` in an outline: its
+/// first child (`11` → `11.1`), its next sibling (`11.1` → `11.2`), or the
+/// next sibling of one of its ancestors (`11.3` → `12`).
+fn follows_in_outline_order(previous: &[u32], next: &[u32]) -> bool {
+    if next.len() == previous.len() + 1 && next.starts_with(previous) && next.last() == Some(&1) {
+        return true;
+    }
+    if next.is_empty() || next.len() > previous.len() {
+        return false;
+    }
+    let depth = next.len() - 1;
+    next[..depth] == previous[..depth] && next[depth] == previous[depth] + 1
 }
 
 fn region_bounding_box(region: &[crate::pdf::table_reconstruct::HocrWord], page_height: f32) -> Option<BoundingBox> {
@@ -5202,5 +5310,149 @@ mod tests {
             split_region_at_column_corridor(&region, height).is_some(),
             "a corridor 1.5x wider than the next-widest is dominant and must split the region"
         );
+    }
+
+    // -- numbered prose set with a hanging indent is not a table --
+
+    /// The words of a contract page where a chapter heading and its first clause
+    /// are set with the number in the margin (`11.` + tab + title, `11.1` + tab +
+    /// clause) and the clause's second line wraps back to the margin. Real
+    /// geometry from a terms-of-use page; the text is lorem ipsum, the numbers
+    /// are kept.
+    fn hanging_indent_page_words(continuation_left: u32) -> Vec<crate::pdf::table_reconstruct::HocrWord> {
+        let word = |text: &str, left: u32, top: u32, width: u32, height: u32| crate::pdf::table_reconstruct::HocrWord {
+            text: text.to_string(),
+            left,
+            top,
+            width,
+            height,
+            confidence: 95.0,
+        };
+        let mut words = vec![
+            word("11.", 43, 169, 12, 10),
+            word("Lorem", 130, 169, 17, 10),
+            word("et", 150, 169, 12, 10),
+            word("Ipsumdolor", 167, 169, 46, 10),
+            word("11.1", 43, 187, 19, 11),
+        ];
+        for (text, left, width) in [
+            ("Dolor", 160, 24),
+            ("Sitam", 188, 24),
+            ("et", 217, 9),
+            ("Con", 231, 14),
+            ("adipisci", 250, 38),
+            ("in", 292, 9),
+            ("sed", 306, 14),
+            ("eius", 325, 19),
+            ("Tem", 348, 14),
+            ("incidid", 367, 28),
+            ("ut", 400, 19),
+            ("lab", 424, 14),
+            ("magnaali", 442, 38),
+            ("quaut", 485, 24),
+        ] {
+            words.push(word(text, left, 187, width, 11));
+        }
+        // The wrapped line: back at the margin (43) in a hanging indent, or under
+        // the text column (160) as a table cell would wrap.
+        let shift = continuation_left - 43;
+        for (text, left, width) in [
+            ("Enim", 43, 19),
+            ("minimveniam", 66, 56),
+            ("qui", 127, 14),
+            ("nost", 146, 19),
+            ("exercitati", 170, 47),
+            ("ul", 221, 9),
+            ("labori", 236, 28),
+            ("Nis", 269, 14),
+            ("ut", 287, 9),
+            ("aliquipexe.", 302, 47),
+        ] {
+            words.push(word(text, left + shift, 205, width, 11));
+        }
+        words
+    }
+
+    #[test]
+    fn numbered_prose_with_a_hanging_indent_is_not_a_table() {
+        let region = hanging_indent_page_words(43);
+        let tables = reconstruct_region_tables(&region, 792.0, 37, false, 1);
+        assert!(
+            tables.is_empty(),
+            "a heading and its first clause set with a hanging indent are prose, not a table: {:?}",
+            tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            reconstruct_region_table_with_reason(&region, 792.0, 37, false, 1).err(),
+            Some(HeuristicTableRejection::HangingIndentProse)
+        );
+    }
+
+    #[test]
+    fn a_numbered_table_whose_cells_wrap_in_their_own_column_is_still_a_table() {
+        // The same rows with the wrapped line under the text column, as a
+        // two-column numbered table wraps a cell: the shape this rule must not
+        // touch. Whatever the other gates decide, it is not this one.
+        let region = hanging_indent_page_words(160);
+        assert_ne!(
+            reconstruct_region_table_with_reason(&region, 792.0, 37, false, 1).err(),
+            Some(HeuristicTableRejection::HangingIndentProse)
+        );
+    }
+
+    #[test]
+    fn hanging_indent_rule_reads_only_numbered_rows_and_wraps() {
+        let rows = |cells: &[[&str; 2]]| -> Vec<Vec<String>> {
+            cells
+                .iter()
+                .map(|r| r.iter().map(|c| c.to_string()).collect())
+                .collect()
+        };
+        let sentence = "lorem ipsum dolor sit amet consectetur adipiscing elit";
+        let wrap = "sed do eiusmod tempor incididunt ut labore";
+        assert!(is_hanging_indent_numbered_prose(&rows(&[
+            ["11.", "Lorem ipsum"],
+            ["11.1", sentence],
+            [wrap, ""],
+        ])));
+        // A label column is not numbered.
+        assert!(!is_hanging_indent_numbered_prose(&rows(&[
+            ["Voltage", "lorem"],
+            ["Current", sentence],
+            [wrap, ""],
+        ])));
+        // Values, not section numbers in outline order.
+        assert!(!is_hanging_indent_numbered_prose(&rows(&[
+            ["0.5", "Lorem ipsum"],
+            ["2.25", sentence],
+            [wrap, ""],
+        ])));
+        // A table of contents: titles only, nothing wraps back to the margin.
+        assert!(!is_hanging_indent_numbered_prose(&rows(&[
+            ["1.", "Lorem ipsum"],
+            ["1.1", "Dolor sit"],
+            ["1.2", "Amet consectetur"],
+        ])));
+        // A table of contents set with dot leaders: the leaders are not words.
+        assert!(!is_hanging_indent_numbered_prose(&rows(&[
+            ["2.1", "Lorem . . . . . . . . . . . . . . . 5"],
+            ["2.2", "Ipsum dolor . . . . . . . . . . . . 5"],
+            ["3 Sitamet . . . . . . . . . . . . . . . . 9", ""],
+        ])));
+        // A cell that wraps in its own column.
+        assert!(!is_hanging_indent_numbered_prose(&rows(&[
+            ["1.", "Lorem ipsum"],
+            ["1.1", sentence],
+            ["", wrap],
+        ])));
+        assert!(follows_in_outline_order(&[11], &[11, 1]));
+        assert!(follows_in_outline_order(&[11, 1], &[11, 2]));
+        assert!(follows_in_outline_order(&[11, 3], &[12]));
+        assert!(!follows_in_outline_order(&[11, 1], &[11, 3]));
+        assert!(!follows_in_outline_order(&[11], &[11, 2]));
+        assert_eq!(section_number_components("11."), Some(vec![11]));
+        assert_eq!(section_number_components("2.3.4"), Some(vec![2, 3, 4]));
+        assert_eq!(section_number_components("3"), None);
+        assert_eq!(section_number_components("1.5x"), None);
     }
 }
