@@ -124,17 +124,92 @@ public func serverConfigMaxMultipartFieldMbFromJson<GenericIntoRustString: IntoR
 public func token_counter_noop(_ client: TokenCounterRef) {
     __swift_bridge__$token_counter_noop(client.ptr)
 }
-public func classifyChunksOwned(_ result: ExtractedDocument, _ config: ChunkClassificationConfig) throws -> ExtractedDocument {
-    try { let val = __swift_bridge__$classify_chunks_owned({result.isOwned = false; return result.ptr;}(), {config.isOwned = false; return config.ptr;}()); if val.is_ok { return ExtractedDocument(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
+public func classifyChunksOwned(_ result: ExtractedDocument, _ config: ChunkClassificationConfig) async throws -> ExtractedDocument {
+    func onComplete(cbWrapperPtr: UnsafeMutableRawPointer?, rustFnRetVal: __private__ResultPtrAndPtr) {
+        let wrapper = Unmanaged<CbWrapper$classify_chunks_owned>.fromOpaque(cbWrapperPtr!).takeRetainedValue()
+        if rustFnRetVal.is_ok {
+            wrapper.cb(.success(ExtractedDocument(ptr: rustFnRetVal.ok_or_err!)))
+        } else {
+            wrapper.cb(.failure(RustString(ptr: rustFnRetVal.ok_or_err!)))
+        }
+    }
+
+    return try await withCheckedThrowingContinuation({ (continuation: CheckedContinuation<ExtractedDocument, Error>) in
+        let callback = { rustFnRetVal in
+            continuation.resume(with: rustFnRetVal)
+        }
+
+        let wrapper = CbWrapper$classify_chunks_owned(cb: callback)
+        let wrapperPtr = Unmanaged.passRetained(wrapper).toOpaque()
+
+        __swift_bridge__$classify_chunks_owned(wrapperPtr, onComplete, {result.isOwned = false; return result.ptr;}(), {config.isOwned = false; return config.ptr;}())
+    })
+}
+class CbWrapper$classify_chunks_owned {
+    var cb: (Result<ExtractedDocument, Error>) -> ()
+
+    public init(cb: @escaping (Result<ExtractedDocument, Error>) -> ()) {
+        self.cb = cb
+    }
 }
 public func doctor(_ config: ExtractionConfig) -> DoctorReport {
     DoctorReport(ptr: __swift_bridge__$doctor({config.isOwned = false; return config.ptr;}()))
 }
-public func extract(_ input: ExtractInput, _ config: ExtractionConfig) throws -> ExtractionResult {
-    try { let val = __swift_bridge__$extract({input.isOwned = false; return input.ptr;}(), {config.isOwned = false; return config.ptr;}()); if val.is_ok { return ExtractionResult(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
+public func extract(_ input: ExtractInput, _ config: ExtractionConfig) async throws -> ExtractionResult {
+    func onComplete(cbWrapperPtr: UnsafeMutableRawPointer?, rustFnRetVal: __private__ResultPtrAndPtr) {
+        let wrapper = Unmanaged<CbWrapper$extract>.fromOpaque(cbWrapperPtr!).takeRetainedValue()
+        if rustFnRetVal.is_ok {
+            wrapper.cb(.success(ExtractionResult(ptr: rustFnRetVal.ok_or_err!)))
+        } else {
+            wrapper.cb(.failure(RustString(ptr: rustFnRetVal.ok_or_err!)))
+        }
+    }
+
+    return try await withCheckedThrowingContinuation({ (continuation: CheckedContinuation<ExtractionResult, Error>) in
+        let callback = { rustFnRetVal in
+            continuation.resume(with: rustFnRetVal)
+        }
+
+        let wrapper = CbWrapper$extract(cb: callback)
+        let wrapperPtr = Unmanaged.passRetained(wrapper).toOpaque()
+
+        __swift_bridge__$extract(wrapperPtr, onComplete, {input.isOwned = false; return input.ptr;}(), {config.isOwned = false; return config.ptr;}())
+    })
 }
-public func extractBatch(_ inputs: RustVec<ExtractInput>, _ config: ExtractionConfig) throws -> ExtractionResult {
-    try { let val = __swift_bridge__$extract_batch({ let val = inputs; val.isOwned = false; return val.ptr }(), {config.isOwned = false; return config.ptr;}()); if val.is_ok { return ExtractionResult(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
+class CbWrapper$extract {
+    var cb: (Result<ExtractionResult, Error>) -> ()
+
+    public init(cb: @escaping (Result<ExtractionResult, Error>) -> ()) {
+        self.cb = cb
+    }
+}
+public func extractBatch(_ inputs: RustVec<ExtractInput>, _ config: ExtractionConfig) async throws -> ExtractionResult {
+    func onComplete(cbWrapperPtr: UnsafeMutableRawPointer?, rustFnRetVal: __private__ResultPtrAndPtr) {
+        let wrapper = Unmanaged<CbWrapper$extract_batch>.fromOpaque(cbWrapperPtr!).takeRetainedValue()
+        if rustFnRetVal.is_ok {
+            wrapper.cb(.success(ExtractionResult(ptr: rustFnRetVal.ok_or_err!)))
+        } else {
+            wrapper.cb(.failure(RustString(ptr: rustFnRetVal.ok_or_err!)))
+        }
+    }
+
+    return try await withCheckedThrowingContinuation({ (continuation: CheckedContinuation<ExtractionResult, Error>) in
+        let callback = { rustFnRetVal in
+            continuation.resume(with: rustFnRetVal)
+        }
+
+        let wrapper = CbWrapper$extract_batch(cb: callback)
+        let wrapperPtr = Unmanaged.passRetained(wrapper).toOpaque()
+
+        __swift_bridge__$extract_batch(wrapperPtr, onComplete, { let val = inputs; val.isOwned = false; return val.ptr }(), {config.isOwned = false; return config.ptr;}())
+    })
+}
+class CbWrapper$extract_batch {
+    var cb: (Result<ExtractionResult, Error>) -> ()
+
+    public init(cb: @escaping (Result<ExtractionResult, Error>) -> ()) {
+        self.cb = cb
+    }
 }
 public func listDocumentExtractors() throws -> RustVec<RustString> {
     try { let val = __swift_bridge__$list_document_extractors(); if val.is_ok { return RustVec(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
@@ -190,14 +265,89 @@ public func verifyExcerpt<GenericIntoRustString: IntoRustString>(_ excerpt: Gene
 public func pdfPageCount<GenericIntoRustString: IntoRustString>(_ pdf_bytes: RustVec<UInt8>, _ password: Optional<GenericIntoRustString>) throws -> UInt {
     try { let val = __swift_bridge__$pdf_page_count({ let val = pdf_bytes; val.isOwned = false; return val.ptr }(), { if let rustString = optionalStringIntoRustString(password) { rustString.isOwned = false; return rustString.ptr } else { return nil } }()); switch val.tag { case __swift_bridge__$ResultUIntAndString$ResultOk: return val.payload.ok case __swift_bridge__$ResultUIntAndString$ResultErr: throw RustString(ptr: val.payload.err) default: fatalError() } }()
 }
-public func extractWithExternalRedaction<GenericIntoRustString: IntoRustString>(_ input: ExtractInput, _ config: ExtractionConfig, _ findings_json: GenericIntoRustString, _ offset_encoding: Optional<GenericIntoRustString>, _ max_findings: Optional<UInt32>) throws -> ExtractionResult {
-    try { let val = __swift_bridge__$extract_with_external_redaction({input.isOwned = false; return input.ptr;}(), {config.isOwned = false; return config.ptr;}(), { let rustString = findings_json.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(offset_encoding) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), max_findings.intoFfiRepr()); if val.is_ok { return ExtractionResult(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
+public func extractWithExternalRedaction<GenericIntoRustString: IntoRustString>(_ input: ExtractInput, _ config: ExtractionConfig, _ findings_json: GenericIntoRustString, _ offset_encoding: Optional<GenericIntoRustString>, _ max_findings: Optional<UInt32>) async throws -> ExtractionResult {
+    func onComplete(cbWrapperPtr: UnsafeMutableRawPointer?, rustFnRetVal: __private__ResultPtrAndPtr) {
+        let wrapper = Unmanaged<CbWrapper$extract_with_external_redaction>.fromOpaque(cbWrapperPtr!).takeRetainedValue()
+        if rustFnRetVal.is_ok {
+            wrapper.cb(.success(ExtractionResult(ptr: rustFnRetVal.ok_or_err!)))
+        } else {
+            wrapper.cb(.failure(RustString(ptr: rustFnRetVal.ok_or_err!)))
+        }
+    }
+
+    return try await withCheckedThrowingContinuation({ (continuation: CheckedContinuation<ExtractionResult, Error>) in
+        let callback = { rustFnRetVal in
+            continuation.resume(with: rustFnRetVal)
+        }
+
+        let wrapper = CbWrapper$extract_with_external_redaction(cb: callback)
+        let wrapperPtr = Unmanaged.passRetained(wrapper).toOpaque()
+
+        __swift_bridge__$extract_with_external_redaction(wrapperPtr, onComplete, {input.isOwned = false; return input.ptr;}(), {config.isOwned = false; return config.ptr;}(), { let rustString = findings_json.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(offset_encoding) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), max_findings.intoFfiRepr())
+    })
 }
-public func redactExternal<GenericIntoRustString: IntoRustString>(_ document: ExtractedDocument, _ config: RedactionConfig, _ findings_json: GenericIntoRustString, _ offset_encoding: Optional<GenericIntoRustString>, _ max_findings: Optional<UInt32>) throws -> ExtractedDocument {
-    try { let val = __swift_bridge__$redact_external({document.isOwned = false; return document.ptr;}(), {config.isOwned = false; return config.ptr;}(), { let rustString = findings_json.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(offset_encoding) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), max_findings.intoFfiRepr()); if val.is_ok { return ExtractedDocument(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
+class CbWrapper$extract_with_external_redaction {
+    var cb: (Result<ExtractionResult, Error>) -> ()
+
+    public init(cb: @escaping (Result<ExtractionResult, Error>) -> ()) {
+        self.cb = cb
+    }
 }
-public func mapUrl<GenericIntoRustString: IntoRustString>(_ uri: GenericIntoRustString, _ config: UrlExtractionConfig) throws -> MapResult {
-    try { let val = __swift_bridge__$map_url({ let rustString = uri.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), {config.isOwned = false; return config.ptr;}()); if val.is_ok { return MapResult(ptr: val.ok_or_err!) } else { throw RustString(ptr: val.ok_or_err!) } }()
+public func redactExternal<GenericIntoRustString: IntoRustString>(_ document: ExtractedDocument, _ config: RedactionConfig, _ findings_json: GenericIntoRustString, _ offset_encoding: Optional<GenericIntoRustString>, _ max_findings: Optional<UInt32>) async throws -> ExtractedDocument {
+    func onComplete(cbWrapperPtr: UnsafeMutableRawPointer?, rustFnRetVal: __private__ResultPtrAndPtr) {
+        let wrapper = Unmanaged<CbWrapper$redact_external>.fromOpaque(cbWrapperPtr!).takeRetainedValue()
+        if rustFnRetVal.is_ok {
+            wrapper.cb(.success(ExtractedDocument(ptr: rustFnRetVal.ok_or_err!)))
+        } else {
+            wrapper.cb(.failure(RustString(ptr: rustFnRetVal.ok_or_err!)))
+        }
+    }
+
+    return try await withCheckedThrowingContinuation({ (continuation: CheckedContinuation<ExtractedDocument, Error>) in
+        let callback = { rustFnRetVal in
+            continuation.resume(with: rustFnRetVal)
+        }
+
+        let wrapper = CbWrapper$redact_external(cb: callback)
+        let wrapperPtr = Unmanaged.passRetained(wrapper).toOpaque()
+
+        __swift_bridge__$redact_external(wrapperPtr, onComplete, {document.isOwned = false; return document.ptr;}(), {config.isOwned = false; return config.ptr;}(), { let rustString = findings_json.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), { if let rustString = optionalStringIntoRustString(offset_encoding) { rustString.isOwned = false; return rustString.ptr } else { return nil } }(), max_findings.intoFfiRepr())
+    })
+}
+class CbWrapper$redact_external {
+    var cb: (Result<ExtractedDocument, Error>) -> ()
+
+    public init(cb: @escaping (Result<ExtractedDocument, Error>) -> ()) {
+        self.cb = cb
+    }
+}
+public func mapUrl<GenericIntoRustString: IntoRustString>(_ uri: GenericIntoRustString, _ config: UrlExtractionConfig) async throws -> MapResult {
+    func onComplete(cbWrapperPtr: UnsafeMutableRawPointer?, rustFnRetVal: __private__ResultPtrAndPtr) {
+        let wrapper = Unmanaged<CbWrapper$map_url>.fromOpaque(cbWrapperPtr!).takeRetainedValue()
+        if rustFnRetVal.is_ok {
+            wrapper.cb(.success(MapResult(ptr: rustFnRetVal.ok_or_err!)))
+        } else {
+            wrapper.cb(.failure(RustString(ptr: rustFnRetVal.ok_or_err!)))
+        }
+    }
+
+    return try await withCheckedThrowingContinuation({ (continuation: CheckedContinuation<MapResult, Error>) in
+        let callback = { rustFnRetVal in
+            continuation.resume(with: rustFnRetVal)
+        }
+
+        let wrapper = CbWrapper$map_url(cb: callback)
+        let wrapperPtr = Unmanaged.passRetained(wrapper).toOpaque()
+
+        __swift_bridge__$map_url(wrapperPtr, onComplete, { let rustString = uri.intoRustString(); rustString.isOwned = false; return rustString.ptr }(), {config.isOwned = false; return config.ptr;}())
+    })
+}
+class CbWrapper$map_url {
+    var cb: (Result<MapResult, Error>) -> ()
+
+    public init(cb: @escaping (Result<MapResult, Error>) -> ()) {
+        self.cb = cb
+    }
 }
 public func alef_phantom_vec_ocr_backend() -> RustVec<OcrBackendBox> {
     RustVec(ptr: __swift_bridge__$alef_phantom_vec_ocr_backend())

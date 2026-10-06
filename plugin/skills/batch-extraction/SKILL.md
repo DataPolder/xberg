@@ -6,7 +6,7 @@ description: Use when extracting from many files at once with shared config, bou
 <!--
 AI-RULEZ :: GENERATED FILE — DO NOT EDIT
 Content-Hash: blake3:3a70b47dd77fcd3f37e83bed3d32b1ad1ea9d6c1642ae8e0ff7b09b55939858a
-Source-Hash: blake3:a87fc164b68044f5536acd076fa4b20ca7da271fa6a02e71b1cf72e8bc2464eb
+Source-Hash: blake3:0a63e6793dfbd7671ca2cfec5688efa8523d2e4087553f9f6503f2d74cef8b78
 Schema-Version: v1
 -->
 

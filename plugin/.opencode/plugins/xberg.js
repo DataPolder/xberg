@@ -1,6 +1,6 @@
 // AI-RULEZ :: GENERATED FILE — DO NOT EDIT
 // Content-Hash: blake3:0c4b20b2428ca03b76e22085bdcc856fbac85091cd3f6d157655d6c25c02714f
-// Source-Hash: blake3:a87fc164b68044f5536acd076fa4b20ca7da271fa6a02e71b1cf72e8bc2464eb
+// Source-Hash: blake3:0a63e6793dfbd7671ca2cfec5688efa8523d2e4087553f9f6503f2d74cef8b78
 // Schema-Version: v1
 
 import { tool } from "@opencode-ai/plugin";
