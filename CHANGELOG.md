@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **(pdf): mixed-rotation pages preserve word boundaries in upright text.** Native extraction no longer rewrites an
+  entire page through the rotated-run assembler when the upright content spans multiple rows, which previously joined
+  adjacent words in reports with rotated footer text. (GH#2049)
+
 ## [1.3.5] - 2026-10-06
 
 ### Added

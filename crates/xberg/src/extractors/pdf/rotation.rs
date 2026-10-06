@@ -239,6 +239,8 @@ pub(crate) fn page_has_rotated_spans(spans: &[TextSpan]) -> bool {
 /// characters in every case. `MIN_ROTATED_TEXT_SHARE` requires rotation to be
 /// a substantial share of the page — the shape of a genuinely sideways table
 /// or page, GH#1358's actual target — before the whole-page rewrite fires.
+/// The structural multi-line gate below additionally excludes pages whose
+/// upright assembly would lose line separators. ~keep
 const MIN_ROTATED_TEXT_SHARE: f32 = 0.2;
 
 /// True when rotated spans make up at least [`MIN_ROTATED_TEXT_SHARE`] of the
@@ -261,6 +263,32 @@ fn rotation_is_dominant(spans: &[TextSpan]) -> bool {
     total_chars > 0 && (rotated_chars as f32 / total_chars as f32) >= MIN_ROTATED_TEXT_SHARE
 }
 
+/// True when upright spans occupy more than one non-overlapping page row.
+///
+/// The rotated repair's upright branch concatenates spans verbatim, so it can
+/// preserve one upright row but cannot preserve a boundary between rows. This
+/// checks that capability directly instead of tuning the rotation-share gate
+/// around one document. ~keep
+fn upright_text_has_multiple_rows(spans: &[TextSpan]) -> bool {
+    let mut common_low = f32::NEG_INFINITY;
+    let mut common_high = f32::INFINITY;
+    let mut count = 0usize;
+    for span in spans
+        .iter()
+        .filter(|span| is_unrotated(span.rotation_degrees) && !span.text.trim().is_empty())
+    {
+        let low = span.y.min(span.y + span.height);
+        let high = span.y.max(span.y + span.height);
+        if !low.is_finite() || !high.is_finite() {
+            continue;
+        }
+        common_low = common_low.max(low);
+        common_high = common_high.min(high);
+        count += 1;
+    }
+    count > 1 && common_low >= common_high
+}
+
 /// Repair a page whose text contains rotated runs, without layout hints.
 ///
 /// This is the hint-free half of the GH#1358 fix: sideways tables and rotated
@@ -280,7 +308,7 @@ fn rotation_is_dominant(spans: &[TextSpan]) -> bool {
 /// paragraph structure, which is a worse trade than leaving the minority
 /// rotated run exactly as unrepaired as it was before GH#1358.
 pub(crate) fn repair_rotated_page_text(spans: &[TextSpan]) -> Option<String> {
-    if !page_has_rotated_spans(spans) || !rotation_is_dominant(spans) {
+    if !page_has_rotated_spans(spans) || !rotation_is_dominant(spans) || upright_text_has_multiple_rows(spans) {
         return None;
     }
 
@@ -569,6 +597,41 @@ mod tests {
         // no-separator concatenation path.
         mod rotation_dominance_gate {
             use super::*;
+
+            #[test]
+            fn should_not_rewrite_an_upright_majority_for_a_rotated_footer() {
+                // Opaque case dc6af85356 has 294 upright and 113 rotated
+                // characters. Rewriting the whole page at that 27.8% rotated
+                // share discards the upright assembler's line separators. ~keep
+                let first_upright_line = "u".repeat(147);
+                let second_upright_line = "u".repeat(147);
+                let rotated = "r".repeat(113);
+                let spans = vec![
+                    TextSpan {
+                        text: first_upright_line,
+                        x: 0.0,
+                        y: 20.0,
+                        width: 400.0,
+                        height: 10.0,
+                        rotation_degrees: 0.0,
+                    },
+                    TextSpan {
+                        text: second_upright_line,
+                        x: 0.0,
+                        y: 0.0,
+                        width: 400.0,
+                        height: 10.0,
+                        rotation_degrees: 0.0,
+                    },
+                    rotated_word(&rotated, 500.0, 100.0),
+                ];
+
+                assert_eq!(
+                    repair_rotated_page_text(&spans),
+                    None,
+                    "a rotated footer must not replace the upright majority's separator-aware assembly"
+                );
+            }
 
             #[test]
             fn should_not_repair_when_rotated_text_is_a_small_minority_of_the_page() {

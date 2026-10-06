@@ -43,8 +43,10 @@
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro)] // ~keep: test/bench binaries print by design; org logging policy exempts tests
 #![cfg(feature = "pdf")]
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
 use xberg::core::config::ExtractInput;
 use xberg::{ExtractionConfig, extract};
 
@@ -246,10 +248,12 @@ fn repo_root() -> PathBuf {
 }
 
 /// Corpus fixtures these tests read. Bucket-fetched, absent from a bare checkout.
-const CORPUS_FIXTURES: [&str; 3] = [
+const CORPUS_FIXTURES: [&str; 5] = [
     "test_documents/pdf/tatr.pdf",
     "test_documents/pdf/2026-13845.pdf",
     "test_documents/pdf/pdfa_018.pdf",
+    "test_documents/pdf/pdfa_035.pdf",
+    "test_documents/ground_truth/pdf/pdfa_035.txt",
 ];
 
 /// Resolve a corpus fixture, or `None` with an explanatory skip note.
@@ -507,6 +511,47 @@ async fn unrotated_corpus_document_keeps_its_tokens_in_document_order() {
     ];
 
     assert_words_in_order(&text, &ORDERED_TOKENS, "unrotated corpus document pdfa_018.pdf");
+}
+
+fn distinct_words_of_at_least_three_codepoints(text: &str) -> HashSet<String> {
+    text.split(|character: char| !character.is_alphanumeric())
+        .filter(|word| word.chars().count() >= 3)
+        .map(|word| word.to_lowercase())
+        .collect()
+}
+
+#[tokio::test]
+async fn mixed_rotation_report_preserves_every_reference_word() {
+    let Some(source) = corpus_fixture("test_documents/pdf/pdfa_035.pdf") else {
+        return;
+    };
+    let Some(reference) = corpus_fixture("test_documents/ground_truth/pdf/pdfa_035.txt") else {
+        return;
+    };
+    let source_bytes = std::fs::read(&source).expect("read opaque source dc6af85356");
+    let reference_bytes = std::fs::read(&reference).expect("read opaque reference dc6af85356");
+    assert_eq!(
+        hex::encode(Sha256::digest(&source_bytes)),
+        "cce42737cb1efbf321fa25074ce78bd1804587a446e84f26ddd52bbdf157e723"
+    );
+    assert_eq!(
+        hex::encode(Sha256::digest(&reference_bytes)),
+        "39e5282095ea6dbefbce56f3370bcabed619c2defd6860cf573f82bcb4f20863"
+    );
+
+    let extracted = extract_corpus_text(&source).await;
+    let reference = String::from_utf8(reference_bytes).expect("reference must be UTF-8");
+    let expected = distinct_words_of_at_least_three_codepoints(&reference);
+    let actual = distinct_words_of_at_least_three_codepoints(&extracted);
+    let recovered = expected.intersection(&actual).count();
+
+    assert_eq!(expected.len(), 52, "ground-truth token count drifted");
+    assert_eq!(
+        recovered,
+        expected.len(),
+        "opaque case dc6af85356 must preserve every reference word; missing: {:?}",
+        expected.difference(&actual).collect::<Vec<_>>()
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
