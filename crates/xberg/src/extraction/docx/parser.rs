@@ -36,6 +36,7 @@ pub(crate) enum DocumentElement {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Document {
     pub paragraphs: Vec<Paragraph>,
+    pub note_refs_by_paragraph: AHashMap<usize, Vec<NoteRef>>,
     pub tables: Vec<Table>,
     pub headers: Vec<HeaderFooter>,
     pub footers: Vec<HeaderFooter>,
@@ -90,6 +91,12 @@ pub struct Paragraph {
     /// field code.
     #[serde(default)]
     pub in_table_of_contents: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NoteRef {
+    pub(crate) id: String,
+    pub(crate) note_type: NoteType,
 }
 
 /// A formatted text run within a DOCX paragraph.
@@ -1221,6 +1228,7 @@ impl TableContext {
 #[derive(Debug, Default)]
 struct BodyParseOutputs {
     paragraphs: Vec<Paragraph>,
+    note_refs_by_paragraph: AHashMap<usize, Vec<NoteRef>>,
     tables: Vec<Table>,
     drawings: Vec<super::drawing::Drawing>,
     elements: Vec<DocumentElement>,
@@ -2405,6 +2413,7 @@ impl<R: Read + Seek> DocxParser<R> {
             out.ambiguous_sections,
         );
         document.paragraphs = out.paragraphs;
+        document.note_refs_by_paragraph = out.note_refs_by_paragraph;
         document.tables = out.tables;
         document.drawings = out.drawings;
         document.elements = out.elements;
@@ -2823,6 +2832,11 @@ impl<R: Read + Seek> DocxParser<R> {
                             );
                         }
                         "w:footnoteReference" | "w:endnoteReference" => {
+                            let note_type = if name.as_ref() == "w:endnoteReference" {
+                                NoteType::Endnote
+                            } else {
+                                NoteType::Footnote
+                            };
                             if let Some(ref mut run) = current_run {
                                 for attr in e.attributes().flatten() {
                                     if attr.key.as_ref() == "w:id" {
@@ -2832,6 +2846,15 @@ impl<R: Read + Seek> DocxParser<R> {
                                         if id != "-1" && id != "0" {
                                             run.text.push_str(&format!("[^{}]", id));
                                             page_breaks.text_since_break = true;
+                                            if table_stack.is_empty() && current_paragraph.is_some() {
+                                                out.note_refs_by_paragraph
+                                                    .entry(current_paragraph_index)
+                                                    .or_default()
+                                                    .push(NoteRef {
+                                                        id: id.to_string(),
+                                                        note_type,
+                                                    });
+                                            }
                                         }
                                     }
                                 }
