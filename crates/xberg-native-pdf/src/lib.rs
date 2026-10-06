@@ -71,8 +71,8 @@
 // The crate contains no `unsafe`. The last two blocks were `mem::transmute`s to
 // `'static` in the rasterizer's font cache, needed only because harfrust and
 // ttf-parser each held their own borrowed parse of the same bytes. Migrating to
-// fontations collapsed those into one `FontRef`, so nothing has to be
-// transmuted.
+// fontations replaced those with a borrowed `FontRef` rebuilt per call plus an
+// owned, `Arc`-backed `harfrust::Font`, so nothing has to be transmuted.
 //
 // `deny`, not `forbid`, for exactly ONE audited exception: the `global_asm!`
 // __memcmpeq shim below, which is `unsafe` by definition and cannot be written any

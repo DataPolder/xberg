@@ -269,11 +269,11 @@ fn cached_font_bytes(id: fontdb::ID, db: &fontdb::Database) -> Option<(Arc<Vec<u
 
 /// Parsed font faces cached by fontdb ID.
 ///
-/// Only owned data lives here: the font bytes, the shaping tables `ShaperData`
-/// derives from them (owned, no borrow), and the units-per-em. Views that
-/// borrow the bytes — `harfrust::FontRef`, which *is* `read_fonts::FontRef`,
-/// and the outline/charmap collections built from it — are cheap
-/// table-directory parses and are rebuilt per call from [`Self::font`].
+/// Only owned data lives here: the font bytes, the `harfrust::Font` (an owned,
+/// `Arc`-backed handle whose shared state holds the prepared shaping tables),
+/// and the units-per-em. Views that borrow the bytes — `skrifa::FontRef` and
+/// the outline/charmap collections built from it — are cheap table-directory
+/// parses and are rebuilt per call from [`Self::font`].
 ///
 /// This is what replaced the previous self-referential arrangement, which kept
 /// a `FontRef<'static>` and a second `ttf_parser::Face<'static>` alive by
@@ -283,27 +283,37 @@ fn cached_font_bytes(id: fontdb::ID, db: &fontdb::Database) -> Option<(Arc<Vec<u
 struct CachedFace {
     data: Arc<Vec<u8>>,
     index: u32,
-    shaper_data: harfrust::ShaperData,
+    shaping_font: harfrust::Font,
     pub units_per_em: f32,
+}
+
+/// Build the `harfrust::Font` over the shared bytes without copying them.
+///
+/// `Font` owns its source and carries the expensive per-font shaping state
+/// (GSUB/GPOS/AAT tables, cmap cache) behind a shared handle, so a clone of a
+/// cached `Font` reuses it while a fresh `Font::new` rebuilds it. ~keep
+fn build_shaping_font(data: &Arc<Vec<u8>>, index: u32) -> Option<harfrust::Font> {
+    let shared: Arc<Vec<u8>> = Arc::clone(data);
+    let bytes: Arc<dyn AsRef<[u8]> + Send + Sync> = shared;
+    harfrust::Font::new(bytes, index)
 }
 
 impl CachedFace {
     fn new(data: Arc<Vec<u8>>, index: u32) -> Option<Self> {
-        let font = harfrust::FontRef::from_index(&data, index).ok()?;
+        let font = FontRef::from_index(&data, index).ok()?;
         let units_per_em = font.head().map(|head| head.units_per_em()).unwrap_or(1000) as f32;
-        let shaper_data = harfrust::ShaperData::new(&font);
+        let shaping_font = build_shaping_font(&data, index)?;
         Some(CachedFace {
             data,
             index,
-            shaper_data,
+            shaping_font,
             units_per_em,
         })
     }
 
     /// Re-derive the borrowing view over the cached bytes.
-    fn font(&self) -> harfrust::FontRef<'_> {
-        harfrust::FontRef::from_index(&self.data, self.index)
-            .expect("font parsed successfully when the cache entry was built")
+    fn font(&self) -> FontRef<'_> {
+        FontRef::from_index(&self.data, self.index).expect("font parsed successfully when the cache entry was built")
     }
 
     fn outline_face(&self) -> OutlineFace<'_> {
@@ -1088,26 +1098,25 @@ impl TextRasterizer {
 
         // `FontRef` and the outline/charmap views are cheap table-directory
         // parses, so they are built here in both branches rather than stored.
-        // Only `ShaperData` is expensive, and the cache holds that. ~keep
-        let _local_shaper_data: Option<harfrust::ShaperData>;
+        // Only the `harfrust::Font` shaping state is expensive, and the cache
+        // holds that. ~keep
         // Only the embedded-font branch needs this; a cached system font already
         // carries `hmtx`, and computing it here would cost an extra parse on the
         // hot path. ~keep
         let local_outline_bytes: std::borrow::Cow<'_, [u8]>;
 
-        let font_ref: harfrust::FontRef<'_>;
-        let shaper_data_ref: &harfrust::ShaperData;
+        let shaping_font: harfrust::Font;
         let outline_face: OutlineFace<'_>;
         let units_per_em: f32;
 
         if let Some(ref c) = cached_arc {
-            _local_shaper_data = None;
-            font_ref = c.font();
-            shaper_data_ref = &c.shaper_data;
+            shaping_font = c.shaping_font.clone();
             outline_face = c.outline_face();
             units_per_em = c.units_per_em;
         } else {
-            let font_opt = harfrust::FontRef::from_index(&font_data, index).ok();
+            let font_opt = FontRef::from_index(&font_data, index)
+                .ok()
+                .and_then(|_| build_shaping_font(&font_data, index));
             if font_opt.is_none() {
                 if allow_fallback {
                     Self::warn_invalid_embedded_font(pdf_font_name);
@@ -1131,25 +1140,22 @@ impl TextRasterizer {
                 }
                 return self.render_text_fallback(pixmap, text, paint, base_transform, gs, clip_mask);
             }
-            font_ref = font_opt.unwrap();
+            shaping_font = font_opt.unwrap();
             local_outline_bytes = outlineable_font_bytes(&font_data, index);
             let Some(face) = OutlineFace::new(&local_outline_bytes, index) else {
                 return Err(Error::InvalidPdf(format!("Failed to parse font: {}", pdf_font_name)));
             };
             units_per_em = face.units_per_em();
             outline_face = face;
-            // ShaperData owns its derived tables (no borrow of `font_ref`). ~keep
-            _local_shaper_data = Some(harfrust::ShaperData::new(&font_ref));
-            shaper_data_ref = _local_shaper_data.as_ref().unwrap();
         }
 
-        let mut buffer = harfrust::UnicodeBuffer::new();
+        let mut buffer = harfrust::Buffer::new();
         buffer.push_str(text);
 
         // Explicitly set script and direction for better CJK shaping ~keep
         if text.chars().any(|c| (c as u32) >= 0x4E00 && (c as u32) <= 0x9FFF) {
             if let Some(script) = harfrust::Script::from_iso15924_tag(harfrust::Tag::new(b"Hani")) {
-                buffer.set_script(script);
+                buffer.set_script(Some(script));
             }
         }
         buffer.set_direction(harfrust::Direction::LeftToRight);
@@ -1158,10 +1164,24 @@ impl TextRasterizer {
         // explicit direction and CJK script set above are preserved. ~keep
         buffer.guess_segment_properties();
 
-        let shaper = shaper_data_ref.shaper(&font_ref).instance(None).build();
-        let glyphs = shaper.shape(buffer, harfrust::ShapeOptions::new());
-        let info = glyphs.glyph_infos();
-        let pos = glyphs.glyph_positions();
+        // Direction is set above, so `shape` has nothing to reject; if it ever
+        // does, the text is drawn by the fallback rather than dropped. ~keep
+        if let Err(err) = harfrust::shape(
+            &harfrust::ShaperFont::new(&shaping_font),
+            &mut buffer,
+            harfrust::ShapeOptions::new(),
+        ) {
+            tracing::warn!(
+                target: "xberg_native_pdf::fonts",
+                operation = "shape_text",
+                error_code = "shape_rejected",
+                error = %err,
+                "text shaping was rejected; using fallback text rendering"
+            );
+            return self.render_text_fallback(pixmap, text, paint, base_transform, gs, clip_mask);
+        }
+        let info = buffer.glyph_infos();
+        let pos = buffer.glyph_positions();
 
         let scale = font_size / units_per_em;
         tracing::trace!(
