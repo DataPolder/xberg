@@ -188,7 +188,7 @@ impl XbergMcp {
         let mut config =
             build_config(&self.default_config, params.config).map_err(|e| rmcp::ErrorData::invalid_params(e, None))?;
         apply_pdf_password(&mut config, params.pdf_password)?;
-        let input = parse_extract_input(params.input)?;
+        let input = parse_extract_input(params.input, &config)?;
 
         let output = crate::extract(input, &config).await.map_err(map_xberg_error_to_mcp)?;
         let response = format_extraction_result_for_wire(&output, use_toon);
@@ -220,7 +220,7 @@ impl XbergMcp {
         let inputs = params
             .inputs
             .into_iter()
-            .map(parse_extract_input)
+            .map(|input| parse_extract_input(input, &config))
             .collect::<Result<Vec<_>, _>>()?;
 
         let output = crate::extract_batch(inputs, &config)
@@ -777,13 +777,20 @@ fn resolve_cache_base() -> std::path::PathBuf {
     crate::cache_dir::resolve_cache_base()
 }
 
-fn parse_extract_input(value: serde_json::Value) -> Result<crate::ExtractInput, rmcp::ErrorData> {
+fn parse_extract_input(
+    value: serde_json::Value,
+    operator: &ExtractionConfig,
+) -> Result<crate::ExtractInput, rmcp::ErrorData> {
     if let Some(config) = value.get("config") {
         crate::core::config::request_security::validate_caller_extraction_config(config)
             .map_err(|message| rmcp::ErrorData::invalid_params(message, None))?;
     }
-    serde_json::from_value::<crate::ExtractInput>(value)
-        .map_err(|error| rmcp::ErrorData::invalid_params(format!("Invalid ExtractInput: {error}"), None))
+    let mut input = serde_json::from_value::<crate::ExtractInput>(value)
+        .map_err(|error| rmcp::ErrorData::invalid_params(format!("Invalid ExtractInput: {error}"), None))?;
+    if let Some(config) = input.config.as_mut() {
+        crate::core::config::request_security::adopt_file_operator_crawl_egress(config, operator);
+    }
+    Ok(input)
 }
 
 fn format_extraction_result_for_wire(output: &crate::ExtractionResult, use_toon: bool) -> String {
@@ -1328,7 +1335,8 @@ mod tests {
             }
         });
 
-        let error = parse_extract_input(value).expect_err("caller credential must be rejected");
+        let error =
+            parse_extract_input(value, &ExtractionConfig::default()).expect_err("caller credential must be rejected");
 
         assert_eq!(
             error.message,
@@ -1337,6 +1345,48 @@ mod tests {
         assert!(
             !error.message.contains("must-not-leak"),
             "rejection must not include caller-controlled values"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "url-config-types")]
+    fn should_preserve_operator_crawl_egress_in_mcp_per_input_override() {
+        let mut operator = ExtractionConfig::default();
+        operator.url.crawl.browser.endpoint = Some("ws://operator-browser.internal/devtools".to_string());
+        operator.url.crawl.browser.session_affinity = false;
+        operator.url.crawl.document_output_dir = Some("/operator/documents".into());
+        operator.url.crawl.warc_output = Some("/operator/archive.warc".into());
+        let value = serde_json::json!({
+            "kind": "bytes",
+            "data": [115, 97, 102, 101],
+            "mime_type": "text/plain",
+            "config": {"url": {"crawl": {
+                "max_depth": 3,
+                "custom_headers": {"x-caller-input": "input-value"}
+            }}}
+        });
+
+        let input = parse_extract_input(value, &operator).expect("caller-owned crawl options must remain valid");
+        let crawl = &input
+            .config
+            .as_ref()
+            .expect("per-input config is present")
+            .url
+            .as_ref()
+            .expect("URL config is present")
+            .crawl;
+
+        assert_eq!(crawl.browser.endpoint, operator.url.crawl.browser.endpoint);
+        assert_eq!(
+            crawl.browser.session_affinity,
+            operator.url.crawl.browser.session_affinity
+        );
+        assert_eq!(crawl.document_output_dir, operator.url.crawl.document_output_dir);
+        assert_eq!(crawl.warc_output, operator.url.crawl.warc_output);
+        assert_eq!(crawl.max_depth, Some(3));
+        assert_eq!(
+            crawl.custom_headers.get("x-caller-input").map(String::as_str),
+            Some("input-value")
         );
     }
 

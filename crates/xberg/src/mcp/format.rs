@@ -20,7 +20,9 @@ pub(super) fn build_config(
         .map(|v| serde_json::to_string(&v))
         .transpose()
         .map_err(|e| format!("Failed to serialize config JSON: {e}"))?;
-    build_config_from_json(default_config, json_string.as_deref())
+    let mut config = build_config_from_json(default_config, json_string.as_deref())?;
+    crate::core::config::request_security::adopt_operator_crawl_egress(&mut config, default_config);
+    Ok(config)
 }
 
 #[cfg(test)]
@@ -231,6 +233,40 @@ mod tests {
         assert_eq!(
             build_config(&default_config, Some(caller_override)).expect_err("caller transport config must be rejected"),
             "Caller extraction config may not set ocr.vlm_config.headers"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "url-config-types")]
+    fn should_preserve_operator_crawl_egress_while_applying_caller_owned_options() {
+        let mut default_config = ExtractionConfig::default();
+        default_config.url.crawl.ssrf.max_redirects = 1;
+        default_config.url.crawl.ssrf.scheme_allowlist = vec!["https".to_string()];
+        default_config.url.crawl.proxy = Some(crawlberg::ProxyConfig {
+            url: "http://operator-proxy.internal:8080".to_string(),
+            username: None,
+            password: None,
+        });
+
+        let caller_override = serde_json::json!({
+            "url": {"crawl": {
+                "max_depth": 7,
+                "custom_headers": {"x-caller": "caller-value"}
+            }}
+        });
+        let merged =
+            build_config(&default_config, Some(caller_override)).expect("caller-owned crawl options must remain valid");
+
+        assert_eq!(merged.url.crawl.ssrf.max_redirects, 1);
+        assert_eq!(merged.url.crawl.ssrf.scheme_allowlist, vec!["https"]);
+        assert_eq!(
+            merged.url.crawl.proxy.as_ref().map(|proxy| proxy.url.as_str()),
+            Some("http://operator-proxy.internal:8080")
+        );
+        assert_eq!(merged.url.crawl.max_depth, Some(7));
+        assert_eq!(
+            merged.url.crawl.custom_headers.get("x-caller").map(String::as_str),
+            Some("caller-value")
         );
     }
 }

