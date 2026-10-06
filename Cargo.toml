@@ -56,19 +56,13 @@ bytes = { version = "1", features = ["serde"] }
 candle-core = { version = "0.11", default-features = false }
 candle-nn = { version = "0.11", default-features = false }
 candle-transformers = { version = "0.11", default-features = false }
-cc = "1.5"
+cc = "1.6"
 cfb = "0.15"
 chrono = "0.4"
 clap = { version = "4.6", features = ["derive", "color", "suggestions"] }
 comrak = { version = "0.55", default-features = false }
 console_error_panic_hook = "0.1"
-# ~keep held at 1.7.1: 1.7.2 relocated CrawlConfig within its crate, and alef can no longer
-# resolve the nested config types by path -- it sanitizes CrawlConfig.{browser,proxy,ssrf,
-# content,document_content_encoding,crawl_strategy} to `String`, degrading those fields in
-# every binding. Bracketed on an otherwise identical tree: `alef verify` exits 0 with 1.7.1
-# and 1 with 8 lossy_sanitized_surface violations on 1.7.2. Raise it only together with an
-# alef that maps those types, and re-check `alef verify`. Verified 2026-09-25.
-crawlberg = { version = "1.8.0", default-features = false }
+crawlberg = { version = "1.10.1", default-features = false }
 criterion = { version = "0.8", features = ["html_reports"] }
 dbase = "0.8"
 flate2 = "1.1"
@@ -76,12 +70,13 @@ fs2 = "0.4.3"
 futures = "0.3"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
 hex = "0.4.3"
-html-to-markdown-rs = { version = "3.16", default-features = false }
+html-to-markdown-rs = { version = "3.17.1", default-features = false }
 image = { version = "0.25.10", default-features = false }
 itertools = "0.15"
 js-sys = "0.3"
 
 lazy_static = "1.5.1"
+# ~keep Crawlberg 1.10.1 pins libc 0.2.189 on iOS until sysinfo supports the 0.2.190 Mach API change.
 libc = "0.2.189"
 # Builds a bundled zlib from source (`static`) for the target, so the vendored
 # librevenge RVNGZipStream.cpp can `#include <zlib.h>` and link zlib even under
@@ -120,7 +115,7 @@ sceptre = { version = "0.7.2", default-features = false }
 
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151" }
-serde_toon_format = "0.1"
+serde_toon_format = "0.2"
 sha2 = "0.11"
 similar = "3"
 sqlite-vec = "0.1"
@@ -133,7 +128,7 @@ thiserror = "2.0.21"
 # `net`/`os-poll`/`os-ext`, which fails to build on wasm32 regardless). These OS-dependent
 # features are re-added only on consuming crates' `[target.'cfg(not(target_arch =
 # "wasm32"))'.dependencies]` blocks (see crates/xberg/Cargo.toml and crates/xberg-cli/Cargo.toml).
-tokio = { version = "1.53.1", features = [
+tokio = { version = "1.53.2", features = [
     "rt",
     "macros",
     "sync",
@@ -147,7 +142,7 @@ tracing = "0.1"
 # and WASM-safe; the top-level `tract` facade instead defaults to CUDA and bundles
 # GPU backends, so it is unusable here. See issue #1275.
 tract-onnx = { version = "0.23.8", default-features = false }
-tree-sitter-language-pack = { version = "1.20.0", default-features = false, features = ["serde"] }
+tree-sitter-language-pack = { version = "1.21.0", default-features = false, features = ["serde"] }
 url = "2.5.8"
 # usvg (re-exported by resvg) with only the `writer` feature so `Tree::to_string`
 # / `WriteOptions` are available for SVG sanitize re-serialization. `writer` pulls

@@ -3046,33 +3046,34 @@ enum XBERGAlefFfiErrorCode
   XbergAlefUnknown = 2,
   XbergAlefPanic = 3,
   XbergAlefInvalidHandle = 4,
-  XbergHeuristicsErrorHeuristicsErrorConfigError = 1100,
-  XbergHeuristicsErrorHeuristicsErrorPdfAnalysisError = 1101,
-  XbergPresetsLoaderLoadErrorParse = 1200,
-  XbergPresetsLoaderLoadErrorSchemaValidation = 1201,
-  XbergPresetsLoaderLoadErrorDeserialize = 1202,
-  XbergPresetsLoaderLoadErrorIdMismatch = 1203,
-  XbergPresetsLoaderLoadErrorBadMetaSchema = 1204,
-  XbergPresetsLoaderLoadErrorIo = 1205,
-  XbergPresetsResolveErrorSchemaNotObject = 1300,
-  XbergErrorXbergErrorIo = 1000,
-  XbergErrorXbergErrorParsing = 1001,
-  XbergErrorXbergErrorOcr = 1002,
-  XbergErrorXbergErrorValidation = 1003,
-  XbergErrorXbergErrorCache = 1004,
-  XbergErrorXbergErrorImageProcessing = 1005,
-  XbergErrorXbergErrorSerialization = 1006,
-  XbergErrorXbergErrorMissingDependency = 1007,
-  XbergErrorXbergErrorPlugin = 1008,
-  XbergErrorXbergErrorLockPoisoned = 1009,
-  XbergErrorXbergErrorUnsupportedFormat = 1010,
-  XbergErrorXbergErrorEmbedding = 1011,
-  XbergErrorXbergErrorReranking = 1012,
-  XbergErrorXbergErrorTranscription = 1013,
-  XbergErrorXbergErrorTimeout = 1014,
-  XbergErrorXbergErrorCancelled = 1015,
-  XbergErrorXbergErrorSecurity = 1016,
-  XbergErrorXbergErrorOther = 1017,
+  XbergAlefCancelled = 5,
+  XbergHeuristicsErrorConfigError = 1100,
+  XbergHeuristicsErrorPdfAnalysisError = 1101,
+  XbergLoadErrorParse = 1200,
+  XbergLoadErrorSchemaValidation = 1201,
+  XbergLoadErrorDeserialize = 1202,
+  XbergLoadErrorIdMismatch = 1203,
+  XbergLoadErrorBadMetaSchema = 1204,
+  XbergLoadErrorIo = 1205,
+  XbergResolveErrorSchemaNotObject = 1300,
+  XbergErrorIo = 1000,
+  XbergErrorParsing = 1001,
+  XbergErrorOcr = 1002,
+  XbergErrorValidation = 1003,
+  XbergErrorCache = 1004,
+  XbergErrorImageProcessing = 1005,
+  XbergErrorSerialization = 1006,
+  XbergErrorMissingDependency = 1007,
+  XbergErrorPlugin = 1008,
+  XbergErrorLockPoisoned = 1009,
+  XbergErrorUnsupportedFormat = 1010,
+  XbergErrorEmbedding = 1011,
+  XbergErrorReranking = 1012,
+  XbergErrorTranscription = 1013,
+  XbergErrorTimeout = 1014,
+  XbergErrorCancelled = 1015,
+  XbergErrorSecurity = 1016,
+  XbergErrorOther = 1017,
 };
 #if __STDC_VERSION__ >= 202311L
 typedef enum XBERGAlefFfiErrorCode XBERGAlefFfiErrorCode;
@@ -4016,6 +4017,15 @@ int32_t xberg_last_error_code(void);
 const char *xberg_last_error_context(void);
 
 /**
+ * Return the variant name of the last typed error, such as `RateLimited`.
+ * The pointer is NULL when the last error did not come from a typed error
+ * value, and is borrowed and valid until the next FFI call on this thread. #
+ * Safety Caller must ensure all pointer arguments are valid or null. The
+ * returned pointer is borrowed from thread-local storage and must NOT be freed.
+ */
+const char *xberg_last_error_variant(void);
+
+/**
  * Free a string previously returned by this library.
  * # Safety
  * Pointer must have been returned by this library, or be null.
@@ -4808,6 +4818,24 @@ int32_t xberg_browser_config_capture_network_events(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_browser_config_session_affinity(XBERGAlefHandle handle);
+
+/**
+ * Get the `chrome_path` field from a `BrowserConfig`.
+ * A non-null returned pointer is owned by the caller.
+ * It must be freed with `xberg_free_string`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_browser_config_chrome_path(XBERGAlefHandle handle);
+
+/**
+ * Get the `chrome_args` field from a `BrowserConfig`.
+ * A non-null returned pointer is owned by the caller.
+ * It must be freed with `xberg_free_string`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_browser_config_chrome_args(XBERGAlefHandle handle);
 
 /**
  * Create a `CacheStats` from a JSON string. Returns null on failure.
@@ -6723,6 +6751,26 @@ int32_t xberg_conversion_options_extract_images(XBERGAlefHandle handle);
 uint64_t xberg_conversion_options_max_image_size(XBERGAlefHandle handle);
 
 /**
+ * Get the `max_input_size` field from a `ConversionOptions`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+uint64_t xberg_conversion_options_max_input_size(XBERGAlefHandle handle);
+
+/**
+ * Report whether the `max_input_size` field on a `ConversionOptions` is `Some`.
+ *
+ * `xberg_conversion_options_max_input_size` cannot distinguish a `None` field
+ * from a legitimate zero-valued `Some` at the C ABI boundary -- there is no
+ * null representation for a numeric return, so both collapse to the same
+ * sentinel. Call this function first: `1` means the field getter's return value
+ * is meaningful, `0` means the field is absent and the getter's sentinel must
+ * be ignored, `-1` reports an invalid handle (see `xberg_last_error_code`). #
+ * Safety Pointer must be a valid handle returned by this library.
+ */
+int32_t xberg_conversion_options_has_max_input_size(XBERGAlefHandle handle);
+
+/**
  * Get the `capture_svg` field from a `ConversionOptions`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
@@ -7188,6 +7236,13 @@ char *xberg_crawl_config_exclude_paths(XBERGAlefHandle handle);
  * Pointer must be a valid handle returned by this library.
  */
 int32_t xberg_crawl_config_path_patterns_match_query(XBERGAlefHandle handle);
+
+/**
+ * Get the `path_patterns_match_url` field from a `CrawlConfig`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+int32_t xberg_crawl_config_path_patterns_match_url(XBERGAlefHandle handle);
 
 /**
  * Get the `dedup_include_query` field from a `CrawlConfig`.
@@ -23965,6 +24020,15 @@ int32_t xberg_ssrf_policy_deny_private(XBERGAlefHandle handle);
 char *xberg_ssrf_policy_allowlist(XBERGAlefHandle handle);
 
 /**
+ * Get the `denylist` field from a `SsrfPolicy`.
+ * A non-null returned pointer is owned by the caller.
+ * It must be freed with `xberg_free_string`.
+ * # Safety
+ * Pointer must be a valid handle returned by this library.
+ */
+char *xberg_ssrf_policy_denylist(XBERGAlefHandle handle);
+
+/**
  * Get the `max_redirects` field from a `SsrfPolicy`.
  * # Safety
  * Pointer must be a valid handle returned by this library.
@@ -30235,6 +30299,52 @@ char *xberg_whisper_model_to_string(XBERGAlefHandle handle);
 void xberg_whitespace_mode_free(XBERGAlefHandle handle);
 
 /**
+ * Allocate a cancel token.
+ *
+ * Pass the token to a `*_cancellable` export to make that blocking call
+ * abortable, then call `xberg_cancel_token_cancel` from any thread to abort it.
+ * The call returns with last-error code `Cancelled` and the underlying request
+ * is dropped. One token may be shared by several calls. A cancelled token stays
+ * cancelled.
+ *
+ * Returns `0` on failure (see `xberg_last_error_code`). The caller owns the
+ * handle and MUST release it with `xberg_cancel_token_free` once no call using
+ * it is still running.
+ *
+ * # Safety
+ * Caller must ensure all pointer arguments are valid or null.
+ * The returned handle is owned by the caller and must be freed with
+ * `xberg_cancel_token_free`.
+ */
+XBERGAlefHandle xberg_cancel_token_new(void);
+
+/**
+ * Trip a cancel token. Safe to call from any thread, repeatedly, and while a
+ * call using the token is blocked.
+ *
+ * Returns `0` on success and `-1` for an invalid, stale or wrong-typed handle
+ * (see `xberg_last_error_code`).
+ *
+ * # Safety
+ * Caller must ensure all pointer arguments are valid or null.
+ * This function does not allocate and returns no owned pointer.
+ */
+int32_t xberg_cancel_token_cancel(XBERGAlefHandle token);
+
+/**
+ * Free a cancel token created by `xberg_cancel_token_new`.
+ *
+ * Passing `0` is a no-op. The token must not be used afterwards, and no call
+ * using it may still be running.
+ *
+ * # Safety
+ * Caller must ensure all pointer arguments are valid or null.
+ * `token` must be `0` or a handle returned by `xberg_cancel_token_new` that has
+ * not been freed.
+ */
+void xberg_cancel_token_free(XBERGAlefHandle token);
+
+/**
  * Classify a document's chunks and return the updated document.
  *
  * This owned form preserves the mutations when the document crosses a
@@ -30246,6 +30356,28 @@ void xberg_whitespace_mode_free(XBERGAlefHandle handle);
  */
 XBERGAlefHandle xberg_classify_chunks_owned(XBERGAlefHandle result,
                                             XBERGAlefHandle config);
+
+/**
+ * Cancellable variant of `xberg_classify_chunks_owned`.
+ *
+ * Takes a trailing `alef_cancel_token` created by `xberg_cancel_token_new`.
+ * Tripping it with `xberg_cancel_token_cancel` from any thread aborts the
+ * blocking call, which then fails with the `Cancelled` error code. Pass `0` for
+ * a call that is never cancelled.
+ *
+ * Classify a document's chunks and return the updated document.
+ *
+ * This owned form preserves the mutations when the document crosses a
+ * language-binding boundary. Rust callers that already own a mutable document
+ * can use `classify_chunks` to avoid moving it.
+ * \note Returns the same validation and LLM errors as `classify_chunks`.
+ * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+XBERGAlefHandle
+xberg_classify_chunks_owned_cancellable(XBERGAlefHandle result,
+                                        XBERGAlefHandle config,
+                                        XBERGAlefHandle alef_cancel_token);
 
 /**
  * Probe the backends and settings in `config` and report what will actually
@@ -30266,11 +30398,43 @@ XBERGAlefHandle xberg_doctor(XBERGAlefHandle config);
 XBERGAlefHandle xberg_extract(XBERGAlefHandle input, XBERGAlefHandle config);
 
 /**
+ * Cancellable variant of `xberg_extract`.
+ *
+ * Takes a trailing `alef_cancel_token` created by `xberg_cancel_token_new`.
+ * Tripping it with `xberg_cancel_token_cancel` from any thread aborts the
+ * blocking call, which then fails with the `Cancelled` error code. Pass `0` for
+ * a call that is never cancelled.
+ *
+ * Extract content from a single bytes or URI input.
+ * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+XBERGAlefHandle xberg_extract_cancellable(XBERGAlefHandle input,
+                                          XBERGAlefHandle config,
+                                          XBERGAlefHandle alef_cancel_token);
+
+/**
  * Extract content from multiple bytes or URI inputs.
  * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
  * Returned pointers must be freed with the appropriate free function.
  */
 XBERGAlefHandle xberg_extract_batch(const char *inputs, XBERGAlefHandle config);
+
+/**
+ * Cancellable variant of `xberg_extract_batch`.
+ *
+ * Takes a trailing `alef_cancel_token` created by `xberg_cancel_token_new`.
+ * Tripping it with `xberg_cancel_token_cancel` from any thread aborts the
+ * blocking call, which then fails with the `Cancelled` error code. Pass `0` for
+ * a call that is never cancelled.
+ *
+ * Extract content from multiple bytes or URI inputs.
+ * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+XBERGAlefHandle
+xberg_extract_batch_cancellable(const char *inputs, XBERGAlefHandle config,
+                                XBERGAlefHandle alef_cancel_token);
 
 #if defined(XBERG_FEATURE_REDACTION)
 /**
@@ -30287,6 +30451,31 @@ XBERGAlefHandle xberg_extract_batch(const char *inputs, XBERGAlefHandle config);
 XBERGAlefHandle xberg_extract_with_external_redaction(
     XBERGAlefHandle input, XBERGAlefHandle config, const char *findings_json,
     const char *offset_encoding, uint32_t max_findings);
+#endif
+
+#if defined(XBERG_FEATURE_REDACTION)
+/**
+ * Cancellable variant of `xberg_extract_with_external_redaction`.
+ *
+ * Takes a trailing `alef_cancel_token` created by `xberg_cancel_token_new`.
+ * Tripping it with `xberg_cancel_token_cancel` from any thread aborts the
+ * blocking call, which then fails with the `Cancelled` error code. Pass `0` for
+ * a call that is never cancelled.
+ *
+ * Extract one bytes input and redact a JSON array or JSON Lines payload from an
+ * external inspection engine.
+ *
+ * The payload is parsed in Rust so vendor aliases and nested fields remain
+ * intact across language bindings. `offset_encoding` defaults to
+ * `unicode_code_points` and `max_findings` defaults to 10,000 when omitted.
+ * Unknown encodings return a validation error.
+ * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+XBERGAlefHandle xberg_extract_with_external_redaction_cancellable(
+    XBERGAlefHandle input, XBERGAlefHandle config, const char *findings_json,
+    const char *offset_encoding, uint32_t max_findings,
+    XBERGAlefHandle alef_cancel_token);
 #endif
 
 #if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)
@@ -30633,6 +30822,35 @@ uintptr_t xberg_list_validators_len(void);
 XBERGAlefHandle xberg_map_url(const char *uri, XBERGAlefHandle config);
 #endif
 
+#if defined(XBERG_FEATURE_URL_INGESTION)
+/**
+ * Cancellable variant of `xberg_map_url`.
+ *
+ * Takes a trailing `alef_cancel_token` created by `xberg_cancel_token_new`.
+ * Tripping it with `xberg_cancel_token_cancel` from any thread aborts the
+ * blocking call, which then fails with the `Cancelled` error code. Pass `0` for
+ * a call that is never cancelled.
+ *
+ * Discover all pages and sitemaps reachable from `uri` without extracting
+ * document content.
+ *
+ * Builds a `crawlberg.CrawlEngine` from `config.crawl`, calls
+ * `CrawlEngine.map`, and returns the set of discovered URLs as a
+ * `crawlberg.MapResult` (re-exported as `MapResult`).
+ *
+ * Use this when you need the URL inventory of a site before committing to
+ * full document extraction â e.g. to build a crawl queue or validate
+ * scope.
+ * \note Returns `Validation` if the crawl configuration fails
+ * validation or if the map operation itself fails.
+ * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+XBERGAlefHandle xberg_map_url_cancellable(const char *uri,
+                                          XBERGAlefHandle config,
+                                          XBERGAlefHandle alef_cancel_token);
+#endif
+
 #if ((defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS) ||                       \
       defined(XBERG_FEATURE_LATE_INTERACTION)) ||                              \
      defined(XBERG_FEATURE_LATE_INTERACTION_PRESETS))
@@ -30759,6 +30977,31 @@ XBERGAlefHandle xberg_redact_external(XBERGAlefHandle document,
                                       const char *findings_json,
                                       const char *offset_encoding,
                                       uint32_t max_findings);
+#endif
+
+#if defined(XBERG_FEATURE_REDACTION)
+/**
+ * Cancellable variant of `xberg_redact_external`.
+ *
+ * Takes a trailing `alef_cancel_token` created by `xberg_cancel_token_new`.
+ * Tripping it with `xberg_cancel_token_cancel` from any thread aborts the
+ * blocking call, which then fails with the `Cancelled` error code. Pass `0` for
+ * a call that is never cancelled.
+ *
+ * Redact an owned document using a JSON array or JSON Lines payload from an
+ * external inspection engine.
+ *
+ * The payload is parsed in Rust so vendor aliases and nested fields remain
+ * intact across language bindings. `offset_encoding` defaults to
+ * `unicode_code_points` and `max_findings` defaults to 10,000 when omitted.
+ * Unknown encodings return a validation error.
+ * \note SAFETY: Caller must ensure all pointer arguments are valid or null.
+ * Returned pointers must be freed with the appropriate free function.
+ */
+XBERGAlefHandle xberg_redact_external_cancellable(
+    XBERGAlefHandle document, XBERGAlefHandle config, const char *findings_json,
+    const char *offset_encoding, uint32_t max_findings,
+    XBERGAlefHandle alef_cancel_token);
 #endif
 
 #if defined(XBERG_FEATURE_MARKDOWN_FOOTNOTES)

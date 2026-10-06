@@ -12498,6 +12498,8 @@ const _: fn() = || {
         let _: Option<String> = BrowserConfig.robots_user_agent;
         let _: bool = BrowserConfig.capture_network_events;
         let _: bool = BrowserConfig.session_affinity;
+        let _: Option<String> = BrowserConfig.chrome_path;
+        let _: Vec<String> = BrowserConfig.chrome_args;
     }
     {
         let CacheStats = None::<crate::CacheStats>.unwrap();
@@ -12740,6 +12742,7 @@ const _: fn() = || {
         let _: bool = ConversionOptions.include_document_structure;
         let _: bool = ConversionOptions.extract_images;
         let _: i64 = ConversionOptions.max_image_size;
+        let _: Option<i64> = ConversionOptions.max_input_size;
         let _: bool = ConversionOptions.capture_svg;
         let _: bool = ConversionOptions.infer_dimensions;
         let _: Option<i64> = ConversionOptions.max_depth;
@@ -12783,6 +12786,7 @@ const _: fn() = || {
         let _: Vec<String> = CrawlConfig.include_paths;
         let _: Vec<String> = CrawlConfig.exclude_paths;
         let _: bool = CrawlConfig.path_patterns_match_query;
+        let _: bool = CrawlConfig.path_patterns_match_url;
         let _: bool = CrawlConfig.dedup_include_query;
         let _: bool = CrawlConfig.strip_tracking_params;
         let _: Vec<String> = CrawlConfig.tracking_params;
@@ -14851,6 +14855,7 @@ const _: fn() = || {
         let SsrfPolicy = None::<crate::SsrfPolicy>.unwrap();
         let _: bool = SsrfPolicy.deny_private;
         let _: Vec<crate::HostMatcher> = SsrfPolicy.allowlist;
+        let _: Vec<crate::HostMatcher> = SsrfPolicy.denylist;
         let _: i64 = SsrfPolicy.max_redirects;
         let _: Vec<String> = SsrfPolicy.scheme_allowlist;
     }
@@ -16563,6 +16568,8 @@ impl SseDecode for crate::BrowserConfig {
         let mut var_robotsUserAgent = <Option<String>>::sse_decode(deserializer);
         let mut var_captureNetworkEvents = <bool>::sse_decode(deserializer);
         let mut var_sessionAffinity = <bool>::sse_decode(deserializer);
+        let mut var_chromePath = <Option<String>>::sse_decode(deserializer);
+        let mut var_chromeArgs = <Vec<String>>::sse_decode(deserializer);
         return crate::BrowserConfig {
             mode: var_mode,
             backend: var_backend,
@@ -16579,6 +16586,8 @@ impl SseDecode for crate::BrowserConfig {
             robots_user_agent: var_robotsUserAgent,
             capture_network_events: var_captureNetworkEvents,
             session_affinity: var_sessionAffinity,
+            chrome_path: var_chromePath,
+            chrome_args: var_chromeArgs,
         };
     }
 }
@@ -17285,6 +17294,7 @@ impl SseDecode for crate::ConversionOptions {
         let mut var_includeDocumentStructure = <bool>::sse_decode(deserializer);
         let mut var_extractImages = <bool>::sse_decode(deserializer);
         let mut var_maxImageSize = <i64>::sse_decode(deserializer);
+        let mut var_maxInputSize = <Option<i64>>::sse_decode(deserializer);
         let mut var_captureSvg = <bool>::sse_decode(deserializer);
         let mut var_inferDimensions = <bool>::sse_decode(deserializer);
         let mut var_maxDepth = <Option<i64>>::sse_decode(deserializer);
@@ -17331,6 +17341,7 @@ impl SseDecode for crate::ConversionOptions {
             include_document_structure: var_includeDocumentStructure,
             extract_images: var_extractImages,
             max_image_size: var_maxImageSize,
+            max_input_size: var_maxInputSize,
             capture_svg: var_captureSvg,
             infer_dimensions: var_inferDimensions,
             max_depth: var_maxDepth,
@@ -17398,6 +17409,7 @@ impl SseDecode for crate::CrawlConfig {
         let mut var_includePaths = <Vec<String>>::sse_decode(deserializer);
         let mut var_excludePaths = <Vec<String>>::sse_decode(deserializer);
         let mut var_pathPatternsMatchQuery = <bool>::sse_decode(deserializer);
+        let mut var_pathPatternsMatchUrl = <bool>::sse_decode(deserializer);
         let mut var_dedupIncludeQuery = <bool>::sse_decode(deserializer);
         let mut var_stripTrackingParams = <bool>::sse_decode(deserializer);
         let mut var_trackingParams = <Vec<String>>::sse_decode(deserializer);
@@ -17453,6 +17465,7 @@ impl SseDecode for crate::CrawlConfig {
             include_paths: var_includePaths,
             exclude_paths: var_excludePaths,
             path_patterns_match_query: var_pathPatternsMatchQuery,
+            path_patterns_match_url: var_pathPatternsMatchUrl,
             dedup_include_query: var_dedupIncludeQuery,
             strip_tracking_params: var_stripTrackingParams,
             tracking_params: var_trackingParams,
@@ -25411,11 +25424,13 @@ impl SseDecode for crate::SsrfPolicy {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_denyPrivate = <bool>::sse_decode(deserializer);
         let mut var_allowlist = <Vec<crate::HostMatcher>>::sse_decode(deserializer);
+        let mut var_denylist = <Vec<crate::HostMatcher>>::sse_decode(deserializer);
         let mut var_maxRedirects = <i64>::sse_decode(deserializer);
         let mut var_schemeAllowlist = <Vec<String>>::sse_decode(deserializer);
         return crate::SsrfPolicy {
             deny_private: var_denyPrivate,
             allowlist: var_allowlist,
+            denylist: var_denylist,
             max_redirects: var_maxRedirects,
             scheme_allowlist: var_schemeAllowlist,
         };
@@ -27464,6 +27479,8 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::BrowserConfig> {
             self.0.robots_user_agent.into_into_dart().into_dart(),
             self.0.capture_network_events.into_into_dart().into_dart(),
             self.0.session_affinity.into_into_dart().into_dart(),
+            self.0.chrome_path.into_into_dart().into_dart(),
+            self.0.chrome_args.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -28248,6 +28265,7 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::ConversionOptions> {
             self.0.include_document_structure.into_into_dart().into_dart(),
             self.0.extract_images.into_into_dart().into_dart(),
             self.0.max_image_size.into_into_dart().into_dart(),
+            self.0.max_input_size.into_into_dart().into_dart(),
             self.0.capture_svg.into_into_dart().into_dart(),
             self.0.infer_dimensions.into_into_dart().into_dart(),
             self.0.max_depth.into_into_dart().into_dart(),
@@ -28313,6 +28331,7 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::CrawlConfig> {
             self.0.include_paths.into_into_dart().into_dart(),
             self.0.exclude_paths.into_into_dart().into_dart(),
             self.0.path_patterns_match_query.into_into_dart().into_dart(),
+            self.0.path_patterns_match_url.into_into_dart().into_dart(),
             self.0.dedup_include_query.into_into_dart().into_dart(),
             self.0.strip_tracking_params.into_into_dart().into_dart(),
             self.0.tracking_params.into_into_dart().into_dart(),
@@ -33607,6 +33626,7 @@ impl flutter_rust_bridge::IntoDart for FrbWrapper<crate::SsrfPolicy> {
         [
             self.0.deny_private.into_into_dart().into_dart(),
             self.0.allowlist.into_into_dart().into_dart(),
+            self.0.denylist.into_into_dart().into_dart(),
             self.0.max_redirects.into_into_dart().into_dart(),
             self.0.scheme_allowlist.into_into_dart().into_dart(),
         ]
@@ -35188,6 +35208,8 @@ impl SseEncode for crate::BrowserConfig {
         <Option<String>>::sse_encode(self.robots_user_agent, serializer);
         <bool>::sse_encode(self.capture_network_events, serializer);
         <bool>::sse_encode(self.session_affinity, serializer);
+        <Option<String>>::sse_encode(self.chrome_path, serializer);
+        <Vec<String>>::sse_encode(self.chrome_args, serializer);
     }
 }
 
@@ -35787,6 +35809,7 @@ impl SseEncode for crate::ConversionOptions {
         <bool>::sse_encode(self.include_document_structure, serializer);
         <bool>::sse_encode(self.extract_images, serializer);
         <i64>::sse_encode(self.max_image_size, serializer);
+        <Option<i64>>::sse_encode(self.max_input_size, serializer);
         <bool>::sse_encode(self.capture_svg, serializer);
         <bool>::sse_encode(self.infer_dimensions, serializer);
         <Option<i64>>::sse_encode(self.max_depth, serializer);
@@ -35836,6 +35859,7 @@ impl SseEncode for crate::CrawlConfig {
         <Vec<String>>::sse_encode(self.include_paths, serializer);
         <Vec<String>>::sse_encode(self.exclude_paths, serializer);
         <bool>::sse_encode(self.path_patterns_match_query, serializer);
+        <bool>::sse_encode(self.path_patterns_match_url, serializer);
         <bool>::sse_encode(self.dedup_include_query, serializer);
         <bool>::sse_encode(self.strip_tracking_params, serializer);
         <Vec<String>>::sse_encode(self.tracking_params, serializer);
@@ -42212,6 +42236,7 @@ impl SseEncode for crate::SsrfPolicy {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.deny_private, serializer);
         <Vec<crate::HostMatcher>>::sse_encode(self.allowlist, serializer);
+        <Vec<crate::HostMatcher>>::sse_encode(self.denylist, serializer);
         <i64>::sse_encode(self.max_redirects, serializer);
         <Vec<String>>::sse_encode(self.scheme_allowlist, serializer);
     }

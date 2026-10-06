@@ -8,17 +8,28 @@ pub fn build(b: *std.Build) void {
     // layout. `alef publish package --lang zig` rewrites this file for the
     // distributed tarball so consumers link the bundled lib/ and include/ dirs.
     // Override with -Dffi_path=... and -Dffi_include_path=... if your layout differs.
-    const ffi_path = b.option(
-        []const u8,
-        "ffi_path",
-        "Path to directory containing libxberg_ffi.{dylib,so,dll,a}"
-    ) orelse "../../target/release";
+    const ffi_path_option = b.option([]const u8, "ffi_path", "Path to directory containing libxberg_ffi.{dylib,so,dll,a}") orelse "../../target/release";
+    const ffi_path: std.Build.LazyPath = if (std.fs.path.isAbsolute(ffi_path_option))
+    .{ .cwd_relative = ffi_path_option }
+    else
+    b.path(ffi_path_option);
 
-    const ffi_include = b.option(
-        []const u8,
-        "ffi_include_path",
-        "Path to directory containing the FFI C header"
-    ) orelse "../../crates/xberg-ffi/include";
+    const ffi_include_option = b.option([]const u8, "ffi_include_path", "Path to directory containing the FFI C header") orelse "../../crates/xberg-ffi/include";
+    const ffi_include: std.Build.LazyPath = if (std.fs.path.isAbsolute(ffi_include_option))
+    .{ .cwd_relative = ffi_include_option }
+    else
+    b.path(ffi_include_option);
+
+    const ffi_header = b.pathJoin(&.{ ffi_include_option, "xberg.h" });
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = if (std.fs.path.isAbsolute(ffi_header))
+        .{ .cwd_relative = ffi_header }
+        else
+        b.path(ffi_header),
+        .target = target,
+        .optimize = optimize,
+    });
+    translate_c.addIncludePath(ffi_include);
 
     const module = b.addModule("xberg", .{
         .root_source_file = b.path("src/xberg.zig"),
@@ -26,8 +37,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    module.addLibraryPath(.{ .cwd_relative = ffi_path });
-    module.addIncludePath(.{ .cwd_relative = ffi_include });
+    module.addImport("c", translate_c.createModule());
+    module.addLibraryPath(ffi_path);
+    module.addIncludePath(ffi_include);
     module.linkSystemLibrary("xberg_ffi", .{});
 
     // Point the test target at the hand-written suite, not at `src/xberg.zig`. The generated
@@ -41,8 +53,8 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
         .imports = &.{.{ .name = "xberg", .module = module }},
     });
-    test_module.addLibraryPath(.{ .cwd_relative = ffi_path });
-    test_module.addIncludePath(.{ .cwd_relative = ffi_include });
+    test_module.addLibraryPath(ffi_path);
+    test_module.addIncludePath(ffi_include);
     test_module.linkSystemLibrary("xberg_ffi", .{});
 
     const tests = b.addTest(.{

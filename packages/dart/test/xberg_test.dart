@@ -8,8 +8,20 @@ void main() {
     // field, or generated equality that stops being field-based, fails `dart test`
     // immediately instead of shipping green with a suite that asserts nothing about
     // the generated API. Create-only scaffold seed. ~keep
-    final a = xberg.CacheStats(totalFiles: 1, totalSizeMb: 1.5, availableSpaceMb: 1.5, oldestFileAgeDays: 1.5, newestFileAgeDays: 1.5);
-    final b = xberg.CacheStats(totalFiles: 1, totalSizeMb: 1.5, availableSpaceMb: 1.5, oldestFileAgeDays: 1.5, newestFileAgeDays: 1.5);
+    final a = xberg.CacheStats(
+      totalFiles: 1,
+      totalSizeMb: 1.5,
+      availableSpaceMb: 1.5,
+      oldestFileAgeDays: 1.5,
+      newestFileAgeDays: 1.5,
+    );
+    final b = xberg.CacheStats(
+      totalFiles: 1,
+      totalSizeMb: 1.5,
+      availableSpaceMb: 1.5,
+      oldestFileAgeDays: 1.5,
+      newestFileAgeDays: 1.5,
+    );
     expect(a, equals(b));
   });
 }

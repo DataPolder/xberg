@@ -11,9 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **(code): BAML files are recognized as source code.** The tree-sitter language pack now includes BAML grammar and
+  extension support, so `.baml` inputs route through code extraction instead of being rejected as unknown.
+
+### Changed
+
+- **(config): URL crawling and HTML conversion expose the latest safety and browser controls.** Crawl patterns can
+  match the full normalized URL, Chromium launches can select an executable and trusted command-line flags, custom
+  SSRF CIDR deny-lists take precedence over permissive settings, and HTML conversion can reject input above a
+  caller-defined byte limit. These options are available in Rust and generated language bindings.
+
 ### Fixed
 
 - **(api): `KeywordConfig.yake_params`, `KeywordConfig.rake_params` and `TesseractConfig.preprocessing` are described as a direct `$ref` rather than `oneOf[$ref, null]`.** All three are omitted from the payload when unset. GH#1841 annotated the omission-only references in types the OpenAPI document registers, and these two config types are registered by downstream specs that embed them instead. `TesseractConfig.preprocessing` also no longer advertises `"default": null`, which the struct-level `#[serde(default)]` added. Wire payloads and generated bindings do not change. (GH#2041)
+- **(pdf): malformed classic xref tables no longer cache the wrong indirect object.** When a subsection starts at
+  object 1 but includes object 0's free entry, native PDF parsing now recovers each shifted reference from its actual
+  object header instead of treating the page tree as the catalog. (GH#2044)
 
 ## [1.3.4] - 2026-10-04
 

@@ -730,6 +730,14 @@
             "null"
           ]
         },
+        "client_factory_from_json": {
+          "default": null,
+          "description": "Name of a client factory that takes the client configuration as one JSON string.\n\nA fixture that declares `docs.client.config` documents a client whose behaviour comes\nfrom that configuration (a budget, a cache, a rate limit), which the positional\n`client_factory` cannot express. When both are set, a documentation snippet for\nthat fixture constructs the client as `client_factory_from_json(\"<json>\")`, with\nthe fixture's `docs.client.config` serialized verbatim as a string literal.\n\nA fixture with `docs.client.config` is excluded from the snippet corpus, with a\nrecorded reason, for every language that leaves this unset.\n\n```toml\n[e2e.call.overrides.go]\nclient_factory = \"CreateClient\"\nclient_factory_from_json = \"CreateClientFromJSON\"\n```",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "client_factory_trailing_args": {
           "default": [],
           "description": "Verbatim trailing arguments appended after the fixed `(\"test-key\", ...)` pair\nwhen calling the `client_factory` function.\n\nUse this when the factory function takes additional positional parameters\nbeyond the API key and optional base URL that the generator would otherwise\nemit.  Each element is emitted verbatim, separated by `, `.\n\nExample — Gleam `create_client` takes five positional arguments:\n`(api_key, base_url, timeout_secs, max_retries, model_hint)`.  Set:\n```toml\n[e2e.call.overrides.gleam]\nclient_factory = \"create_client\"\nclient_factory_trailing_args = [\"option.None\", \"option.None\", \"option.None\"]\n```\nto produce `create_client(\"test-key\", option.Some(url), option.None, option.None, option.None)`.",
@@ -823,6 +831,14 @@
         "handle_struct_type": {
           "default": null,
           "description": "Elixir struct module name for the handle config argument.\n\nWhen set, the generated Elixir handle config uses struct literal syntax\n(`%Module.StructType{key: val}`) instead of a plain string-keyed map.\nRustler `NifStruct` requires a proper Elixir struct — plain maps are rejected.\n\nE.g., `\"CrawlConfig\"` generates `%SampleCrawler.CrawlConfig{download_assets: true}`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handle_teardown": {
+          "default": null,
+          "description": "Async function that consumes a generated handle after fixture assertions\ncomplete (Rust generator only).",
           "type": [
             "string",
             "null"
@@ -3174,6 +3190,17 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "link_flags": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Extra cgo `LDFLAGS` appended after the FFI library's own `-l` flag, keyed by a cgo build\nconstraint: a GOOS (`darwin`, `linux`, `windows`, ...) or `GOOS,GOARCH`\n(`windows,arm64`). Each value is the list of linker arguments for that constraint and\nrenders as one `#cgo <constraint> LDFLAGS: ...` line in the generated cgo preamble.\n\nNeeded when the Go package links the static FFI library, which leaves the native\nlibraries the Rust standard library and its dependencies need (`-framework Security`,\n`-lresolv`, `-lws2_32`, ...) for the final link to supply.",
+          "type": "object"
         },
         "module": {
           "type": [
@@ -8331,7 +8358,7 @@
       "type": "object"
     }
   },
-  "$id": "https://github.com/xberg-io/alef/releases/download/v0.103.10/alef.schema.json",
+  "$id": "https://github.com/xberg-io/alef/releases/download/v0.104.4/alef.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "JSON Schema for the JSON representation of alef.toml.",
@@ -8451,6 +8478,6 @@
   ],
   "title": "Alef configuration",
   "type": "object",
-  "version": "0.103.10",
-  "x-alef-version": "0.103.10"
+  "version": "0.104.4",
+  "x-alef-version": "0.104.4"
 }

@@ -1317,7 +1317,7 @@ lru = { version = "0.18", optional = true }
 mail-parser = { version = "0.11.9", features = ["full_encoding"], optional = true }
 # AsciiMath parser, used to reach LaTeX through the shared MathML converter.
 mathemascii = { version = "0.4.0", optional = true }
-mel_spec = { version = "0.4", optional = true }
+mel_spec = { version = "0.5", optional = true }
 memchr = "2.8.3"
 memmap2 = { workspace = true }
 mime = { workspace = true }
@@ -1441,7 +1441,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["s
 tract-onnx = { workspace = true, optional = true }
 # Typst's own parser, used to convert Typst math to LaTeX.
 typst-syntax = { version = "0.15.1", optional = true }
-unhwp = { version = "0.13.0", default-features = false, features = ["hwpx"], optional = true }
+unhwp = { version = "0.13.2", default-features = false, features = ["hwpx"], optional = true }
 unicode-normalization = { version = "0.1.25", optional = true }
 url = { workspace = true }
 urlencoding = "2"

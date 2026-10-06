@@ -2558,6 +2558,7 @@ class BrowserConfig {
   final BrowserBackend backend;
 
   /// CDP WebSocket endpoint for connecting to an external browser instance.
+  /// Crawlberg disconnects during teardown but never closes the external browser process. <!-- -->
   final String? endpoint;
 
   /// Timeout for browser page load and rendering (in milliseconds when serialized).
@@ -2618,6 +2619,26 @@ class BrowserConfig {
   /// Default: true. When false, each request gets a fresh Page.
   final bool sessionAffinity;
 
+  /// Chrome or Chromium executable to launch. When set, crawlberg launches only this
+  /// binary, and a path that is missing or not executable is an error that names the
+  /// path; crawlberg never falls back to a different Chrome. When unset, crawlberg uses
+  /// the `CHROME` environment variable, then searches the machine for an installed Chrome,
+  /// Chromium or Edge. Chromiumoxide backend only: ignored, with a warning, when `endpoint`
+  /// is set, with the native backend, and by scrapes and crawls that use a shared browser pool.
+  final String? chromePath;
+
+  /// Extra Chrome command-line flags, each written as `--flag` or `--flag=value`, for example
+  /// `--user-agent=...`. A flag here replaces a crawlberg default flag of the same name
+  /// (`--lang=fr` replaces crawlberg's `--lang=en_US`). Rejected: an entry that does not
+  /// start with `--`, a flag name with an uppercase letter (Chrome flag names are lowercase),
+  /// a flag named twice, and `--headless`, `--remote-debugging-port` and `--user-data-dir`,
+  /// which crawlberg sets itself to run Chrome. Set this only from trusted configuration,
+  /// like `proxy`: flags such as `--proxy-server` and `--host-resolver-rules` send Chrome's
+  /// traffic around the `ssrf` policy. Chromiumoxide backend only: ignored, with a warning,
+  /// when `endpoint` is set, with the native backend, and by scrapes and crawls that use a
+  /// shared browser pool.
+  final List<String> chromeArgs;
+
   const BrowserConfig({
     required this.mode,
     required this.backend,
@@ -2634,6 +2655,8 @@ class BrowserConfig {
     this.robotsUserAgent,
     required this.captureNetworkEvents,
     required this.sessionAffinity,
+    this.chromePath,
+    required this.chromeArgs,
   });
 
   @override
@@ -2652,7 +2675,9 @@ class BrowserConfig {
       evalScript.hashCode ^
       robotsUserAgent.hashCode ^
       captureNetworkEvents.hashCode ^
-      sessionAffinity.hashCode;
+      sessionAffinity.hashCode ^
+      chromePath.hashCode ^
+      chromeArgs.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -2673,7 +2698,9 @@ class BrowserConfig {
           evalScript == other.evalScript &&
           robotsUserAgent == other.robotsUserAgent &&
           captureNetworkEvents == other.captureNetworkEvents &&
-          sessionAffinity == other.sessionAffinity;
+          sessionAffinity == other.sessionAffinity &&
+          chromePath == other.chromePath &&
+          chromeArgs == other.chromeArgs;
 }
 
 /// When to use the headless browser fallback.
@@ -4389,6 +4416,13 @@ class ConversionOptions {
   /// Maximum decoded image size in bytes (default 5MB).
   final PlatformInt64 maxImageSize;
 
+  /// Maximum accepted HTML input size in bytes.
+  ///
+  /// WebAssembly builds default to [`DEFAULT_WASM_MAX_INPUT_SIZE`] (2 MiB) to avoid
+  /// an uncatchable stack-exhaustion trap on unusually large DOMs. Native builds default
+  /// to `None`. Set `Some(bytes)` to choose another limit or `None` to disable it.
+  final PlatformInt64? maxInputSize;
+
   /// Capture SVG elements as images.
   final bool captureSvg;
 
@@ -4482,6 +4516,7 @@ class ConversionOptions {
     required this.includeDocumentStructure,
     required this.extractImages,
     required this.maxImageSize,
+    this.maxInputSize,
     required this.captureSvg,
     required this.inferDimensions,
     this.maxDepth,
@@ -4531,6 +4566,7 @@ class ConversionOptions {
       includeDocumentStructure.hashCode ^
       extractImages.hashCode ^
       maxImageSize.hashCode ^
+      maxInputSize.hashCode ^
       captureSvg.hashCode ^
       inferDimensions.hashCode ^
       maxDepth.hashCode ^
@@ -4582,6 +4618,7 @@ class ConversionOptions {
           includeDocumentStructure == other.includeDocumentStructure &&
           extractImages == other.extractImages &&
           maxImageSize == other.maxImageSize &&
+          maxInputSize == other.maxInputSize &&
           captureSvg == other.captureSvg &&
           inferDimensions == other.inferDimensions &&
           maxDepth == other.maxDepth &&
@@ -4742,7 +4779,9 @@ class CrawlConfig {
 
   /// When true, HTTP-level error responses (404 NotFound, 403 Forbidden, WAF blocks)
   /// are surfaced as `ScrapeResult` records with the matching `status_code` rather
-  /// than raised as `CrawlError`. Default `false` preserves the historical
+  /// than raised as `CrawlError`. A WAF block reports the status of the refused
+  /// response when it is a 4xx or 5xx, and 403 when the block page came with a
+  /// 2xx status. Default `false` preserves the historical
   /// throw-on-error contract for direct fetches. Independently of this flag,
   /// 404s reached at the end of a redirect chain are *always* surfaced softly —
   /// the user opted into redirect-following, so receiving a 404 there is part of
@@ -4776,8 +4815,17 @@ class CrawlConfig {
   /// Whether `include_paths`/`exclude_paths` match against `path?query` instead of just
   /// `path`. Defaults to `false`, matching path only: a pattern anchored with `$` (e.g.
   /// `/feed/?$`) changes meaning once the query joins the matched text, so this must stay
-  /// opt-in rather than silently changing what an existing config matches.
+  /// opt-in rather than silently changing what an existing config matches. Has no effect
+  /// when [`Self::path_patterns_match_url`] is `true`.
   final bool pathPatternsMatchQuery;
+
+  /// Whether `include_paths`/`exclude_paths` match against the full URL,
+  /// `scheme://host[:port]/path?query`, so a pattern can scope by host. Defaults to `false`.
+  /// When `true` it takes precedence over [`Self::path_patterns_match_query`]: the query is
+  /// part of the full URL whatever that flag says. The matched text never contains a
+  /// `user:password@`, a fragment or a default port, and the host is in punycode
+  /// (`bücher.de` is matched as `xn--bcher-kva.de`).
+  final bool pathPatternsMatchUrl;
 
   /// Whether the crawl-dedup key includes the (sorted) query string. Defaults to `false`,
   /// matching historical behavior: `/item?id=1` and `/item?id=2` are treated as one page and
@@ -4797,7 +4845,8 @@ class CrawlConfig {
   /// enabled.
   final List<String> trackingParams;
 
-  /// Custom HTTP headers to send with each request.
+  /// Custom HTTP headers to send with each request to the seed URL's host. A request to another host
+  /// does not carry them.
   final Map<String, String> customHeaders;
 
   /// Timeout for individual HTTP requests (in milliseconds when serialized).
@@ -4985,6 +5034,7 @@ class CrawlConfig {
     required this.includePaths,
     required this.excludePaths,
     required this.pathPatternsMatchQuery,
+    required this.pathPatternsMatchUrl,
     required this.dedupIncludeQuery,
     required this.stripTrackingParams,
     required this.trackingParams,
@@ -5043,6 +5093,7 @@ class CrawlConfig {
       includePaths.hashCode ^
       excludePaths.hashCode ^
       pathPatternsMatchQuery.hashCode ^
+      pathPatternsMatchUrl.hashCode ^
       dedupIncludeQuery.hashCode ^
       stripTrackingParams.hashCode ^
       trackingParams.hashCode ^
@@ -5103,6 +5154,7 @@ class CrawlConfig {
           includePaths == other.includePaths &&
           excludePaths == other.excludePaths &&
           pathPatternsMatchQuery == other.pathPatternsMatchQuery &&
+          pathPatternsMatchUrl == other.pathPatternsMatchUrl &&
           dedupIncludeQuery == other.dedupIncludeQuery &&
           stripTrackingParams == other.stripTrackingParams &&
           trackingParams == other.trackingParams &&
@@ -16555,7 +16607,7 @@ class PropertyChange {
 
 /// Proxy configuration for HTTP requests.
 class ProxyConfig {
-  /// Proxy URL (e.g. "http://proxy:8080", "socks5://proxy:1080").
+  /// Proxy URL (e.g. "http://proxy:8080"). <!-- -->
   final String url;
 
   /// Optional username for proxy authentication.
@@ -17896,22 +17948,33 @@ class SsrfPolicy {
   /// If true, reject URLs that resolve to private/metadata IP ranges.
   final bool denyPrivate;
 
-  /// Hostnames and IP ranges permitted regardless of `deny_private`.
+  /// Hostnames and IP ranges permitted regardless of `deny_private`, unless a matching
+  /// address is in `denylist`.
   ///
   /// The allowlist is an *override* of `deny_private`, not an intersection with it.
   /// Precedence, in order:
   ///
-  /// 1. `deny_private == false` permits everything; the allowlist is not consulted.
-  /// 2. A hostname matching an `Exact` or `Suffix` entry is permitted immediately,
-  ///    *before* DNS resolution — so the deny-list is never applied to it. This trusts
-  ///    the host string: a name that resolves into private space is still permitted.
-  /// 3. A literal or resolved IP inside a `Cidr` entry is permitted even though it is
+  /// 1. A configured `denylist` CIDR always refuses a matching address.
+  /// 2. `deny_private == false` permits addresses outside `denylist`; the allowlist is not consulted.
+  /// 3. A hostname matching an `Exact` or `Suffix` entry is permitted before applying
+  ///    the built-in deny-list. When `denylist` is non-empty, it is still resolved so
+  ///    custom network denials can be enforced.
+  /// 4. A literal or resolved IP inside a `Cidr` entry is permitted even though it is
   ///    in the default deny-list.
-  /// 4. Otherwise the default deny-list decides.
+  /// 5. Otherwise the default deny-list decides.
   ///
   /// An empty allowlist therefore denies nothing by itself — it simply leaves
   /// `deny_private` and the deny-list in sole control.
   final List<HostMatcher> allowlist;
+
+  /// IP ranges refused regardless of `deny_private` and `allowlist`.
+  ///
+  /// Only [`HostMatcher::Cidr`] entries are valid. Configured denials are checked
+  /// before permissive settings, including against IPv4 addresses embedded in IPv6 and,
+  /// on native targets, every address returned by DNS. They extend the built-in deny-list
+  /// and cannot weaken it. A hostname is refused when an upstream proxy or remote browser
+  /// performs the connection lookup, because that lookup cannot be bound to these checks.
+  final List<HostMatcher> denylist;
 
   /// Maximum number of HTTP redirects to follow during validation.
   final PlatformInt64 maxRedirects;
@@ -17924,6 +17987,7 @@ class SsrfPolicy {
   const SsrfPolicy({
     required this.denyPrivate,
     required this.allowlist,
+    required this.denylist,
     required this.maxRedirects,
     required this.schemeAllowlist,
   });
@@ -17932,6 +17996,7 @@ class SsrfPolicy {
   int get hashCode =>
       denyPrivate.hashCode ^
       allowlist.hashCode ^
+      denylist.hashCode ^
       maxRedirects.hashCode ^
       schemeAllowlist.hashCode;
 
@@ -17942,6 +18007,7 @@ class SsrfPolicy {
           runtimeType == other.runtimeType &&
           denyPrivate == other.denyPrivate &&
           allowlist == other.allowlist &&
+          denylist == other.denylist &&
           maxRedirects == other.maxRedirects &&
           schemeAllowlist == other.schemeAllowlist;
 }
