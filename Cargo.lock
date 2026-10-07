@@ -1953,9 +1953,9 @@ dependencies = [
 
 [[package]]
 name = "crawlberg"
-version = "1.10.1"
+version = "1.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5deba1d98a2443b6c43beca9ec699ed3bb2cd1a19d010bdebaceb4a57f119ce4"
+checksum = "de7772187c51e531fcf40756a70e9d2d64912cb3adcea2fc5ed82ef9f4bda142"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -2020,9 +2020,9 @@ dependencies = [
 
 [[package]]
 name = "crawlberg-robots"
-version = "1.10.1"
+version = "1.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8499344c8bacd91c1cd16c36e4998769ecc1210179e88d2b80eb33468d6fee9"
+checksum = "9d03618f7c8347091546ee5f4c497ea8b4f83e4dd2e66b5e4746ebf0a2cc1da9"
 
 [[package]]
 name = "crc32fast"
@@ -10356,9 +10356,9 @@ dependencies = [
 
 [[package]]
 name = "unhwp"
-version = "0.13.3"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "340a37adc9a7c5b315741051f9b63067f700f95ada09061209a8de00c06c4c18"
+checksum = "c01e4f219a4bb51fd212a3dd8b10c68acf64dc1ea0315040ae14702ee5329663"
 dependencies = [
  "cfb 0.15.0",
  "flate2",
@@ -10465,9 +10465,9 @@ dependencies = [
 
 [[package]]
 name = "unparser-shared"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8e8a25fd04f2af50a85b4a477369c13356b8638fb3af9b5938abcb8d0cf7987"
+checksum = "224ae26c5a48010f7ed3db7711962131218a7efb6169c8c5eb76c76270617371"
 dependencies = [
  "pulldown-cmark 0.13.4",
  "pulldown-cmark-to-cmark",
