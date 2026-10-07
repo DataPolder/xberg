@@ -11,7 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.3.6] - 2026-10-06
+## [1.3.6] - 2026-10-07
+
+### Changed
+
+- **(zig): the Zig binding now requires Zig 0.17.0.** `build.zig.zon` declares
+  `.minimum_zig_version = "0.17.0"` and the package is built and tested on Zig 0.17.
+- **(pdf): lossy JPEG 2000 images now decode to the same pixels as OpenJPEG.** Since 1.3.5 the JPEG 2000
+  decoder applies the standard's reconstruction offset for lossy coefficients (ISO 15444-1 E-6..E-8); earlier
+  releases decoded such images slightly darker. Rendered pages and OCR input change accordingly. On scans with grey
+  shaded table rows, OCR without `normalize_shaded_rows` can now recover fewer table rows than in 1.3.4; with
+  `normalize_shaded_rows` enabled, results shift by only a few values.
 
 ### Fixed
 
