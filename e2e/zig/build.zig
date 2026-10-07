@@ -8,7 +8,22 @@ pub fn build(b: *std.Build) void {
     const smoke_step = b.step("smoke", "Run smoke tests only");
     const ffi_path = b.option([]const u8, "ffi_path", "Path to directory containing libxberg_ffi") orelse "../../target/release";
     const ffi_include = b.option([]const u8, "ffi_include_path", "Path to directory containing FFI header") orelse "../../crates/xberg-ffi/include";
-    const ffi_path_abs = b.pathFromRoot(ffi_path);
+    // Zig 0.17 replaced `build_root`/`pathFromRoot` with `root`; the compile-time field check
+    // keeps 0.16 working, matching alef's generated e2e build. ~keep
+    const build_root = if (@hasField(std.Build, "root"))
+        b.root.toString(b.allocator) catch @panic("failed to resolve build root")
+    else
+        b.build_root.path orelse ".";
+    const ffi_path_abs = b.pathResolve(&.{ build_root, ffi_path });
+
+    // The binding imports the FFI header as module "c" (packages/zig/build.zig wires it the
+    // same way); this file is user_owned in alef.toml, so alef does not add it here. ~keep
+    const translate_c = b.addTranslateC(.{
+        .root_source_file = .{ .cwd_relative = b.pathJoin(&.{ ffi_include, "xberg.h" }) },
+        .target = target,
+        .optimize = optimize,
+    });
+    translate_c.addIncludePath(.{ .cwd_relative = ffi_include });
 
     const xberg_module = b.addModule("xberg", .{
         .root_source_file = b.path("../../packages/zig/src/xberg.zig"),
@@ -16,6 +31,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
+    xberg_module.addImport("c", translate_c.createModule());
     xberg_module.addLibraryPath(.{ .cwd_relative = ffi_path });
     xberg_module.addIncludePath(.{ .cwd_relative = ffi_include });
     xberg_module.linkSystemLibrary("xberg_ffi", .{});
@@ -27,8 +43,9 @@ pub fn build(b: *std.Build) void {
     var mock_servers_json: ?[]const u8 = null;
     var mock_servers_map = std.StringHashMap([]const u8).init(_alloc);
     if (mock_server_url == null) {
-        const _bin = b.pathFromRoot("../rust/target/release/mock-server");
-        const _fixtures = b.pathFromRoot("../../fixtures");
+        const _bin = b.graph.environ_map.get("ALEF_E2E_MOCK_SERVER") orelse
+            b.pathResolve(&.{ build_root, "../rust/target/release/mock-server" });
+        const _fixtures = b.pathResolve(&.{ build_root, "../../fixtures" });
         var _threaded = std.Io.Threaded.init(_alloc, .{});
         const _io = _threaded.io();
         const _spawned = std.process.spawn(_io, .{
