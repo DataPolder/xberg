@@ -160,6 +160,23 @@ pub struct TableCell {
     pub paragraphs: Vec<Paragraph>,
     /// Cell-level properties from `<w:tcPr>`.
     pub properties: Option<super::table::CellProperties>,
+    /// The cell's content in document order — its own paragraphs, the tables nested in
+    /// it and the page breaks between them — recorded for the cells of a top-level
+    /// table only. `paragraphs` keeps the flattened view every renderer reads; this is
+    /// what lets a host cell be emitted as flow (see [`host_cell_flow`]).
+    #[serde(skip)]
+    pub(crate) flow: Vec<CellBlock>,
+}
+
+/// One block of a top-level table cell's content, in document order.
+#[derive(Debug, Clone)]
+pub(crate) enum CellBlock {
+    /// The cell's own paragraph at this index of [`TableCell::paragraphs`].
+    Paragraph(usize),
+    /// A table nested in the cell, as parsed (its own nested tables flattened).
+    Table(Box<Table>),
+    /// A page break the cell's content crosses.
+    PageBreak,
 }
 
 #[cfg_attr(alef, alef(skip))]
@@ -1203,6 +1220,10 @@ struct TableContext {
     /// whole table, not reset per row, so every cell instance gets a distinct id. See
     /// [`Self::row_ordinal`].
     cell_ordinal: u32,
+    /// For a top-level table: how many of the page breaks deferred inside it
+    /// ([`PageBreakState::pending_table`]) already have a place in a cell's
+    /// [`TableCell::flow`].
+    flow_breaks_placed: u32,
 }
 
 impl TableContext {
@@ -1214,8 +1235,92 @@ impl TableContext {
             paragraph: None,
             row_ordinal: 0,
             cell_ordinal: 0,
+            flow_breaks_placed: 0,
         }
     }
+}
+
+/// Record, in the current cell of a top-level table, the page breaks counted since the
+/// last one placed there (#3123). Breaks deep inside nested tables are placed when that
+/// nested table closes, behind it; breaks in a paragraph behind its content are placed
+/// when the paragraph closes; a break before any content of a paragraph goes before it.
+fn place_cell_flow_breaks(table_stack: &mut [TableContext], page_breaks: &PageBreakState) {
+    if table_stack.len() != 1 {
+        return;
+    }
+    let ctx = &mut table_stack[0];
+    let unplaced = page_breaks.pending_table.saturating_sub(ctx.flow_breaks_placed);
+    if unplaced == 0 {
+        return;
+    }
+    if let Some(cell) = ctx.current_cell.as_mut() {
+        for _ in 0..unplaced {
+            cell.flow.push(CellBlock::PageBreak);
+        }
+        ctx.flow_breaks_placed += unplaced;
+    }
+}
+
+/// After a page break was counted: if it fell inside a top-level cell before any
+/// content of the paragraph being built, it belongs before that paragraph.
+fn place_cell_break_before_paragraph(
+    table_stack: &mut [TableContext],
+    current_run: &Option<Run>,
+    page_breaks: &PageBreakState,
+) {
+    let paragraph_has_content = current_run.as_ref().is_some_and(|run| !run.text.is_empty())
+        || table_stack
+            .last()
+            .and_then(|ctx| ctx.paragraph.as_ref())
+            .is_some_and(|paragraph| !paragraph.runs.is_empty());
+    if !paragraph_has_content {
+        place_cell_flow_breaks(table_stack, page_breaks);
+    }
+}
+
+/// Fewest characters a host cell carries: about a page of text. ~keep
+const HOST_CELL_MIN_CHARS: usize = 2000;
+/// Fewest paragraphs of its own a host cell needs when it nests no table. ~keep
+const HOST_CELL_MIN_PARAGRAPHS: usize = 20;
+
+/// The **host cell** of `table`, when the table is a layout scaffold around one: a top-level
+/// table of at least two cells in which exactly one cell carries any text, and that cell
+/// carries block content — at least [`HOST_CELL_MIN_CHARS`] characters and either a
+/// nested table or at least [`HOST_CELL_MIN_PARAGRAPHS`] paragraphs of its own (#3123).
+///
+/// A Word template that lays a whole section out inside one cell of an otherwise empty
+/// table (an order confirmation's 26 location overviews, each with its own heading,
+/// tables and page breaks, all in row 6 of an 8-row frame) is flow, not a table: read as
+/// a table it becomes one cell string with no paragraph or page boundaries, its headings
+/// bold text and its nested tables inlined.
+///
+/// What stays a table: every table with a second cell that carries text (a data table
+/// with one long cell included), a one-cell box (a framed code or offer box is a box the
+/// author drew), and a small cell (under a page of text, without enough paragraphs or a
+/// nested table to be a section).
+fn host_cell_flow(table: &Table) -> Option<&TableCell> {
+    let cells: Vec<&TableCell> = table.rows.iter().flat_map(|row| row.cells.iter()).collect();
+    if cells.len() < 2 {
+        return None;
+    }
+    let has_text = |cell: &TableCell| cell.paragraphs.iter().any(|p| !p.to_text().trim().is_empty());
+    let mut texted = cells.iter().filter(|cell| has_text(cell));
+    let host = texted.next()?;
+    if texted.next().is_some() {
+        return None;
+    }
+    let chars: usize = host.paragraphs.iter().map(|p| p.to_text().trim().chars().count()).sum();
+    let own_paragraphs = host
+        .flow
+        .iter()
+        .filter(|block| matches!(block, CellBlock::Paragraph(_)))
+        .count();
+    let nested_tables = host
+        .flow
+        .iter()
+        .filter(|block| matches!(block, CellBlock::Table(_)))
+        .count();
+    (chars >= HOST_CELL_MIN_CHARS && (nested_tables > 0 || own_paragraphs >= HOST_CELL_MIN_PARAGRAPHS)).then_some(*host)
 }
 
 /// Output of [`DocxParser::parse_body_elements`], the element-dispatch loop shared by
@@ -2711,6 +2816,7 @@ impl<R: Read + Seek> DocxParser<R> {
                                 &mut out.elements,
                                 &mut page_breaks,
                             );
+                            place_cell_break_before_paragraph(&mut table_stack, &current_run, &page_breaks);
                         }
                         "w:lastRenderedPageBreak" => {
                             apply_last_rendered_page_break(
@@ -2720,6 +2826,7 @@ impl<R: Read + Seek> DocxParser<R> {
                                 &mut out.elements,
                                 &mut page_breaks,
                             );
+                            place_cell_break_before_paragraph(&mut table_stack, &current_run, &page_breaks);
                         }
                         "w:sectPr" => {
                             // `parse_section_properties_streaming` now threads `budget`
@@ -2805,6 +2912,7 @@ impl<R: Read + Seek> DocxParser<R> {
                                 &mut out.elements,
                                 &mut page_breaks,
                             );
+                            place_cell_break_before_paragraph(&mut table_stack, &current_run, &page_breaks);
                         }
                         "w:tab" => {
                             if let Some(ref mut run) = current_run {
@@ -2830,6 +2938,7 @@ impl<R: Read + Seek> DocxParser<R> {
                                 &mut out.elements,
                                 &mut page_breaks,
                             );
+                            place_cell_break_before_paragraph(&mut table_stack, &current_run, &page_breaks);
                         }
                         "w:footnoteReference" | "w:endnoteReference" => {
                             let note_type = if name.as_ref() == "w:endnoteReference" {
@@ -3011,12 +3120,17 @@ impl<R: Read + Seek> DocxParser<R> {
                             }
                         }
                         "w:p" => {
+                            let top_level = table_stack.len() == 1;
                             if let Some(ctx) = table_stack.last_mut() {
                                 if let Some(para) = ctx.paragraph.take()
                                     && let Some(ref mut cell) = ctx.current_cell
                                 {
                                     cell.paragraphs.push(para);
+                                    if top_level {
+                                        cell.flow.push(CellBlock::Paragraph(cell.paragraphs.len() - 1));
+                                    }
                                 }
+                                place_cell_flow_breaks(&mut table_stack, &page_breaks);
                             } else if let Some(para) = current_paragraph.take() {
                                 let idx = out.paragraphs.len();
                                 out.paragraphs.push(para);
@@ -3030,6 +3144,7 @@ impl<R: Read + Seek> DocxParser<R> {
                             }
                         }
                         "w:tc" => {
+                            place_cell_flow_breaks(&mut table_stack, &page_breaks);
                             if let Some(ctx) = table_stack.last_mut()
                                 && let Some(cell) = ctx.current_cell.take()
                                 && let Some(ref mut row) = ctx.current_row
@@ -3048,8 +3163,12 @@ impl<R: Read + Seek> DocxParser<R> {
                         "w:tbl" => {
                             if let Some(completed_ctx) = table_stack.pop() {
                                 let completed_table = completed_ctx.table;
+                                let into_top_level_cell = table_stack.len() == 1;
                                 if let Some(parent_ctx) = table_stack.last_mut() {
                                     if let Some(ref mut cell) = parent_ctx.current_cell {
+                                        if into_top_level_cell {
+                                            cell.flow.push(CellBlock::Table(Box::new(completed_table.clone())));
+                                        }
                                         for row in completed_table.rows {
                                             for table_cell in row.cells {
                                                 for para in table_cell.paragraphs {
@@ -3058,16 +3177,44 @@ impl<R: Read + Seek> DocxParser<R> {
                                             }
                                         }
                                     }
+                                    place_cell_flow_breaks(&mut table_stack, &page_breaks);
                                 } else {
-                                    let idx = out.tables.len();
-                                    out.tables.push(completed_table);
-                                    out.elements.push(DocumentElement::Table(idx));
+                                    // #3123 — a host cell is document flow laid out in a table:
+                                    // emit its paragraphs, nested tables and page breaks in
+                                    // place of the table.
+                                    let mut flow_breaks = 0u32;
+                                    if let Some(host) = host_cell_flow(&completed_table) {
+                                        for block in &host.flow {
+                                            match block {
+                                                CellBlock::Paragraph(index) => {
+                                                    let idx = out.paragraphs.len();
+                                                    out.paragraphs.push(host.paragraphs[*index].clone());
+                                                    out.elements.push(DocumentElement::Paragraph(idx));
+                                                }
+                                                CellBlock::Table(nested) => {
+                                                    let idx = out.tables.len();
+                                                    out.tables.push((**nested).clone());
+                                                    out.elements.push(DocumentElement::Table(idx));
+                                                }
+                                                CellBlock::PageBreak => {
+                                                    out.elements.push(DocumentElement::PageBreak);
+                                                    flow_breaks += 1;
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        let idx = out.tables.len();
+                                        out.tables.push(completed_table);
+                                        out.elements.push(DocumentElement::Table(idx));
+                                    }
                                     // The outermost table close is the only point that flushes
                                     // page breaks deferred while inside a table (#1419); a nested
                                     // instead, so breaks in an inner table stay pending until the
-                                    // outer one closes and only ever flush once.
+                                    // outer one closes and only ever flush once. A host cell's
+                                    // own breaks were emitted in its flow above.
                                     page_breaks.text_since_break = true;
-                                    let deferred_breaks = std::mem::take(&mut page_breaks.pending_table);
+                                    let deferred_breaks =
+                                        std::mem::take(&mut page_breaks.pending_table).saturating_sub(flow_breaks);
                                     for _ in 0..deferred_breaks {
                                         out.elements.push(DocumentElement::PageBreak);
                                     }
@@ -6896,5 +7043,145 @@ mod tests {
                 "level {level} is within Word's own range"
             );
         }
+    }
+
+    // -- a host cell is flow, not a table (#3123) --
+
+    /// The shape of an order confirmation that lays its whole location overview out
+    /// in one cell of an otherwise empty frame table: numbered bold headings, body
+    /// paragraphs, a nested price table and page breaks, all inside row 2 / col 1 of
+    /// a 3×2 table whose other cells are empty. Text is lorem ipsum.
+    fn host_cell_frame(second_cell_text: Option<&str>, one_cell: bool, sections: usize) -> String {
+        let lorem = "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
+        let mut host = String::new();
+        for section in 0..sections {
+            if section == 2 {
+                // A render hint at the start of the heading: the page turns before it.
+                host.push_str(&format!(
+                    r#"<w:p><w:r><w:lastRenderedPageBreak/><w:rPr><w:b/></w:rPr><w:t>1.{} Ipsum dolor</w:t></w:r></w:p>"#,
+                    section + 2
+                ));
+            } else {
+                host.push_str(&format!(
+                    r#"<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>1.{} Ipsum dolor</w:t></w:r></w:p>"#,
+                    section + 2
+                ));
+            }
+            for _ in 0..7 {
+                host.push_str(&format!(r#"<w:p><w:r><w:t>{lorem}</w:t></w:r></w:p>"#));
+            }
+            host.push_str(
+                r#"<w:tbl><w:tblPr></w:tblPr><w:tblGrid><w:gridCol w:w="1000"/><w:gridCol w:w="1000"/></w:tblGrid>
+                   <w:tr><w:tc><w:p><w:r><w:t>Aantal</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Prijs</w:t></w:r></w:p></w:tc></w:tr>
+                   <w:tr><w:tc><w:p><w:r><w:t>4</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>120</w:t></w:r></w:p></w:tc></w:tr>
+                 </w:tbl>"#,
+            );
+            if section == 0 {
+                // An authored break at the end of the section's last paragraph.
+                host.push_str(&format!(
+                    r#"<w:p><w:r><w:t>{lorem}</w:t><w:br w:type="page"/></w:r></w:p>"#
+                ));
+            }
+        }
+        let empty = r#"<w:tc><w:p/></w:tc>"#;
+        let second = second_cell_text.map_or(empty.to_string(), |t| {
+            format!(r#"<w:tc><w:p><w:r><w:t>{t}</w:t></w:r></w:p></w:tc>"#)
+        });
+        let rows = if one_cell {
+            format!(r#"<w:tr><w:tc>{host}</w:tc></w:tr>"#)
+        } else {
+            format!(r#"<w:tr>{empty}{second}</w:tr><w:tr><w:tc>{host}</w:tc>{empty}</w:tr><w:tr>{empty}{empty}</w:tr>"#)
+        };
+        wrap_body(&format!(
+            r#"<w:p><w:r><w:t>1.1 Investeringsoverzicht</w:t></w:r></w:p>
+               <w:tbl><w:tblPr></w:tblPr><w:tblGrid><w:gridCol w:w="5000"/><w:gridCol w:w="5000"/></w:tblGrid>{rows}</w:tbl>
+               <w:p><w:r><w:t>Na de tabel</w:t></w:r></w:p>"#
+        ))
+    }
+
+    fn element_texts(doc: &Document) -> Vec<String> {
+        doc.elements
+            .iter()
+            .map(|e| match e {
+                DocumentElement::Paragraph(i) => doc.paragraphs[*i].to_text(),
+                DocumentElement::Table(i) => format!("<table {} rows>", doc.tables[*i].rows.len()),
+                DocumentElement::Drawing(_) => "<drawing>".to_string(),
+                DocumentElement::PageBreak => "<page break>".to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_host_cell_is_emitted_as_flow_3123() {
+        let doc = parse_xml(&host_cell_frame(None, false, 3));
+        let texts = element_texts(&doc);
+        // The frame is gone; its three nested price tables are tables of their own.
+        assert_eq!(doc.tables.len(), 3, "{texts:?}");
+        assert!(doc.tables.iter().all(|t| t.rows.len() == 2), "{texts:?}");
+        // The headings are paragraphs of their own, in order, with their bold run.
+        let headings: Vec<usize> = texts
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.ends_with("Ipsum dolor"))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(headings.len(), 3, "{texts:?}");
+        assert_eq!(texts[headings[0]], "1.2 Ipsum dolor");
+        let heading = doc
+            .elements
+            .iter()
+            .find_map(|e| match e {
+                DocumentElement::Paragraph(i) if doc.paragraphs[*i].to_text() == "1.2 Ipsum dolor" => {
+                    Some(&doc.paragraphs[*i])
+                }
+                _ => None,
+            })
+            .expect("heading paragraph");
+        assert!(heading.runs.iter().all(|r| r.bold));
+        // The two page breaks sit where the content turns the page: the authored
+        // break after section 1.2's last paragraph, and the render hint before
+        // heading 1.4 (it follows real text, so it is the page break of a document
+        // Word paginated itself).
+        let breaks: Vec<usize> = texts
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| *t == "<page break>")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(breaks.len(), 2, "{texts:?}");
+        assert_eq!(texts[breaks[0] + 1], "1.3 Ipsum dolor", "{texts:?}");
+        assert_eq!(texts[breaks[1] + 1], "1.4 Ipsum dolor", "{texts:?}");
+        // Text after the table follows the flow.
+        assert_eq!(texts.last().map(String::as_str), Some("Na de tabel"));
+    }
+
+    #[test]
+    fn a_table_with_a_second_texted_cell_stays_a_table_3123() {
+        let doc = parse_xml(&host_cell_frame(Some("Kolom"), false, 3));
+        assert_eq!(doc.tables.len(), 1);
+        assert!(element_texts(&doc).iter().any(|t| t == "<table 3 rows>"));
+    }
+
+    #[test]
+    fn a_one_cell_box_stays_a_table_3123() {
+        let doc = parse_xml(&host_cell_frame(None, true, 3));
+        assert_eq!(doc.tables.len(), 1);
+    }
+
+    #[test]
+    fn a_small_cell_in_an_empty_frame_stays_a_table_3123() {
+        // One section: about a thousand characters, under a page of text.
+        let doc = parse_xml(&host_cell_frame(None, false, 1));
+        assert_eq!(doc.tables.len(), 1, "{:?}", element_texts(&doc));
+    }
+
+    #[test]
+    fn a_host_cell_keeps_the_document_page_count_3123() {
+        // Flow or table, the same breaks are counted once.
+        let flow = parse_xml(&host_cell_frame(None, false, 3));
+        let table = parse_xml(&host_cell_frame(Some("Kolom"), false, 3));
+        let pages = |doc: &Document| doc.extract_text_with_boundaries(true, true).1.len();
+        assert_eq!(pages(&flow), pages(&table));
+        assert_eq!(pages(&flow), 3);
     }
 }
