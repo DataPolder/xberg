@@ -3690,6 +3690,14 @@ fn finalize_paragraph(
         }
     }
 
+    // Text set along a path -- a street name across a site plan, a label rotated
+    // with the drawing, a word bent around a logo -- is a label, not a heading.
+    // On a drawing it is often the largest text on the page, so the font-size
+    // cluster made it the document's title. ~keep
+    if heading_level.is_some() && is_text_on_a_path(lines, first.font_size) {
+        heading_level = None;
+    }
+
     let is_list_item = heading_level.is_none() && is_list_candidate;
     let is_code_block =
         heading_level.is_none() && !is_list_item && lines.iter().all(|l| l.is_monospace) && lines.len() >= 2;
@@ -3737,6 +3745,45 @@ fn finalize_paragraph(
         }),
         word_count,
     })
+}
+
+/// Largest angle, in degrees, a segment's rotation may differ from a multiple of
+/// 90 and still read as upright, sideways or upside-down text rather than text
+/// laid at a slant.
+const MAX_AXIS_ROTATION_SLACK_DEG: f32 = 2.0;
+
+/// How far, in ems of the paragraph's font size, the baselines of a run of
+/// single-glyph segments may drift before the run is text set along a path.
+const MAX_GLYPH_RUN_BASELINE_DRIFT_EM: f32 = 0.1;
+
+/// Whether `lines` is text set along a path rather than along a line of the page:
+/// - a segment is rotated at a slant (not within [`MAX_AXIS_ROTATION_SLACK_DEG`] of
+///   a multiple of 90 degrees), or
+/// - at least three segments of one glyph each whose baselines drift by more than
+///   [`MAX_GLYPH_RUN_BASELINE_DRIFT_EM`] -- glyphs placed one by one along a curve.
+///
+/// Sideways text (a 90-degree side title) and a title written one glyph per run on
+/// one baseline are neither. ~keep
+fn is_text_on_a_path(lines: &[&SegmentData], font_size: f32) -> bool {
+    let oblique = lines.iter().any(|line| {
+        let off_axis = line.rotation_degrees.rem_euclid(90.0);
+        off_axis > MAX_AXIS_ROTATION_SLACK_DEG && off_axis < 90.0 - MAX_AXIS_ROTATION_SLACK_DEG
+    });
+    if oblique {
+        return true;
+    }
+    let glyphs = lines
+        .iter()
+        .filter(|line| (1..=2).contains(&line.text.trim().chars().count()))
+        .count();
+    if lines.len() < 3 || glyphs < lines.len() || font_size <= 0.0 {
+        return false;
+    }
+    let (low, high) = lines.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), line| {
+        let baseline = line.upright_baseline();
+        (lo.min(baseline), hi.max(baseline))
+    });
+    high - low > MAX_GLYPH_RUN_BASELINE_DRIFT_EM * font_size
 }
 
 /// Check if text is ENTIRELY a list marker with no item text after it.
