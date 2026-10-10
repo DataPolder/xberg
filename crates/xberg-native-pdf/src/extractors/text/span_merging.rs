@@ -32,6 +32,7 @@ impl<'doc> TextExtractor<'doc> {
         // used below to rescue a narrow word gap the fixed kerning guard
         // suppressed. Computed before the fold consumes the list. ~keep
         let line_thresholds = Self::bimodal_line_gap_thresholds(&spans);
+        let tracked_lines = Self::tracked_glyph_lines(&spans);
         let mut merged = Vec::with_capacity(old_len);
         let mut current_span: Option<TextSpan> = None;
 
@@ -418,6 +419,25 @@ impl<'doc> TextExtractor<'doc> {
                         }
                     }
 
+                    // Tracked-glyph guard. On a page whose producer draws one
+                    // glyph per show-text operator and writes word ends as
+                    // explicit space glyphs, a line set with letter-spacing puts
+                    // every glyph pair the same distance apart. A gap no wider
+                    // than that tracking is not a word break: `C A S E S T U D Y`
+                    // is `CASE STUDY`, `B . V .` is `B.V.`. Real word ends on such
+                    // a line are the explicit space glyphs, which never reach
+                    // this decision. The same reading as the ReversedChars guard
+                    // below, for left-to-right text. ~keep
+                    if space_decision.insert_space
+                        && space_decision.source == SpaceSource::GeometricGap
+                        && same_baseline
+                        && let Some(tracking) = tracked_lines.get(span_idx).copied().flatten()
+                        && gap <= tracking * TRACKED_GAP_TOLERANCE
+                        && current.text.chars().next_back().is_some_and(|c| !c.is_whitespace())
+                    {
+                        space_decision.insert_space = false;
+                    }
+
                     // ReversedChars Arabic word-shatter guard (ISO 32000-1
                     // §14.8.2.3.3). On a page that draws RTL glyphs individually
                     // under /ReversedChars, real word boundaries are marked with
@@ -688,3 +708,10 @@ impl<'doc> TextExtractor<'doc> {
         });
     }
 }
+
+/// How much wider than a tracked line's own letter-spacing a gap may be and still
+/// read as that spacing in the tracked-glyph guard of
+/// [`TextExtractor::merge_adjacent_spans`]: a little slack for glyphs whose
+/// advance and ink differ (`P` before `i`), well under the extra width a real
+/// space adds.
+const TRACKED_GAP_TOLERANCE: f32 = 1.3;
