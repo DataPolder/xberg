@@ -2115,6 +2115,78 @@ fn has_label_like_header_row(grid: &[Vec<String>]) -> bool {
         })
 }
 
+/// Largest step between consecutive row numbers in a [`has_row_number_column`]
+/// column: a numbered catalogue that skips an entry (or loses one to a merged
+/// row) still counts, a column of unrelated figures does not.
+const ROW_NUMBER_MAX_STEP: u32 = 2;
+
+/// Share (percent) of data rows that must carry a row number, and a short
+/// cell in the companion column, for [`has_row_number_column`].
+const ROW_NUMBER_MIN_ROW_PERCENT: usize = 80;
+
+/// Longest cell, in words and in characters, that still reads as a code or a
+/// label in the companion column of [`has_row_number_column`].
+const ROW_NUMBER_COMPANION_MAX_WORDS: usize = 3;
+const ROW_NUMBER_COMPANION_MAX_CHARS: usize = 20;
+
+/// Whether the grid numbers its own rows: a positive table signal that the
+/// prose-like-rows test cannot see.
+///
+/// That test reads each row as one string, so a product list with a long
+/// description column (`3 | AB-C202FR010 | FRS | Face Recognition … license
+/// per channel`) scores as prose on every row, although no prose carries a
+/// column of consecutive integers next to a column of codes. Three
+/// conditions, all required:
+///
+/// - at least three columns, so a numbered list read as rows (`1. | text`)
+///   never qualifies;
+/// - one column holding a bare integer in at least
+///   [`ROW_NUMBER_MIN_ROW_PERCENT`] of the data rows, rising in row order by
+///   at most [`ROW_NUMBER_MAX_STEP`] each time;
+/// - another column whose cells are short (a code, a model, a label) in at
+///   least as many rows.
+fn has_row_number_column(data_rows: &[Vec<String>], num_cols: usize) -> bool {
+    if num_cols < 3 || data_rows.len() < 3 {
+        return false;
+    }
+    let enough = |count: usize| count * 100 >= data_rows.len() * ROW_NUMBER_MIN_ROW_PERCENT;
+    let bare_integer = |cell: &str| -> Option<u32> {
+        let cell = cell.trim();
+        (!cell.is_empty() && cell.len() <= 4 && cell.chars().all(|c| c.is_ascii_digit()))
+            .then(|| cell.parse().ok())
+            .flatten()
+    };
+    (0..num_cols).any(|numbers| {
+        let values: Vec<u32> = data_rows
+            .iter()
+            .filter_map(|row| row.get(numbers).and_then(|c| bare_integer(c)))
+            .collect();
+        if values.len() < 3 || !enough(values.len()) {
+            return false;
+        }
+        if !values
+            .windows(2)
+            .all(|w| w[1] > w[0] && w[1] - w[0] <= ROW_NUMBER_MAX_STEP)
+        {
+            return false;
+        }
+        (0..num_cols).filter(|&c| c != numbers).any(|companion| {
+            let short = data_rows
+                .iter()
+                .filter(|row| {
+                    row.get(companion).is_some_and(|cell| {
+                        let cell = cell.trim();
+                        !cell.is_empty()
+                            && cell.split_whitespace().count() <= ROW_NUMBER_COMPANION_MAX_WORDS
+                            && cell.chars().count() <= ROW_NUMBER_COMPANION_MAX_CHARS
+                    })
+                })
+                .count();
+            enough(short)
+        })
+    })
+}
+
 /// Core well-formedness check. `skip_columnar_prose_guard` drops only the
 /// uniform-column-length prose heuristic, for callers that have already vetted
 /// the region's columnar structure geometrically (the #1319 text-heavy geometric
@@ -2202,7 +2274,7 @@ pub(crate) fn is_well_formed_table_core(grid: &[Vec<String>], skip_columnar_pros
             }
         }
 
-        if eligible_rows >= 3 && prose_like_rows * 2 > eligible_rows {
+        if eligible_rows >= 3 && prose_like_rows * 2 > eligible_rows && !has_row_number_column(data_rows, num_cols) {
             return false;
         }
     }
@@ -2936,6 +3008,152 @@ fn is_ascii_digits(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    // ---- the row-number column exemption of the prose-like-rows test ----
+
+    fn grid_of(rows: &[&[&str]]) -> Vec<Vec<String>> {
+        rows.iter().map(|r| r.iter().map(|c| c.to_string()).collect()).collect()
+    }
+
+    #[test]
+    fn a_numbered_list_with_codes_and_descriptions_is_well_formed() {
+        let grid = grid_of(&[
+            &["Lorem", "Ipsum dolor", "Sit", "Amet consectetur"],
+            &[
+                "3",
+                "LO-A202RE010",
+                "LOR",
+                "Lorem ipsum dolor sit amet consectetur adipiscing",
+            ],
+            &[
+                "4",
+                "LO-A202IP010",
+                "IPSU",
+                "Elit sed do eiusmod tempor incididunt ut labore",
+            ],
+            &[
+                "5",
+                "LO-A202DO010",
+                "DO",
+                "Et dolore magna aliqua ut enim ad minim veniam",
+            ],
+            &[
+                "6",
+                "LO-A202SI010",
+                "SIT",
+                "Quis nostrud exercitation ullamco laboris nisi",
+            ],
+            &[
+                "7",
+                "LO-A202AM010",
+                "AME",
+                "Ut aliquip ex ea commodo consequat duis aute",
+            ],
+        ]);
+        assert!(is_well_formed_table(&grid));
+    }
+
+    /// A numbered list read as rows: consecutive numbers, but every other
+    /// column is running text, so nothing beside the number is a code.
+    #[test]
+    fn wrapped_numbered_prose_is_not_a_table() {
+        let grid = grid_of(&[
+            &[
+                "1",
+                "Lorem ipsum dolor sit amet consectetur",
+                "adipiscing elit sed do eiusmod tempor",
+            ],
+            &[
+                "2",
+                "Incididunt ut labore et dolore magna",
+                "aliqua ut enim ad minim veniam quis",
+            ],
+            &[
+                "3",
+                "Nostrud exercitation ullamco laboris nisi",
+                "ut aliquip ex ea commodo consequat",
+            ],
+            &[
+                "4",
+                "Duis aute irure dolor in reprehenderit",
+                "in voluptate velit esse cillum dolore",
+            ],
+            &[
+                "5",
+                "Eu fugiat nulla pariatur excepteur sint",
+                "occaecat cupidatat non proident sunt",
+            ],
+        ]);
+        assert!(!is_well_formed_table(&grid));
+    }
+
+    /// A reference list: the numbers are bracketed, not bare, and the rest is
+    /// prose-like citation text.
+    #[test]
+    fn a_reference_list_is_not_a_table() {
+        let grid = grid_of(&[
+            &[
+                "[1]",
+                "Lorem ipsum dolor sit amet",
+                "consectetur adipiscing elit sed do eiusmod",
+            ],
+            &[
+                "[2]",
+                "Tempor incididunt ut labore",
+                "et dolore magna aliqua ut enim ad minim",
+            ],
+            &[
+                "[3]",
+                "Veniam quis nostrud exercitation",
+                "ullamco laboris nisi ut aliquip ex ea",
+            ],
+            &[
+                "[4]",
+                "Commodo consequat duis aute",
+                "irure dolor in reprehenderit in voluptate",
+            ],
+            &[
+                "[5]",
+                "Velit esse cillum dolore eu",
+                "fugiat nulla pariatur excepteur sint",
+            ],
+        ]);
+        assert!(!is_well_formed_table(&grid));
+    }
+
+    /// Prose beside a column of page numbers: the numbers are consecutive,
+    /// but no other column holds a short code or label.
+    #[test]
+    fn a_page_number_column_beside_prose_is_not_a_table() {
+        let grid = grid_of(&[
+            &[
+                "Lorem ipsum dolor sit amet consectetur",
+                "adipiscing elit sed do eiusmod tempor",
+                "12",
+            ],
+            &[
+                "Incididunt ut labore et dolore magna",
+                "aliqua ut enim ad minim veniam quis",
+                "13",
+            ],
+            &[
+                "Nostrud exercitation ullamco laboris nisi",
+                "ut aliquip ex ea commodo consequat",
+                "14",
+            ],
+            &[
+                "Duis aute irure dolor in reprehenderit",
+                "in voluptate velit esse cillum dolore",
+                "15",
+            ],
+            &[
+                "Eu fugiat nulla pariatur excepteur sint",
+                "occaecat cupidatat non proident sunt",
+                "16",
+            ],
+        ]);
+        assert!(!is_well_formed_table(&grid));
+    }
+
     use super::*;
 
     #[cfg(feature = "pdf")]
