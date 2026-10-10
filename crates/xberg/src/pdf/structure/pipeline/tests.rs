@@ -6882,3 +6882,114 @@ fn blocks_to_paragraphs_merges_normally_without_a_column_corridor_gh1806() {
         "with no corridor, the two lines merge as before this fix"
     );
 }
+
+/// A bold segment at the geometry of a numbered clause title in a 5-page
+/// agreement: 12 pt bold over a ~10 pt body, one baseline. Text is lorem ipsum.
+fn title_seg(text: &str, x: f32, width: f32, font_size: f32, baseline_y: f32) -> SegmentData {
+    SegmentData {
+        text: text.to_string(),
+        x,
+        y: baseline_y,
+        width,
+        height: font_size,
+        font_size,
+        is_bold: true,
+        is_italic: false,
+        is_monospace: false,
+        baseline_y,
+        rotation_degrees: 0.0,
+        assigned_role: None,
+    }
+}
+
+/// The font clusters of that agreement: a 24.7 pt title, 14.4 pt H2 and a 10.1 pt
+/// body. Its 12 pt bold clause titles sit closer to body than to H2, so only the
+/// bold branch of `finalize_paragraph` can make them headings.
+fn agreement_heading_map() -> Vec<(f32, Option<u8>)> {
+    vec![(24.66857, Some(1)), (14.360001, Some(2)), (10.135384, None)]
+}
+
+/// A one-line bold title is a heading however the writer split it into text runs.
+/// Some writers emit one segment per word; the bold branch counted segments as if
+/// they were lines, so `1. Lorem ipsum dolor` written as four runs on one baseline
+/// failed `lines.len() == 1`, fell through to the list test, and came out a list item
+/// with its number stripped -- while the same line written as one run was a heading.
+#[test]
+fn bold_title_split_into_word_runs_on_one_baseline_is_a_heading() {
+    let heading_map = agreement_heading_map();
+    let gap_info = crate::pdf::structure::classify::precompute_gap_info(&heading_map);
+    let baseline = 450.05;
+    let runs = [
+        title_seg("1.", 56.52, 8.73, 12.0, baseline),
+        title_seg("Lorem", 92.66, 38.0, 12.0, baseline),
+        title_seg("ipsum", 134.0, 35.0, 12.0, baseline),
+        title_seg("dolor", 172.0, 30.0, 12.0, baseline),
+    ];
+    let refs: Vec<&SegmentData> = runs.iter().collect();
+    let para = finalize_paragraph(&refs, &heading_map, &gap_info).expect("paragraph");
+    assert_eq!(para.heading_level, Some(2), "a one-line bold title must be a heading");
+    assert!(
+        !para.is_list_item,
+        "a heading is not a list item, so its number is kept"
+    );
+
+    let whole = title_seg("1. Lorem ipsum dolor", 56.52, 145.0, 12.0, baseline);
+    let para = finalize_paragraph(&[&whole], &heading_map, &gap_info).expect("paragraph");
+    assert_eq!(
+        para.heading_level,
+        Some(2),
+        "the same line as one run was already a heading"
+    );
+}
+
+/// The bold branch stays a one-line test: two bold lines on different baselines
+/// are not a title, and a numbered one stays a list item.
+#[test]
+fn bold_numbered_text_on_two_baselines_stays_a_list_item() {
+    let heading_map = agreement_heading_map();
+    let gap_info = crate::pdf::structure::classify::precompute_gap_info(&heading_map);
+    let runs = [
+        title_seg("1.", 56.52, 8.73, 12.0, 450.05),
+        title_seg("Lorem", 92.66, 38.0, 12.0, 450.05),
+        title_seg("ipsum", 92.66, 35.0, 12.0, 436.0),
+    ];
+    let refs: Vec<&SegmentData> = runs.iter().collect();
+    let para = finalize_paragraph(&refs, &heading_map, &gap_info).expect("paragraph");
+    assert_eq!(para.heading_level, None);
+    assert!(para.is_list_item);
+}
+
+/// A numbered item at body size is a list item, whether or not it is bold.
+#[test]
+fn bold_numbered_item_at_body_size_stays_a_list_item() {
+    let heading_map = agreement_heading_map();
+    let gap_info = crate::pdf::structure::classify::precompute_gap_info(&heading_map);
+    let baseline = 300.0;
+    let runs = [
+        title_seg("1.", 56.52, 6.0, 9.96, baseline),
+        title_seg("Lorem", 92.66, 30.0, 9.96, baseline),
+        title_seg("ipsum", 126.0, 28.0, 9.96, baseline),
+    ];
+    let refs: Vec<&SegmentData> = runs.iter().collect();
+    let para = finalize_paragraph(&refs, &heading_map, &gap_info).expect("paragraph");
+    assert_eq!(para.heading_level, None);
+    assert!(para.is_list_item);
+}
+
+/// Only a numbered title is judged by its baseline. An unnumbered bold line split
+/// into runs -- two column labels welded on one baseline, one line of a wrapped
+/// title -- keeps the one-run test.
+#[test]
+fn unnumbered_bold_line_split_into_runs_keeps_the_one_run_test() {
+    let heading_map = agreement_heading_map();
+    let gap_info = crate::pdf::structure::classify::precompute_gap_info(&heading_map);
+    let baseline = 300.0;
+    let runs = [
+        title_seg("Lorem", 58.0, 40.0, 12.0, baseline),
+        title_seg("ipsum", 102.0, 38.0, 12.0, baseline),
+        title_seg("Dolor", 330.0, 40.0, 12.0, baseline),
+    ];
+    let refs: Vec<&SegmentData> = runs.iter().collect();
+    let para = finalize_paragraph(&refs, &heading_map, &gap_info).expect("paragraph");
+    assert_eq!(para.heading_level, None);
+}

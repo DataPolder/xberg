@@ -3006,11 +3006,24 @@ fn finalize_paragraph(
         && first.font_size >= body_font_size * super::constants::MIN_HEADING_FONT_RATIO
         && first.font_size >= body_font_size + super::constants::MIN_HEADING_FONT_GAP;
 
+    // A numbered title is one visual line, not one text run: some writers emit a
+    // run per word, and `1. Lorem ipsum` as four runs on one baseline failed the
+    // one-run test, fell through to the list test below and lost its number to
+    // `list_marker`. Only a list candidate is judged by its baseline: counting
+    // baselines for every bold line also admitted welded column labels, the lines
+    // of a wrapped title one by one, and chart legends. ~keep
+    let one_line = lines.len() == 1
+        || (is_list_candidate
+            && lines.iter().all(|line| {
+                line.has_same_rotation(first)
+                    && (line.upright_baseline() - first.upright_baseline()).abs() <= INLINE_STYLE_BASELINE_TOLERANCE
+            }));
+
     if heading_level.is_none()
         && is_bold
         && clears_bold_font_gate
         && (1..=8).contains(&word_count)
-        && lines.len() == 1
+        && one_line
         && !trimmed.ends_with('.')
         && !trimmed.ends_with(':')
         && !trimmed.ends_with(',')
