@@ -136,6 +136,79 @@ struct HeadingRun {
 /// worse than better. ~keep
 const SPARSE_VALLEY_REGION_SHARE: f32 = 0.35;
 
+/// a hanging list marker -- a clause or list number (`1.2`, `2.`, `12.3.4`), a
+/// parenthesised or closing-bracket label (`(a)`, `iv)`), or a bullet -- and nothing else.
+fn is_hanging_marker(text: &str) -> bool {
+    let text = text.trim();
+    if text.is_empty() || text.chars().count() > 6 {
+        return false;
+    }
+    if text.chars().count() == 1 && matches!(text, "\u{2022}" | "\u{b7}" | "\u{25aa}" | "-" | "\u{2013}") {
+        return true;
+    }
+    let inner = text.trim_start_matches('(').trim_end_matches([')', '.']);
+    if inner.is_empty() {
+        return false;
+    }
+    // A clause number carries its dot or bracket (`2.`, `1.2`, `(3)`); a bare integer is a
+    // value, a chart label, a page number. ~keep
+    let dotted_number = inner.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && inner.chars().any(|c| c.is_ascii_digit())
+        && (text.contains('.') || text.ends_with(')'));
+    let label = inner.chars().count() <= 4
+        && inner.chars().all(|c| c.is_ascii_alphabetic())
+        && (text.ends_with(')') || text.ends_with('.'))
+        && (inner.chars().count() == 1 || inner.chars().all(|c| "ivxlcIVXLC".contains(c)));
+    dotted_number || label
+}
+
+/// whether the left side of a cut at `split_x` is a column of hanging list markers
+/// rather than a column: at least two of its lines are lone markers, each on the baseline of
+/// a line on the other side, and every other line of it runs on past the cut (a clause's
+/// wrap returning to the margin under its number). A column -- a sidebar, the left column of
+/// two -- has lines of its own that end before the cut. ~keep
+fn is_hanging_marker_column(all_spans: &[TextSpan], left: &[usize], right: &[usize], split_x: f32) -> bool {
+    let mut markers = 0usize;
+    for line in group_indices_into_rows(all_spans, left).into_iter().flatten() {
+        let text: String = line
+            .iter()
+            .map(|&i| all_spans[i].text.trim())
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if text.is_empty() {
+            continue;
+        }
+        let first = &all_spans[line[0]];
+        let em = line
+            .iter()
+            .map(|&i| all_spans[i].font_size)
+            .fold(0.0f32, f32::max)
+            .max(1.0);
+        if is_hanging_marker(&text) {
+            // The text it numbers sits on its baseline and reads as text: a table's value
+            // column (`20.0` beside `20.8`) has a number there. ~keep
+            let beside = right
+                .iter()
+                .filter(|&&i| (all_spans[i].bbox.y - first.bbox.y).abs() <= 0.5 * em)
+                .filter(|&&i| !all_spans[i].text.trim().is_empty())
+                .min_by(|&&a, &&b| all_spans[a].bbox.left().total_cmp(&all_spans[b].bbox.left()));
+            let on_a_line_beside_it =
+                beside.is_some_and(|&i| all_spans[i].text.trim().chars().next().is_some_and(char::is_alphabetic));
+            if !on_a_line_beside_it {
+                return false;
+            }
+            markers += 1;
+            continue;
+        }
+        let runs_past_the_cut = line.iter().map(|&i| ink_right(&all_spans[i])).fold(f32::MIN, f32::max) > split_x + em;
+        if !runs_past_the_cut {
+            return false;
+        }
+    }
+    markers >= 2
+}
+
 fn deepest_valley_point(density: &[f32], start: usize, end: usize, split_is_clear: &dyn Fn(f32) -> bool) -> f32 {
     debug_assert!(start < end && end <= density.len());
     if start >= end || end > density.len() {
@@ -2042,6 +2115,15 @@ impl XYCutStrategy {
             return None;
         }
 
+        // a margin of hanging clause numbers is not a column. A single-column agreement
+        // hangs `1.2`, `2.`, `2.3` in the margin with the clause text indented beside them, and
+        // the indent opens a valley; cut there, every number was read before the text it
+        // numbers, a clause's wrap back to the margin went with the numbers, and a bare number
+        // with its text on the other side became an empty clause. ~keep
+        if is_hanging_marker_column(all_spans, &left, &right, split_x) {
+            return None;
+        }
+
         // Real column splits produce balanced partitions. A 95/5 split is
         // almost always from edge dips or stray content, not a column. ~keep
         let min_side = (indices.len() / 10).max(2);
@@ -2637,6 +2719,153 @@ mod tests {
             rtl_draw_logical: false,
             mirrored: false,
             page_rotation_applied: 0,
+        }
+    }
+
+    /// One span per word, 9.96 pt Arial: ~5 pt per character, a 3 pt word space. ~keep
+    fn words(text: &str, x: f32, y: f32) -> Vec<TextSpan> {
+        let mut cursor = x;
+        text.split_whitespace()
+            .map(|word| {
+                let width = word.chars().count() as f32 * 5.0;
+                let span = make_span_text(cursor, y, width, 10.0, word, 9.96);
+                cursor += width + 3.0;
+                span
+            })
+            .collect()
+    }
+
+    /// The flattened reading order of `spans` under the XY-cut.
+    fn read(spans: &[TextSpan]) -> Vec<String> {
+        XYCutStrategy::new()
+            .partition_region(spans, None)
+            .into_iter()
+            .flatten()
+            .map(|span| span.text.clone())
+            .collect()
+    }
+
+    /// page 3 of a single-column agreement as it enters the XY-cut, its real geometry
+    /// with the words replaced by lorem ipsum (`xycut_hanging_clause_numbers.tsv`). Clause
+    /// numbers hang in the margin (x 56.5) beside clause text indented to x 93.5, a run of
+    /// indented definition lines has no number beside it, and clause wraps return to the
+    /// margin. The indent's valley was cut as a column gutter: every number was read before the
+    /// text it numbers. ~keep
+    fn hanging_clause_page() -> Vec<TextSpan> {
+        include_str!("xycut_hanging_clause_numbers.tsv")
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.is_empty())
+            .map(|line| {
+                let f: Vec<&str> = line.split('\t').collect();
+                let n = |k: usize| f[k].parse::<f32>().expect("fixture number");
+                make_span_text(n(0), n(1), n(2), n(3), &f[5].replace('_', " "), n(4))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn hanging_clause_numbers_are_read_with_their_clause() {
+        let spans = hanging_clause_page();
+        let groups = XYCutStrategy::new().partition_region(&spans, None);
+        let order: Vec<&TextSpan> = groups.iter().flatten().filter(|s| !s.text.trim().is_empty()).collect();
+        for number in ["1.2", "1.3", "1.4", "2.", "2.1", "2.2", "2.3"] {
+            let at = order.iter().position(|s| s.text == number).expect("the number is read");
+            let next = order.get(at + 1).expect("something follows the number");
+            assert!(
+                (next.bbox.y - order[at].bbox.y).abs() < 2.0,
+                "`{number}` is read straight before the clause text on its own line, got `{}` at y {}",
+                next.text,
+                next.bbox.y
+            );
+        }
+    }
+
+    /// A narrow sidebar of prose beside the body (a journal's first page: citation,
+    /// received/accepted dates, keywords) stays a column: its lines end before the body.
+    #[test]
+    fn a_prose_sidebar_beside_the_body_stays_a_column() {
+        let mut spans = Vec::new();
+        let mut y = 700.0;
+        for _ in 0..14 {
+            spans.extend(words("Citation lorem ipsum dolor", 30.0, y));
+            spans.extend(words(
+                "Body text lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor",
+                190.0,
+                y,
+            ));
+            y -= 12.0;
+        }
+        let order = read(&spans);
+        let last_sidebar = order.iter().rposition(|t| t == "Citation").expect("sidebar read");
+        let first_body = order.iter().position(|t| t == "Body").expect("body read");
+        assert!(last_sidebar < first_body, "the sidebar is read whole before the body");
+        assert!(!is_hanging_marker("Citation"));
+    }
+
+    /// Two columns of prose stay two columns.
+    #[test]
+    fn two_prose_columns_stay_two_columns() {
+        let mut spans = Vec::new();
+        let mut y = 700.0;
+        for _ in 0..14 {
+            spans.extend(words("Left lorem ipsum dolor sit amet consectetur adipiscing", 50.0, y));
+            spans.extend(words(
+                "Right lorem ipsum dolor sit amet consectetur adipiscing",
+                330.0,
+                y,
+            ));
+            y -= 12.0;
+        }
+        let order = read(&spans);
+        let last_left = order.iter().rposition(|t| t == "Left").expect("left read");
+        let first_right = order.iter().position(|t| t == "Right").expect("right read");
+        assert!(
+            last_left < first_right,
+            "the left column is read whole before the right"
+        );
+    }
+
+    /// A table's value column beside another value column (`20.0` | `20.8`) is not a margin
+    /// of clause numbers: the text beside each "marker" is a number, not a clause.
+    #[test]
+    fn a_column_of_values_is_not_a_hanging_marker_column() {
+        let mut spans = Vec::new();
+        let mut left = Vec::new();
+        let mut right = Vec::new();
+        let mut y = 700.0;
+        for (a, b) in [("20.0", "20.8"), ("18.5", "19.1"), ("22.4", "21.9"), ("17.0", "16.6")] {
+            left.push(spans.len());
+            spans.push(make_span_text(56.6, y, 18.0, 10.0, a, 9.96));
+            right.push(spans.len());
+            spans.push(make_span_text(120.0, y, 18.0, 10.0, b, 9.96));
+            y -= 12.0;
+        }
+        assert!(!is_hanging_marker_column(&spans, &left, &right, 90.0));
+    }
+
+    /// A margin of WORDS beside indented text (`Note`, `Warning`, `Tip`) is not a column
+    /// of hanging markers: this rule does not apply to it.
+    #[test]
+    fn a_margin_of_labels_is_not_a_hanging_marker_column() {
+        let mut spans = Vec::new();
+        let mut left = Vec::new();
+        let mut right = Vec::new();
+        let mut y = 700.0;
+        for label in ["Note", "Warning", "Tip", "Caution"] {
+            left.push(spans.len());
+            spans.push(make_span_text(56.6, y, 30.0, 10.0, label, 9.96));
+            for word in words("Lorem ipsum dolor sit amet consectetur adipiscing elit", 93.5, y) {
+                right.push(spans.len());
+                spans.push(word);
+            }
+            y -= 24.0;
+        }
+        assert!(!is_hanging_marker_column(&spans, &left, &right, 82.0));
+        for marker in ["1.2", "2.", "12.3.4", "(a)", "iv)", "b."] {
+            assert!(is_hanging_marker(marker), "{marker}");
+        }
+        for word in ["Note", "2.5 GbE", "Tip.", "100%", "53", "2024"] {
+            assert!(!is_hanging_marker(word), "{word}");
         }
     }
 
