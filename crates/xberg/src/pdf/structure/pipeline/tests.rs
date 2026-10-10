@@ -6882,3 +6882,92 @@ fn blocks_to_paragraphs_merges_normally_without_a_column_corridor_gh1806() {
         "with no corridor, the two lines merge as before this fix"
     );
 }
+
+/// A glyph segment at the geometry of a drawing's street-name labels: 33.8 pt bold,
+/// one segment per glyph, with its rotation.
+fn path_glyph(text: &str, x: f32, baseline_y: f32, width: f32, rotation_degrees: f32) -> SegmentData {
+    SegmentData {
+        text: text.to_string(),
+        x,
+        y: baseline_y,
+        width,
+        height: 33.824844,
+        font_size: 33.824844,
+        is_bold: true,
+        is_italic: false,
+        is_monospace: false,
+        baseline_y,
+        rotation_degrees,
+        assigned_role: None,
+    }
+}
+
+/// The font clusters of that floor plan: the street names (33 pt) are the page's
+/// largest text, above the 9.9 pt labels and the 2.8 pt dimensions.
+fn floor_plan_heading_map() -> Vec<(f32, Option<u8>)> {
+    vec![(33.013416, Some(1)), (9.8678465, None), (2.8108463, None)]
+}
+
+/// #3163 (X28): a street name laid at a slant across a floor plan -- each glyph its
+/// own run, rotated -12.5 degrees -- is a label, not the document's title. The
+/// lorem letters keep the plan's geometry.
+#[test]
+fn text_rotated_at_a_slant_is_not_a_heading() {
+    let heading_map = floor_plan_heading_map();
+    let gap_info = crate::pdf::structure::classify::precompute_gap_info(&heading_map);
+    let runs = [
+        path_glyph("L", 221.04, 119.52, 24.42, -12.497734),
+        path_glyph("o", 244.80, 114.24, 18.81, -12.497734),
+        path_glyph("r", 263.04, 110.28, 18.81, -12.497734),
+        path_glyph("E", 290.16, 104.16, 24.42, -12.497734),
+        path_glyph("m", 313.80, 99.00, 18.81, -12.497734),
+    ];
+    let refs: Vec<&SegmentData> = runs.iter().collect();
+    let para = finalize_paragraph(&refs, &heading_map, &gap_info).expect("paragraph");
+    assert_eq!(para.heading_level, None, "slanted label text is not a heading");
+}
+
+/// #3163 (X28): the same plan's other street name is upright glyph by glyph but
+/// placed along a curve: five single-glyph runs whose baselines rise by 4.5 pt.
+#[test]
+fn glyphs_placed_along_a_curve_are_not_a_heading() {
+    let heading_map = floor_plan_heading_map();
+    let gap_info = crate::pdf::structure::classify::precompute_gap_info(&heading_map);
+    let runs = [
+        path_glyph("L", 796.20, 61.68, 24.42, 0.0),
+        path_glyph("o", 820.44, 62.76, 18.81, 0.0),
+        path_glyph("R", 838.92, 63.60, 41.17, 0.0),
+        path_glyph("e", 879.84, 65.40, 18.81, 0.0),
+        path_glyph("m", 898.44, 66.24, 18.81, 0.0),
+    ];
+    let refs: Vec<&SegmentData> = runs.iter().collect();
+    let para = finalize_paragraph(&refs, &heading_map, &gap_info).expect("paragraph");
+    assert_eq!(para.heading_level, None, "glyphs along a curve are not a heading");
+}
+
+/// Sideways text is not text on a path: a 90-degree side title stays a heading.
+#[test]
+fn a_sideways_title_stays_a_heading() {
+    let heading_map = floor_plan_heading_map();
+    let gap_info = crate::pdf::structure::classify::precompute_gap_info(&heading_map);
+    let title = path_glyph("Lorem Ipsum", 40.0, 400.0, 220.0, 90.0);
+    let para = finalize_paragraph(&[&title], &heading_map, &gap_info).expect("paragraph");
+    assert_eq!(para.heading_level, Some(1));
+}
+
+/// A title written one glyph per run on one baseline is still a title.
+#[test]
+fn a_title_written_glyph_by_glyph_on_one_baseline_stays_a_heading() {
+    let heading_map = floor_plan_heading_map();
+    let gap_info = crate::pdf::structure::classify::precompute_gap_info(&heading_map);
+    let runs = [
+        path_glyph("L", 100.0, 700.0, 24.42, 0.0),
+        path_glyph("o", 124.4, 700.0, 18.81, 0.0),
+        path_glyph("r", 143.2, 700.0, 18.81, 0.0),
+        path_glyph("e", 162.0, 700.0, 18.81, 0.0),
+        path_glyph("m", 180.8, 700.0, 18.81, 0.0),
+    ];
+    let refs: Vec<&SegmentData> = runs.iter().collect();
+    let para = finalize_paragraph(&refs, &heading_map, &gap_info).expect("paragraph");
+    assert_eq!(para.heading_level, Some(1));
+}
