@@ -676,6 +676,74 @@ impl<'doc> TextExtractor<'doc> {
         out
     }
 
+    /// Per-span tracking gap for the tracked-glyph guard in
+    /// `merge_adjacent_spans`: `Some(gap)` when the span sits on a baseline run
+    /// drawn one glyph per show-text operator with a uniform letter-spacing of
+    /// `gap` points, on a page whose producer marks word ends with explicit space
+    /// glyphs.
+    ///
+    /// Such a producer has already said where every word ends, and on a tracked
+    /// line every glyph pair sits the same distance apart. A geometric gap of
+    /// that size is letter-spacing, not a missing space: `C A S E S T U D Y` is
+    /// `CASE STUDY` drawn with wide tracking. The page-level signal is what lets a
+    /// one-word line (`Nederland`) count too, since it carries no space glyph of
+    /// its own.
+    ///
+    /// - Page: at least [`MIN_EXPLICIT_SPACE_GLYPHS`] whitespace-only spans the
+    ///   content stream drew itself (not the synthetic spaces the TJ pass emits,
+    ///   `offset_semantic`), each between two one-glyph spans.
+    /// - Line: at least [`MIN_TRACKED_LINE_GLYPHS`] glyphs, every one its own
+    ///   span, whose median gap between two letters or digits is at least
+    ///   [`MIN_TRACKING_EM`] of the font size. Ordinary text drawn glyph by glyph
+    ///   has a median gap near zero, so the guard never sees it.
+    ///
+    /// Indexed to `spans`, like [`Self::bimodal_line_gap_thresholds`].
+    pub(super) fn tracked_glyph_lines(spans: &[TextSpan]) -> Vec<Option<f32>> {
+        let n = spans.len();
+        let mut out = vec![None; n];
+        let blank = |s: &TextSpan| s.text.chars().all(char::is_whitespace);
+        let one_glyph = |s: &TextSpan| s.text.chars().count() == 1 && !blank(s);
+        let explicit_spaces = (1..n.saturating_sub(1))
+            .filter(|&k| {
+                let s = &spans[k];
+                !s.text.is_empty()
+                    && blank(s)
+                    && !s.offset_semantic
+                    && one_glyph(&spans[k - 1])
+                    && one_glyph(&spans[k + 1])
+            })
+            .count();
+        if explicit_spaces < MIN_EXPLICIT_SPACE_GLYPHS {
+            return out;
+        }
+        let mut i = 0;
+        while i < n {
+            let mut j = i;
+            while j + 1 < n && (spans[j].bbox.y - spans[j + 1].bbox.y).abs() < 1.0 {
+                j += 1;
+            }
+            let glyphs: Vec<&TextSpan> = spans[i..=j].iter().filter(|s| !blank(s)).collect();
+            if glyphs.len() >= MIN_TRACKED_LINE_GLYPHS && glyphs.iter().all(|s| one_glyph(s)) {
+                let alnum = |s: &TextSpan| s.text.chars().all(char::is_alphanumeric);
+                let mut gaps: Vec<f32> = (i..j)
+                    .filter(|&k| alnum(&spans[k]) && alnum(&spans[k + 1]))
+                    .map(|k| spans[k + 1].bbox.x - (spans[k].bbox.x + spans[k].bbox.width))
+                    .collect();
+                gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                let font_size = glyphs.iter().map(|s| s.font_size).fold(0.0_f32, f32::max);
+                if let Some(&median) = gaps.get(gaps.len() / 2)
+                    && median >= font_size * MIN_TRACKING_EM
+                {
+                    for slot in out.iter_mut().take(j + 1).skip(i) {
+                        *slot = Some(median);
+                    }
+                }
+            }
+            i = j + 1;
+        }
+        out
+    }
+
     /// Given the consecutive inter-span gaps of one baseline run, return the
     /// threshold separating an intra-word cluster from an inter-word cluster
     /// when the distribution is clearly bimodal, else `None`. `fs` is the
@@ -782,3 +850,18 @@ impl SnapBaseSearch<'_> {
         best_base_y
     }
 }
+
+/// Fewest glyphs a baseline run needs before [`TextExtractor::tracked_glyph_lines`]
+/// reads its gaps as tracking: two or three glyphs say too little.
+const MIN_TRACKED_LINE_GLYPHS: usize = 4;
+
+/// Smallest median letter gap, as a fraction of the font size, that
+/// [`TextExtractor::tracked_glyph_lines`] reads as letter-spacing. Ordinary text
+/// drawn glyph by glyph sits near zero; the tracked cover title that motivated
+/// the guard sits at 0.19 em.
+const MIN_TRACKING_EM: f32 = 0.1;
+
+/// Fewest explicit space glyphs, each between two one-glyph spans, a page needs
+/// before [`TextExtractor::tracked_glyph_lines`] trusts its producer to mark every
+/// word end itself.
+const MIN_EXPLICIT_SPACE_GLYPHS: usize = 3;
