@@ -597,11 +597,26 @@ pub(crate) fn extract_all_from_native_document(
                     .into_iter()
                     .map(|entry| (entry.table, entry.grid))
                     .unzip();
-                let covered_pages: std::collections::HashSet<u32> = combined.iter().map(|t| t.page_number).collect();
-                let hierarchy_segments = match crate::pdf::native::table::extract_tables_heuristic(
+                // The heuristic runs around the tables the higher tiers found,
+                // not instead of them: a ruled header row must not keep the
+                // unruled rows under it from being a table. Only a page whose
+                // covered table has no box to mask is skipped whole. ~keep
+                let mut covered: std::collections::HashMap<u32, Vec<crate::types::BoundingBox>> =
+                    std::collections::HashMap::new();
+                let mut skip_pages: std::collections::HashSet<u32> = std::collections::HashSet::new();
+                for table in &combined {
+                    match table.bounding_box {
+                        Some(bbox) => covered.entry(table.page_number).or_default().push(bbox),
+                        None => {
+                            skip_pages.insert(table.page_number);
+                        }
+                    }
+                }
+                let hierarchy_segments = match crate::pdf::native::table::extract_tables_heuristic_around(
                     &mut doc,
                     allow_single_column,
-                    &covered_pages,
+                    &skip_pages,
+                    &covered,
                 ) {
                     Ok(extraction) => {
                         native_grids.resize_with(combined.len() + extraction.tables.len(), || None);

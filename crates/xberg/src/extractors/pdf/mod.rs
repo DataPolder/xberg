@@ -9974,4 +9974,130 @@ BT /F1 12 Tf 30 30 Td (Beta) Tj ET
             "page counts must match between the two configurations"
         );
     }
+
+    /// A purchase order whose ruled box holds only the intro line and the
+    /// header row, with its order lines below it unruled: the native tier finds
+    /// the two ruled rows, and the order lines must still be a table. Geometry
+    /// of the measured page (column edges, row pitch), text replaced.
+    #[cfg(feature = "pdf")]
+    fn ruled_header_unruled_rows_pdf() -> Vec<u8> {
+        use lopdf::content::{Content, Operation};
+        use lopdf::{Document, Object, Stream, dictionary};
+
+        let mut ops = Vec::new();
+        let line = |ops: &mut Vec<Operation>, x0: i64, y0: i64, x1: i64, y1: i64| {
+            ops.push(Operation::new("m", vec![x0.into(), y0.into()]));
+            ops.push(Operation::new("l", vec![x1.into(), y1.into()]));
+            ops.push(Operation::new("S", vec![]));
+        };
+        let text = |ops: &mut Vec<Operation>, x: i64, y: i64, s: &str| {
+            ops.push(Operation::new("BT", vec![]));
+            ops.push(Operation::new("Tf", vec!["F1".into(), 9.into()]));
+            ops.push(Operation::new("Td", vec![x.into(), y.into()]));
+            ops.push(Operation::new("Tj", vec![Object::string_literal(s)]));
+            ops.push(Operation::new("ET", vec![]));
+        };
+        // The ruled box: two rows, four columns.
+        let columns = [80_i64, 180, 260, 340, 500];
+        for y in [546_i64, 572, 598] {
+            line(&mut ops, 80, y, 500, y);
+        }
+        for x in columns {
+            line(&mut ops, x, 546, x, 598);
+        }
+        for (x, word) in [(84, "Lorem"), (184, "ipsum"), (264, "dolor"), (344, "sit amet")] {
+            text(&mut ops, x, 582, word);
+        }
+        for (x, word) in [(84, "Model"), (184, "Aantal"), (264, "Prijs"), (344, "Omschrijving")] {
+            text(&mut ops, x, 556, word);
+        }
+        // The order lines below it, unruled.
+        let rows = [
+            ("CPS-LOR", "3", "5.000,00", "Lorem ipsum dolor sit"),
+            ("VS-IPS", "20", "100,00", "Amet consectetur elit"),
+            ("VMS-DOL", "1", "300,00", "Sed do eiusmod tempor"),
+            ("FR-SIT", "12", "250,00", "Incididunt ut labore"),
+            ("AG-AMT", "8", "75,00", "Et dolore magna aliqua"),
+            ("PT-CON", "4", "150,00", "Ut enim ad minim veniam"),
+        ];
+        for (i, (model, count, price, description)) in rows.iter().enumerate() {
+            let y = 520 - 14 * i as i64;
+            text(&mut ops, 84, y, model);
+            text(&mut ops, 184, y, count);
+            text(&mut ops, 264, y, price);
+            text(&mut ops, 344, y, description);
+        }
+
+        let mut document = Document::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let font_id = document.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let content = Content { operations: ops };
+        let content_id = document.add_object(Stream::new(
+            dictionary! {},
+            content.encode().expect("ruled header fixture content must encode"),
+        ));
+        let page_id = document.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => dictionary! { "Font" => dictionary! { "F1" => font_id } },
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        });
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+        let mut bytes = Vec::new();
+        document
+            .save_to(&mut bytes)
+            .expect("ruled header fixture PDF must serialize");
+        bytes
+    }
+
+    #[cfg(feature = "pdf")]
+    #[tokio::test]
+    async fn a_ruled_header_row_does_not_keep_the_rows_below_it_from_being_a_table() {
+        let config = ExtractionConfig {
+            use_cache: false,
+            ..Default::default()
+        };
+        let internal = PdfExtractor::new()
+            .extract_content(&ruled_header_unruled_rows_pdf(), "application/pdf", &config)
+            .await
+            .expect("ruled header fixture extraction");
+        let cells: Vec<String> = internal
+            .tables
+            .iter()
+            .flat_map(|t| t.cells.iter().flatten().cloned())
+            .collect();
+        assert!(
+            cells.iter().any(|c| c.contains("Omschrijving")),
+            "the ruled header table itself must stay: {cells:?}"
+        );
+        let header_tables = internal
+            .tables
+            .iter()
+            .filter(|t| t.cells.iter().flatten().any(|c| c.contains("Omschrijving")))
+            .count();
+        assert_eq!(header_tables, 1, "the ruled rows must not be rebuilt a second time");
+        for order_line in ["CPS-LOR", "FR-SIT", "PT-CON"] {
+            assert!(
+                cells.iter().any(|c| c.contains(order_line)),
+                "the unruled order line `{order_line}` must be a table cell: {cells:?}"
+            );
+        }
+    }
 }
