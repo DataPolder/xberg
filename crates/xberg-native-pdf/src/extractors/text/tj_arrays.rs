@@ -211,6 +211,7 @@ impl<'doc> TextExtractor<'doc> {
             self.cached_current_font.clone(),
         );
         let mut _element_count = 0;
+        let tracking = self.uniform_tj_tracking(array, font_name.as_deref());
 
         for (idx, element) in array.iter().enumerate() {
             _element_count += 1;
@@ -225,7 +226,7 @@ impl<'doc> TextExtractor<'doc> {
                     self.process_tj_string_element(array, idx, s, &metrics, font_name.as_deref(), &mut buffer)?;
                 }
                 TextElement::Offset(offset) => {
-                    buffer = self.process_tj_offset_element(array, idx, *offset, buffer)?;
+                    buffer = self.process_tj_offset_element(array, idx, *offset, tracking, buffer)?;
                 }
             }
         }
@@ -304,6 +305,7 @@ impl<'doc> TextExtractor<'doc> {
         array: &[TextElement],
         idx: usize,
         offset: f32,
+        tracking: Option<f32>,
         mut buffer: TjBuffer,
     ) -> Result<TjBuffer> {
         // Track TJ offset for statistical analysis
@@ -331,7 +333,12 @@ impl<'doc> TextExtractor<'doc> {
         // Per PDF spec: negative offsets increase spacing
         // Use geometry-based adaptive threshold ~keep
         let threshold = self.calculate_adaptive_tj_threshold();
-        if offset < threshold {
+        // On a tracked array an offset no wider than the array's own letter-
+        // spacing is that spacing (or a kerning pair inside it), folded into the
+        // advance like any sub-threshold kerning; only a clearly wider offset is
+        // a word break. See [`Self::uniform_tj_tracking`]. ~keep
+        let is_tracking = tracking.is_some_and(|t| offset >= t - TJ_TRACKING_SPREAD);
+        if offset < threshold && !is_tracking {
             self.flush_buffer_at_tj_word_boundary(array, idx, offset, buffer)
         } else {
             // Sub-threshold offset: matrix advances but the
@@ -353,6 +360,94 @@ impl<'doc> TextExtractor<'doc> {
             self.fold_offset_into_buffer(&mut buffer, offset);
             Ok(buffer)
         }
+    }
+
+    /// The letter-spacing a `TJ` array applies through its own offsets, if it
+    /// draws its text that way: `Some(offset)` when the array places nearly every
+    /// glyph on its own, the same offset between each pair, and writes its word
+    /// ends as space characters.
+    ///
+    /// Some producers justify or track a line by putting one string per glyph and
+    /// one identical negative offset after each (`[(o)-170 (p)-170 ( )-170 (e)
+    /// …] TJ`). Each offset is past the word-boundary threshold, so read one by
+    /// one they made every glyph a word: `o p  e e n  a f s t a n d`. The space
+    /// characters already mark the words, and an offset the array repeats after
+    /// every glyph is spacing, not a boundary. All of:
+    /// - at least [`TJ_TRACKING_MIN_SLOTS`] offsets between two strings;
+    /// - at least [`TJ_TRACKING_SHORT_STRING_PERCENT`] of the strings one or two
+    ///   bytes long (a glyph, or a two-byte code);
+    /// - at least [`TJ_TRACKING_COMMON_PERCENT`] of those offsets within
+    ///   [`TJ_TRACKING_SPREAD`] of their median, and that median at least
+    ///   [`TJ_TRACKING_MIN_OFFSET`] of extra space;
+    /// - a space character in one of the strings, and at least
+    ///   [`TJ_TRACKING_LETTER_PERCENT`] of the non-space glyphs letters: a row of
+    ///   drawing grid labels (`8 7 6 5 4 3 2 1`) is spaced out on purpose.
+    pub(super) fn uniform_tj_tracking(&self, array: &[TextElement], font_name: Option<&str>) -> Option<f32> {
+        let strings: Vec<&[u8]> = array
+            .iter()
+            .filter_map(|e| match e {
+                TextElement::String(s) => Some(s.as_slice()),
+                TextElement::Offset(_) => None,
+            })
+            .collect();
+        if strings.is_empty() {
+            return None;
+        }
+        let short = strings.iter().filter(|s| s.len() <= 2).count();
+        if short * 100 < strings.len() * TJ_TRACKING_SHORT_STRING_PERCENT {
+            return None;
+        }
+        let mut slots: Vec<f32> = array
+            .windows(3)
+            .filter_map(|w| match w {
+                [TextElement::String(_), TextElement::Offset(o), TextElement::String(_)] => Some(*o),
+                _ => None,
+            })
+            .collect();
+        if slots.len() < TJ_TRACKING_MIN_SLOTS {
+            return None;
+        }
+        slots.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median = slots[slots.len() / 2];
+        if median > -TJ_TRACKING_MIN_OFFSET {
+            return None;
+        }
+        let common = slots
+            .iter()
+            .filter(|o| (**o - median).abs() <= TJ_TRACKING_SPREAD)
+            .count();
+        if common * 100 < slots.len() * TJ_TRACKING_COMMON_PERCENT {
+            return None;
+        }
+        let font = font_name.and_then(|name| self.fonts.get(name));
+        // The same byte -> text order the show-string path decodes with: the
+        // font's byte table, then its ToUnicode map, then the extraction
+        // fallback. ~keep
+        let byte_table = font.map(|f| f.get_byte_to_char_table());
+        let decode = |byte: u8| -> Option<char> {
+            let Some(f) = font else {
+                return byte.is_ascii().then_some(byte as char);
+            };
+            match byte_table.as_ref().map(|t| t[byte as usize]) {
+                Some(c) if c != '\0' => Some(c),
+                _ => f
+                    .char_to_unicode(byte as u32)
+                    .unwrap_or_else(|| fallback_extraction_char_to_unicode(f, byte as u32))
+                    .chars()
+                    .next(),
+            }
+        };
+        let glyphs: Vec<char> = strings
+            .iter()
+            .flat_map(|s| s.iter())
+            .filter_map(|&b| decode(b))
+            .collect();
+        let letters = glyphs.iter().filter(|c| c.is_alphabetic()).count();
+        let inked = glyphs.iter().filter(|c| !c.is_whitespace()).count();
+        if letters * 100 < inked * TJ_TRACKING_LETTER_PERCENT {
+            return None;
+        }
+        glyphs.contains(&' ').then_some(median)
     }
 
     /// A `TJ` offset past the word-boundary threshold: flush the current
@@ -485,3 +580,29 @@ impl<'doc> TextExtractor<'doc> {
         }
     }
 }
+
+/// Fewest offsets between two strings a `TJ` array needs before
+/// [`TextExtractor::uniform_tj_tracking`] reads a repeated one as letter-spacing.
+const TJ_TRACKING_MIN_SLOTS: usize = 6;
+
+/// Share (percent) of an array's strings that must be one or two bytes long --
+/// one glyph each -- for [`TextExtractor::uniform_tj_tracking`].
+const TJ_TRACKING_SHORT_STRING_PERCENT: usize = 80;
+
+/// Share (percent) of an array's string-to-string offsets that must sit at its
+/// median for [`TextExtractor::uniform_tj_tracking`].
+const TJ_TRACKING_COMMON_PERCENT: usize = 80;
+
+/// How far (thousandths of an em) an offset may sit from the array's tracking
+/// and still count as it in [`TextExtractor::uniform_tj_tracking`], and how much
+/// wider than the tracking an offset may be before it is a word break.
+const TJ_TRACKING_SPREAD: f32 = 25.0;
+
+/// Smallest tracking (thousandths of an em of extra space) worth reading as
+/// such; ordinary kerning sits well below it.
+const TJ_TRACKING_MIN_OFFSET: f32 = 50.0;
+
+/// Share (percent) of an array's glyphs that must be letters for
+/// [`TextExtractor::uniform_tj_tracking`]: tracked text is words, while evenly
+/// spaced digits are labels (a drawing's grid row) spaced out on purpose.
+const TJ_TRACKING_LETTER_PERCENT: usize = 50;
