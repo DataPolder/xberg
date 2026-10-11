@@ -7,25 +7,146 @@
 //! - [`extract_tables_bordered`] — relaxed Lines-strategy pass for bordered tables
 //!   with 2+ columns. Catches 2-column data tables (label/value) whose cells are
 //!   delimited by stroke lines that `strict()` skips due to `min_table_columns=3`.
-//! - [`extract_tables_heuristic`] — text-layer fallback that reuses the same
+//! - [`extract_tables_heuristic_around`] — text-layer fallback that reuses the same
 //!   spatial reconstruction the layout-detection path uses, but without
 //!   requiring layout hints. Catches tables that xberg_native_pdf's grid detector
 //!   misses (e.g. invoice line items, financial tables without ruling lines).
 //!
 //! The default extraction flow in `extractors::pdf::extraction` runs all three
-//! per-page in priority order (native → bordered → heuristic), where each tier
-//! only runs on pages where the previous tier found nothing.
+//! per-page in priority order (native → bordered → heuristic). Bordered only
+//! runs on pages where native found nothing; the heuristic runs on the text
+//! outside the tables the first two found (a page whose found table has no box
+//! is skipped whole).
 
 use super::NativeDocument;
 use crate::pdf::error::{PdfError, Result};
 use crate::pdf::table_reconstruct::table_to_markdown;
 use crate::types::{BoundingBox, ProcessingWarning, Table};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug)]
 pub(crate) struct NativeTable {
     pub table: Table,
     pub grid: Option<crate::types::TableGrid>,
+}
+
+/// Glyphs that mark a list item rather than start a table cell.
+const LIST_MARKERS: &[char] = &['►', '▶', '•', '■', '●', '▪', '➤', '◆'];
+
+/// Whether `table` is a bullet list the column clustering cut into a grid:
+/// - a cell holds nothing but list markers (the marker column split off its
+///   text), or
+/// - a row opens with a list marker and fewer than half the rows fill two
+///   cells -- the wrapped prose of a `► ►` callout, one line per row.
+fn is_bullet_list_grid(table: &Table) -> bool {
+    let is_marker = |c: char| LIST_MARKERS.contains(&c);
+    let marker_only = table.cells.iter().flatten().any(|cell| {
+        let cell = cell.trim();
+        !cell.is_empty() && cell.chars().all(|c| c.is_whitespace() || is_marker(c))
+    });
+    if marker_only {
+        return true;
+    }
+    let opens_with_marker = table.cells.iter().any(|row| {
+        row.iter()
+            .map(|cell| cell.trim())
+            .find(|cell| !cell.is_empty())
+            .is_some_and(|cell| cell.starts_with(is_marker))
+    });
+    let filled_rows = table
+        .cells
+        .iter()
+        .filter(|row| row.iter().filter(|cell| !cell.trim().is_empty()).count() >= 2)
+        .count();
+    opens_with_marker && filled_rows * 2 < table.cells.len()
+}
+
+/// How far past a page's column gutter a table must reach on both sides to
+/// count as crossing it.
+const GUTTER_CROSSING_MARGIN: f64 = 5.0;
+
+/// Prose lines a page needs on each side of a gap before
+/// [`prose_column_gutter`] calls it a two-column layout.
+const MIN_GUTTER_SIDE_PROSE: usize = 8;
+
+/// The x of the gutter of a two-column prose page, or `None`.
+///
+/// A vertical band in the middle of the content (30-70 % of its width) that no
+/// line-sized segment crosses, with at least [`MIN_GUTTER_SIDE_PROSE`] prose
+/// lines (four or more words) wholly on each side. Prose on both sides is what
+/// makes it a column layout: a table whose columns happen to leave a gap has
+/// codes or numbers on at least one side. Segments wider than 55 % of the
+/// content (full-width headings, footers) are left out of the search.
+fn prose_column_gutter(segments: &[crate::pdf::hierarchy::SegmentData]) -> Option<f32> {
+    let left = segments.iter().map(|s| s.x).fold(f32::INFINITY, f32::min);
+    let right = segments.iter().map(|s| s.x + s.width).fold(f32::NEG_INFINITY, f32::max);
+    let width = right - left;
+    if !width.is_finite() || width < 300.0 {
+        return None;
+    }
+    let pieces: Vec<_> = segments
+        .iter()
+        .filter(|s| s.width > 0.0 && s.width <= width * 0.55 && !s.text.trim().is_empty())
+        .collect();
+    let prose = |s: &&crate::pdf::hierarchy::SegmentData| {
+        s.text
+            .split_whitespace()
+            .filter(|w| w.chars().any(char::is_alphabetic))
+            .count()
+            >= 4
+    };
+    let mut best: Option<(f32, f32)> = None;
+    let mut run_start: Option<f32> = None;
+    let mut x = left + width * 0.3;
+    while x <= left + width * 0.7 {
+        let crossed = pieces.iter().any(|s| s.x < x && s.x + s.width > x);
+        match (crossed, run_start) {
+            (false, None) => run_start = Some(x),
+            (true, Some(start)) => {
+                if best.is_none_or(|(a, b)| x - start > b - a) {
+                    best = Some((start, x));
+                }
+                run_start = None;
+            }
+            _ => {}
+        }
+        x += 2.0;
+    }
+    if let Some(start) = run_start
+        && best.is_none_or(|(a, b)| x - start > b - a)
+    {
+        best = Some((start, x));
+    }
+    let gutter = best.map(|(a, b)| (a + b) / 2.0)?;
+    let left_prose = pieces.iter().filter(|s| s.x + s.width <= gutter && prose(s)).count();
+    let right_prose = pieces.iter().filter(|s| s.x >= gutter && prose(s)).count();
+    (left_prose >= MIN_GUTTER_SIDE_PROSE && right_prose >= MIN_GUTTER_SIDE_PROSE).then_some(gutter)
+}
+
+/// Whether a row of `table` holds a numbered section heading: a dotted number
+/// of two or more levels (`2.1.3`) at a word boundary, followed by a title of at
+/// least three words that opens with a capitalised word of four or more letters
+/// (`2.1.3 Veiligheidszone op de grond`). A version number in a data row
+/// (`9.0.0 Helmet 1510`) is followed by figures, not a title.
+fn has_section_heading_row(table: &Table) -> bool {
+    let is_section_number = |token: &str| {
+        let token = token.trim_end_matches('.');
+        let parts: Vec<&str> = token.split('.').collect();
+        parts.len() >= 2
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.len() <= 3 && p.chars().all(|c| c.is_ascii_digit()))
+    };
+    let is_word = |token: &str| token.chars().all(|c| c.is_alphabetic() || c == '-' || c == ',');
+    table.cells.iter().any(|row| {
+        let tokens: Vec<&str> = row.iter().flat_map(|cell| cell.split_whitespace()).collect();
+        tokens.windows(4).any(|w| {
+            is_section_number(w[0])
+                && w[1].chars().next().is_some_and(char::is_uppercase)
+                && w[1].chars().count() >= 4
+                && w[1..].iter().all(|t| is_word(t))
+        })
+    })
 }
 
 /// Cap on candidate vertical regions per page. Real tables fit comfortably
@@ -356,10 +477,35 @@ pub(crate) struct HeuristicTableExtraction {
 ///
 /// Returns the detected tables together with ownership of the exact hierarchy
 /// segments used for reconstruction.
+#[cfg(test)]
 pub(crate) fn extract_tables_heuristic(
     doc: &mut NativeDocument,
     allow_single_column: bool,
     skip_pages: &HashSet<u32>,
+) -> Result<HeuristicTableExtraction> {
+    extract_tables_heuristic_around(doc, allow_single_column, skip_pages, &HashMap::new())
+}
+
+/// The heuristic table tier (see `extract_tables_heuristic`) for a page that already carries tables from a
+/// higher tier: on a page listed in `covered`, the heuristic runs on the text
+/// OUTSIDE those tables' boxes instead of not at all.
+///
+/// A ruled table found by the native or bordered tier often covers only part
+/// of what the page tabulates. A purchase order whose ruled header row is the
+/// only ruled part came out as a two-row table, and the order lines below it
+/// -- unruled, a table on the next page where nothing ruled sat above them --
+/// stayed loose paragraphs, their group rows promoted to headings. Skipping
+/// the whole page for the sake of one ruled table left exactly that gap.
+///
+/// A segment whose centre lies inside a covered box is left out before the
+/// words are clustered, so the heuristic never rebuilds a table the higher
+/// tier already owns. A page whose covered table has no box cannot be masked
+/// and belongs in `skip_pages`.
+pub(crate) fn extract_tables_heuristic_around(
+    doc: &mut NativeDocument,
+    allow_single_column: bool,
+    skip_pages: &HashSet<u32>,
+    covered: &HashMap<u32, Vec<BoundingBox>>,
 ) -> Result<HeuristicTableExtraction> {
     use crate::pdf::table_reconstruct::{HocrWord, segments_to_words};
 
@@ -396,6 +542,23 @@ pub(crate) fn extract_tables_heuristic(
             .fold(0.0_f32, f32::max)
             .max(792.0);
 
+        let page_segments = segments;
+        let outside: Vec<_>;
+        let segments = match covered.get(&page_number) {
+            Some(boxes) if !boxes.is_empty() => {
+                outside = segments
+                    .iter()
+                    .filter(|segment| {
+                        let x = f64::from(segment.x + segment.width / 2.0);
+                        let y = f64::from(segment.y + segment.height / 2.0);
+                        !boxes.iter().any(|b| x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1)
+                    })
+                    .cloned()
+                    .collect();
+                &outside
+            }
+            _ => segments,
+        };
         let words: Vec<HocrWord> = segments_to_words(segments, page_height);
         if words.len() < 4 {
             continue;
@@ -447,6 +610,43 @@ pub(crate) fn extract_tables_heuristic(
         if crate::pdf::table_reconstruct::page_has_lifted_rotation_frame(segments, page_height) {
             for table in &mut tables[page_tables_start..] {
                 table.bounding_box = None;
+            }
+        }
+
+        // On a page the heuristic only reads around a higher tier's tables, a
+        // table whose box falls off the page was built from coordinates the
+        // page cannot hold (rotated content read in its own frame) and would
+        // duplicate text the higher tier's table or the prose already carries.
+        // Such a page was never read by this tier before it learned to read
+        // around covered tables, so dropping those keeps it where it was. ~keep
+        //
+        // Likewise:
+        // - a grid that is a bullet list cut into columns (the `► ►` lines of a
+        //   `BELANGRIJK` callout), see [`is_bullet_list_grid`];
+        // - a grid that crosses the gutter of a two-column page, which reads
+        //   the prose of both columns as rows, see [`prose_column_gutter`];
+        // - a grid that took in a numbered section heading as a row, see
+        //   [`has_section_heading_row`].
+        // Losing prose or a heading costs more than missing a table, so each
+        // drops the table rather than trimming it. ~keep
+        if covered.get(&page_number).is_some_and(|boxes| !boxes.is_empty()) {
+            let gutter = prose_column_gutter(page_segments);
+            let mut index = page_tables_start;
+            while index < tables.len() {
+                let table = &tables[index];
+                let off_page = table
+                    .bounding_box
+                    .is_some_and(|b| b.x0 < 0.0 || b.y0 < 0.0 || b.y1 > f64::from(page_height) + 1.0);
+                let crosses_gutter = gutter.is_some_and(|g| {
+                    table.bounding_box.is_some_and(|b| {
+                        b.x0 < f64::from(g) - GUTTER_CROSSING_MARGIN && b.x1 > f64::from(g) + GUTTER_CROSSING_MARGIN
+                    })
+                });
+                if off_page || crosses_gutter || is_bullet_list_grid(table) || has_section_heading_row(table) {
+                    tables.remove(index);
+                } else {
+                    index += 1;
+                }
             }
         }
     }
@@ -3688,6 +3888,103 @@ mod tests {
 
         let tables = reconstruct_page_region_tables(&[first, second], 792.0, 1, false, 0);
         assert_eq!(tables.len(), 2, "ordinary table headers must remain distinct");
+    }
+
+    fn line_segment(text: &str, x: f32, y: f32, width: f32) -> crate::pdf::hierarchy::SegmentData {
+        crate::pdf::hierarchy::SegmentData {
+            text: text.to_string(),
+            x,
+            y,
+            width,
+            height: 9.0,
+            font_size: 9.0,
+            is_bold: false,
+            is_italic: false,
+            is_monospace: false,
+            baseline_y: y,
+            rotation_degrees: 0.0,
+            assigned_role: None,
+        }
+    }
+
+    /// The shape of a two-column paper page whose heuristic table ran across
+    /// both columns and took their prose in as rows: prose lines on both sides
+    /// of a clear gutter.
+    #[test]
+    fn a_two_column_prose_page_has_a_gutter() {
+        let mut segments = Vec::new();
+        for i in 0..12 {
+            let y = 700.0 - 12.0 * i as f32;
+            segments.push(line_segment("lorem ipsum dolor sit amet consectetur", 72.0, y, 225.0));
+            segments.push(line_segment(
+                "sed do eiusmod tempor incididunt ut labore",
+                315.0,
+                y,
+                225.0,
+            ));
+        }
+        let gutter = prose_column_gutter(&segments).expect("a two-column prose page");
+        assert!((297.0..=315.0).contains(&gutter), "gutter at {gutter}");
+    }
+
+    /// An order page: codes on the left, descriptions on the right, a gap in
+    /// between. No prose on the left, so no column layout.
+    #[test]
+    fn an_order_table_page_has_no_gutter() {
+        let mut segments = Vec::new();
+        for i in 0..12 {
+            let y = 700.0 - 14.0 * i as f32;
+            segments.push(line_segment("CPS-LOR", 83.0, y, 40.0));
+            segments.push(line_segment("3", 190.0, y, 6.0));
+            segments.push(line_segment("Lorem ipsum dolor sit amet per server", 340.0, y, 200.0));
+        }
+        assert_eq!(prose_column_gutter(&segments), None);
+    }
+
+    /// The shape of a heuristic table under a figure that took the next section
+    /// heading (`2.1.3 Veiligheidszone op de grond …`) in as a row; a version
+    /// number in a data row is not a heading.
+    #[test]
+    fn a_numbered_section_heading_row_marks_a_swallowed_heading() {
+        let table = |rows: &[&[&str]]| Table {
+            cells: rows.iter().map(|r| r.iter().map(|c| c.to_string()).collect()).collect(),
+            ..Table::default()
+        };
+        assert!(has_section_heading_row(&table(&[
+            &["Lorem 2 [A] [B]", "ipsum 001"],
+            &["Afb. 2 [A] [B] [F] 2.1.3", "Veiligheidszone op de grond op perceel"],
+        ])));
+        assert!(!has_section_heading_row(&table(&[
+            &["9.0.0", "Helmet", "1510", "15383"],
+            &["", "Vest", "2000", "15043"],
+        ])));
+        assert!(!has_section_heading_row(&table(&[
+            &["2.5", "bar", "Lorem"],
+            &["3.0", "bar", "Ipsum"]
+        ])));
+    }
+
+    #[test]
+    fn a_bullet_callout_cut_into_columns_is_not_a_table() {
+        let table = |rows: &[&[&str]]| Table {
+            cells: rows.iter().map(|r| r.iter().map(|c| c.to_string()).collect()).collect(),
+            ..Table::default()
+        };
+        assert!(is_bullet_list_grid(&table(&[
+            &["► ►", "Lorem ipsum dolor sit amet"],
+            &["", "consectetur adipiscing elit."],
+        ])));
+        assert!(is_bullet_list_grid(&table(&[
+            &["► ► Lorem ipsum dolor sit", ""],
+            &["(amet 09027).", "Consectetur adipiscing"],
+            &["elit sed do eiusmod", ""],
+            &["tempor (Ø80 mm).", ""],
+        ])));
+        assert!(!is_bullet_list_grid(&table(&[
+            &["• Lorem ipsum", "• Dolor sit"],
+            &["Amet", "Elit"],
+        ])));
+        assert!(!is_bullet_list_grid(&table(&[&["Lorem", "3"], &["Ipsum", "4"]])));
     }
 
     #[test]
