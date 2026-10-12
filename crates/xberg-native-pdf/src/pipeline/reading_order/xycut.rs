@@ -303,6 +303,48 @@ enum TwoColumnProse {
 /// #3024: a table cell holding a bare number -- digits with at most a decimal point, comma,
 /// percent sign, dash, plus-minus or equals sign, and short. `2.1` alone is one too, which is
 /// why the share is asked of a whole column and not of one line. ~keep
+/// X33 (#3183): a word gap narrower than this, with words on both sides of a column cut, is a
+/// line the cut runs through -- a column gutter is wider. ~keep
+const TORN_LINE_MAX_GAP_PT: f32 = 8.0;
+/// X33 (#3183): how many rows a column cut may run through before it is no gutter. ~keep
+const MIN_TORN_ROWS: usize = 3;
+
+/// X33 (#3183): a column cut at `split_x` that runs through the word gaps of the region's lines.
+///
+/// A single-column page whose producer writes one span (or one font run) per word has valleys
+/// in its projection -- an indent, a short line's end, a bold run's edge -- and every full-width
+/// line has words a few points either side of them. Cut there, each such line was torn in two
+/// and its halves read in different columns (`… Settings > System &` here, `updates > Power
+/// off` a column later). A real gutter has no line running through it. The cut is refused when
+/// at least `MIN_TORN_ROWS` rows, and a quarter of the region's rows, have words on both sides
+/// of it closer than `TORN_LINE_MAX_GAP_PT`.
+///
+/// A span crossing the cut is not counted: a full-width title or legend above two columns is
+/// one span or a few, and the band peel and `partition_lines_at` handle it; counting it refused
+/// the sidebar gutter of a journal's first page beneath its full-width title. ~keep
+fn cut_tears_lines(all_spans: &[TextSpan], indices: &[usize], split_x: f32) -> bool {
+    let mut rows = 0usize;
+    let mut torn = 0usize;
+    for row in group_indices_into_rows(all_spans, indices) {
+        rows += 1;
+        let spans: Vec<usize> = row.into_iter().flatten().collect();
+        let left_end = spans
+            .iter()
+            .filter(|&&i| all_spans[i].bbox.left() < split_x)
+            .map(|&i| ink_right(&all_spans[i]))
+            .fold(f32::NEG_INFINITY, f32::max);
+        let right_start = spans
+            .iter()
+            .filter(|&&i| all_spans[i].bbox.left() >= split_x)
+            .map(|&i| all_spans[i].bbox.left())
+            .fold(f32::INFINITY, f32::min);
+        if left_end.is_finite() && right_start.is_finite() && right_start - left_end < TORN_LINE_MAX_GAP_PT {
+            torn += 1;
+        }
+    }
+    torn >= MIN_TORN_ROWS && torn * 4 >= rows
+}
+
 fn is_bare_number(text: &str) -> bool {
     text.chars().count() <= 8
         && text.chars().any(|c| c.is_ascii_digit())
@@ -2409,6 +2451,11 @@ impl XYCutStrategy {
                 skipped = true;
                 continue;
             }
+            // X33 (#3183): a valley the region's lines run through is no gutter; try the next
+            // one, which on a journal page beneath a full-width title is the sidebar's. ~keep
+            if cut_tears_lines(all_spans, indices, split_x) {
+                continue;
+            }
             if skipped && !page_gutter.is_some_and(|gutter| (split_x - gutter).abs() <= FALLBACK_GUTTER_TOLERANCE_PT) {
                 return None;
             }
@@ -2466,6 +2513,11 @@ impl XYCutStrategy {
         // to the side holding the majority of its inked width, so a line entirely on one
         // side partitions exactly as `left edge < split_x` already did (unaffected), and
         // only a straddling line's assignment changes. ~keep
+        // X33 (#3183): the peak-trough fallback reaches here without the valley loop. ~keep
+        if cut_tears_lines(all_spans, indices, split_x) {
+            return None;
+        }
+
         let (left, right) = self.partition_lines_at(all_spans, indices, split_x);
 
         if left.is_empty() || right.is_empty() {
@@ -3163,6 +3215,110 @@ mod tests {
                 next.bbox.y
             );
         }
+    }
+
+    /// X33 (#3183): page 11 of a wearable's user guide as it enters the XY-cut, its real
+    /// geometry with the letters replaced by lorem ipsum (`xycut_3183_torn_lines.tsv`). A single
+    /// column of instructions, each line several font runs (bold menu names); the projection
+    /// opens valleys at run edges, and cut there, a line's runs were read in different columns.
+    fn torn_lines_page_3183() -> Vec<TextSpan> {
+        include_str!("xycut_3183_torn_lines.tsv")
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.is_empty())
+            .map(|line| {
+                let f: Vec<&str> = line.split('\t').collect();
+                let n = |k: usize| f[k].parse::<f32>().expect("fixture number");
+                make_span_text(n(0), n(1), n(2), n(3), &f[5].replace('_', " "), n(4))
+            })
+            .collect()
+    }
+
+    /// A single column is read row by row, top to bottom: no span from `from_y` up is read
+    /// before a span of a row more than half a line above it. Lone bullets are left out: where a hanging bullet is
+    /// read is the marker passes' business, not the column cut's.
+    fn assert_rows_read_top_to_bottom(spans: &[TextSpan], from_y: f32) {
+        let order: Vec<TextSpan> = XYCutStrategy::new()
+            .apply(spans.to_vec(), &ReadingOrderContext::new())
+            .expect("the XY-cut orders the page")
+            .into_iter()
+            .map(|ordered| ordered.span)
+            .filter(|span| span.text.trim().chars().any(char::is_alphanumeric) && span.bbox.y >= from_y)
+            .collect();
+        for (at, span) in order.iter().enumerate() {
+            if let Some(later) = order[at + 1..].iter().find(|s| s.bbox.y > span.bbox.y + 6.0) {
+                panic!(
+                    "`{}` (y {}) is read before `{}` (y {}), a row above it",
+                    span.text, span.bbox.y, later.text, later.bbox.y
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_column_cut_through_a_single_columns_lines_is_not_taken_3183() {
+        // The page's first section (`Method 1`, `Method 2`, from y 600 up). Lower down, a
+        // short instruction list opens a cut that tears fewer than a quarter of its region's
+        // rows; X33 leaves that cut alone, and this test does not claim it. ~keep
+        assert_rows_read_top_to_bottom(&torn_lines_page_3183(), 600.0);
+    }
+
+    /// X33 control: a prose sidebar beside the body, beneath a title and an author line that run
+    /// the full width one word per span (a journal's first page), keeps its column: the title's
+    /// word gaps straddle no gutter the sidebar opens, and the sidebar is read before the body.
+    #[test]
+    fn a_sidebar_beneath_a_full_width_title_stays_a_column_3183() {
+        let mut spans = Vec::new();
+        spans.extend(words_3173(
+            "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt",
+            30.0,
+            760.0,
+        ));
+        spans.extend(words_3173(
+            "Ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi aliquip",
+            30.0,
+            745.0,
+        ));
+        spans.extend(words_3173(
+            "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore",
+            30.0,
+            730.0,
+        ));
+        let mut y = 700.0;
+        for _ in 0..14 {
+            spans.extend(words_3173("Citation lorem ipsum dolor", 30.0, y));
+            spans.extend(words_3173(
+                "Body text lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor",
+                190.0,
+                y,
+            ));
+            y -= 12.0;
+        }
+        let order = read_3173(&spans);
+        let last_sidebar = order.iter().rposition(|t| t == "Citation").expect("sidebar read");
+        let first_body = order.iter().position(|t| t == "Body").expect("body read");
+        assert!(last_sidebar < first_body, "the sidebar is read whole before the body");
+    }
+
+    /// X33 control: a cut between a label column and a value column 40 pt apart tears no line;
+    /// `cut_tears_lines` lets it through, while a cut through a line's word spaces does not.
+    #[test]
+    fn a_cut_at_a_table_edge_tears_no_line_3183() {
+        let mut spans = Vec::new();
+        let mut y = 700.0;
+        for _ in 0..8 {
+            spans.extend(words_3173("Lorem ipsum label", 40.0, y));
+            spans.extend(words_3173("12,50 EUR", 180.0, y));
+            y -= 12.0;
+        }
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        assert!(
+            !cut_tears_lines(&spans, &indices, 160.0),
+            "the table edge tears no line"
+        );
+        assert!(
+            cut_tears_lines(&spans, &indices, 70.0),
+            "a cut inside the label column does"
+        );
     }
 
     /// A narrow sidebar of prose beside the body (a journal's first page: citation,
