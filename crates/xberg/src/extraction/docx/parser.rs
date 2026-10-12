@@ -76,6 +76,10 @@ pub struct Paragraph {
     pub numbering_id: Option<i64>,
     /// Indentation level within the numbering definition (0-based).
     pub numbering_level: Option<i64>,
+    /// Outline level set on the paragraph itself (`w:pPr/w:outlineLvl`, 0-based),
+    /// which outranks the one its style carries. `9` is Word's "body text".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline_level: Option<u8>,
     /// Bookmark names (`w:bookmarkStart/@w:name`) that start inside this paragraph.
     ///
     /// A generated table of contents links each entry to the `_Toc…` bookmark Word
@@ -335,6 +339,9 @@ fn collect_revision_attrs(e: &BytesStart) -> (Option<String>, Option<String>, Op
     (id, author, date)
 }
 
+/// `w:outlineLvl` value Word uses for "body text": not part of the outline.
+const BODY_TEXT_OUTLINE_LEVEL: u8 = 9;
+
 /// Map heading style name to markdown heading level (fallback for docs without styles.xml).
 fn heading_level_from_style_name(style: &str) -> Option<u8> {
     match style {
@@ -456,6 +463,23 @@ impl Document {
         }
     }
 
+    /// Heading level of `paragraph`: its own `w:outlineLvl` when it sets one,
+    /// otherwise its style's ([`Self::resolve_heading_level`]).
+    ///
+    /// Word lets a paragraph state its outline level directly, without a heading
+    /// style (Paragraph > Outline level in the dialog, written as
+    /// `w:pPr/w:outlineLvl`). Word's navigation pane and table of contents treat
+    /// it as a heading of that level; reading only `w:pStyle` turned it into body
+    /// text. A direct level outranks the style's, and `9` ("body text") turns a
+    /// heading style's paragraph into body text.
+    pub(crate) fn paragraph_heading_level(&self, paragraph: &Paragraph) -> Option<u8> {
+        match paragraph.outline_level {
+            Some(level) if level >= BODY_TEXT_OUTLINE_LEVEL => None,
+            Some(level) => Some(level.saturating_add(1).min(6)),
+            None => paragraph.style.as_deref().and_then(|s| self.resolve_heading_level(s)),
+        }
+    }
+
     /// Resolve heading level for a paragraph style using the StyleCatalog.
     ///
     /// Walks the style inheritance chain to find `outline_level`.
@@ -472,6 +496,11 @@ impl Document {
                 visited += 1;
                 if let Some(style_def) = catalog.styles.get(id) {
                     if let Some(level) = style_def.paragraph_properties.outline_level {
+                        // `9` is Word's "body text": the style says this is NOT
+                        // a heading. Read as a level it became a level-6 heading.
+                        if level >= BODY_TEXT_OUTLINE_LEVEL {
+                            return None;
+                        }
                         // `outline_level` is a document-controlled `u8` (styles.xml's
                         // `w:outlineLvl w:val`) that can legally be as high as 255; a
                         // plain `level + 1` overflows when `level == 255` (panics under
@@ -764,7 +793,7 @@ impl Document {
             Self::ensure_blank_line(output);
         }
 
-        let heading_level = paragraph.style.as_deref().and_then(|s| self.resolve_heading_level(s));
+        let heading_level = self.paragraph_heading_level(paragraph);
         let md = paragraph.to_markdown(&self.numbering_defs, list_counters, heading_level);
         if md.is_empty() {
             *prev_was_list = is_list;
@@ -1711,6 +1740,7 @@ fn apply_paragraph_property(
             "w:pStyle" => para.style = get_val_attr_string(e),
             "w:ilvl" => para.numbering_level = get_val_attr(e).map(clamp_numbering_level),
             "w:numId" => para.numbering_id = get_val_attr(e),
+            "w:outlineLvl" => para.outline_level = get_val_attr(e).and_then(|v| u8::try_from(v).ok()),
             _ => {}
         }
     }
@@ -2760,7 +2790,7 @@ impl<R: Read + Seek> DocxParser<R> {
                                 apply_run_formatting(e, &mut current_run);
                             }
                         }
-                        "w:pStyle" | "w:ilvl" | "w:numId" => {
+                        "w:pStyle" | "w:ilvl" | "w:numId" | "w:outlineLvl" => {
                             apply_paragraph_property(e, &mut table_stack, &mut current_paragraph);
                         }
                         "w:hyperlink" => {
@@ -2900,7 +2930,7 @@ impl<R: Read + Seek> DocxParser<R> {
                                 apply_run_formatting(e, &mut current_run);
                             }
                         }
-                        "w:pStyle" | "w:ilvl" | "w:numId" => {
+                        "w:pStyle" | "w:ilvl" | "w:numId" | "w:outlineLvl" => {
                             apply_paragraph_property(e, &mut table_stack, &mut current_paragraph);
                         }
                         "w:br" => {
