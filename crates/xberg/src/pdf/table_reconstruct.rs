@@ -2195,6 +2195,42 @@ fn has_row_number_column(data_rows: &[Vec<String>], num_cols: usize) -> bool {
 /// guard (empty-cell fraction, shredded-row, alpha-ratio, unique-word, and
 /// header-duplication checks) still applies.
 pub(crate) fn is_well_formed_table_core(grid: &[Vec<String>], skip_columnar_prose_guard: bool) -> bool {
+    is_well_formed_table_inner(grid, skip_columnar_prose_guard, false)
+}
+
+/// [`is_well_formed_borderless_table`] for a grid whose rows are padded
+/// multi-line blocks, each row one slab of the page (X34, #3225; see
+/// `take_row_block_tables` in `pdf::native::table`).
+///
+/// Every test applies except the prose-like-rows test, which reads a row whose
+/// text is mostly letters as a line of prose. That holds where a row is one line
+/// of the page. A row block's row is several lines of label-like cells (a field
+/// name, `Example : true`, a type, `optional`), mostly letters by nature, and
+/// what keeps prose out of it is geometric: the padding between rows, the
+/// shared column tracks, the header labels and the straddled-boundary test.
+pub(crate) fn is_well_formed_row_block_table(
+    grid: &[Vec<String>],
+    region: &[HocrWord],
+    column_positions: &[u32],
+    horizontal_rules: usize,
+) -> bool {
+    if !is_well_formed_table_inner(grid, false, true) {
+        return false;
+    }
+    if !short_grid_has_positive_table_evidence(grid) {
+        return false;
+    }
+    if horizontal_rules > 0 {
+        return true;
+    }
+    straddled_boundary_ratio(region, column_positions) < MAX_STRADDLED_BOUNDARY_RATIO
+}
+
+fn is_well_formed_table_inner(
+    grid: &[Vec<String>],
+    skip_columnar_prose_guard: bool,
+    skip_row_prose_guard: bool,
+) -> bool {
     if grid.len() < 2 {
         return false;
     }
@@ -2246,7 +2282,7 @@ pub(crate) fn is_well_formed_table_core(grid: &[Vec<String>], skip_columnar_pros
         return false;
     }
 
-    if data_rows.len() >= 3 && num_cols >= 2 {
+    if !skip_row_prose_guard && data_rows.len() >= 3 && num_cols >= 2 {
         let mut prose_like_rows = 0usize;
         let mut eligible_rows = 0usize;
 
