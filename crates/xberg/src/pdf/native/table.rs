@@ -564,17 +564,6 @@ pub(crate) fn extract_tables_heuristic_around(
             continue;
         }
 
-        let mut regions = cluster_words_into_vertical_regions(&words);
-        if regions.len() > MAX_REGIONS_PER_PAGE {
-            tracing::debug!(
-                page = page_number,
-                regions = regions.len(),
-                cap = MAX_REGIONS_PER_PAGE,
-                "heuristic table extraction: capping candidate regions on this page",
-            );
-            regions.truncate(MAX_REGIONS_PER_PAGE);
-        }
-
         // Signal 1 of the #1399 admission test: a page whose producer drew
         // ruling lines is one where a table candidate is credible on its face.
         // One `extract_paths` call per page, reusing the layout gate's own rule
@@ -588,8 +577,8 @@ pub(crate) fn extract_tables_heuristic_around(
         .map_or(0, |paths| crate::pdf::rules::count_rules(&paths).0);
 
         let page_tables_start = tables.len();
-        tables.extend(reconstruct_page_region_tables(
-            &regions,
+        tables.extend(heuristic_page_tables(
+            &words,
             page_height,
             page_number,
             allow_single_column,
@@ -658,6 +647,39 @@ pub(crate) fn extract_tables_heuristic_around(
             used_structure_tree,
         },
     })
+}
+
+/// The heuristic tables of one page from its words: first the row-block tables
+/// of padded multi-line rows (X34, #3225, see [`take_row_block_tables`]), whose
+/// words the row-gap split would otherwise cut into one rejected region per row,
+/// then the ordinary vertical regions of the words that remain.
+fn heuristic_page_tables(
+    words: &[crate::pdf::table_reconstruct::HocrWord],
+    page_height: f32,
+    page_number: u32,
+    allow_single_column: bool,
+    horizontal_rules: usize,
+) -> Vec<Table> {
+    let (mut tables, words) =
+        take_row_block_tables(words, page_height, page_number, allow_single_column, horizontal_rules);
+    let mut regions = cluster_words_into_vertical_regions(&words);
+    if regions.len() > MAX_REGIONS_PER_PAGE {
+        tracing::debug!(
+            page = page_number,
+            regions = regions.len(),
+            cap = MAX_REGIONS_PER_PAGE,
+            "heuristic table extraction: capping candidate regions on this page",
+        );
+        regions.truncate(MAX_REGIONS_PER_PAGE);
+    }
+    tables.extend(reconstruct_page_region_tables(
+        &regions,
+        page_height,
+        page_number,
+        allow_single_column,
+        horizontal_rules,
+    ));
+    tables
 }
 
 fn reconstruct_page_region_tables(
@@ -1534,23 +1556,27 @@ fn cluster_words_into_vertical_regions(
 
     attach_aligned_numeric_headers(&mut regions, median_height, row_tolerance);
 
-    regions.retain(|r| {
-        if r.len() < 4 {
-            return false;
-        }
-        let mut row_ycs: Vec<f32> = r.iter().map(row_center).collect();
-        row_ycs.sort_by(|left, right| left.total_cmp(right));
-        row_ycs.dedup_by(|a, b| (*a - *b).abs() <= row_tolerance_f);
-        if row_ycs.len() < 3 {
-            return false;
-        }
-        let mut xs: Vec<u32> = r.iter().map(|w| w.left).collect();
-        xs.sort_unstable();
-        xs.dedup_by(|a, b| a.abs_diff(*b) <= REGION_X_TRACK_TOLERANCE);
-        xs.len() >= 2
-    });
+    regions.retain(|r| is_table_candidate_region(r, row_tolerance_f));
 
     regions
+}
+
+/// Whether a region is worth a table attempt: four or more words on three or
+/// more rows and two or more left-edge tracks.
+fn is_table_candidate_region(region: &[crate::pdf::table_reconstruct::HocrWord], row_tolerance: f32) -> bool {
+    if region.len() < 4 {
+        return false;
+    }
+    let mut row_ycs: Vec<f32> = region.iter().map(row_center).collect();
+    row_ycs.sort_by(|left, right| left.total_cmp(right));
+    row_ycs.dedup_by(|a, b| (*a - *b).abs() <= row_tolerance);
+    if row_ycs.len() < 3 {
+        return false;
+    }
+    let mut xs: Vec<u32> = region.iter().map(|w| w.left).collect();
+    xs.sort_unstable();
+    xs.dedup_by(|a, b| a.abs_diff(*b) <= REGION_X_TRACK_TOLERANCE);
+    xs.len() >= 2
 }
 
 /// Split `words` into vertically-contiguous slabs on row-centre gaps larger than
@@ -1595,6 +1621,397 @@ fn split_words_on_row_gaps(
         regions.push(current);
     }
     regions
+}
+
+/// Fewest row slabs, the header included, before a run is read as a row-block
+/// table (see [`take_row_block_tables`]): a header and two data rows. ~keep
+const ROW_BLOCK_MIN_SLABS: usize = 3;
+/// Fewest lines a data slab carries. The shape this pass is for is a table whose
+/// rows are multi-line cells set apart by padding; a run of single-line slabs is
+/// a spaced label/value list or a form, left to the ordinary path. ~keep
+const ROW_BLOCK_MIN_DATA_LINES: usize = 2;
+/// Fewest column tracks a data slab opens a cell on. ~keep
+const ROW_BLOCK_MIN_TRACKS: usize = 2;
+/// Most lines of a data slab that open a cell in every column (see
+/// [`row_block_data_slab_fits`]). ~keep
+const ROW_BLOCK_MAX_FULL_LINES: usize = 1;
+/// Largest whitespace between two slabs of one run, in median word heights: the
+/// padding between rows, not the space before a new block of the page. ~keep
+const ROW_BLOCK_MAX_GAP_HEIGHTS: f32 = 4.0;
+/// How far, as a factor either way, a gap between data slabs may stray from the
+/// run's first one: rows of one table share one cell padding. The header gap may
+/// be smaller, never larger by more than this. ~keep
+const ROW_BLOCK_GAP_RATIO: f32 = 1.5;
+/// Horizontal gap, in median word heights, that separates two header cells. ~keep
+const ROW_BLOCK_HEADER_CELL_GAP_HEIGHTS: f32 = 1.5;
+/// Longest a header cell may be and still read as a column label. ~keep
+const ROW_BLOCK_HEADER_MAX_WORDS: usize = 3;
+const ROW_BLOCK_HEADER_MAX_CHARS: usize = 30;
+
+/// One slab of [`split_words_on_row_gaps`]: its words, its vertical extent and
+/// its lines (words grouped on their row centre, each line in reading order).
+struct RowSlab {
+    words: Vec<crate::pdf::table_reconstruct::HocrWord>,
+    top: u32,
+    bottom: u32,
+    lines: Vec<Vec<crate::pdf::table_reconstruct::HocrWord>>,
+}
+
+impl RowSlab {
+    fn new(words: Vec<crate::pdf::table_reconstruct::HocrWord>, row_tolerance: f32) -> Self {
+        let top = words.iter().map(|w| w.top).min().unwrap_or(0);
+        let bottom = words.iter().map(|w| w.top.saturating_add(w.height)).max().unwrap_or(0);
+        let mut sorted = words.clone();
+        sorted.sort_by(|a, b| row_center(a).total_cmp(&row_center(b)));
+        let mut lines: Vec<Vec<crate::pdf::table_reconstruct::HocrWord>> = Vec::new();
+        for word in sorted {
+            match lines.last_mut() {
+                Some(line) if (row_center(&word) - row_center(&line[0])).abs() <= row_tolerance => line.push(word),
+                _ => lines.push(vec![word]),
+            }
+        }
+        for line in &mut lines {
+            line.sort_by_key(|w| w.left);
+        }
+        Self {
+            words,
+            top,
+            bottom,
+            lines,
+        }
+    }
+}
+
+/// The header cells of `slab`'s first line with their left edges, when that line
+/// reads as the label row of a table: two or more cells, each a short label.
+///
+/// Only the first line: the padding above the first row is often smaller than
+/// between rows, so the split leaves the header and the first row in one slab.
+fn row_block_header(slab: &RowSlab, median_height: u32) -> Option<Vec<(u32, String)>> {
+    let line = slab.lines.first()?;
+    let cell_gap = (median_height as f32 * ROW_BLOCK_HEADER_CELL_GAP_HEIGHTS) as u32;
+    let mut cells: Vec<(u32, String, u32)> = Vec::new();
+    for word in line {
+        match cells.last_mut() {
+            Some((_, text, right)) if word.left.saturating_sub(*right) <= cell_gap => {
+                text.push(' ');
+                text.push_str(&word.text);
+                *right = word.left.saturating_add(word.width);
+            }
+            _ => cells.push((word.left, word.text.clone(), word.left.saturating_add(word.width))),
+        }
+    }
+    // A word label: it opens with a letter and carries no digit, so a numbered
+    // heading (`6.2  Voorbereidende werkzaamheden`, whose number and title sit
+    // a cell gap apart) is never taken for a header row.
+    let label_like = |text: &str| {
+        text.split_whitespace().count() <= ROW_BLOCK_HEADER_MAX_WORDS
+            && text.chars().count() <= ROW_BLOCK_HEADER_MAX_CHARS
+            && text.chars().next().is_some_and(char::is_alphabetic)
+            && !text.chars().any(|c| c.is_ascii_digit())
+    };
+    (cells.len() >= ROW_BLOCK_MIN_TRACKS && cells.iter().all(|(_, text, _)| label_like(text)))
+        .then(|| cells.into_iter().map(|(left, text, _)| (left, text)).collect())
+}
+
+/// The column of `left` among `tracks`: the last track at or left of it.
+fn row_block_column(tracks: &[u32], left: u32) -> usize {
+    tracks
+        .iter()
+        .rposition(|&track| track <= left.saturating_add(REGION_X_TRACK_TOLERANCE))
+        .unwrap_or(0)
+}
+
+/// Whether `slab` is one row of the table whose columns start at `tracks`: two or
+/// more lines, a cell in the first column, cells opened on at
+/// least [`ROW_BLOCK_MIN_TRACKS`] tracks, nothing left of the first column, no
+/// word running across a column boundary, no line of blank form fields
+/// ([`is_form_filler`]), no cell that starts off a header track, and at most
+/// [`ROW_BLOCK_MAX_FULL_LINES`] line that fills
+/// every column — the rest leave cells to other lines, the multi-line cells this
+/// pass exists for. A heading or a line of prose fails it.
+fn row_block_data_slab_fits(slab: &RowSlab, tracks: &[u32], cell_gap: u32) -> bool {
+    let tolerance = REGION_X_TRACK_TOLERANCE;
+    if slab.lines.len() < ROW_BLOCK_MIN_DATA_LINES {
+        return false;
+    }
+    let first_track = tracks[0];
+    if slab
+        .words
+        .iter()
+        .any(|w| w.left.saturating_add(tolerance) < first_track)
+    {
+        return false;
+    }
+    if slab
+        .lines
+        .iter()
+        .any(|line| line.iter().all(|w| is_form_filler(&w.text)))
+    {
+        return false;
+    }
+    let straddles = slab.words.iter().any(|w| {
+        tracks[1..].iter().any(|&track| {
+            w.left.saturating_add(tolerance) < track && w.left.saturating_add(w.width) > track + tolerance
+        })
+    });
+    if straddles {
+        return false;
+    }
+    let mut opened: HashSet<usize> = HashSet::new();
+    let mut full_lines = 0usize;
+    for line in &slab.lines {
+        let mut last_column = None;
+        let mut last_right: Option<u32> = None;
+        let mut line_opened: HashSet<usize> = HashSet::new();
+        for word in line {
+            let column = row_block_column(tracks, word.left);
+            let on_track = word.left.abs_diff(tracks[column]) <= tolerance;
+            // A word that starts a cell — first on its line, or past a gap as
+            // wide as the header's cell gap — must start on a header track. Off
+            // a track it is a column the header does not name (a three-column
+            // legend under a two-label line), which this pass cannot place.
+            let starts_cell = last_right.is_none_or(|right| word.left.saturating_sub(right) > cell_gap);
+            if starts_cell && !on_track {
+                return false;
+            }
+            if last_column != Some(column) && on_track {
+                line_opened.insert(column);
+            }
+            last_column = Some(column);
+            last_right = Some(word.left.saturating_add(word.width));
+        }
+        if line_opened.len() == tracks.len() {
+            full_lines += 1;
+        }
+        opened.extend(line_opened);
+    }
+    // A line that opens a cell in every column is a row on its own. One per
+    // slab is a row of multi-line cells whose first line carries every cell's
+    // start; more is several rows of a line-per-row table (product codes with
+    // their descriptions, labels with their values under a group label, two
+    // text columns side by side), and gluing them into one row would pair the
+    // wrong cells.
+    // The row has its first-column cell — on any line: a description set a
+    // little above the name it belongs to opens the row in another column.
+    opened.contains(&0) && opened.len() >= ROW_BLOCK_MIN_TRACKS && full_lines <= ROW_BLOCK_MAX_FULL_LINES
+}
+
+/// Shortest run of filler that marks a blank form field. ~keep
+const FORM_FILLER_MIN_CHARS: usize = 3;
+
+/// Whether `text` is a blank form field rather than content: a run of
+/// underscores, dots, dashes or check boxes. A form set out in padded blocks — a
+/// line of labels over a line of fields — shares this pass's geometry, and its
+/// field lines are what give it away: a table row never has a line of nothing.
+fn is_form_filler(text: &str) -> bool {
+    text.chars().count() >= FORM_FILLER_MIN_CHARS
+        && text
+            .chars()
+            .all(|c| matches!(c, '_' | '.' | '…' | '·' | '-' | '–' | '□' | '☐' | '▢'))
+}
+
+/// One table row from `slab`: per column, its words in reading order.
+fn row_block_cells(slab: &RowSlab, tracks: &[u32]) -> Vec<String> {
+    let mut cells = vec![String::new(); tracks.len()];
+    for line in &slab.lines {
+        for word in line {
+            let cell = &mut cells[row_block_column(tracks, word.left)];
+            if !cell.is_empty() {
+                cell.push(' ');
+            }
+            cell.push_str(&word.text);
+        }
+    }
+    cells
+}
+
+/// X34 (#3225) — tables whose rows are multi-line blocks set apart by padding.
+///
+/// [`split_words_on_row_gaps`] cuts a page wherever two row centres lie more than
+/// [`ROW_GAP_SPLIT_HEIGHT_FACTOR`] median word heights apart. An API reference
+/// typeset by Asciidoctor (`Vaidio 6.0.0 API Documentation.pdf`) pads every cell:
+/// a row is three lines 8 pt apart (`enable` / `Example : true  boolean` /
+/// `optional`), and the next row starts 34 pt below. Each row becomes a region of
+/// its own, each region is judged alone as a three-line grid and rejected as not
+/// well formed, and the whole table reaches the output as loose paragraphs; only
+/// tables of single-line rows (the response-code tables) survive.
+///
+/// Before the ordinary clustering, this pass looks for a run of those slabs that
+/// is one table:
+/// - the first slab is a header: one line of two or more short labels, whose
+///   left edges are the column tracks;
+/// - each following slab is a row on those tracks
+///   ([`row_block_data_slab_fits`]) — a heading or prose ends the run;
+/// - the whitespace between the slabs is bounded
+///   ([`ROW_BLOCK_MAX_GAP_HEIGHTS`]) and regular ([`ROW_BLOCK_GAP_RATIO`]);
+/// - the run has at least [`ROW_BLOCK_MIN_SLABS`] slabs.
+///
+/// Each slab becomes one table row, and the table then passes the code-listing
+/// and well-formedness tests a heuristic candidate passes (see the note at the
+/// verdict below for the two it does not). The words of every accepted table are removed from what the
+/// ordinary clustering sees; everything else is returned untouched.
+fn take_row_block_tables(
+    words: &[crate::pdf::table_reconstruct::HocrWord],
+    page_height: f32,
+    page_number: u32,
+    allow_single_column: bool,
+    horizontal_rules: usize,
+) -> (Vec<Table>, Vec<crate::pdf::table_reconstruct::HocrWord>) {
+    use crate::pdf::table_reconstruct::{is_well_formed_row_block_table, looks_like_code_listing};
+
+    if words.len() < 4 {
+        return (Vec::new(), words.to_vec());
+    }
+    let mut heights: Vec<u32> = words.iter().map(|w| w.height).collect();
+    heights.sort_unstable();
+    let median_height = heights[heights.len() / 2].max(1);
+    let row_tolerance = (median_height / 2).max(3) as f32;
+    let max_gap = (median_height as f32 * ROW_BLOCK_MAX_GAP_HEIGHTS) as u32;
+    let cell_gap = (median_height as f32 * ROW_BLOCK_HEADER_CELL_GAP_HEIGHTS) as u32;
+
+    let slabs: Vec<RowSlab> = split_words_on_row_gaps(words, median_height)
+        .into_iter()
+        .map(|slab| RowSlab::new(slab, row_tolerance))
+        .collect();
+    let gap = |upper: &RowSlab, lower: &RowSlab| lower.top.saturating_sub(upper.bottom);
+    // This pass claims only what the ordinary path throws away: a slab that is
+    // a table on its own (a line-per-row table the row-gap split cut into
+    // pieces, each read correctly) ends the run. The header slab is exempt —
+    // the header with the first rows is what the ordinary path does read,
+    // leaving the rest of the table as paragraphs.
+    let ordinary_reads = |slab: &RowSlab| {
+        is_table_candidate_region(&slab.words, row_tolerance)
+            && !reconstruct_region_tables(
+                &slab.words,
+                page_height,
+                page_number,
+                allow_single_column,
+                horizontal_rules,
+            )
+            .is_empty()
+    };
+
+    let mut tables = Vec::new();
+    let mut used: HashSet<(u32, u32, u32, u32)> = HashSet::new();
+    let mut index = 0;
+    while index < slabs.len() {
+        let Some(header) = row_block_header(&slabs[index], median_height) else {
+            index += 1;
+            continue;
+        };
+        let tracks: Vec<u32> = header.iter().map(|(left, _)| *left).collect();
+        // The header slab's other lines, if any, are the first row.
+        let header_slab = &slabs[index];
+        let embedded_row = (header_slab.lines.len() > 1).then(|| {
+            RowSlab::new(
+                header_slab.lines[1..].iter().flatten().cloned().collect(),
+                row_tolerance,
+            )
+        });
+        if embedded_row
+            .as_ref()
+            .is_some_and(|row| !row_block_data_slab_fits(row, &tracks, cell_gap))
+        {
+            index += 1;
+            continue;
+        }
+        // Gaps between slabs: all of them separate rows when the first row
+        // shares the header's slab; otherwise the first separates the header,
+        // which may be tighter than the rows, never looser.
+        let mut end = index + 1;
+        let mut reference: Option<u32> = None;
+        let mut header_gap: Option<u32> = None;
+        while end < slabs.len()
+            && row_block_data_slab_fits(&slabs[end], &tracks, cell_gap)
+            && !ordinary_reads(&slabs[end])
+        {
+            let this_gap = gap(&slabs[end - 1], &slabs[end]);
+            if this_gap > max_gap {
+                break;
+            }
+            if end == index + 1 && embedded_row.is_none() {
+                header_gap = Some(this_gap);
+            } else {
+                let reference = *reference.get_or_insert(this_gap);
+                let (low, high) = (
+                    reference as f32 / ROW_BLOCK_GAP_RATIO,
+                    reference as f32 * ROW_BLOCK_GAP_RATIO,
+                );
+                if (this_gap as f32) < low || (this_gap as f32) > high {
+                    break;
+                }
+            }
+            end += 1;
+        }
+        let rows = usize::from(embedded_row.is_some()) + (end - index - 1);
+        let header_gap_fits = match (header_gap, reference) {
+            (Some(header_gap), Some(reference)) => header_gap as f32 <= reference as f32 * ROW_BLOCK_GAP_RATIO,
+            _ => true,
+        };
+        if rows + 1 < ROW_BLOCK_MIN_SLABS || !header_gap_fits {
+            index += 1;
+            continue;
+        }
+
+        let run = &slabs[index..end];
+        let mut grid = vec![header.iter().map(|(_, text)| text.clone()).collect::<Vec<_>>()];
+        grid.extend(embedded_row.iter().map(|row| row_block_cells(row, &tracks)));
+        grid.extend(run[1..].iter().map(|slab| row_block_cells(slab, &tracks)));
+        let run_words: Vec<crate::pdf::table_reconstruct::HocrWord> =
+            run.iter().flat_map(|slab| slab.words.iter().cloned()).collect();
+        // Not `post_process_table_with_columns`: its prose-flow tests read a
+        // row boundary as a line break (`row_continuation_flow` takes a schema
+        // cell `string` followed by a lower-case field name `ip` for a sentence
+        // running on). Here every boundary is padding measured on the page and
+        // every column has a header label, so there is no flow to test and no
+        // empty column to drop. The code-listing and well-formedness tests
+        // still judge the grid, the latter without its own line-is-a-row test
+        // (see `is_well_formed_row_block_table`).
+        let verdict = if looks_like_code_listing(&grid) {
+            Err("code_listing")
+        } else if !is_well_formed_row_block_table(&grid, &run_words, &tracks, horizontal_rules) {
+            Err("not_well_formed")
+        } else {
+            Ok(grid)
+        };
+        let cleaned = match verdict {
+            Ok(cleaned) => cleaned,
+            Err(reason) => {
+                tracing::trace!(
+                    page = page_number,
+                    slabs = run.len(),
+                    reason = %reason,
+                    "row-block table candidate rejected by the heuristic table tests"
+                );
+                index += 1;
+                continue;
+            }
+        };
+        tracing::trace!(
+            page = page_number,
+            rows = cleaned.len(),
+            cols = cleaned.first().map_or(0, Vec::len),
+            "row-block table accepted"
+        );
+        let markdown = table_to_markdown(&cleaned);
+        used.extend(run_words.iter().map(|w| (w.left, w.top, w.width, w.height)));
+        tables.push(Table {
+            cells: cleaned,
+            markdown,
+            page_number,
+            bounding_box: region_bounding_box(&run_words, page_height),
+            ..Default::default()
+        });
+        index = end;
+    }
+
+    let rest = words
+        .iter()
+        .filter(|w| !used.contains(&(w.left, w.top, w.width, w.height)))
+        .cloned()
+        .collect();
+    (tables, rest)
 }
 
 /// #3013: corridor floor, in median word heights, for the gutter fallback below. The regular
@@ -6917,5 +7334,268 @@ mod tests {
         assert_eq!(section_number_components("2.3.4"), Some(vec![2, 3, 4]));
         assert_eq!(section_number_components("3"), None);
         assert_eq!(section_number_components("1.5x"), None);
+    }
+
+    // -- X34: row-block tables (#3225) --
+
+    /// The words of a page set out like an Asciidoctor API schema table
+    /// (`Vaidio 6.0.0 API Documentation.pdf` p585, lorem text): a one-line header
+    /// over rows of three lines 12 apart (name / `Example : value` + type /
+    /// `optional`), the rows 42 apart, so the row-gap split cuts after each row.
+    /// The header and the first row share one slab, as on the page.
+    fn row_block_page(rows: usize) -> Vec<crate::pdf::table_reconstruct::HocrWord> {
+        let mut words = vec![
+            make_word("Name", 51, 100, 30),
+            make_word("Description", 134, 100, 60),
+            make_word("Schema", 439, 100, 40),
+        ];
+        for row in 0..rows {
+            let top = 112 + row as u32 * 66;
+            let name = ["lorem", "ipsum", "dolor", "amet", "elit", "sed"][row % 6];
+            words.push(make_word(name, 51, top, 30));
+            words.push(make_word("Example", 134, top + 12, 40));
+            words.push(make_word(":", 181, top + 12, 4));
+            words.push(make_word("\"consectetur\"", 190, top + 12, 60));
+            words.push(make_word("string", 439, top + 12, 30));
+            words.push(make_word("optional", 51, top + 24, 40));
+        }
+        words
+    }
+
+    #[test]
+    fn padded_multi_line_rows_are_read_as_one_table_3225() {
+        let words = row_block_page(5);
+        let tables = heuristic_page_tables(&words, 800.0, 585, false, 0);
+        let table = tables
+            .iter()
+            .find(|t| t.cells.first().is_some_and(|h| h == &["Name", "Description", "Schema"]))
+            .unwrap_or_else(|| {
+                panic!(
+                    "no row-block table in {:?}",
+                    tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+                )
+            });
+        assert_eq!(table.cells.len(), 6, "{:?}", table.cells);
+        assert_eq!(
+            table.cells[1],
+            vec!["lorem optional", "Example : \"consectetur\"", "string"]
+        );
+        assert_eq!(table.cells[5][0], "elit optional");
+    }
+
+    #[test]
+    fn a_header_and_one_row_is_left_to_the_ordinary_path_3225() {
+        let words = row_block_page(1);
+        let (tables, rest) = take_row_block_tables(&words, 800.0, 585, false, 0);
+        assert!(tables.is_empty());
+        assert_eq!(rest.len(), words.len());
+    }
+
+    /// A label/value specification block with regular spacing: one line per
+    /// item, the items as far apart as the rows above, and a first line that
+    /// reads as two labels. No multi-line rows, no table.
+    #[test]
+    fn a_regularly_spaced_label_value_block_is_not_a_row_block_table_3225() {
+        let mut words = Vec::new();
+        for (i, (label, value)) in [
+            ("Lorem", "ipsum dolor"),
+            ("Sit", "amet elit"),
+            ("Sed", "do eiusmod"),
+            ("Tempor", "incididunt ut"),
+            ("Labore", "et dolore"),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let top = 100 + i as u32 * 42;
+            words.push(make_word(label, 51, top, 40));
+            for (j, part) in value.split(' ').enumerate() {
+                words.push(make_word(part, 200 + j as u32 * 30, top, 25));
+            }
+        }
+        let (tables, rest) = take_row_block_tables(&words, 800.0, 3, false, 0);
+        assert!(
+            tables.is_empty(),
+            "{:?}",
+            tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+        );
+        assert_eq!(rest.len(), words.len());
+    }
+
+    /// A form in padded blocks: a line of two labels over a line of two blank
+    /// fields. Same geometry as a row-block table; the field lines give it away.
+    #[test]
+    fn a_form_of_labelled_blank_fields_is_not_a_row_block_table_3225() {
+        let mut words = vec![make_word("Lorem", 51, 100, 40), make_word("Ipsum", 300, 100, 40)];
+        for block in 0..4u32 {
+            let top = 112 + block * 54;
+            if block > 0 {
+                words.push(make_word("Dolor", 51, top, 40));
+                words.push(make_word("Amet", 300, top, 40));
+            }
+            words.push(make_word("______________", 51, top + 12, 180));
+            words.push(make_word("______________", 300, top + 12, 180));
+        }
+        let (tables, _) = take_row_block_tables(&words, 800.0, 7, false, 0);
+        assert!(
+            tables.is_empty(),
+            "{:?}",
+            tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+        );
+    }
+
+    /// A numbered section heading whose number and title sit a cell gap apart,
+    /// over padded blocks of list items (an installation manual's `6.2  Lorem
+    /// ipsum` with its steps): the number is no column label.
+    #[test]
+    fn a_numbered_heading_over_padded_blocks_is_not_a_header_3225() {
+        let mut words = vec![
+            make_word("6.2", 28, 100, 20),
+            make_word("Lorem", 80, 100, 40),
+            make_word("ipsum", 124, 100, 40),
+        ];
+        for block in 0..4u32 {
+            let top = 112 + block * 66;
+            words.push(make_word("6.2.1", 28, top, 30));
+            words.push(make_word("Dolor", 80, top, 40));
+            words.push(make_word("amet", 80, top + 12, 30));
+            words.push(make_word("elit", 114, top + 12, 30));
+            words.push(make_word("sed", 80, top + 24, 30));
+        }
+        let (tables, _) = take_row_block_tables(&words, 800.0, 34, false, 0);
+        assert!(
+            tables.is_empty(),
+            "{:?}",
+            tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+        );
+    }
+
+    /// A numeric table of one line per row, set in groups of three lines with a
+    /// gap after each group: the ordinary path reads every group as a table, so
+    /// this pass must not glue the groups into rows of three lines each.
+    #[test]
+    fn line_per_row_groups_the_ordinary_path_reads_are_not_claimed_3225() {
+        let mut words = vec![
+            make_word("Lorem", 351, 100, 40),
+            make_word("Ipsum", 420, 100, 40),
+            make_word("Dolor", 490, 100, 40),
+        ];
+        for group in 0..4u32 {
+            for line in 0..3u32 {
+                let top = 112 + group * 66 + line * 12;
+                let n = group * 3 + line;
+                words.push(make_word(&format!("{}", 5 + n), 351, top, 12));
+                words.push(make_word(&format!("{}", 350 + 100 * n), 420, top, 20));
+                words.push(make_word(&format!("{}", 315 + 60 * n), 490, top, 20));
+            }
+        }
+        let (tables, _) = take_row_block_tables(&words, 800.0, 18, false, 0);
+        assert!(
+            tables.is_empty(),
+            "{:?}",
+            tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+        );
+    }
+
+    /// A two-column listing set in pairs: each slab is two complete rows (a code
+    /// and its description on every line), the pairs set apart by padding. The
+    /// slabs are line-per-row pieces; gluing a pair into one row would pair the
+    /// wrong cells.
+    #[test]
+    fn slabs_whose_every_line_is_a_full_row_are_not_row_blocks_3225() {
+        let mut words = vec![make_word("Lorem", 76, 100, 30), make_word("Ipsum", 160, 100, 40)];
+        for pair in 0..4u32 {
+            for line in 0..2u32 {
+                let top = 112 + pair * 54 + line * 12;
+                let n = (pair * 2 + line) as usize;
+                let code = [
+                    "AB-100", "AB-101", "CD-200", "CD-201", "EF-300", "EF-301", "GH-400", "GH-401",
+                ][n];
+                let (first, second) = [
+                    ("Dolor", "sit"),
+                    ("Amet", "elit"),
+                    ("Sed", "eiusmod"),
+                    ("Tempor", "labore"),
+                    ("Magna", "aliqua"),
+                    ("Veniam", "nostrud"),
+                    ("Ullamco", "laboris"),
+                    ("Commodo", "consequat"),
+                ][n];
+                words.push(make_word(code, 76, top, 40));
+                words.push(make_word(first, 160, top, 40));
+                words.push(make_word(second, 204, top, 40));
+            }
+        }
+        let (tables, _) = take_row_block_tables(&words, 800.0, 54, false, 0);
+        assert!(
+            tables.is_empty(),
+            "{:?}",
+            tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+        );
+    }
+
+    /// A specification table in padded groups: a group label alone on its line,
+    /// then several full label/value lines (`Lorem ipsum  kW  8,0`). Each group
+    /// is several rows, not one row of multi-line cells.
+    #[test]
+    fn a_group_label_over_label_value_lines_is_not_a_row_block_3225() {
+        let labels = [
+            "Ipsum", "Dolor", "Amet", "Elit", "Tempor", "Magna", "Veniam", "Nostrud", "Ullamco", "Laboris", "Commodo",
+            "Aute",
+        ];
+        let mut words = vec![make_word("Lorem", 52, 100, 40), make_word("Sit", 250, 100, 30)];
+        for group in 0..4u32 {
+            let top = 112 + group * 90;
+            words.push(make_word("Group", 52, top, 40));
+            for line in 0..3u32 {
+                let row_top = top + 12 * (line + 1);
+                words.push(make_word(labels[(group * 3 + line) as usize], 52, row_top, 50));
+                words.push(make_word(&format!("{},{}", 7 + group, line), 250, row_top, 30));
+            }
+        }
+        let (tables, _) = take_row_block_tables(&words, 800.0, 60, false, 0);
+        assert!(
+            tables.is_empty(),
+            "{:?}",
+            tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+        );
+    }
+
+    /// A legend of three columns under a line that reads as two labels: the
+    /// third column starts its cells off every header track.
+    #[test]
+    fn a_column_the_header_does_not_name_is_not_a_row_block_3225() {
+        let mut words = vec![
+            make_word("Lorem", 140, 100, 40),
+            make_word("ipsum", 184, 100, 40),
+            make_word("Dolor", 295, 100, 40),
+            make_word("sit", 339, 100, 20),
+        ];
+        let captions = [
+            "amet", "elit", "sed", "tempor", "magna", "veniam", "nostrud", "laboris", "commodo",
+        ];
+        for block in 0..3u32 {
+            let top = 112 + block * 54;
+            words.push(make_word(captions[(block * 3) as usize], 140, top, 50));
+            words.push(make_word(captions[(block * 3 + 1) as usize], 459, top, 50));
+            words.push(make_word("aliqua", 140, top + 12, 40));
+            words.push(make_word(captions[(block * 3 + 2) as usize], 295, top + 12, 50));
+        }
+        let (tables, _) = take_row_block_tables(&words, 800.0, 38, false, 0);
+        assert!(
+            tables.is_empty(),
+            "{:?}",
+            tables.iter().map(|t| &t.cells).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn form_filler_is_recognised_3225() {
+        assert!(is_form_filler("_____"));
+        assert!(is_form_filler("........"));
+        assert!(is_form_filler("☐☐☐"));
+        assert!(!is_form_filler("__"));
+        assert!(!is_form_filler("string"));
+        assert!(!is_form_filler("1.2.3"));
     }
 }
