@@ -27,6 +27,10 @@ const MIN_PROSE_LINE_ALPHA_CHARS: usize = 8;
 const MIN_PROSE_LINE_WORDS: usize = 3;
 const MIN_PROSE_ALPHA_RATIO: f32 = 0.55;
 const MIN_VERTICAL_OVERLAP_RATIO: f32 = 0.35;
+/// Rows on which both sides carry a prose line (baselines within `PROSE_LINE_Y_TOLERANCE_PTS`)
+/// that make a page two columns even when their vertical overlap is short. See
+/// `has_balanced_vertical_support`. ~keep
+const MIN_SHARED_PROSE_ROWS: usize = 2;
 const PROSE_LINE_Y_TOLERANCE_PTS: f32 = 4.0;
 const INLINE_SCRIPT_LOOKBACK: usize = 8;
 const INLINE_SCRIPT_MIN_FONT_RATIO: f32 = 0.5;
@@ -217,6 +221,26 @@ fn has_balanced_vertical_support(left: &SideSupport, right: &SideSupport) -> boo
         let high = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         (low, high)
     };
+    // X32 (#3210): staggered columns. The left column ends low on the page and the right one
+    // starts high (a case study with a photo above one column and below the other), so the
+    // two sides overlap for only a few rows: 90 of 322 pt and 13 of 307 pt on the reporter's
+    // pages, under the ratio below. Read top to bottom, every row both columns share alternates
+    // a left line with a right one, and the two columns are welded into one paragraph there.
+    // Two prose lines on one baseline either side of the gutter are not one line; stacked
+    // blocks that are not side by side share no row, so the ratio still guards them. ~keep
+    let shared_rows = left
+        .prose_line_ys
+        .iter()
+        .filter(|&&left_y| {
+            right
+                .prose_line_ys
+                .iter()
+                .any(|&right_y| (left_y - right_y).abs() <= PROSE_LINE_Y_TOLERANCE_PTS)
+        })
+        .count();
+    if shared_rows >= MIN_SHARED_PROSE_ROWS {
+        return true;
+    }
     let (left_low, left_high) = extent(&left.prose_line_ys);
     let (right_low, right_high) = extent(&right.prose_line_ys);
     let overlap = (left_high.min(right_high) - left_low.max(right_low)).max(0.0);
@@ -1248,6 +1272,90 @@ mod tests {
         assert_eq!(
             super::select_reading_order(&prose_columns(), 612.0, 792.0),
             ReadingOrder::ColumnAware
+        );
+    }
+
+    /// One column of lorem prose lines at `x`, one line per baseline in `ys`, each `width` wide.
+    fn lorem_column(x: f32, width: f32, ys: &[f32]) -> Vec<TextSpan> {
+        const LINES: [&str; 4] = [
+            "Lorem ipsum dolor sit amet consectetur",
+            "sed do eiusmod tempor incididunt labore",
+            "ut enim ad minim veniam quis nostrud",
+            "duis aute irure dolor in reprehenderit",
+        ];
+        ys.iter()
+            .enumerate()
+            .map(|(index, &y)| text_span(LINES[index % LINES.len()], x, y, width))
+            .collect()
+    }
+
+    /// X32 (#3210): the reporter's page 7, a case study whose left column ends at y 345 and
+    /// whose right column starts at y 435 below a photo. The sides overlap by 90 of the right
+    /// column's 322 pt (0.28) and share seven rows. ~keep
+    #[test]
+    fn staggered_columns_sharing_rows_use_column_aware_3210() {
+        let left_ys = [
+            698.1, 682.8, 667.5, 652.1, 636.8, 621.5, 606.1, 590.8, 544.8, 529.5, 514.1, 498.8, 483.5, 468.1, 452.8,
+            437.5, 422.2, 406.8, 391.5, 376.2, 360.8, 345.5,
+        ];
+        let right_ys = [
+            434.8, 419.5, 404.1, 388.8, 373.5, 358.2, 342.8, 327.5, 312.2, 296.8, 281.5, 266.2, 250.8, 235.5, 189.5,
+            174.2, 158.8, 143.5, 128.2, 112.8,
+        ];
+        let mut spans = lorem_column(42.0, 230.0, &left_ys);
+        spans.extend(lorem_column(322.0, 235.0, &right_ys));
+        assert_eq!(
+            super::select_reading_order(&spans, 595.0, 842.0),
+            ReadingOrder::ColumnAware,
+            "two columns sharing seven rows are columns, however short their overlap"
+        );
+    }
+
+    /// X32 (#3210): the reporter's page 8, the narrowest case: the columns overlap by 13 of
+    /// 307 pt and share two prose rows. ~keep
+    #[test]
+    fn staggered_columns_sharing_two_rows_use_column_aware_3210() {
+        let left_ys = [
+            746.1, 730.8, 715.5, 700.2, 654.2, 638.8, 623.5, 608.2, 592.8, 577.5, 562.2, 546.8, 531.5, 516.2, 485.5,
+            470.2, 454.8, 439.5,
+        ];
+        let right_ys = [
+            452.3, 437.0, 421.6, 406.3, 391.0, 375.6, 360.3, 345.0, 329.6, 299.0, 283.6, 268.3, 253.0, 237.7, 222.3,
+            207.0, 191.7, 176.3, 161.0, 145.7, 130.3,
+        ];
+        let mut spans = lorem_column(37.0, 230.0, &left_ys);
+        spans.extend(lorem_column(315.0, 240.0, &right_ys));
+        assert_eq!(
+            super::select_reading_order(&spans, 595.0, 842.0),
+            ReadingOrder::ColumnAware
+        );
+    }
+
+    /// X32 control: a block on the left above a block on the right, with no row in common, is
+    /// not read as two columns -- the vertical-overlap ratio still decides. ~keep
+    #[test]
+    fn stacked_blocks_sharing_no_row_use_top_to_bottom_3210() {
+        let left_ys: Vec<f32> = (0..8).map(|index| 700.0 - index as f32 * 15.3).collect();
+        let right_ys: Vec<f32> = (0..8).map(|index| 450.0 - index as f32 * 15.3).collect();
+        let mut spans = lorem_column(42.0, 230.0, &left_ys);
+        spans.extend(lorem_column(322.0, 235.0, &right_ys));
+        assert_eq!(
+            super::select_reading_order(&spans, 595.0, 842.0),
+            ReadingOrder::TopToBottom
+        );
+    }
+
+    /// X32 control: one shared row is not enough -- a sidebar's last line may happen to sit on
+    /// a baseline of the body beside it. ~keep
+    #[test]
+    fn staggered_blocks_sharing_one_row_use_top_to_bottom_3210() {
+        let left_ys: Vec<f32> = (0..8).map(|index| 700.0 - index as f32 * 15.3).collect();
+        let right_ys: Vec<f32> = (0..8).map(|index| 592.9 - index as f32 * 15.3).collect();
+        let mut spans = lorem_column(42.0, 230.0, &left_ys);
+        spans.extend(lorem_column(322.0, 235.0, &right_ys));
+        assert_eq!(
+            super::select_reading_order(&spans, 595.0, 842.0),
+            ReadingOrder::TopToBottom
         );
     }
 
