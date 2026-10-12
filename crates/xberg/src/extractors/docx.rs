@@ -128,7 +128,7 @@ fn build_internal_document(
                     continue;
                 }
 
-                let heading_level = paragraph.style.as_deref().and_then(|s| doc.resolve_heading_level(s));
+                let heading_level = doc.paragraph_heading_level(paragraph);
 
                 let is_quote_style = paragraph.style.as_deref().is_some_and(|s| {
                     let lower = s.to_ascii_lowercase();
@@ -2154,6 +2154,75 @@ mod tests {
         assert!(
             !h1_nodes.is_empty(),
             "Should have h1 heading node from style-based heading"
+        );
+    }
+
+    /// A paragraph that states its outline level itself (`w:pPr/w:outlineLvl`,
+    /// no heading style) is a heading of that level; `9` ("body text") is not,
+    /// even on a heading style; a plain heading style is unchanged.
+    #[tokio::test]
+    async fn test_direct_outline_level_makes_a_heading() {
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:pPr><w:outlineLvl w:val="0"/></w:pPr><w:r><w:t>DIRECT LEVEL ONE</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Body under level one.</w:t></w:r></w:p>
+    <w:p><w:pPr><w:outlineLvl w:val="1"/></w:pPr><w:r><w:t>CONTROLE EN REGISTREREN</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Body under level two.</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Heading2"/><w:outlineLvl w:val="9"/></w:pPr><w:r><w:t>Styled but body text</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Plain Kop2</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="BodyStyle"/></w:pPr><w:r><w:t>Style says body text</w:t></w:r></w:p>
+  </w:body>
+</w:document>"#;
+
+        let styles_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:styleId="Heading2">
+    <w:name w:val="heading 2"/>
+    <w:pPr><w:outlineLvl w:val="1"/></w:pPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="BodyStyle">
+    <w:name w:val="Body Style"/>
+    <w:pPr><w:outlineLvl w:val="9"/></w:pPr>
+  </w:style>
+</w:styles>"#;
+
+        let data = build_test_docx_with_parts(document_xml, Some(styles_xml), None, None, None, None, None);
+        let config = ExtractionConfig {
+            output_format: crate::core::config::OutputFormat::Markdown,
+            ..Default::default()
+        };
+        let result = DocxExtractor::new()
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &config,
+            )
+            .await
+            .unwrap();
+        let result =
+            crate::extraction::derive::derive_extraction_result(result, true, crate::core::config::OutputFormat::Plain);
+        use crate::types::NodeContent;
+        let headings: Vec<(u8, String)> = result
+            .document
+            .as_ref()
+            .expect("DocumentStructure should be present")
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.content {
+                NodeContent::Heading { level, text } => Some((*level, text.clone())),
+                NodeContent::Title { text } => Some((1, text.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            headings,
+            vec![
+                (1, "DIRECT LEVEL ONE".to_string()),
+                (2, "CONTROLE EN REGISTREREN".to_string()),
+                (2, "Plain Kop2".to_string()),
+            ],
+            "{headings:?}"
         );
     }
 
