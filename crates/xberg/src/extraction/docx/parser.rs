@@ -475,9 +475,32 @@ impl Document {
     pub(crate) fn paragraph_heading_level(&self, paragraph: &Paragraph) -> Option<u8> {
         match paragraph.outline_level {
             Some(level) if level >= BODY_TEXT_OUTLINE_LEVEL => None,
+            // A list item's own outline level is not a heading (X37): an offer
+            // template puts `outlineLvl 1` on its `List Paragraph` spec lines
+            // (`GPU → Minimaal Intel i7 Processor`), which Word lists in the
+            // navigation pane but which are items of a list, not sections. The
+            // style still decides, so a heading style on a numbered paragraph
+            // stays a heading.
+            Some(_) if self.is_list_paragraph(paragraph) => {
+                paragraph.style.as_deref().and_then(|s| self.resolve_heading_level(s))
+            }
             Some(level) => Some(level.saturating_add(1).min(6)),
             None => paragraph.style.as_deref().and_then(|s| self.resolve_heading_level(s)),
         }
+    }
+
+    /// Whether `paragraph` is a list item: it carries Word list numbering
+    /// (`w:numPr`), or its style is a list style (`List Paragraph`, `List
+    /// Bullet`, …, matched on the style's own name, which Word keeps in
+    /// English whatever the UI language: `Lijstalinea` is named `List
+    /// Paragraph`).
+    fn is_list_paragraph(&self, paragraph: &Paragraph) -> bool {
+        paragraph.numbering_id.is_some()
+            || paragraph
+                .style
+                .as_deref()
+                .and_then(|s| self.resolve_style_name(s))
+                .is_some_and(|name| name.to_ascii_lowercase().starts_with("list"))
     }
 
     /// Resolve heading level for a paragraph style using the StyleCatalog.

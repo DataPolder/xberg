@@ -2228,6 +2228,57 @@ mod tests {
         );
     }
 
+    /// X37: a list item's own outline level is not a heading. A `List
+    /// Paragraph` spec line and a numbered list item carrying `outlineLvl 1`
+    /// stay body text; a plain paragraph with it is still a heading.
+    #[tokio::test]
+    async fn test_outline_level_on_a_list_item_is_no_heading() {
+        let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:pPr><w:outlineLvl w:val="1"/></w:pPr><w:r><w:t>CONTROLE EN REGISTREREN</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pStyle w:val="Lijstalinea"/><w:outlineLvl w:val="1"/></w:pPr><w:r><w:t>GPU Minimaal Intel i7 Processor</w:t></w:r></w:p>
+    <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:outlineLvl w:val="1"/></w:pPr><w:r><w:t>Werkgeheugen Minimaal 32GB</w:t></w:r></w:p>
+  </w:body>
+</w:document>"#;
+
+        let styles_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:styleId="Lijstalinea">
+    <w:name w:val="List Paragraph"/>
+  </w:style>
+</w:styles>"#;
+
+        let data = build_test_docx_with_parts(document_xml, Some(styles_xml), None, None, None, None, None);
+        let config = ExtractionConfig {
+            output_format: crate::core::config::OutputFormat::Markdown,
+            ..Default::default()
+        };
+        let result = DocxExtractor::new()
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &config,
+            )
+            .await
+            .unwrap();
+        let result =
+            crate::extraction::derive::derive_extraction_result(result, true, crate::core::config::OutputFormat::Plain);
+        use crate::types::NodeContent;
+        let headings: Vec<String> = result
+            .document
+            .as_ref()
+            .expect("DocumentStructure should be present")
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.content {
+                NodeContent::Heading { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(headings, vec!["CONTROLE EN REGISTREREN".to_string()], "{headings:?}");
+    }
+
     #[tokio::test]
     async fn test_paragraph_style_name_reaches_element_metadata() {
         let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
