@@ -82,7 +82,12 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
         // an `||` boost, not a requirement — and a run of consecutive subsection
         // headings would otherwise be re-joined here even after the line grouper
         // split them. See #1386. ~keep
-        let next_starts_section = starts_numbered_section(&next);
+        // X38: `§ 2 Definition and scope` opens a section as surely as `2.1 Scope` does. It
+        // is not in `is_numbered_section_heading` (the keyword form wants a word in front of
+        // the number), so the last bullet of `§ 1` -- no terminator, same size, a blank line
+        // above it -- absorbed it here and the section was lost. Only for the paragraph that
+        // would be absorbed; what a `§` paragraph itself may absorb is left as it was. ~keep
+        let next_starts_section = starts_numbered_section(&next) || starts_section_sign_heading(&next);
         // The mirror of `next_starts_section`: a numbered section heading must never be
         // absorbed AS a continuation either. The line grouper in `blocks_to_paragraphs`
         // (`pipeline.rs`) already splits a heading from unrelated text that follows it,
@@ -325,6 +330,37 @@ fn starts_numbered_section(para: &PdfParagraph) -> bool {
     super::classify::is_numbered_section_heading(&joined)
 }
 
+/// X38: the paragraph's first line opens on a section sign, a number and a capitalised word --
+/// `§ 2 Definition and scope`, `§3 Geheimhouding`. A lowercase or numeric word after the number
+/// (`§ 3 lid 2`, `§ 3 2021`) is a reference in running text, not a section start. ~keep
+fn starts_section_sign_heading(para: &PdfParagraph) -> bool {
+    let Some(first_line) = para.lines.first() else {
+        return false;
+    };
+    let joined = first_line
+        .segments
+        .iter()
+        .map(|segment| segment.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let Some(rest) = joined.trim_start().strip_prefix('§') else {
+        return false;
+    };
+    let rest = rest.trim_start();
+    let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    if digits == 0 {
+        return false;
+    }
+    let after = &rest[digits..];
+    after.starts_with(char::is_whitespace)
+        && after
+            .trim_start()
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() && c.is_uppercase())
+}
+
 /// Check if a paragraph starts with a lowercase letter, indicating it's a
 /// continuation of a previous sentence split across paragraph boundaries.
 fn starts_with_lowercase_continuation(para: &PdfParagraph) -> bool {
@@ -519,6 +555,47 @@ mod tests {
             segment.y = baseline_y;
         }
         para
+    }
+
+    /// A body paragraph at `x` on the line `baseline_y` (PDF space, y up), 10 pt regular.
+    fn body_line_at(text: &str, x: f32, baseline_y: f32) -> PdfParagraph {
+        let mut para = make_body_paragraph_at(text, 10.0, baseline_y);
+        if let Some(segment) = para.lines[0].segments.first_mut() {
+            segment.x = x;
+        }
+        para
+    }
+
+    /// X38 (NDA ESSC p1): the last bullet of `§ 1` (text at x 148.8, no terminator) does not
+    /// absorb the `§ 2` heading at the margin (x 51.6) a blank line below it (baselines 27 pt
+    /// apart at 10 pt). Lorem ipsum stands in for the text; the geometry is the page's own. ~keep
+    #[test]
+    fn a_section_sign_heading_is_not_absorbed_by_the_bullet_above_it_x38() {
+        let mut paragraphs = vec![
+            body_line_at("Lorem ipsum dolor sit amet consectetur adipiscing", 148.8, 553.0),
+            body_line_at("§ 2 Dolor sit amet", 51.6, 526.0),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 2, "the § heading must stay its own paragraph");
+    }
+
+    /// X38's controls: a `§` reference that continues a sentence (`§ 3 lid 2 …`) and an
+    /// ordinary wrap still join. ~keep
+    #[test]
+    fn a_section_sign_reference_still_joins_x38() {
+        let mut paragraphs = vec![
+            body_line_at("Lorem ipsum dolor sit amet zoals bepaald in", 51.6, 553.0),
+            body_line_at("§ 3 lid 2 consectetur adipiscing", 51.6, 541.0),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1, "a § reference in running text still joins");
+
+        let mut paragraphs = vec![
+            body_line_at("Lorem ipsum dolor sit amet consectetur adipiscing", 148.8, 553.0),
+            body_line_at("elit sed do eiusmod tempor", 148.8, 541.0),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1, "an ordinary wrap still joins");
     }
 
     /// #3013 (Soluble p3): the note under a table ends a sentence; the lowercase line a blank
