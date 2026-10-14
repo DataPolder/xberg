@@ -55,7 +55,12 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
         // an `||` boost, not a requirement — and a run of consecutive subsection
         // headings would otherwise be re-joined here even after the line grouper
         // split them. See #1386. ~keep
-        let next_starts_section = starts_numbered_section(&next);
+        // `§ 2 Definition and scope` opens a section as surely as `2.1 Scope` does, but it is
+        // not in `is_numbered_section_heading` (the keyword form wants a word in front of the
+        // number). The last line of a list item above it -- no terminator, same size, a blank
+        // line between -- absorbed it here and the section was lost. Only for the paragraph
+        // that would be absorbed; what a `§` paragraph itself may absorb is unchanged.
+        let next_starts_section = starts_numbered_section(&next) || starts_section_sign_heading(&next);
         // The mirror of `next_starts_section`: a numbered section heading must never be
         // absorbed AS a continuation either. The line grouper in `blocks_to_paragraphs`
         // (`pipeline.rs`) already splits a heading from unrelated text that follows it,
@@ -194,6 +199,37 @@ fn starts_numbered_section(para: &PdfParagraph) -> bool {
         .collect::<Vec<_>>()
         .join(" ");
     super::classify::is_numbered_section_heading(&joined)
+}
+
+/// The paragraph's first line opens on a section sign, a number and a capitalised word --
+/// `§ 2 Definition and scope`, `§3 Geheimhouding`. A lowercase or numeric word after the number
+/// (`§ 3 lid 2`, `§ 3 2021`) is a reference in running text, not a section start.
+fn starts_section_sign_heading(para: &PdfParagraph) -> bool {
+    let Some(first_line) = para.lines.first() else {
+        return false;
+    };
+    let joined = first_line
+        .segments
+        .iter()
+        .map(|segment| segment.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let Some(rest) = joined.trim_start().strip_prefix('§') else {
+        return false;
+    };
+    let rest = rest.trim_start();
+    let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    if digits == 0 {
+        return false;
+    }
+    let after = &rest[digits..];
+    after.starts_with(char::is_whitespace)
+        && after
+            .trim_start()
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() && c.is_uppercase())
 }
 
 /// Check if a paragraph starts with a lowercase letter, indicating it's a
@@ -390,6 +426,48 @@ mod tests {
             segment.y = baseline_y;
         }
         para
+    }
+
+    /// A body paragraph at `x` on the line `baseline_y` (PDF space, y up), 10 pt regular.
+    fn body_line_at(text: &str, x: f32, baseline_y: f32) -> PdfParagraph {
+        let mut para = make_body_paragraph_at(text, 10.0, baseline_y);
+        if let Some(segment) = para.lines[0].segments.first_mut() {
+            segment.x = x;
+        }
+        para
+    }
+
+    /// The last line of a list item (text at x 148.8, no terminator; its bullet is a symbol-font
+    /// glyph that is not recognised) does not absorb the `§ 2` heading at the margin (x 51.6) a
+    /// blank line below it (baselines 27 pt apart at 10 pt). The geometry is a real page's;
+    /// lorem ipsum stands in for its text.
+    #[test]
+    fn a_section_sign_heading_is_not_absorbed_by_the_list_item_above_it() {
+        let mut paragraphs = vec![
+            body_line_at("Lorem ipsum dolor sit amet consectetur adipiscing", 148.8, 553.0),
+            body_line_at("§ 2 Dolor sit amet", 51.6, 526.0),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 2, "the § heading must stay its own paragraph");
+    }
+
+    /// The controls: a `§` reference that continues a sentence (`§ 3 lid 2 …`) and an ordinary
+    /// wrap still join.
+    #[test]
+    fn a_section_sign_reference_still_joins() {
+        let mut paragraphs = vec![
+            body_line_at("Lorem ipsum dolor sit amet zoals bepaald in", 51.6, 553.0),
+            body_line_at("§ 3 lid 2 consectetur adipiscing", 51.6, 541.0),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1, "a § reference in running text still joins");
+
+        let mut paragraphs = vec![
+            body_line_at("Lorem ipsum dolor sit amet consectetur adipiscing", 148.8, 553.0),
+            body_line_at("elit sed do eiusmod tempor", 148.8, 541.0),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1, "an ordinary wrap still joins");
     }
 
     #[test]
