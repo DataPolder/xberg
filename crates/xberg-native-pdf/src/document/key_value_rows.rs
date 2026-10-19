@@ -138,6 +138,16 @@ fn value_tracks(
     tracks
 }
 
+/// X42: a form's labels name different fields -- `Applicant:`, `Address:`, `Venue:`. Paragraphs
+/// that each end on the same short line at the margin (`zoals vermeld in:` wrapped to
+/// `vermeld in:`, four times on one page of an installation manual) are prose: read as a form,
+/// their spans were swapped with the section headings beside them and every heading was torn
+/// from its number. A block is accepted only when at least three quarters of its labels differ. ~keep
+fn labels_are_distinct(spans: &[crate::layout::TextSpan], labels: &[usize]) -> bool {
+    let distinct: std::collections::HashSet<&str> = labels.iter().map(|&label| spans[label].text.trim()).collect();
+    distinct.len() * 4 >= labels.len() * 3
+}
+
 /// Find only repeated LTR form rows whose wrapped values bracket a centred label.
 /// The centred-line requirement keeps ordinary aligned tables and columns byte-identical. ~keep
 fn find_key_value_blocks(spans: &[crate::layout::TextSpan]) -> Vec<KeyValueBlock> {
@@ -161,6 +171,9 @@ fn find_key_value_blocks(spans: &[crate::layout::TextSpan]) -> Vec<KeyValueBlock
             let candidates = build_key_value_blocks(spans, &labels, &values, MIN_LABELS);
             let mut accepted = false;
             for block in candidates {
+                if !labels_are_distinct(spans, &block.labels) {
+                    continue;
+                }
                 let members = block.labels.iter().chain(block.values.iter().flatten());
                 if members.clone().any(|index| used.contains(index)) {
                     continue;
