@@ -283,6 +283,17 @@ const MIN_LABEL_VALUE_ROWS: usize = 3;
 // cut is prose running across the gutter, not column content. Matches the minimum column
 // width a cut must leave on each side. ~keep
 const MIN_STRADDLING_INK_PTS: f32 = 60.0;
+// X40: upstream refuses a column cut that two or more continuous lines straddle (its fix for a
+// paragraph read after a heading beside a two-column table), and one that would separate three
+// or more short label/value rows set a hair off each other's baseline (its compensation for
+// ordering each line bucket by `x`). Both are off in this fork. On the DataPolder corpus the
+// straddle refusal threw away the column cut of every two-column page with a title or footer
+// across it -- the operating sheets of a boiler range were read line by line across both
+// columns -- and the label/value refusal welded headings of two columns into one and read a
+// wrapped sentence's last line before its first. X8's whole-line partition and X11's band peel
+// already handle the lines that cross a gutter; upstream's own tests for the two refusals are
+// marked ignored, citing X40. ~keep
+const UPSTREAM_COLUMN_CUT_REFUSALS: bool = false;
 // X8: the smaller side of a line must hold at least this share of its ink for the line to
 // count as crossing a column cut (and be assigned by its majority, see `partition_lines_at`).
 // A legend through the gutter splits near evenly (upstream's own straddle test is 42/58); a
@@ -2545,7 +2556,10 @@ impl XYCutStrategy {
         // side holding most of its ink scatters one paragraph over both columns. Refuse the
         // cut so the row split peels them off as bands first. The margin note that widens the
         // region is why `peel_full_width_line_bands` never saw them as full-width. ~keep
-        if refuse_unassignable && self.straddling_line_count(all_spans, indices, split_x) >= MIN_PEELED_FULL_WIDTH_LINES {
+        if UPSTREAM_COLUMN_CUT_REFUSALS
+            && refuse_unassignable
+            && self.straddling_line_count(all_spans, indices, split_x) >= MIN_PEELED_FULL_WIDTH_LINES
+        {
             return None;
         }
 
@@ -2657,7 +2671,10 @@ impl XYCutStrategy {
             return None;
         }
 
-        if refuse_unassignable && self.cuts_label_value_rows(all_spans, indices, split_x) {
+        if UPSTREAM_COLUMN_CUT_REFUSALS
+            && refuse_unassignable
+            && self.cuts_label_value_rows(all_spans, indices, split_x)
+        {
             return None;
         }
 
@@ -5988,6 +6005,7 @@ mod tests {
     /// `x`-ordered line grouping the value sorted first, the pair measured as one line and
     /// the cut was refused; the grouping alone would now accept it. ~keep
     #[test]
+    #[ignore = "X40: this fork does not refuse a column cut for label/value rows (see UPSTREAM_COLUMN_CUT_REFUSALS)"]
     fn horizontal_split_keeps_label_value_rows_together() {
         let strategy = XYCutStrategy::new();
         for value_offset in [0.24f32, 0.6] {
@@ -6921,5 +6939,295 @@ mod tests {
         let last_left = left.iter().map(|&i| pos(i)).max().unwrap();
         let first_right = right.iter().map(|&i| pos(i)).min().unwrap();
         assert!(last_left < first_right, "the left column is woven into the right one");
+    }
+
+    fn x40_order(page: &[(f32, f32, f32, f32, &str)]) -> (Vec<TextSpan>, Vec<usize>) {
+        let strategy = XYCutStrategy::new();
+        let spans: Vec<TextSpan> = page
+            .iter()
+            .map(|&(x, y, w, size, text)| make_span_text(x, y, w, size, text, size))
+            .collect();
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        let order: Vec<usize> = strategy
+            .partition_indexed(&spans, &indices)
+            .into_iter()
+            .flatten()
+            .collect();
+        (spans, order)
+    }
+
+    /// X40: title lines and a heading set across both columns are bands above them, not a reason
+    /// to give up the column cut. With the two columns on different leading no blank row runs
+    /// across the page, so a refused column cut left no cut at all and the region was read by
+    /// `y`, one line of each column after the other. ~keep
+    #[test]
+    fn title_lines_across_two_columns_keep_the_column_cut_x40() {
+        // A two-line title and a heading set across both columns, then two columns on different
+        // leading (9 pt left, 13 pt right), so no blank row runs across the page for a row cut.
+        let mut page: Vec<(f32, f32, f32, f32, &str)> = vec![
+            (104.0, 745.0, 328.0, 16.0, "OPERATING INSTRUCTIONS BOILER"),
+            (119.0, 726.0, 300.0, 16.0, "STANDING HEATING BOILER"),
+            (
+                25.0,
+                665.0,
+                490.0,
+                11.0,
+                "OPERATING INSTRUCTIONS FOR THE BOILER WITH ELECTRONIC IGNITION",
+            ),
+        ];
+        for row in 0..30 {
+            page.push((
+                25.0,
+                640.0 - row as f32 * 9.0,
+                230.0,
+                8.0,
+                "left column body text of the instructions",
+            ));
+        }
+        for row in 0..20 {
+            page.push((
+                317.0,
+                636.0 - row as f32 * 13.0,
+                210.0,
+                8.0,
+                "right column body text of the instructions",
+            ));
+        }
+        let (spans, order) = x40_order(&page);
+        let pos = |i: usize| order.iter().position(|&o| o == i).unwrap();
+        let left: Vec<usize> = (3..spans.len()).filter(|&i| spans[i].bbox.left() < 200.0).collect();
+        let right: Vec<usize> = (3..spans.len()).filter(|&i| spans[i].bbox.left() > 200.0).collect();
+        let last_left = left.iter().map(|&i| pos(i)).max().unwrap();
+        let first_right = right.iter().map(|&i| pos(i)).min().unwrap();
+        assert!(last_left < first_right, "the columns are woven line by line: {order:?}");
+    }
+
+    /// X40: a boiler's operating sheet -- a two-line title and a title over both columns at the
+    /// top, the maker's address across the foot, two columns between. Every span of the page,
+    /// geometry verbatim, letters replaced by lorem ipsum of the same length. ~keep
+    #[test]
+    fn an_operating_sheet_with_a_title_across_both_columns_reads_column_by_column_x40() {
+        #[rustfmt::skip]
+        let page: &[(f32, f32, f32, f32, &str)] = &[
+            (104.35, 744.79, 328.57, 16.00, "EMAGNAALIQUALOREMIPSU MDOLORSI TA"),
+            (119.40, 725.79, 126.91, 16.00, "EET DOl-Oremag"),
+            (246.32, 725.79, 0.28, 16.00, " "),
+            (251.21, 725.79, 109.95, 16.00, "ORINCID I.D."),
+            (361.16, 725.79, 0.28, 16.00, " "),
+            (365.42, 725.79, 52.43, 16.00, "IDIDU"),
+            (524.91, 724.52, 35.28, 8.30, "UM 05-03"),
+            (24.56, 664.73, 246.96, 11.10, "METCONSECTETURADIPISC INGELITSEDDOE"),
+            (271.52, 664.73, 0.28, 11.10, " "),
+            (274.71, 664.73, 197.93, 11.10, "DOE IUSMODTEMPORI NCIDIDUNTU"),
+            (25.42, 636.76, 208.49, 8.30, "Dunt u tlabor eetdo lore magnaaliqua lore mi psumdolorsit."),
+            (25.42, 618.48, 89.76, 9.00, "Ncididu ntu tl abore"),
+            (316.57, 618.78, 69.49, 9.00, "Lo rsitame tconsec"),
+            (394.27, 618.78, 53.17, 8.30, "(ntu tlaboree)"),
+            (316.70, 605.78, 7.20, 8.30, "1. "),
+            (329.02, 605.78, 122.67, 8.30, "Oreetdo lo remagnaaliq ualore mi."),
+            (25.42, 604.48, 236.19, 8.30, "Us Modtemporinci did untutlaboreet doloremagn aaliq ua lor"),
+            (316.70, 596.78, 237.63, 8.30, "2. Edd oe iusmodtemporinci di du ntutlabo reetd. Ol orema"),
+            (25.42, 595.48, 236.20, 8.30, "U.A. lorem ip su mdolor si ta metcon sec te turadi pis ci"),
+            (329.02, 587.78, 225.30, 8.30, "tame tc onsectetura di pi scingelit sed 30 doeiusmo dt"),
+            (25.42, 586.48, 39.66, 8.30, "naaliqualo."),
+            (329.02, 578.78, 24.90, 8.30, "aloremi."),
+            (25.42, 577.48, 236.19, 8.30, "Ual oremip sumdolorsit ame tc onsecteturadipis cingel it"),
+            (316.70, 569.79, 237.17, 8.30, "3. Olorsitam et consecte tura dipisc, ing eli tseddoeiusm od"),
+            (25.42, 568.48, 236.18, 8.30, "umdolors i.t.a. met consectetur adip iscingeli ts eddoeiu"),
+            (329.02, 560.79, 201.80, 8.30, "30 ectetura di piscingeli tseddoe iu smodtem porinc."),
+            (25.42, 559.48, 236.14, 8.30, "etdolor emag na aliqualore mipsumdolorsita. Me tco nsectet-"),
+            (316.70, 551.79, 7.23, 8.30, "4. "),
+            (329.02, 551.79, 224.84, 8.30, "Oremag na aliqualo re 4 mips umdo lors itametcon, sec tetu ra"),
+            (25.42, 550.48, 236.20, 8.30, "eet dol or emagnaaliqu alo re mipsumdolorsitam etconsec te"),
+            (329.02, 542.79, 225.30, 8.30, "ncidi du ntutlab or eetd olo rema gnaaliqualorem ip sum"),
+            (25.42, 541.48, 236.24, 8.30, "usmodtemp 30 orincidi duntutla bo reetdolore magnaal iq"),
+            (329.02, 533.79, 225.30, 8.30, "modtemporincidid untutla. Bo reetdolore mag naaliqu al"),
+            (25.42, 532.49, 235.72, 8.30, "sectetu rad ipisci, ng elitseddo eiusmodte mporin ci didun"),
+            (329.02, 524.79, 225.30, 8.30, "eddoeiu smodte mporinc idid un tutla bore et do loremag."),
+            (25.42, 523.49, 235.73, 8.30, "onsectetur. Adipis ci ngelitse ddoe iusmod temporinc idi dun"),
+            (329.02, 515.79, 225.30, 8.30, "Tdolor 5 emagnaa liqualo remipsum do lorsi tame tc on sect-"),
+            (25.42, 514.49, 236.18, 8.30, "porincididu nt 30 utlabore et doloremagn aaliqua lo remipsu"),
+            (329.02, 506.79, 221.65, 8.30, "nge li tseddoeiu smodtempo rincid id untut laboreetdo."),
+            (25.42, 505.49, 236.19, 8.30, "tdolor. Emagnaali qu aloremip su 4 mdol ors itam etc onse ct"),
+            (25.42, 496.49, 236.37, 8.30, "ncidi du ntutlab or eetd olo rema gnaaliqualorem ip sum"),
+            (25.42, 487.49, 100.33, 8.30, "scingelitseddoei usmodte."),
+            (316.57, 484.18, 122.43, 9.00, "Etdolore mag naa liqualorem"),
+            (25.42, 478.49, 236.19, 8.30, "Bo reetdoloremagn aali qualoremips umd olorsi tametconsec"),
+            (316.70, 470.18, 238.97, 8.30, "1. Utlaboreetdolore ma gn aaliqual oremi psumdo (lors itame"),
+            (25.42, 469.49, 236.19, 8.30, "abo re etdoloremagnaali qualore. Mi ps umdolorsita met co"),
+            (327.91, 461.18, 191.35, 8.30, "con secte tura dipi, scinge litse ddo eiusmo dtem)."),
+            (25.42, 460.49, 236.31, 8.30, "porincididuntutl aboree td oloremagnaaliq 10 ualorem ip-"),
+            (316.70, 452.18, 237.17, 8.30, "2. Usmodtemporincid id un tutlabor eetdolorema gnaali. Qu"),
+            (25.42, 451.49, 236.19, 8.30, "onsecte. Turadipis cing el itseddoeiusmod temporincid 1 idun"),
+            (327.91, 443.19, 121.56, 8.30, "seddoeiusmodt empo ri ncididu."),
+            (25.42, 442.49, 236.20, 8.30, "por 24 inc ididuntut 5 laboree tdolore. Ma gnaaliqualor"),
+            (316.70, 434.19, 237.64, 8.30, "3. Id untutlabo reetd, oloremag naa liqual oremips umd olorsit-"),
+            (25.42, 433.49, 236.19, 8.30, "eetdoloremag naa li qual oremipsum 5 dolorsi tam 24 etc onsec"),
+            (327.91, 425.19, 13.84, 8.30, "dol."),
+            (25.42, 424.49, 236.19, 8.30, "adipis cingel it sed doeiusmo dte mp orincid iduntutlabo ree td"),
+            (25.42, 415.49, 236.37, 8.30, "adipiscingelitse. Dd oei usmodtem por in cididuntutla"),
+            (25.42, 406.49, 235.72, 8.30, "ididuntutlab ore et doloremagnaali qu aloremip, sumdo lor si"),
+            (316.57, 403.18, 43.51, 9.00, "Doloremagn"),
+            (25.42, 397.49, 235.72, 8.30, "ons ectetura dipiscin ge litseddoeiusmodt empo rincid idunt"),
+            (316.57, 389.38, 237.67, 8.30, "Ori nc idi du ntutla bor ee tdolorem agnaaliqua loremi psum"),
+            (25.42, 388.49, 38.97, 8.30, "or emagna."),
+            (316.57, 380.38, 237.76, 8.30, "emips, umdol or sitame tcon secteturad ip is cingelits eddoei-"),
+            (316.57, 371.38, 169.26, 8.30, "cidid, untutlab or eetdo loremagnaa liq ualor."),
+            (25.42, 370.24, 203.97, 9.00, "Eddoeiusmo dtempori nc ididu nt utlabor ee tdolore"),
+            (25.42, 355.24, 7.20, 8.30, "1. "),
+            (38.04, 355.24, 219.05, 8.30, "Ts eddoeiusm odte mporinci 1 did untu tla boreetdol orema. "),
+            (316.57, 349.38, 35.57, 9.00, "Tametcon"),
+            (25.42, 346.25, 7.20, 8.30, "2. "),
+            (38.04, 346.25, 190.94, 8.30, "Or incid id un tutlaboreet dolore magn aaliqual orem."),
+            (25.42, 337.25, 7.20, 8.30, "3. "),
+            (38.04, 337.25, 171.78, 8.30, "Re etdoloremag naaliq ualo remipsumdolor sita."),
+            (316.57, 336.38, 237.38, 8.30, "Eius modtempor incididu nt utlaboreetdolore ma gn aaliqua"),
+            (25.42, 328.25, 7.20, 8.30, "4. "),
+            (38.04, 328.25, 114.39, 8.30, "Ip iscingel itse ddoe iusmo."),
+            (316.57, 327.38, 236.83, 8.30, "dolor emagna. Aliq ualoremip sumdolor si tametcon secteturadip"),
+            (316.57, 318.38, 237.30, 8.30, "na al iqualoremipsumdo lo rs itametc onsec tetura dipi sc"),
+            (25.42, 312.97, 236.17, 9.00, "Etcon se cteturadipi scinge litseddoeiu smo dt empori-"),
+            (316.57, 309.39, 119.46, 8.30, "remagnaaliqua loremipsumd olorsi."),
+            (25.42, 302.17, 163.94, 9.00, "incid idun tutlab oreetd ol oremagna al."),
+            (316.57, 300.39, 28.00, 8.30, "Tet ur:"),
+            (347.22, 300.39, 207.11, 8.30, "Od te mporin cididu nt utlaboreetdol oremagnaali qualor em"),
+            (316.57, 291.39, 236.84, 8.30, "ddoeiusmodtempor inci di dunt utlabo re etdolorema gn aali-"),
+            (316.57, 282.39, 27.21, 8.30, "adipi."),
+            (316.57, 259.38, 89.40, 9.00, "Remipsumdo lo rsitam"),
+            (316.57, 245.98, 237.76, 8.30, "Rs ita metconsec tetu rad ipiscinge, litsed doei usmodtempo."),
+            (316.57, 236.98, 237.30, 8.30, "Iqual or emip sumd olorsit, am etconsectet uradip iscingel it"),
+            (316.57, 227.98, 237.77, 8.30, "rsit ametconsec. Tet uradipis cin ge lits eddoeiusmo dtem po."),
+            (316.57, 218.99, 237.76, 8.30, "Magnaa li qualor emips um dol orsita metco ns ectetu radipiscing"),
+            (316.57, 209.99, 237.76, 8.30, "ut la boree tdolor emagn aaliqual or emipsu. Mdo lorsitamet"),
+            (316.57, 200.99, 237.30, 8.30, "tempo rincid id untutlabor eet doloremagna aliq ua loremipsu"),
+            (316.57, 191.99, 239.56, 8.30, "sitametc. (Ons ecteturadip iscing elitseddoeiu smodt emp orinc"),
+            (316.57, 182.99, 239.56, 8.30, "litseddoe iu). Smod te mporincid iduntut lab oree td oloremag-"),
+            (316.57, 173.99, 237.76, 8.30, "iqua loremipsu mdolors, ita me tconsectetu radi piscingel it"),
+            (316.57, 164.99, 92.25, 8.30, "dolorsi tame tconsectet."),
+            (316.57, 155.99, 241.36, 8.30, "Dol oremag (naaliqual) ore mipsumdolo rsi ta met/consectetu rad"),
+            (316.57, 146.99, 237.77, 8.30, "gn aaliq ua lo re mipsum dolo rs itame tc onsectetura dipi sc"),
+            (316.57, 137.99, 237.76, 8.30, "mporincididu. Ntutlabo re etdolore mag na aliqualoremi psumd-"),
+            (316.57, 128.99, 237.76, 8.30, "oremip su md olo/rsitametco nsectet. Uradipisci ng elitsedd oei-"),
+            (316.57, 119.99, 237.30, 8.30, "mdo lor sitam etcons ecte turadi pisc ingel itse ddoeius. Mod te"),
+            (316.57, 110.99, 237.76, 8.30, "rsitam etconsectet. Uradipis cingel it seddoeiusmo dt empo"),
+            (316.57, 101.99, 32.75, 8.30, "remipsu."),
+            (316.57, 92.99, 152.69, 8.30, "Rinc ididuntutlaboreetd olor emagnaaliq. "),
+            (316.57, 83.99, 144.75, 8.30, "Aboreetd olorema gn aaliqu alor emipsum."),
+            (316.57, 74.99, 237.29, 8.30, "Olor em agnaa liq ualore mipsu mdo lorsitametco nsectetur"),
+            (316.57, 65.99, 237.76, 8.30, "consec, tet ur adipiscingel itseddoeius, modt empori ncid"),
+            (316.57, 56.99, 237.30, 8.30, "emagn aaliqualor emip su mdolorsitam etc onse. Ct et ura dipi-"),
+            (316.57, 47.99, 120.59, 8.30, "ididuntutl abo ree td ol oremagnaali."),
+        ];
+        let (spans, order) = x40_order(page);
+        let pos = |i: usize| order.iter().position(|&o| o == i).unwrap();
+        let body = |i: usize| (60.0..650.0).contains(&spans[i].bbox.y) && !spans[i].text.trim().is_empty();
+        let left: Vec<usize> = (0..spans.len())
+            .filter(|&i| body(i) && spans[i].bbox.right() < 262.0)
+            .collect();
+        let right: Vec<usize> = (0..spans.len())
+            .filter(|&i| body(i) && spans[i].bbox.left() > 285.0)
+            .collect();
+        assert!(left.len() >= 8 && right.len() >= 8);
+        let last_left = left.iter().map(|&i| pos(i)).max().unwrap();
+        let first_right = right.iter().map(|&i| pos(i)).min().unwrap();
+        assert!(last_left < first_right, "the columns are woven line by line: {order:?}");
+    }
+
+    /// X40: a sentence wrapped over two lines at the left margin keeps its last line after its
+    /// first; the label/value refusal read `… eerst aan te sluiten.` before `Voor eenvoudige
+    /// toegang …` on this installation manual page. Every span of the page, geometry verbatim,
+    /// letters replaced by lorem ipsum of the same length. ~keep
+    #[test]
+    fn a_wrapped_sentence_keeps_its_last_line_after_its_first_x40() {
+        #[rustfmt::skip]
+        let page: &[(f32, f32, f32, f32, &str)] = &[
+            (48.18, 818.88, 78.39, 9.00, "Scingelitse ddoeiusmodt"),
+            (126.66, 818.88, 1.62, 9.00, " "),
+            (233.96, 543.38, 37.81, 5.00, "0010046947-001"),
+            (48.18, 528.00, 25.56, 9.00, "Lit. 18 "),
+            (79.37, 528.00, 84.30, 9.00, "Reetdolor em agnaaliqualo"),
+            (48.18, 494.52, 5.93, 10.98, "5"),
+            (54.11, 494.52, 0.25, 10.98, " "),
+            (79.38, 494.52, 104.20, 10.98, "Scingelitse ddoeiusmodt"),
+            (53.88, 474.72, 45.70, 9.00, "GNAALIQUA"),
+            (48.18, 459.72, 189.30, 9.00, "Aaliqu alo re mipsumdolor sita metcon se ct eturadipi!"),
+            (48.18, 445.68, 240.89, 9.00, "Ingel itseddo, eiusmo-/dtemporincididu, ntutla- bo reetdoloremagnaal "),
+            (48.18, 434.70, 234.75, 9.00, "ps umdolorsit ametconsec tetura dipi sc ingeli, tseddoeiu sm odtemp-"),
+            (48.18, 423.72, 66.82, 9.00, "piscingeli tseddoei."),
+            (48.18, 409.68, 6.36, 9.00, "▶"),
+            (59.52, 409.68, 227.64, 9.00, "Magnaal iqu aloremipsumdo lor sitam etconse ct etu radipiscingeli."),
+            (48.18, 397.68, 6.17, 9.00, "▶"),
+            (59.52, 397.68, 229.66, 9.00, "Boreetdoloremagnaa li -qualoremipsu mdol orsita me tc onsec teturadi."),
+            (48.18, 385.68, 6.36, 9.00, "▶"),
+            (59.52, 385.68, 229.62, 9.00, "Orem ip sum dol orsitamet cons, ect etur adipisc in ge litseddoe ius-"),
+            (59.52, 374.70, 34.20, 9.00, "tconsectet."),
+            (48.18, 362.70, 6.36, 9.00, "▶"),
+            (59.52, 362.70, 220.65, 9.00, "Mdolo rsi tametconsectet uradipi scin geli tse ddoeiusmod tem po "),
+            (59.52, 351.72, 226.49, 9.00, "qualoremip su mdolorsita, me tconsec teturadi piscing el itsedd-"),
+            (59.52, 340.68, 22.14, 9.00, "orinc."),
+            (48.18, 284.40, 65.72, 9.00, "magna ali qu aloremi."),
+            (57.15, 219.15, 10.79, 12.94, "5."),
+            (48.18, 295.38, 163.66, 9.00, "Iusm odtemporin cididun, tutla boreetdolor em "),
+            (211.86, 295.38, 34.26, 9.00, "utlaboree"),
+            (246.18, 295.38, 34.27, 9.00, " diduntutl "),
+            (267.30, 222.64, 10.79, 12.94, "6."),
+            (311.82, 766.38, 236.09, 9.00, "Aloremi ps umdolorsita metcon sec tetura dipis cingelitse, ddoeiu sm "),
+            (311.82, 755.40, 92.68, 9.00, "ecteturad ipisci ngelitse."),
+            (311.82, 741.36, 6.36, 9.00, "▶"),
+            (323.16, 741.36, 202.15, 9.00, "Dtempo rincid id un tutlabo- re etdoloremagnaaliqualorem."),
+            (311.82, 696.06, 236.66, 9.00, "Untutla bore etdolo re magnaaliqua, lore mi psumdolorsi tame-tconsect-"),
+            (311.82, 685.08, 240.94, 9.00, "untu tlabor eetdoloremag na al iqualoremipsumdolorsit am etconsecte."),
+            (311.82, 637.74, 235.18, 9.00, "Liqualo re mipsu mdolorsita metconsecteturadipi sci nge litse ddoe iu "),
+            (311.82, 626.76, 240.09, 9.00, "orsit ametconsecteturadipis ci ngelitseddo ei usm odtempo rinc idi du nt-"),
+            (311.82, 615.78, 28.97, 9.00, "ididuntut."),
+            (311.82, 586.98, 13.48, 9.96, "5.1"),
+            (325.30, 586.98, 0.25, 9.96, " "),
+            (343.01, 586.98, 29.68, 9.96, "Uradipis"),
+            (317.46, 567.48, 45.68, 9.00, "GNAALIQUA"),
+            (311.82, 552.48, 155.64, 9.00, "Ingelitse ddoeiu smod tempo ri NC-ididuntu!"),
+            (311.82, 538.44, 187.66, 9.00, "Edd oeiusmodtemp ori nci didun tu tl aboreetdo loremagna."),
+            (311.82, 524.46, 238.53, 9.00, "Liqu AL-oremipsu mdo lo rsitamet cons ectetu ra di pisci ngel itseddoeius."),
+            (311.82, 510.48, 6.36, 9.00, "▶"),
+            (323.16, 510.48, 220.61, 9.00, "Tdolore magn aaliqualo, remipsumdolor si tametconsect eturad ipi "),
+            (323.16, 499.44, 115.18, 9.00, "dolorema gna ali qualor 19 em ips."),
+            (311.82, 487.44, 6.36, 9.00, "▶"),
+            (323.16, 487.44, 223.21, 9.00, "Reetdol oremagnaali, qualo rem ipsum dol or sita me tconsectet "),
+            (323.16, 476.46, 219.52, 9.00, "utl ab ore et doloremagn aal iqualor emipsumdo lor sitamet cons-"),
+            (323.16, 465.42, 155.99, 9.00, "magna al iqualoremip sumdol orsita metconse."),
+            (311.82, 453.42, 6.36, 9.00, "▶"),
+            (323.16, 453.42, 136.99, 9.00, "Loremag NA- al iqualoremipsumd olorsita."),
+            (311.82, 441.42, 6.36, 9.00, "▶"),
+            (323.16, 441.42, 79.92, 9.00, "Iscinge li tseddoeiusmo."),
+            (311.82, 429.42, 6.36, 9.00, "▶"),
+            (323.16, 429.42, 229.62, 9.00, "Iq ualoremi psum dol orsitame tcon sectetura dip isc ingeli 12 ts "),
+            (323.16, 418.44, 224.71, 9.00, "rem ipsumdol orsita. Met co nse ctet ura dipisc in gelitsedd oeiusm-"),
+            (323.16, 407.46, 69.19, 9.00, "tametconse cteturadip."),
+            (311.82, 386.34, 239.84, 9.00, "Oeiu smodtemporincididuntu tlaboreet dolore mag naa liqualore mips-"),
+            (311.82, 375.30, 213.96, 9.00, "do-loremagn aaliqua lo remipsum dolorsitametc onsect eturadip."),
+            (311.82, 361.32, 231.79, 9.00, "Nge litseddoe iusmod temp orincididuntu tl aboreetdo loremag na ali-"),
+            (311.82, 350.34, 221.82, 9.00, "radip iscing elitse ddoeiusmod, te mporincidid un tutlabore."),
+            (57.15, 167.76, 10.79, 12.94, "3."),
+            (108.26, 104.56, 10.79, 12.94, "1."),
+            (48.18, 72.24, 25.54, 9.00, "Adi. 19 "),
+            (79.35, 72.24, 68.94, 9.00, "Ipsumdolorsitametcon"),
+            (59.52, 36.48, 9.72, 9.00, "14"),
+            (267.30, 154.81, 10.79, 12.94, "2."),
+            (267.30, 120.74, 10.79, 12.94, "4."),
+            (242.06, 89.12, 40.75, 5.39, "0010049216-001"),
+            (398.34, 37.38, 143.11, 7.68, "Iusmodte 5800m PO – 6721109858 (2025/06)"),
+        ];
+        let (spans, order) = x40_order(page);
+        let pos = |i: usize| order.iter().position(|&o| o == i).unwrap();
+        let at = |x: f32, y: f32| {
+            (0..spans.len())
+                .find(|&i| (spans[i].bbox.x - x).abs() < 0.01 && (spans[i].bbox.y - y).abs() < 0.01)
+                .expect("the fixture has this span")
+        };
+        let first_line = at(48.18, 295.38);
+        let last_line = at(48.18, 284.40);
+        assert!(
+            pos(first_line) < pos(last_line),
+            "the last line is read before the first: {order:?}"
+        );
     }
 }

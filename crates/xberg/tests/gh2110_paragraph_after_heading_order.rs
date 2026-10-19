@@ -52,11 +52,13 @@ fn assert_page_is_read_top_to_bottom(content: &str) {
 }
 
 #[test]
+#[ignore = "X40: this fork does not refuse a column cut that lines straddle (see UPSTREAM_COLUMN_CUT_REFUSALS in xycut.rs)"]
 fn page_is_read_top_to_bottom_in_markdown() {
     assert_page_is_read_top_to_bottom(&extract(OutputFormat::Markdown));
 }
 
 #[test]
+#[ignore = "X40: this fork does not refuse a column cut that lines straddle (see UPSTREAM_COLUMN_CUT_REFUSALS in xycut.rs)"]
 fn page_is_read_top_to_bottom_in_plain_text() {
     assert_page_is_read_top_to_bottom(&extract(OutputFormat::Plain));
 }
