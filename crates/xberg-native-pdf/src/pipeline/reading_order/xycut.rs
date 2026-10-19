@@ -1282,7 +1282,11 @@ impl XYCutStrategy {
         // table's column, and were read after the next heading. When the cut runs through
         // such a band, peel the band off with whatever lies above and below it instead, and
         // let each part find its own cut. ~keep
-        if let Some((split_x, _, _)) = self.find_horizontal_split_with_x(all_spans, indices)
+        // On v1.3.10 the cut is asked for WITHOUT upstream's straddling-lines and label/value
+        // refusals: both refuse exactly the cut this peel needs -- a band of wide quotes
+        // straddles it by definition -- and a refusal reads the region by y, weaving the
+        // columns above the band line by line. The parts are then cut with the refusals on. ~keep
+        if let Some((split_x, _, _)) = self.find_horizontal_split_with_x(all_spans, indices, false)
             && let Some(parts) = prose_band_split(all_spans, indices, split_x)
             && parts.len() >= 2
         {
@@ -2420,7 +2424,7 @@ impl XYCutStrategy {
         all_spans: &[TextSpan],
         indices: &[usize],
     ) -> Option<(Vec<usize>, Vec<usize>)> {
-        let (split_x, left, right) = self.find_horizontal_split_with_x(all_spans, indices)?;
+        let (split_x, left, right) = self.find_horizontal_split_with_x(all_spans, indices, true)?;
         // X11 (#3012): a cut through a band of prose that fills the whole region -- nothing above or
         // below it to peel (`partition_indexed_depth` peels when there is) -- is no column
         // split at all. ~keep
@@ -2430,11 +2434,14 @@ impl XYCutStrategy {
         Some((left, right))
     }
 
-    /// `find_horizontal_split_indexed`, with the cut's x. ~keep
+    /// `find_horizontal_split_indexed`, with the cut's x. `refuse_unassignable` applies
+    /// upstream's refusals of a cut that lines straddle or that splits label/value
+    /// rows; X11's band probe turns them off to see the cut it may peel around. ~keep
     fn find_horizontal_split_with_x(
         &self,
         all_spans: &[TextSpan],
         indices: &[usize],
+        refuse_unassignable: bool,
     ) -> Option<(f32, Vec<usize>, Vec<usize>)> {
         let profile = self.horizontal_projection_indexed(all_spans, indices)?;
 
@@ -2454,7 +2461,7 @@ impl XYCutStrategy {
         let valleys = self.interior_valleys(&profile);
         if valleys.is_empty() {
             let split_x = self.find_split_between_peaks(&profile)?;
-            return self.column_cut_at(all_spans, indices, split_x);
+            return self.column_cut_at(all_spans, indices, split_x, refuse_unassignable);
         }
         let page_gutter = PAGE_GUTTER.with(|cell| cell.get());
         let mut skipped = false;
@@ -2487,7 +2494,7 @@ impl XYCutStrategy {
             if skipped && !page_gutter.is_some_and(|gutter| (split_x - gutter).abs() <= FALLBACK_GUTTER_TOLERANCE_PT) {
                 return None;
             }
-            return self.column_cut_at(all_spans, indices, split_x);
+            return self.column_cut_at(all_spans, indices, split_x, refuse_unassignable);
         }
         None
     }
@@ -2498,6 +2505,7 @@ impl XYCutStrategy {
         all_spans: &[TextSpan],
         indices: &[usize],
         split_x: f32,
+        refuse_unassignable: bool,
     ) -> Option<(f32, Vec<usize>, Vec<usize>)> {
         // Reject splits where either resulting sub-column would be
         // narrower than ~60 pt (about 6 body-text characters at
@@ -2537,7 +2545,7 @@ impl XYCutStrategy {
         // side holding most of its ink scatters one paragraph over both columns. Refuse the
         // cut so the row split peels them off as bands first. The margin note that widens the
         // region is why `peel_full_width_line_bands` never saw them as full-width. ~keep
-        if self.straddling_line_count(all_spans, indices, split_x) >= MIN_PEELED_FULL_WIDTH_LINES {
+        if refuse_unassignable && self.straddling_line_count(all_spans, indices, split_x) >= MIN_PEELED_FULL_WIDTH_LINES {
             return None;
         }
 
@@ -2649,7 +2657,7 @@ impl XYCutStrategy {
             return None;
         }
 
-        if self.cuts_label_value_rows(all_spans, indices, split_x) {
+        if refuse_unassignable && self.cuts_label_value_rows(all_spans, indices, split_x) {
             return None;
         }
 
@@ -2682,13 +2690,17 @@ impl XYCutStrategy {
         let mut short_rows = 0usize;
         for pair in lines.windows(2) {
             let (left_min, left_max, left_y, left_font) = extent(&pair[0]);
-            let (right_min, right_max, right_y, right_font) = extent(&pair[1]);
+            let (right_min, _, right_y, right_font) = extent(&pair[1]);
             let offset = (left_y - right_y).abs();
             if left_max > split_x || right_min < split_x || offset == 0.0 || offset > XYCUT_LINE_Y_TOLERANCE_PTS {
                 continue;
             }
             paired_rows += 1;
-            let narrow_side = (left_max - left_min).min(right_max - right_min);
+            // DataPolder (X11 port): the LABEL is the left run -- a key, a list marker, a row
+            // header. A short run on the right beside a full prose line is a chart's value or
+            // axis label next to a text column (X11's report page: `2`, `Ad ipisci` beside
+            // 180 pt quote lines), and counting it refused the cut that page needs. ~keep
+            let narrow_side = left_max - left_min;
             if narrow_side < LABEL_RUN_MAX_EM * left_font.max(right_font) {
                 short_rows += 1;
             }
