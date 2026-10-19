@@ -2687,6 +2687,63 @@ fn apply_span_order(spans: &mut [xberg_native_pdf::layout::TextSpan], order: &[u
 /// body lines are not row-aligned at all (no line ever has spans from both
 /// sides within `LINE_Y_TOLERANCE_PTS`) can starve `detect_split_x` of the
 /// per-line evidence it needs.
+/// X41: true when one side of `split_x` holds nothing but numbering labels -- `4.5`, `5.`,
+/// `6.10`, `25` -- on at least `MIN_DENSE_COLUMN_SPANS_PER_SIDE` lines.
+///
+/// That side is a margin of hanging clause numbers, or a table of contents' section numbers,
+/// not a column. Since v1.3.10 the band builder treats no line as furniture once the split is
+/// chosen (upstream's fix for a margin-note column beside a justified main column), so a split
+/// that lands between hanging numbers and their clauses leaves one band, and every number is
+/// read before every clause it numbers: an agreement lost its clause structure, a manual's
+/// table of contents became headings, numbered steps lost their numbers. Before that change each
+/// wide clause line was furniture, a band boundary, and kept its number beside it. ~keep
+fn side_is_only_numbering_labels(
+    spans: &[xberg_native_pdf::layout::TextSpan],
+    lines: &[SpanLine],
+    split_x: f32,
+) -> bool {
+    let is_label = |text: &str| {
+        let text = text.trim().trim_end_matches('.');
+        !text.is_empty()
+            && text.len() <= 12
+            && text
+                .split('.')
+                .all(|part| !part.is_empty() && part.len() <= 3 && part.bytes().all(|b| b.is_ascii_digit()))
+    };
+    let side_counts = |left_side: bool| -> (usize, usize) {
+        let mut labels = 0;
+        let mut other = 0;
+        for line in lines {
+            let texts: Vec<&str> = line
+                .iter()
+                .filter(|&&index| span_has_ink(&spans[index]))
+                .filter(|&&index| {
+                    let bbox = &spans[index].bbox;
+                    if left_side {
+                        bbox.x + bbox.width <= split_x
+                    } else {
+                        bbox.x >= split_x
+                    }
+                })
+                .map(|&index| spans[index].text.as_str())
+                .collect();
+            if texts.is_empty() {
+                continue;
+            }
+            if texts.iter().all(|text| text.split_whitespace().all(is_label)) {
+                labels += 1;
+            } else {
+                other += 1;
+            }
+        }
+        (labels, other)
+    };
+    [true, false].into_iter().any(|left_side| {
+        let (labels, other) = side_counts(left_side);
+        labels >= MIN_DENSE_COLUMN_SPANS_PER_SIDE && other == 0
+    })
+}
+
 pub(crate) fn reorder_dense_two_column_page(spans: &mut [xberg_native_pdf::layout::TextSpan], page_width: f32) -> bool {
     let content_left = spans.iter().map(|span| span.bbox.x).fold(f32::INFINITY, f32::min);
     let content_right = spans
@@ -2705,6 +2762,10 @@ pub(crate) fn reorder_dense_two_column_page(spans: &mut [xberg_native_pdf::layou
     let split_x = snap_split_left_of_hanging_labels(spans, &lines, page_width, detected_split_x);
     let split_x = redirect_split_out_of_content(spans, &lines, page_width, split_x);
 
+    // X41: a margin of hanging clause numbers is not a column. ~keep
+    if side_is_only_numbering_labels(spans, &lines, split_x) {
+        return false;
+    }
     let bands = build_bands(spans, &lines, NO_WIDTH_FURNITURE, split_x);
     let Some(final_order) = emit_band_order(spans, bands, split_x) else {
         return false;
@@ -7957,5 +8018,185 @@ mod tests {
             .map(|text| text.split(' ').next().unwrap_or(text))
             .collect();
         assert_eq!(headings, ["3.2.2.", "3.3.", "3.3.1.", "3.3.2."]);
+    }
+
+    fn x41_spans(page: &[(f32, f32, f32, f32, &str)]) -> Vec<TextSpan> {
+        page.iter()
+            .map(|&(x, y, w, size, text)| span_with_width(text, x, y, w, size, size))
+            .collect()
+    }
+
+    /// X41: a single-column agreement hangs its clause numbers in the margin. A split between
+    /// the numbers and the clause text must not reorder the page: read as two columns, every
+    /// number came before every clause. ~keep
+    #[test]
+    fn hanging_clause_numbers_are_not_a_column_x41() {
+        let mut page: Vec<(f32, f32, f32, f32, &str)> = Vec::new();
+        let mut y = 740.0;
+        for clause in 0..16 {
+            let number: &'static str = Box::leak(format!("4.{} ", clause + 1).into_boxed_str());
+            page.push((93.6, y, 14.1, 8.5, number));
+            page.push((
+                120.2,
+                y,
+                290.0,
+                8.5,
+                "The partner delivers the asset to the lessor by handing it over. ",
+            ));
+            for _ in 0..(1 + clause % 3) {
+                y -= 9.72;
+                page.push((
+                    120.2,
+                    y,
+                    260.0,
+                    8.5,
+                    "The lessor informs the customer that it is the owner. ",
+                ));
+            }
+            y -= 9.72;
+        }
+        let mut spans = x41_spans(&page);
+        let before: Vec<String> = spans.iter().map(|span| span.text.clone()).collect();
+        assert!(
+            !reorder_dense_two_column_page(&mut spans, 595.0),
+            "a margin of numbers is no column"
+        );
+        let after: Vec<String> = spans.iter().map(|span| span.text.clone()).collect();
+        assert_eq!(before, after);
+    }
+
+    /// X41: page 9 of a lease cooperation agreement -- clause numbers `4.5` to `7.3` hung in the
+    /// margin beside the clause text. Every span of the page, geometry verbatim, letters
+    /// replaced by lorem ipsum of the same length. ~keep
+    #[test]
+    fn an_agreement_page_keeps_each_clause_number_with_its_clause_x41() {
+        #[rustfmt::skip]
+        let page: &[(f32, f32, f32, f32, &str)] = &[
+            (284.52, 750.96, 235.63, 8.46, " boreetdo loremagnaal iqualoremips Umdolo Rsita 2018.01 "),
+            (93.60, 730.92, 14.11, 8.46, "4.5 "),
+            (120.24, 730.92, 387.96, 8.46, "DID unt utl aboreet dolo rem agn aa liqualor emi ps umdolorsi tametcon secteturadi. PIS cin ge "),
+            (120.24, 721.20, 124.63, 8.46, "Sitamet con sectetur adipiscing. "),
+            (93.60, 711.48, 14.11, 8.46, "4.6 "),
+            (120.24, 711.48, 387.96, 8.46, "Us modtemporin ci diduntutlabore. Etd olo remagn aal IQU al oremipsumdo lor sitametco nse cte tur ad "),
+            (120.24, 701.76, 72.43, 8.46, "metconse cteturadi: "),
+            (126.84, 691.44, 4.64, 8.46, "−"),
+            (131.52, 691.44, 2.35, 8.46, " "),
+            (140.28, 691.44, 172.99, 8.46, "Ntutlaboree td ol oremagnaaliqual ore mi Psumd "),
+            (126.84, 681.12, 4.64, 8.46, "−"),
+            (131.52, 681.12, 2.35, 8.46, " "),
+            (140.28, 681.12, 173.47, 8.46, "Ddoeiusmodt em po rincididunt utla bo Reetd  "),
+            (126.84, 670.80, 4.64, 8.46, "−"),
+            (131.52, 670.80, 2.35, 8.46, " "),
+            (140.28, 670.80, 370.51, 8.46, "Liq - ualorem IPS - um dolorsitam etconsec te tu ra dipiscingel its ed Doeiu smodtempori nc ididuntutlab "),
+            (126.84, 660.60, 4.64, 8.46, "−"),
+            (131.52, 660.60, 2.35, 8.46, " "),
+            (140.28, 660.60, 262.39, 8.46, "Nge li tseddoeiu sm odtemporinc ididuntutl ab oreetdolo rem ag Naaliqua "),
+            (126.84, 650.16, 4.64, 8.46, "−"),
+            (131.52, 650.16, 2.35, 8.46, " "),
+            (140.28, 650.16, 374.40, 8.46, "Ect eturad ipi SCI ngel itseddoei usmodte mpo ri Ncidi dun tutlab ore etdolo rem ag naaliqualo remips "),
+            (140.28, 640.56, 330.48, 8.46, "cte tu Rad ipi scingelits eddoeiusm od temporincidi dun tutlaboree (Tdol) or emagnaa "),
+            (140.28, 630.84, 143.95, 8.46, "seddoeiusmodt emp- or incididuntu. "),
+            (120.24, 621.12, 382.68, 8.46, "PIS cin ge litseddoeiu smodtempo rin cid iduntu tla BOR eetd oloremagna aliqu aloremips um dolor "),
+            (120.24, 611.28, 378.84, 8.46, "naaliqualorem. Ipsum DOL or sitametcons ec? Tet uradipi sc Ingelitseddoeius. MOD tempo rin cidi "),
+            (120.24, 601.56, 101.11, 8.46, "iscinge litseddoeiusmodte. "),
+            (93.60, 591.84, 14.11, 8.46, "4.7 "),
+            (120.24, 591.84, 374.35, 8.46, "Em por inci diduntutlab oreetdo lo re ma gnaaliqualo rem ipsumd? Olo rsitame TCO ns ectet ura dip "),
+            (120.24, 582.24, 181.63, 8.46, "Dtemporincidid untutl 5 abore etd ol Oremagn..  "),
+            (93.60, 572.40, 14.11, 8.46, "4.8 "),
+            (120.24, 572.40, 394.56, 8.46, "Boree TDO lo remagnaal iqual oremi psumdol ors Itametc, onsect et Uradipi sc ingelitsedd oeiusmod tem "),
+            (120.24, 562.68, 199.39, 8.46, "gna Aliqualoremips umdo lor SIT. Ame tco nsecte tur: "),
+            (126.84, 552.36, 4.64, 8.46, "−"),
+            (131.52, 552.36, 2.35, 8.46, " "),
+            (140.28, 552.36, 339.67, 8.46, "on sect eturadipiscingelits edd oeiusm (odt em Porinci di dun tutl aboreetdolorem) ag  "),
+            (126.84, 542.16, 4.64, 8.46, "−"),
+            (131.52, 542.16, 2.35, 8.46, " "),
+            (140.28, 542.16, 356.11, 8.46, "dd oeiu smodtempo rinc id idu Ntutlaboreetdo (loremagnaali qua lo remipsumdol ors it Ametcon). "),
+            (93.60, 532.32, 14.11, 8.46, "4.9 "),
+            (120.24, 532.32, 395.88, 8.46, "In Cididun tutlab ore Etdoloremagnaa liq UAL orem ipsumdolor sit am Etcon. Secte tur Adipiscingelit se ddo ei "),
+            (120.24, 522.60, 388.08, 8.46, "Lorem? Agn aal IQU al Oremi psumdolors ita MET co nsectetu ra dipiscin. Gel it seddo ei us modtempo "),
+            (120.24, 512.88, 169.75, 8.46, "remipsu mdol or sitame (tco. 3:115 nse c TE). "),
+            (120.24, 503.28, 2.35, 8.46, " "),
+            (93.60, 491.52, 9.43, 8.46, "5. "),
+            (120.24, 491.52, 98.83, 8.46, "Adi pisci NGE litseddo? "),
+            (93.60, 481.08, 14.11, 8.46, "5.1 "),
+            (120.24, 481.08, 386.52, 8.46, "Modtemp ori Ncididuntutlab ore (etdolorema)gnaaliqu? Alo remip SUM dolo rsitamet, cons ecteturadipisc. "),
+            (120.24, 471.36, 381.31, 8.46, "ORI ncidi du ntu tlabo ree tdolo re magn aaliqual or emipsumdolo rs itame tco ns Ectet. Ur adi piscin "),
+            (120.24, 461.64, 394.92, 8.46, "scinge li tseddoeiusmod? Tem porin ci Diduntu tla bo reetdoloremag naaliqua lor em ipsumdol ors ITA me tc "),
+            (120.24, 451.92, 365.76, 8.46, "tametconsec tet ur Adipi sc ingelits ed doeius (modtempori) ncididuntutl aboreetdolo. Remagnaal "),
+            (120.24, 442.20, 230.35, 8.46, "rsitamet conse cteturadipisc inge lit sed doe Iusmodtemporin. "),
+            (93.60, 432.36, 14.11, 8.46, "5.2 "),
+            (120.24, 432.36, 388.32, 8.46, "Or eetdolo 4 remag naaliqu aloremipsu mdo lor sitame tcons. Ec tet urad ipiscingeli tseddoe? Ius modt "),
+            (120.24, 422.64, 383.04, 8.46, "qu aloremi psumdolorsi tam Etconsecteturadi pis cinge litsed DOE iu sm Odtempo. Ri ncidi dun tutl "),
+            (120.24, 413.04, 117.07, 8.46, "rinci diduntutlabo reetdolo. "),
+            (93.60, 403.32, 14.11, 8.46, "5.3 "),
+            (120.24, 403.32, 199.87, 8.46, "Tc Onsecte turadi pi scingeli tsed doe IUS modte: "),
+            (120.24, 393.48, 5.11, 8.46, "- "),
+            (133.68, 393.48, 375.79, 8.46, "Nt Utlab ore Etdoloremagnaa liqua loremipsumdo lo rsi Tametconsec tet Uradipisci ngeli tseddoei; us "),
+            (120.24, 383.76, 5.11, 8.46, "- "),
+            (133.68, 383.76, 178.27, 8.46, "SCI ng elitsed doeiu smodtem por in Cididun. "),
+            (120.24, 374.04, 283.15, 8.46, "SUM do lo Rsitame tconse ct etu radipisci ngeli tseddo eiusmodte mpori. "),
+            (93.60, 364.32, 14.11, 8.46, "5.4 "),
+            (120.24, 364.32, 386.23, 8.46, "Or inci diduntutlabor eetd olorem agnaaliq ualoremipsu mdo lorsitamet co ns Ecteturadipiscin. Gel "),
+            (120.24, 354.60, 394.92, 8.46, "usmod tem pori (n) ci diduntutlaboreetdo lor em Agnaali qu (al) or emipsumdolorsitam etc ONS. Ect etura "),
+            (120.24, 344.88, 381.84, 8.46, "liq ualo remi psumdolorsi Tametconsecteturad. Ipi (scingelit) seddoeiusm od temporincid id untutlab "),
+            (120.24, 335.16, 388.75, 8.46, "oeiusm odte mp Orincid id UNT utlaboreetdol - ore magnaali - qualoremi. Psum dolors it Ametcon se CTE "),
+            (120.24, 325.44, 299.11, 8.46, "agnaal iqu aloremip sum dol orsitametcons (ecteturadipi sc ing e-lits) ed doeiusmodte. "),
+            (93.60, 315.60, 2.35, 8.46, " "),
+            (93.60, 304.08, 9.43, 8.46, "6. "),
+            (120.24, 304.08, 217.27, 8.46, "Mod temporin CID id untutlabor ee td oloremagnaaliqu? "),
+            (93.60, 293.52, 14.11, 8.46, "6.1 "),
+            (120.24, 293.52, 246.31, 8.46, "Iq ualoremips um dolors ita me tconsectetura dipi sc ingelitsedd. "),
+            (93.60, 283.80, 14.11, 8.46, "6.2 "),
+            (120.24, 283.80, 330.00, 8.46, "PSU mdolo rsi tame tco nsec teturad ipiscin(g). Eli tsed DOE iu smo dtempo rin CID id "),
+            (120.24, 274.08, 379.92, 8.46, "Ididuntutlaboreet doloremag. Naa li qu aloremi psumdolo rsita met cons ecteturadip is cingeli tsedd "),
+            (120.24, 264.48, 380.40, 8.46, "rincidi du ntutlab 4. Or eet dolore magnaali QUA lo Remipsumdolorsita me tcon secteturadipi. Sci "),
+            (120.24, 254.64, 380.95, 8.46, "ectetur ADI pis cin geli tse Ddoeius. Mo dtemporincidi dunt UTL aboreet dol orem agnaaliqualorem.  "),
+            (93.60, 244.92, 14.11, 8.46, "6.3 "),
+            (120.24, 244.92, 304.27, 8.46, "Lorem ip sumdolorsitam etcon se cte turadipisci. Nge li ts eddoeiusmo dtem POR.  "),
+            (93.60, 235.20, 14.11, 8.46, "6.4 "),
+            (120.24, 235.20, 238.03, 8.46, "Dd oeiusm odt em porincididuntut laboreet DOL or emagn aal: "),
+            (126.84, 225.00, 4.64, 8.46, "−"),
+            (131.52, 225.00, 2.35, 8.46, " "),
+            (140.28, 225.00, 147.19, 8.46, "ci ngelitse ddo ei Usmodtemporincidi "),
+            (126.84, 214.56, 4.64, 8.46, "−"),
+            (131.52, 214.56, 2.35, 8.46, " "),
+            (140.28, 214.56, 174.91, 8.46, "or emipsumdolorsitame tco nse Cteturadipisci  "),
+            (126.84, 204.36, 4.64, 8.46, "−"),
+            (131.52, 204.36, 2.35, 8.46, " "),
+            (140.28, 204.36, 68.71, 8.46, "me tconsectet ur  "),
+            (126.84, 194.04, 4.64, 8.46, "−"),
+            (131.52, 194.04, 2.35, 8.46, " "),
+            (140.28, 194.04, 97.39, 8.46, "ag naaliqual oremipsumd. "),
+            (93.60, 184.32, 14.11, 8.46, "6.5 "),
+            (120.24, 184.32, 394.99, 8.46, "REM agn aal iqualoremipsu mdol orsitamet consec te Turadipiscingelit seddo, eiusmod te mp orincid "),
+            (120.24, 174.48, 366.91, 8.46, "loremag na al Iqualoremipsumdol. Ors itametcon sectetu ra dip iscingelits ed do eiusmodtemp. "),
+            (93.60, 164.88, 2.35, 8.46, " "),
+            (93.60, 153.24, 9.43, 8.46, "7. "),
+            (120.24, 153.24, 237.42, 8.46, "Dol oremagnaaliq UAL or emipsumdol or si tametconsectetu? "),
+            (93.60, 142.68, 14.11, 8.46, "7.1 "),
+            (120.24, 142.68, 391.03, 8.46, "Ag naaliqualor emipsumdolo rsi tamet Consecteturadipis. Cin geli ts eddoeiusmod temp orincid iduntutlab "),
+            (120.24, 132.96, 393.55, 8.46, "el it seddoe ius mod temporincididuntut lab ore Etdoloremagnaa. Liq ua Loremipsumdolorsi tam etconsec "),
+            (120.24, 123.36, 385.56, 8.46, "ctetu rad ipis ci ng elitseddoeius modte, mpori nc Ididunt utlabor ee tdo LOR emag na aliqualore mi psu "),
+            (120.24, 113.52, 340.39, 8.46, "cingelitseddo. Eiu smodt emp ori nci didu nt utl aboreetdo lorem Agnaaliqualoremip sumd. "),
+            (93.60, 103.80, 14.11, 8.46, "7.2 "),
+            (120.24, 103.80, 394.44, 8.46, "Tseddo eiusm odt EMP or incididuntu tlaboreet do lo remagn aa/li qu Aloremi psu mdolorsitamet consectet. "),
+            (120.24, 94.08, 363.48, 8.46, "REM ipsumdolo rs itametconsect et ur 25a dip iscing elits. Edd oei us mod tempori ncid id un tut "),
+            (120.24, 84.36, 270.91, 8.46, "tseddoei, usmodtemp ORI nc ididuntutlabo re et doloremagnaal iqualor.  "),
+            (93.60, 74.64, 14.11, 8.46, "7.3 "),
+            (120.24, 74.64, 392.16, 8.46, "Dt emporincididunt ut la boreet dolo remagna. Al iqualoremip su md olorsitametco nsecte tura di piscinge "),
+            (120.24, 64.92, 272.23, 8.46, "umdol. ORS ita me tconsectetu ra di piscingelitsedd oeiusmodt emp: "),
+            (120.24, 55.20, 5.11, 8.46, "- "),
+            (133.68, 55.20, 188.11, 8.46, "Si tametconsecte turadipis cin geli tse 0,25%. "),
+            (120.24, 45.48, 5.11, 8.46, "- "),
+            (133.68, 45.48, 102.43, 8.46, "Ip sumdolorsit ametconse.  "),
+            (93.60, 28.92, 38.09, 7.56, "Seddoe 2/4 "),
+            (305.64, 28.92, 2.10, 7.56, " "),
+            (493.56, 28.92, 26.34, 7.56, "Ddoeiu: "),
+        ];
+        let mut spans = x41_spans(page);
+        assert!(
+            !reorder_dense_two_column_page(&mut spans, 595.0),
+            "a margin of clause numbers is no column"
+        );
     }
 }
