@@ -78,3 +78,159 @@ fn test_rowspan_label_promoted_to_top_of_block() {
         texts
     );
 }
+
+/// X44: build a `Table` from text rows (an empty string is an empty cell).
+fn x44_table(rows: &[&[&str]]) -> crate::structure::Table {
+    let mut table = crate::structure::Table::new();
+    table.col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    for row in rows {
+        let mut table_row = crate::structure::TableRow::new(false);
+        for text in *row {
+            table_row
+                .cells
+                .push(crate::structure::TableCell::new((*text).to_string(), false));
+        }
+        table.rows.push(table_row);
+    }
+    table
+}
+
+/// X44: the kiwa EN 50518 mapping matrix (p50), a ruled nine-column grid whose
+/// cells wrap; every wrapped tail is its own row and opens lowercase. Kept.
+#[test]
+fn x44_ruled_grid_with_wrapped_cells_is_not_prose() {
+    let table = x44_table(&[
+        &[
+            "European standard",
+            "EN 50518",
+            "EN-IEC 62676-4:",
+            "IEC 60839-11-2:",
+            "K21023",
+            "EN 50136-1/A1",
+            "CLC/TS 50134-7:",
+            "ISO/IEC 27039; 2015",
+            "TS54-14: 2004",
+        ],
+        &[
+            "Name of the standard",
+            "Monitoring and alarm",
+            "Video",
+            "Alarm &",
+            "Mobile Security –",
+            "Alarm",
+            "Alarm systems -",
+            "Information technology",
+            "Fire Alarms Systems",
+        ],
+        &[
+            "",
+            "receiving centre",
+            "surveillance",
+            "electronic",
+            "Security of mobile",
+            "Transmission",
+            "Social alarm",
+            "Security techniques -",
+            "(FAS)",
+        ],
+        &[
+            "",
+            "",
+            "systems for use",
+            "security",
+            "objects and",
+            "Service Provider",
+            "systems - Part 7:",
+            "Selection, deployment",
+            "",
+        ],
+        &[
+            "",
+            "",
+            "in security",
+            "systems - Part",
+            "persons",
+            "",
+            "Application",
+            "and operations of",
+            "",
+        ],
+        &[
+            "",
+            "",
+            "applications -",
+            "11-2: Electronic",
+            "",
+            "",
+            "guidelines",
+            "intrusion detection",
+            "",
+        ],
+        &["", "", "Part 4:", "access control", "", "", "", "systems (IDPS)", ""],
+    ]);
+    assert!(
+        super::super::looks_like_prose_table(&table),
+        "the old verdict counts the wraps"
+    );
+    assert!(
+        !super::super::looks_like_prose_ruled_table(&table),
+        "wrapped cells under a full header are a table"
+    );
+}
+
+/// X44: kiwa p52 shape — four columns, a full header, lowercase wraps under filled cells.
+#[test]
+fn x44_four_column_grid_with_wraps_is_kept() {
+    let table = x44_table(&[
+        &["Omschrijving", "Omschrijving 2", "Reactietijd", "Extra"],
+        &[
+            "Stroomstoring",
+            "Herstel stroomstoring",
+            "12 uur als er nog een",
+            "180s bij volledige",
+        ],
+        &["", "", "backup stroom is", "uitval"],
+        &[
+            "Communicatieuitval",
+            "Herstel",
+            "Eigen afspraken met klant",
+            "dubbele uitval is",
+        ],
+        &["", "communicatieuitval", "", "prio 2"],
+        &["Sabotage detector", "Herstel sabotage", "prio 2", ""],
+    ]);
+    assert!(!super::super::looks_like_prose_ruled_table(&table));
+}
+
+/// X44: prose boxed by a rule grid continues sideways, mid-clause, into the next
+/// column; those fragments still count, so the grid is still refused.
+#[test]
+fn x44_prose_split_across_columns_is_still_refused() {
+    let table = x44_table(&[
+        &["Public divided over", "which level of", "government is"],
+        &["primarily responsible", "for policies to", "limit the spread"],
+        &["Which should be", "mainly responsible", "for developing"],
+        &["and executing the", "policies to limit", "the spread of"],
+        &["the coronavirus in", "the country and", "in the state"],
+    ]);
+    assert!(super::super::looks_like_prose_ruled_table(&table));
+}
+
+/// X44: a header row with an empty cell keeps the old verdict, wraps and all
+/// (figure panels and flowed text open on a sparse first row).
+#[test]
+fn x44_header_with_an_empty_cell_keeps_the_old_verdict() {
+    let table = x44_table(&[
+        &["LLaVA-Instruct-150K", "", ""],
+        &["", "In-context:", "Query:"],
+        &["", "instruction: what type", "instruction: what is the"],
+        &["", "device can be seen in", "lights in the image?"],
+        &["", "response: there is a", "response: all the"],
+        &["", "laptop on the desk", "traffic lights are"],
+    ]);
+    assert_eq!(
+        super::super::looks_like_prose_ruled_table(&table),
+        super::super::looks_like_prose_table(&table)
+    );
+    assert!(super::super::looks_like_prose_ruled_table(&table));
+}

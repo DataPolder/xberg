@@ -530,7 +530,7 @@ impl PdfDocument {
         // spatial candidate, independent of anything else in this function. ~keep
         Ok(detect_tables_with_lines(&spans, &lines, &config)
             .into_iter()
-            .filter(|t| t.is_real_grid() && !looks_like_prose_table(t))
+            .filter(|t| t.is_real_grid() && !looks_like_prose_ruled_table(t))
             .collect())
     }
 

@@ -1402,12 +1402,58 @@ fn first_in_use_uncompressed(xref: &crate::xref::CrossRefTable) -> Option<Object
 /// IRS forms, and the CJK traffic-volume grid all stay well below both
 /// bars.
 fn looks_like_prose_table(table: &crate::structure::Table) -> bool {
+    prose_table_signals(table, false)
+}
+
+/// X44: [`looks_like_prose_table`] for a grid the ruling lines drew.
+///
+/// A ruled grid whose cells wrap is cut into one row per text line
+/// (`split_rows_by_text_positions`): the wrapped tail of `Monitoring and alarm`
+/// arrives as a row of its own reading `receiving centre`. Counted as a prose
+/// fragment, a lowercase tail like that pushed a nine-column mapping matrix past
+/// the 25 % bar (kiwa EN 50518 appendix, 28 of 88 cells) and the whole grid was
+/// dropped, its cells left as loose text. A lowercase cell right under a filled
+/// cell of its own column continues that cell when its row is a continuation
+/// row -- a column the row above filled has ended there. Prose flowed through a
+/// grid fills every cell of every row, so its fragments still count.
+///
+/// Only when the header row is filled in every column: the figure panels, flowed
+/// titles and slide text that a rule grid also boxes in open on an empty or
+/// one-cell row, and keep the old verdict. ~keep
+fn looks_like_prose_ruled_table(table: &crate::structure::Table) -> bool {
+    prose_table_signals(table, header_row_is_full(table))
+}
+
+/// X44: every column of the first row carries text. ~keep
+fn header_row_is_full(table: &crate::structure::Table) -> bool {
+    let Some(first) = table.rows.first() else {
+        return false;
+    };
+    table.col_count >= 2
+        && first.cells.len() >= table.col_count
+        && first.cells.iter().all(|cell| !cell.text.trim().is_empty())
+}
+
+/// X44: row `row_index` carries the wrapped tails of the row above — some column
+/// the row above filled has ended here (it is empty), so the line is not a data
+/// row of its own. A grid of flowed prose fills every cell of every row. ~keep
+fn is_continuation_row(table: &crate::structure::Table, row_index: usize) -> bool {
+    if row_index == 0 {
+        return false;
+    }
+    let above = &table.rows[row_index - 1];
+    table.rows[row_index].cells.iter().enumerate().any(|(column, cell)| {
+        cell.text.trim().is_empty() && above.cells.get(column).is_some_and(|a| !a.text.trim().is_empty())
+    })
+}
+
+fn prose_table_signals(table: &crate::structure::Table, skip_wrapped_continuations: bool) -> bool {
     let mut total = 0usize;
     let mut sentence_tails = 0usize;
     let mut lower_starts = 0usize;
     let mut leader_dots = 0usize;
-    for row in &table.rows {
-        for cell in &row.cells {
+    for (row_index, row) in table.rows.iter().enumerate() {
+        for (column, cell) in row.cells.iter().enumerate() {
             let trimmed = cell.text.trim();
             if trimmed.is_empty() {
                 continue;
@@ -1418,8 +1464,15 @@ fn looks_like_prose_table(table: &crate::structure::Table) -> bool {
             {
                 sentence_tails += 1;
             }
+            let wraps_cell_above = skip_wrapped_continuations
+                && is_continuation_row(table, row_index)
+                && table.rows[row_index - 1]
+                    .cells
+                    .get(column)
+                    .is_some_and(|above| !above.text.trim().is_empty());
             if let Some(first) = trimmed.chars().next()
                 && first.is_ascii_lowercase()
+                && !wraps_cell_above
             {
                 lower_starts += 1;
             }
