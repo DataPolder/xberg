@@ -1680,18 +1680,96 @@ fn merge_consecutive_h1s(page: &mut Vec<PdfParagraph>) {
 /// are more likely lists or section labels than wrapped titles. Trades occasional
 /// under-merging of unusually long company names for zero false merges on cover-page
 /// model-code lists — the class of bug this function was introduced to fix.
+///
+/// X43: both texts, and so the word counts, are the text assembly will emit
+/// (`assembly::paragraph_emitted_text`), not the segments joined with plain spaces. A
+/// letter-spaced title is one segment per glyph at this point: `PEOPLE` / `COUNTING` counted
+/// 6 and 8 "words" and the two-line title was never merged, although each line is one word
+/// once assembled.
 fn looks_like_title_continuation(prev: &PdfParagraph, next: &PdfParagraph) -> bool {
-    let next_text = effective_text(next);
+    let next_text = super::assembly::paragraph_emitted_text(next);
     if looks_like_standalone_heading_text(&next_text) {
         return false;
     }
-    let prev_text = effective_text(prev);
+    let prev_text = super::assembly::paragraph_emitted_text(prev);
     if prev_text.trim_end().ends_with(['.', '!', '?', ':']) {
+        return false;
+    }
+    // X43: a line that ends in a date closes on its own (`WEBINAR 31-03-2022` over `BEDANKT
+    // VOOR UW AANDACHT!` on a closing slide). Counted on the assembled text the date is one
+    // word, so the word limit no longer keeps the two apart. ~keep
+    if ends_in_date(&prev_text) {
         return false;
     }
     let prev_wc = prev_text.split_whitespace().count();
     let next_wc = next_text.split_whitespace().count();
     prev_wc <= 4 && next_wc <= 4
+}
+
+/// Month names, Dutch and English, full or abbreviated (`maart`, `mrt`, `March`, `Mar.`).
+const DATE_MONTHS: &[&str] = &[
+    "januari",
+    "februari",
+    "maart",
+    "april",
+    "mei",
+    "juni",
+    "juli",
+    "augustus",
+    "september",
+    "oktober",
+    "november",
+    "december",
+    "january",
+    "february",
+    "march",
+    "may",
+    "june",
+    "july",
+    "august",
+    "october",
+    "jan",
+    "feb",
+    "mrt",
+    "mar",
+    "apr",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "sept",
+    "okt",
+    "oct",
+    "nov",
+    "dec",
+];
+
+/// X43: true when `text` ends in a date: `31-03-2022`, `1-3-2022`, `31/03/2022`, `31.03.2022`,
+/// `2022-03-31`, or a day, a written month and a four-digit year (`31 maart 2022`, `4 May
+/// 2026`). A year alone (`2014 INCENTIVE PLAN`, `… 2022`) is not a date.
+fn ends_in_date(text: &str) -> bool {
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    let Some(last) = tokens.last() else {
+        return false;
+    };
+    let last = last.trim_end_matches([',', ';']);
+    let digits = |t: &str, lens: std::ops::RangeInclusive<usize>| {
+        lens.contains(&t.len()) && t.bytes().all(|b| b.is_ascii_digit())
+    };
+    for separator in ['-', '/', '.'] {
+        let parts: Vec<&str> = last.split(separator).collect();
+        if parts.len() == 3
+            && ((digits(parts[0], 1..=2) && digits(parts[1], 1..=2) && digits(parts[2], 4..=4))
+                || (separator == '-' && digits(parts[0], 4..=4) && digits(parts[1], 2..=2) && digits(parts[2], 2..=2)))
+        {
+            return true;
+        }
+    }
+    if let [.., day, month, year] = tokens.as_slice() {
+        let month = month.trim_end_matches(['.', ',']).to_lowercase();
+        return digits(day, 1..=2) && DATE_MONTHS.contains(&month.as_str()) && digits(last, 4..=4) && *year == last;
+    }
+    false
 }
 
 /// Return the effective plain text for a paragraph, preferring `para.text` (the
@@ -2481,6 +2559,141 @@ mod tests {
                 page[0].text
             );
         }
+    }
+
+    /// X43: an H1 set letter-spaced, one segment per glyph, as the extractor hands over a
+    /// title tracked by 0.125 em (a datasheet's `PEOPLE` / `COUNTING`, TJ -125): 16 pt glyphs
+    /// 3 pt apart at 24 pt, which assembly welds into one word.
+    fn make_tracked_h1(text: &str, y: f32) -> PdfParagraph {
+        let mut p = make_paragraph(24.0, text.chars().count());
+        for (i, (segment, glyph)) in p.lines[0].segments.iter_mut().zip(text.chars()).enumerate() {
+            segment.text = glyph.to_string();
+            segment.x = 54.0 + i as f32 * 19.0;
+            segment.width = 16.0;
+            segment.y = y;
+            segment.baseline_y = y;
+            segment.is_bold = true;
+        }
+        p.lines[0].baseline_y = y;
+        p.lines[0].is_bold = true;
+        p.is_bold = true;
+        p.heading_level = Some(1);
+        p.word_count = PdfParagraph::compute_word_count("", &p.lines);
+        p
+    }
+
+    #[test]
+    fn test_merge_h1s_letter_spaced_title_lines_merge_x43() {
+        let mut page = vec![
+            make_tracked_h1("PEOPLE", 700.0),
+            make_tracked_h1("COUNTING", 668.0),
+            make_paragraph(12.0, 3),
+        ];
+        assert_eq!(super::super::assembly::paragraph_emitted_text(&page[0]), "PEOPLE");
+        merge_consecutive_h1s(&mut page);
+        assert_eq!(page.len(), 2, "the two tracked lines are one title");
+        assert_eq!(page[0].lines.len(), 2);
+    }
+
+    #[test]
+    fn test_merge_h1s_line_ending_in_a_date_stays_apart_x43() {
+        let mut page = vec![
+            make_h1_with_text(24.0, "WEBINAR 31-03-2022"),
+            make_h1_with_text(24.0, "BEDANKT VOOR UW AANDACHT!"),
+        ];
+        merge_consecutive_h1s(&mut page);
+        assert_eq!(page.len(), 2, "a line ending in a date is no wrapped title");
+        for first in [
+            "WEBINAR 1-3-2022",
+            "WEBINAR 31/03/2022",
+            "WEBINAR 31.03.2022",
+            "WEBINAR 2022-03-31",
+            "WEBINAR 31 maart 2022",
+            "WEBINAR 4 May 2026",
+        ] {
+            let mut page = vec![make_h1_with_text(24.0, first), make_h1_with_text(24.0, "BEDANKT")];
+            merge_consecutive_h1s(&mut page);
+            assert_eq!(page.len(), 2, "{first:?} ends in a date");
+        }
+        // A year alone is not a date: the two-line exhibit title still merges.
+        let mut page = vec![
+            make_h1_with_text(24.0, "2014 INCENTIVE PLAN"),
+            make_h1_with_text(24.0, "STOCK OPTION AWARD TERMS"),
+        ];
+        merge_consecutive_h1s(&mut page);
+        assert_eq!(
+            page.len(),
+            1,
+            "`2014 INCENTIVE PLAN` / `STOCK OPTION AWARD TERMS` is one title"
+        );
+        let mut page = vec![
+            make_h1_with_text(24.0, "JAARVERSLAG 2022"),
+            make_h1_with_text(24.0, "VAIBS"),
+        ];
+        merge_consecutive_h1s(&mut page);
+        assert_eq!(page.len(), 1);
+    }
+
+    #[test]
+    fn test_merge_h1s_letter_spaced_model_codes_stay_apart_x43() {
+        let mut page = vec![make_tracked_h1("XTREME", 700.0), make_h1_with_text(24.0, "XTREME 24")];
+        page.push(make_h1_with_text(24.0, "XTREME 30"));
+        merge_consecutive_h1s(&mut page);
+        assert_eq!(page.len(), 3, "`XTREME 24` / `XTREME 30` are model codes, not a wrap");
+        let mut codes = vec![
+            make_h1_with_text(24.0, "XTREME 24"),
+            make_h1_with_text(24.0, "XTREME 30"),
+        ];
+        merge_consecutive_h1s(&mut codes);
+        assert_eq!(codes.len(), 2);
+    }
+
+    #[test]
+    fn test_merge_h1s_letter_spaced_five_word_line_stays_x43() {
+        // Each glyph run is one word once assembled, so the 4-word limit counts real words:
+        // a five-word tracked first line still does not merge.
+        let mut first = make_paragraph(24.0, 0);
+        first.lines[0].segments.clear();
+        let mut x = 54.0;
+        for word in ["THE", "QUICK", "BROWN", "FOX", "JUMPED"] {
+            for glyph in word.chars() {
+                let mut segment = make_paragraph(24.0, 1).lines[0].segments[0].clone();
+                segment.text = glyph.to_string();
+                segment.x = x;
+                segment.width = 16.0;
+                segment.is_bold = true;
+                first.lines[0].segments.push(segment);
+                x += 19.0;
+            }
+            x += 12.0;
+        }
+        first.heading_level = Some(1);
+        first.is_bold = true;
+        assert_eq!(
+            super::super::assembly::paragraph_emitted_text(&first),
+            "THE QUICK BROWN FOX JUMPED"
+        );
+        let mut page = vec![first, make_tracked_h1("OVER", 668.0)];
+        merge_consecutive_h1s(&mut page);
+        assert_eq!(page.len(), 2, "a five-word first line is no wrapped title");
+    }
+
+    #[test]
+    fn test_merge_h1s_spaced_words_unchanged_x43() {
+        // Ordinary segments 10 pt apart (well over 0.15 em) keep their word boundaries: the
+        // plain pair merges as before, a five-word pair still does not.
+        let mut page = vec![make_h1(24.0, "KAISUN HOLDINGS"), make_h1(24.0, "LIMITED")];
+        merge_consecutive_h1s(&mut page);
+        assert_eq!(page.len(), 1);
+        let mut long = make_paragraph(24.0, 5);
+        long.heading_level = Some(1);
+        assert_eq!(
+            super::super::assembly::paragraph_emitted_text(&long),
+            "word0 word1 word2 word3 word4"
+        );
+        let mut page = vec![long, make_h1(24.0, "Over")];
+        merge_consecutive_h1s(&mut page);
+        assert_eq!(page.len(), 2);
     }
 
     /// Create a paragraph with bbox in the top margin of a 792pt page.

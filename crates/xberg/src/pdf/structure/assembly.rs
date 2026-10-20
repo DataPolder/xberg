@@ -1050,6 +1050,20 @@ fn extract_text_and_annotations(
     (text, annotations)
 }
 
+/// X43: the text assembly will emit for `para` -- `para.text` when set, otherwise its lines
+/// joined with the same geometry-aware word boundaries `push_paragraph_element` uses. A
+/// letter-spaced title arrives as one segment per glyph (`P`, `E`, `O`, …); joined with a plain
+/// space it reads `P E O P L E`, while assembly welds the touching glyphs into `PEOPLE`. A
+/// decision taken on the paragraph before assembly must see the latter. No hyphen witnesses:
+/// the callers judge a heading, which a line-break hyphen does not reach. ~keep
+pub(super) fn paragraph_emitted_text(para: &PdfParagraph) -> String {
+    if !para.text.is_empty() {
+        para.text.clone()
+    } else {
+        join_line_texts_plain(&para.lines, &super::pipeline::HyphenWitnesses::default())
+    }
+}
+
 /// Join line texts into a single plain string (no markup).
 fn join_line_texts_plain(
     lines: &[super::types::PdfLine],
