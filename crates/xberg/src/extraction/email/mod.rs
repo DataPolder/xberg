@@ -175,6 +175,86 @@ pub(crate) fn extract_email_content_with_nested(
     }
 }
 
+/// DataPolder X46 (#3390): an e-mail's attachments **with their bytes**, for a
+/// caller that parses each attachment itself.
+///
+/// The extractor already holds every attachment's bytes, but only hands back
+/// what it extracted from them (`ExtractedDocument::children`); the parse that
+/// keeps the bytes is crate-private. This exposes it, without extracting
+/// anything: the same parse as [`crate::extractors::email`] with the same
+/// configuration (`email.msg_fallback_codepage`, `max_embedded_file_bytes`,
+/// `security_limits`), so the attachments, their names and their order are the
+/// ones the extractor's children come from.
+#[derive(Debug, Clone, Default)]
+pub struct EmailAttachments {
+    /// The file attachments, bytes in [`EmailAttachment::data`], in the order
+    /// of the extractor's attachment children (`message/rfc822` parts left
+    /// out, as there). An `.eml`'s nested messages follow, one per part, as
+    /// `nested_message_{n}.eml` with mime `message/rfc822` and their raw bytes
+    /// — the names the extractor gives those children. A part over
+    /// `max_embedded_file_bytes` carries no bytes and is left out.
+    pub attachments: Vec<EmailAttachment>,
+    /// A `.msg`'s embedded messages (`afEmbeddedMessage`), parsed, flat across
+    /// every nesting depth, in the extractor's order; each carries its own
+    /// attachments with their bytes. Empty for an `.eml`.
+    pub embedded_messages: Vec<EmailExtractionResult>,
+}
+
+/// See [`EmailAttachments`]. `mime_type` as for [`extract_email_content`]:
+/// `message/rfc822` (or `text/plain`) for an `.eml`,
+/// `application/vnd.ms-outlook` for a `.msg`. With `max_archive_depth == 0`
+/// no nested message is returned, as the extractor returns no children then.
+pub fn email_attachments(
+    content: &[u8],
+    mime_type: &str,
+    config: &crate::core::config::ExtractionConfig,
+) -> Result<EmailAttachments> {
+    let fallback_codepage = config.email.as_ref().and_then(|email| email.msg_fallback_codepage);
+    let parsed = if config.max_archive_depth > 0 {
+        let security_limits = config.security_limits.clone().unwrap_or_default();
+        extract_email_content_with_nested(
+            content,
+            mime_type,
+            fallback_codepage,
+            config.max_embedded_file_bytes,
+            &security_limits,
+        )?
+    } else {
+        ParsedEmailContent {
+            result: extract_email_content(content, mime_type, fallback_codepage)?,
+            nested_messages: Vec::new(),
+            nested_embedded_messages: Vec::new(),
+            warnings: Vec::new(),
+        }
+    };
+    let mut attachments: Vec<EmailAttachment> = parsed
+        .result
+        .attachments
+        .into_iter()
+        .filter(|a| {
+            !a.mime_type
+                .as_deref()
+                .is_some_and(|m| m.eq_ignore_ascii_case("message/rfc822"))
+        })
+        .collect();
+    for (idx, nested) in parsed.nested_messages.iter().enumerate() {
+        if let Some(data) = &nested.data {
+            attachments.push(EmailAttachment {
+                name: None,
+                filename: Some(format!("nested_message_{idx}.eml")),
+                mime_type: Some("message/rfc822".to_string()),
+                size: Some(nested.size),
+                is_image: false,
+                data: Some(data.clone()),
+            });
+        }
+    }
+    Ok(EmailAttachments {
+        attachments,
+        embedded_messages: parsed.nested_embedded_messages,
+    })
+}
+
 /// Build text output from email extraction result
 ///
 /// Renders Subject/From/To/CC/BCC/Date plus, when present, Reply-To, Message-ID,

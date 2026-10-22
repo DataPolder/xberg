@@ -859,3 +859,82 @@ fn test_maybe_transcode_utf16_robustness() {
     let long_utf8 = b"Subject: This is a normal UTF-8 string without any null bytes.";
     assert!(maybe_transcode_utf16(long_utf8).is_none());
 }
+
+/// DataPolder X46 (#3390): a multipart mail with a PDF attachment, an inline
+/// image and a forwarded message.
+fn mail_with_attachments() -> Vec<u8> {
+    let pdf = b"%PDF-1.4 fake attachment bytes \x00\x01\x02";
+    let png = b"\x89PNG\r\n\x1a\nlogo";
+    let b64 = |bytes: &[u8]| {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    };
+    format!(
+        "From: a@example.com\r\nTo: b@example.com\r\nSubject: Offer\r\nMIME-Version: 1.0\r\n\
+         Content-Type: multipart/mixed; boundary=\"XX\"\r\n\r\n\
+         --XX\r\nContent-Type: text/plain\r\n\r\nSee the attached offer.\r\n\
+         --XX\r\nContent-Type: image/png\r\nContent-ID: <logo>\r\nContent-Disposition: inline; filename=\"logo.png\"\r\n\
+         Content-Transfer-Encoding: base64\r\n\r\n{}\r\n\
+         --XX\r\nContent-Type: application/pdf; name=\"offer.pdf\"\r\nContent-Disposition: attachment; filename=\"offer.pdf\"\r\n\
+         Content-Transfer-Encoding: base64\r\n\r\n{}\r\n\
+         --XX\r\nContent-Type: message/rfc822\r\nContent-Disposition: attachment\r\n\r\n\
+         From: c@example.com\r\nTo: a@example.com\r\nSubject: Original\r\n\r\nThe forwarded text.\r\n\
+         --XX--\r\n",
+        b64(png),
+        b64(pdf)
+    )
+    .into_bytes()
+}
+
+#[test]
+fn email_attachments_returns_the_bytes_in_order() {
+    let config = crate::core::config::ExtractionConfig::default();
+    let got = email_attachments(&mail_with_attachments(), "message/rfc822", &config).unwrap();
+    let names: Vec<Option<&str>> = got.attachments.iter().map(|a| a.filename.as_deref()).collect();
+    assert_eq!(
+        names,
+        [Some("logo.png"), Some("offer.pdf"), Some("nested_message_0.eml")],
+        "file attachments in order, the nested message last"
+    );
+    assert_eq!(
+        got.attachments[1].data.as_deref(),
+        Some(&b"%PDF-1.4 fake attachment bytes \x00\x01\x02"[..]),
+        "the attachment's exact bytes"
+    );
+    let nested = &got.attachments[2];
+    assert_eq!(nested.mime_type.as_deref(), Some("message/rfc822"));
+    let raw = nested.data.as_ref().expect("nested message bytes");
+    let reparsed = parse_eml_content(raw).unwrap();
+    assert_eq!(reparsed.subject.as_deref(), Some("Original"));
+    assert!(
+        got.embedded_messages.is_empty(),
+        "an .eml has no .msg embedded messages"
+    );
+}
+
+#[test]
+fn email_attachments_without_archive_depth_has_no_nested_message() {
+    let config = crate::core::config::ExtractionConfig {
+        max_archive_depth: 0,
+        ..Default::default()
+    };
+    let got = email_attachments(&mail_with_attachments(), "message/rfc822", &config).unwrap();
+    assert!(
+        got.attachments
+            .iter()
+            .all(|a| a.mime_type.as_deref() != Some("message/rfc822"))
+    );
+    assert!(
+        got.attachments
+            .iter()
+            .any(|a| a.filename.as_deref() == Some("offer.pdf"))
+    );
+}
+
+#[test]
+fn email_attachments_refuses_what_the_extractor_refuses() {
+    let config = crate::core::config::ExtractionConfig::default();
+    assert!(email_attachments(b"", "message/rfc822", &config).is_err());
+    assert!(email_attachments(b"From: x\r\n\r\nbody", "application/pdf", &config).is_err());
+    assert!(email_attachments(b"not a cfb file", "application/vnd.ms-outlook", &config).is_err());
+}
