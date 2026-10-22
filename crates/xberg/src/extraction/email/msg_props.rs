@@ -59,6 +59,35 @@ pub(super) fn read_msg_int_prop<F: std::io::Read + std::io::Seek>(
 /// recipient's `__properties_version1.0` stream, whose header is always 8
 /// bytes (MS-OXMSG 2.4.4/2.4.5) regardless of whether the parent message is
 /// the top-level message or an embedded message.
+/// X47 — a `PT_BOOLEAN` (0x000B) fixed-size property of an attachment or
+/// recipient storage, read like [`read_msg_attach_or_recip_int_prop`]: the
+/// value sits in the first byte of the 8-byte value slot.
+pub(super) fn read_msg_attach_bool_prop<F: std::io::Read + std::io::Seek>(
+    comp: &mut cfb::CompoundFile<F>,
+    base: &str,
+    prop_id: u16,
+) -> Option<bool> {
+    use std::io::Read;
+
+    const ATTACH_OR_RECIP_HEADER_SIZE: usize = 8;
+
+    let props_path = format!("{base}/__properties_version1.0");
+    let mut stream = comp.open_stream(&props_path).ok()?;
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).ok()?;
+
+    let mut offset = ATTACH_OR_RECIP_HEADER_SIZE;
+    while offset + 16 <= buf.len() {
+        let ptype = u16::from_le_bytes([buf[offset], buf[offset + 1]]);
+        let pid = u16::from_le_bytes([buf[offset + 2], buf[offset + 3]]);
+        if pid == prop_id && ptype == 0x000B {
+            return Some(buf[offset + 8] != 0);
+        }
+        offset += 16;
+    }
+    None
+}
+
 pub(super) fn read_msg_attach_or_recip_int_prop<F: std::io::Read + std::io::Seek>(
     comp: &mut cfb::CompoundFile<F>,
     base: &str,

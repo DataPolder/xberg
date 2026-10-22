@@ -190,6 +190,16 @@ pub(super) fn build_email_attachments(
         };
 
         let is_image = is_image_mime_type(&mime_type);
+        // X47 — shown inside the body: `Content-Disposition: inline`, or no
+        // disposition at all and a `Content-ID` the HTML refers to (`cid:`).
+        let content_id = attachment
+            .content_id()
+            .map(|id| id.trim().trim_start_matches('<').trim_end_matches('>').to_string())
+            .filter(|id| !id.is_empty());
+        let inline = match attachment.content_disposition() {
+            Some(disposition) => disposition.is_inline(),
+            None => content_id.is_some(),
+        };
 
         attachments.push(EmailAttachment {
             name: filename.clone(),
@@ -198,6 +208,8 @@ pub(super) fn build_email_attachments(
             size: Some(size),
             is_image,
             data,
+            inline,
+            content_id,
         });
     }
     attachments
@@ -374,6 +386,9 @@ pub(super) fn parse_eml_content_internal(
         message_id,
         ..
     } = addresses;
+
+    let mut attachments = attachments;
+    super::mark_cid_referenced(&mut attachments, html_content.as_deref());
 
     Ok(ParsedEmailContent {
         result: EmailExtractionResult {

@@ -707,6 +707,8 @@ fn extract_attachments(message: &dyn PstMessage) -> Vec<EmailAttachment> {
             size,
             is_image,
             data: attach_data.map(bytes::Bytes::from),
+            inline: false,
+            content_id: None,
         });
     }
 

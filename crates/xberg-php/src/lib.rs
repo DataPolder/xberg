@@ -6066,6 +6066,14 @@ pub struct EmailAttachment {
     /// Attachment data (if extracted).
     /// Uses `bytes.Bytes` for cheap cloning of large buffers.
     pub data: Option<Vec<u8>>,
+    /// Shown inside the message body (a `cid:` image), not attached (X47).
+    #[php(prop, name = "inline")]
+    #[serde(default)]
+    pub inline: bool,
+    /// The attachment's content id, without angle brackets (X47).
+    #[php(prop, name = "contentId")]
+    #[serde(default, alias = "contentId")]
+    pub content_id: Option<String>,
 }
 
 #[php_impl]
@@ -6083,6 +6091,8 @@ impl EmailAttachment {
         mimeType: Option<String>,
         size: Option<i64>,
         data: Option<PhpBytes>,
+        inline: Option<bool>,
+        contentId: Option<String>,
     ) -> Self {
         Self {
             name,
@@ -6091,6 +6101,8 @@ impl EmailAttachment {
             size,
             is_image: isImage,
             data: data.map(|b| b.0),
+            inline: inline.unwrap_or(false),
+            content_id: contentId,
         }
     }
 
@@ -6112,6 +6124,14 @@ impl EmailAttachment {
 
     pub fn get_is_image(&self) -> bool {
         self.is_image.clone()
+    }
+
+    pub fn get_inline(&self) -> bool {
+        self.inline
+    }
+
+    pub fn get_content_id(&self) -> Option<String> {
+        self.content_id.clone()
     }
 
     pub fn get_data(&self) -> Option<Vec<u8>> {
@@ -32113,6 +32133,8 @@ impl From<xberg::EmailAttachment> for EmailAttachment {
             size: val.size.map(|v| v as i64),
             is_image: val.is_image,
             data: val.data.map(|v| v.to_vec().into()),
+            inline: val.inline,
+            content_id: val.content_id,
         }
     }
 }
@@ -39361,6 +39383,8 @@ impl From<EmailAttachment> for xberg::EmailAttachment {
             size: val.size.map(|v| v as usize),
             is_image: val.is_image,
             data: val.data.map(|v| v.to_vec().into()),
+            inline: val.inline,
+            content_id: val.content_id,
         }
     }
 }

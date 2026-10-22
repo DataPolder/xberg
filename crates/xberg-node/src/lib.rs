@@ -2638,6 +2638,13 @@ pub struct JsEmailAttachment {
     /// Uses `bytes.Bytes` for cheap cloning of large buffers.
     #[napi(ts_type = "Uint8Array | Buffer | Array<number>")]
     pub data: Option<JsBytes>,
+    /// Shown inside the message body (a `cid:` image), not attached (X47).
+    #[serde(default)]
+    pub inline: bool,
+    /// The attachment's content id, without angle brackets (X47).
+    #[napi(js_name = "contentId")]
+    #[serde(default)]
+    pub content_id: Option<String>,
 }
 
 /// Configuration for email extraction.
@@ -24377,6 +24384,8 @@ impl From<xberg::EmailAttachment> for JsEmailAttachment {
             size: val.size.map(|v| v as i64),
             is_image: val.is_image,
             data: val.data.map(|v| v.to_vec().into()),
+            inline: val.inline,
+            content_id: val.content_id,
         }
     }
 }
@@ -34917,6 +34926,8 @@ impl From<JsEmailAttachment> for xberg::EmailAttachment {
             size: val.size.map(|v| v as usize),
             is_image: val.is_image,
             data: val.data.map(|v| v.to_vec().into()),
+            inline: val.inline,
+            content_id: val.content_id,
         }
     }
 }

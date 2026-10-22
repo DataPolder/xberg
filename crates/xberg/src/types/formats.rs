@@ -303,6 +303,17 @@ pub struct EmailAttachment {
     /// Attachment data (if extracted).
     /// Uses `bytes::Bytes` for cheap cloning of large buffers.
     pub data: Option<Bytes>,
+    /// DataPolder X47 (#3390): the attachment is shown **inside** the message
+    /// body (a `cid:` image such as a signature logo) rather than attached to
+    /// it. `.eml`: `Content-Disposition: inline`, or no disposition and a
+    /// `Content-ID`. `.msg`: `PR_ATTACHMENT_HIDDEN`, or a content id with
+    /// `ATT_MHTML_REF` in `PR_ATTACH_FLAGS`. Not serialized when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inline: bool,
+    /// The attachment's content id (`Content-ID` / `PR_ATTACH_CONTENT_ID`),
+    /// without the angle brackets, when it has one (X47).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_id: Option<String>,
 }
 
 /// OCR extraction result.

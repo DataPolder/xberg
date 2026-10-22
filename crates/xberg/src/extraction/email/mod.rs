@@ -54,6 +54,16 @@ const PID_TAG_ATTACH_DATA_OBJECT: u16 = 0x3701;
 /// `afEmbeddedMessage`: the attachment is itself a Message object stored as a
 /// nested CFB storage rather than binary stream data.
 const ATTACH_METHOD_EMBEDDED_MSG: u32 = 5;
+/// X47 — `PR_ATTACH_CONTENT_ID` (PT_UNICODE / PT_STRING8): the `cid:` an HTML
+/// body refers to.
+const PID_TAG_ATTACH_CONTENT_ID: u16 = 0x3712;
+/// X47 — `PR_ATTACH_FLAGS` (PT_LONG).
+const PID_TAG_ATTACH_FLAGS: u16 = 0x3714;
+/// X47 — `ATT_MHTML_REF`: the attachment is referenced from the HTML body.
+const ATT_MHTML_REF: u32 = 0x0000_0004;
+/// X47 — `PR_ATTACHMENT_HIDDEN` (PT_BOOLEAN): Outlook does not list it as an
+/// attachment, because it is shown inside the body.
+const PID_TAG_ATTACHMENT_HIDDEN: u16 = 0x7FFE;
 
 fn html_tag_regex() -> &'static Regex {
     HTML_TAG_RE.get_or_init(|| Regex::new(r"<[^>]+>").unwrap())
@@ -246,6 +256,8 @@ pub fn email_attachments(
                 size: Some(nested.size),
                 is_image: false,
                 data: Some(data.clone()),
+                inline: false,
+                content_id: None,
             });
         }
     }
@@ -253,6 +265,25 @@ pub fn email_attachments(
         attachments,
         embedded_messages: parsed.nested_embedded_messages,
     })
+}
+
+/// X47 — an attachment whose content id the HTML body refers to (`cid:<id>`)
+/// is shown inside the body, whatever its disposition or flags say: Outlook
+/// gives every attachment of an HTML message a content id and sets neither
+/// `PR_ATTACHMENT_HIDDEN` nor `ATT_MHTML_REF` on a forwarded message's
+/// signature images. Case-insensitive, as content ids are compared.
+pub(crate) fn mark_cid_referenced(attachments: &mut [EmailAttachment], html: Option<&str>) {
+    let Some(html) = html.filter(|h| !h.is_empty()) else {
+        return;
+    };
+    let html = html.to_ascii_lowercase();
+    for attachment in attachments.iter_mut().filter(|a| !a.inline) {
+        if let Some(id) = &attachment.content_id
+            && html.contains(&format!("cid:{}", id.to_ascii_lowercase()))
+        {
+            attachment.inline = true;
+        }
+    }
 }
 
 /// Build text output from email extraction result

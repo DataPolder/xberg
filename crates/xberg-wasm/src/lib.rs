@@ -8762,6 +8762,8 @@ pub struct WasmEmailAttachment {
     size: Option<usize>,
     is_image: bool,
     data: Option<Vec<u8>>,
+    inline: bool,
+    content_id: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -8775,6 +8777,8 @@ impl WasmEmailAttachment {
         mimeType: Option<String>,
         size: Option<usize>,
         data: Option<Vec<u8>>,
+        inline: Option<bool>,
+        contentId: Option<String>,
     ) -> WasmEmailAttachment {
         WasmEmailAttachment {
             name,
@@ -8783,6 +8787,8 @@ impl WasmEmailAttachment {
             size,
             is_image: isImage,
             data,
+            inline: inline.unwrap_or(false),
+            content_id: contentId,
         }
     }
 
@@ -8859,6 +8865,28 @@ impl WasmEmailAttachment {
     #[wasm_bindgen(setter)]
     pub fn set_data(&mut self, value: Option<Vec<u8>>) {
         self.data = value;
+    }
+
+    /// Shown inside the message body (a `cid:` image), not attached (X47).
+    #[wasm_bindgen(getter)]
+    pub fn inline(&self) -> bool {
+        self.inline
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_inline(&mut self, value: bool) {
+        self.inline = value;
+    }
+
+    /// The attachment's content id, without angle brackets (X47).
+    #[wasm_bindgen(getter, js_name = "contentId")]
+    pub fn content_id(&self) -> Option<String> {
+        self.content_id.clone()
+    }
+
+    #[wasm_bindgen(setter, js_name = "contentId")]
+    pub fn set_content_id(&mut self, value: Option<String>) {
+        self.content_id = value;
     }
 }
 
@@ -43306,6 +43334,8 @@ impl From<xberg::EmailAttachment> for WasmEmailAttachment {
             size: val.size,
             is_image: val.is_image,
             data: val.data.map(|v| v.to_vec().into()),
+            inline: val.inline,
+            content_id: val.content_id,
         }
     }
 }

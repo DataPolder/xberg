@@ -4513,13 +4513,21 @@ pub struct EmailAttachment {
     /// Uses `bytes.Bytes` for cheap cloning of large buffers.
     #[pyo3(get)]
     pub data: Option<Vec<u8>>,
+    /// Shown inside the message body (a `cid:` image), not attached (X47).
+    #[pyo3(get)]
+    #[serde(default)]
+    pub inline: bool,
+    /// The attachment's content id, without angle brackets (X47).
+    #[pyo3(get)]
+    #[serde(default)]
+    pub content_id: Option<String>,
 }
 
 #[pymethods]
 impl EmailAttachment {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    #[pyo3(signature = (is_image, name=None, filename=None, mime_type=None, size=None, data=None))]
+    #[pyo3(signature = (is_image, name=None, filename=None, mime_type=None, size=None, data=None, inline=false, content_id=None))]
     #[new]
     pub fn new(
         is_image: bool,
@@ -4528,6 +4536,8 @@ impl EmailAttachment {
         mime_type: Option<String>,
         size: Option<usize>,
         data: Option<Vec<u8>>,
+        inline: bool,
+        content_id: Option<String>,
     ) -> Self {
         Self {
             name,
@@ -4536,6 +4546,8 @@ impl EmailAttachment {
             size,
             is_image,
             data,
+            inline,
+            content_id,
         }
     }
 
@@ -36362,6 +36374,8 @@ impl From<xberg::EmailAttachment> for EmailAttachment {
             size: val.size,
             is_image: val.is_image,
             data: val.data.map(|v| v.to_vec().into()),
+            inline: val.inline,
+            content_id: val.content_id,
         }
     }
 }

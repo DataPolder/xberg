@@ -170,6 +170,8 @@ pub(super) fn process_embedded_msg_attachment<F: std::io::Read + std::io::Seek>(
             size: None,
             is_image: false,
             data: None,
+            inline: false,
+            content_id: None,
         });
 
         nested_embedded_messages.push(nested_result);
@@ -193,6 +195,8 @@ pub(super) fn process_embedded_msg_attachment<F: std::io::Read + std::io::Seek>(
             size: None,
             is_image: false,
             data: None,
+            inline: false,
+            content_id: None,
         });
     }
     Ok(())
@@ -238,6 +242,16 @@ pub(super) fn process_msg_attachment<F: std::io::Read + std::io::Seek>(
         .filter(|s| !s.is_empty())
         .or_else(|| Some("application/octet-stream".to_string()));
     let is_image = mime_type.as_ref().map(|m| is_image_mime_type(m)).unwrap_or(false);
+    // X47 — shown inside the body: Outlook hides it (`PR_ATTACHMENT_HIDDEN`),
+    // or it has a content id and is referenced from the HTML (`ATT_MHTML_REF`
+    // in `PR_ATTACH_FLAGS`).
+    let content_id = read_msg_string_prop(comp, path, PID_TAG_ATTACH_CONTENT_ID, ctx.codepage)
+        .map(|id| id.trim().trim_start_matches('<').trim_end_matches('>').to_string())
+        .filter(|id| !id.is_empty());
+    let hidden = read_msg_attach_bool_prop(comp, path, PID_TAG_ATTACHMENT_HIDDEN).unwrap_or(false);
+    let mhtml_ref = read_msg_attach_or_recip_int_prop(comp, path, PID_TAG_ATTACH_FLAGS)
+        .is_some_and(|flags| flags & ATT_MHTML_REF != 0);
+    let inline = hidden || (content_id.is_some() && mhtml_ref);
 
     attachments.push(EmailAttachment {
         name: filename.clone(),
@@ -246,6 +260,8 @@ pub(super) fn process_msg_attachment<F: std::io::Read + std::io::Seek>(
         size,
         is_image,
         data: att_data,
+        inline,
+        content_id,
     });
     Ok(())
 }
@@ -431,6 +447,9 @@ pub(super) fn extract_msg_from_cfb_at<F: std::io::Read + std::io::Seek>(
         date: &core.date,
         message_id: &core.message_id,
     });
+
+    let mut attachments = attachments;
+    mark_cid_referenced(&mut attachments, core.html_content.as_deref());
 
     Ok((
         EmailExtractionResult {

@@ -154,6 +154,8 @@ fn test_build_email_text_output_with_attachments() {
             mime_type: Some("text/plain".to_string()),
             size: Some(1024),
             is_image: false,
+            inline: false,
+            content_id: None,
             data: None,
         }],
         metadata: HashMap::new(),
@@ -204,6 +206,8 @@ fn test_build_metadata_with_attachments() {
             mime_type: Some("application/pdf".to_string()),
             size: Some(1024),
             is_image: false,
+            inline: false,
+            content_id: None,
             data: None,
         },
         EmailAttachment {
@@ -212,6 +216,8 @@ fn test_build_metadata_with_attachments() {
             mime_type: Some("image/png".to_string()),
             size: Some(2048),
             is_image: true,
+            inline: false,
+            content_id: None,
             data: None,
         },
     ];
@@ -361,6 +367,8 @@ fn test_build_email_text_output_empty_attachments() {
             mime_type: Some("application/octet-stream".to_string()),
             size: Some(100),
             is_image: false,
+            inline: false,
+            content_id: None,
             data: None,
         }],
         metadata: HashMap::new(),
@@ -937,4 +945,96 @@ fn email_attachments_refuses_what_the_extractor_refuses() {
     assert!(email_attachments(b"", "message/rfc822", &config).is_err());
     assert!(email_attachments(b"From: x\r\n\r\nbody", "application/pdf", &config).is_err());
     assert!(email_attachments(b"not a cfb file", "application/vnd.ms-outlook", &config).is_err());
+}
+
+/// DataPolder X47 (#3390): an inline `cid:` image is marked inline with its
+/// content id; an ordinary attachment is not.
+#[test]
+fn eml_attachments_report_inline_and_content_id() {
+    let config = crate::core::config::ExtractionConfig::default();
+    let got = email_attachments(&mail_with_attachments(), "message/rfc822", &config).unwrap();
+    let logo = &got.attachments[0];
+    assert_eq!(logo.filename.as_deref(), Some("logo.png"));
+    assert!(logo.inline, "Content-Disposition: inline + Content-ID");
+    assert_eq!(logo.content_id.as_deref(), Some("logo"), "angle brackets stripped");
+    let pdf = &got.attachments[1];
+    assert_eq!(pdf.filename.as_deref(), Some("offer.pdf"));
+    assert!(!pdf.inline, "Content-Disposition: attachment");
+    assert_eq!(pdf.content_id, None);
+}
+
+/// A part with no disposition but a `Content-ID` is shown in the body.
+#[test]
+fn eml_part_without_disposition_but_with_content_id_is_inline() {
+    let mail = b"From: a@example.com\r\nTo: b@example.com\r\nSubject: x\r\nMIME-Version: 1.0\r\n\
+Content-Type: multipart/related; boundary=\"YY\"\r\n\r\n\
+--YY\r\nContent-Type: text/html\r\n\r\n<img src=\"cid:sig@x\">\r\n\
+--YY\r\nContent-Type: image/gif; name=\"sig.gif\"\r\nContent-ID: <sig@x>\r\nContent-Transfer-Encoding: base64\r\n\r\nR0lGODlhAQABAAAAACw=\r\n\
+--YY--\r\n";
+    let result = parse_eml_content(mail).unwrap();
+    let sig = result
+        .attachments
+        .iter()
+        .find(|a| a.content_id.as_deref() == Some("sig@x"))
+        .expect("the cid image is an attachment");
+    assert!(sig.inline);
+}
+
+/// `inline: false` and `content_id: None` are left out of the JSON, so an
+/// attachment that is not inline serializes as before X47.
+#[test]
+fn email_attachment_json_unchanged_when_not_inline() {
+    let attachment = EmailAttachment {
+        name: Some("a.pdf".into()),
+        filename: Some("a.pdf".into()),
+        mime_type: Some("application/pdf".into()),
+        size: Some(1),
+        is_image: false,
+        data: None,
+        inline: false,
+        content_id: None,
+    };
+    let json = serde_json::to_string(&attachment).unwrap();
+    assert!(!json.contains("inline") && !json.contains("content_id"), "{json}");
+    let back: EmailAttachment = serde_json::from_str(
+        r#"{"name":null,"filename":null,"mime_type":null,"size":null,"is_image":true,"data":null}"#,
+    )
+    .unwrap();
+    assert!(!back.inline && back.content_id.is_none());
+}
+
+/// A content id the HTML body refers to marks the attachment inline even when
+/// its disposition says `attachment` (Outlook's forwarded signature images).
+#[test]
+fn cid_referenced_from_the_html_body_is_inline() {
+    let mut attachments = vec![
+        EmailAttachment {
+            name: None,
+            filename: Some("image001.png".into()),
+            mime_type: Some("image/png".into()),
+            size: Some(1029),
+            is_image: true,
+            inline: false,
+            content_id: Some("1E23CFAA@VAIBS.COM".into()),
+            data: None,
+        },
+        EmailAttachment {
+            name: None,
+            filename: Some("deck.pdf".into()),
+            mime_type: Some("application/pdf".into()),
+            size: Some(4_696_175),
+            is_image: false,
+            inline: false,
+            content_id: Some("EBF9EDE7@vaibs.com".into()),
+            data: None,
+        },
+    ];
+    mark_cid_referenced(&mut attachments, Some(r#"<p><img src="cid:1e23cfaa@vaibs.com"></p>"#));
+    assert!(attachments[0].inline, "referenced, case-insensitive");
+    assert!(
+        !attachments[1].inline,
+        "a content id the body never shows stays an attachment"
+    );
+    mark_cid_referenced(&mut attachments, None);
+    assert!(!attachments[1].inline);
 }
