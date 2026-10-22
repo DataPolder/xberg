@@ -382,6 +382,19 @@ impl<'doc> TextExtractor<'doc> {
     /// - a space character in one of the strings, and at least
     ///   [`TJ_TRACKING_LETTER_PERCENT`] of the non-space glyphs letters: a row of
     ///   drawing grid labels (`8 7 6 5 4 3 2 1`) is spaced out on purpose.
+    ///
+    /// An array with no space character has not said where its words end, so it
+    /// is tracked only as ONE word (X45): a contract's chapter titles are drawn
+    /// one word per array, `[(D)-130(E)-139(F)-132 … (S)] TJ`, and its numbers
+    /// the same way, `[(1)-137(0)-133(.)] TJ`; they read `D E F I N I T I O N S`
+    /// and `1 0 .`. All of:
+    /// - every string one byte, one glyph;
+    /// - every offset within [`TJ_TRACKING_SPREAD`] of the median, and that
+    ///   median between [`TJ_TRACKING_MIN_OFFSET`] and
+    ///   [`TJ_TRACKING_WORD_MAX_OFFSET`]: letter-spacing, not columns;
+    /// - the glyphs a word ([`is_tracked_word`]): at least
+    ///   [`TJ_TRACKING_WORD_MIN_LETTERS`] letters and nothing else, or a number
+    ///   closed by its dot (`10.`). Grid labels (`8 7 6`) are neither.
     pub(super) fn uniform_tj_tracking(&self, array: &[TextElement], font_name: Option<&str>) -> Option<f32> {
         let strings: Vec<&[u8]> = array
             .iter()
@@ -393,10 +406,6 @@ impl<'doc> TextExtractor<'doc> {
         if strings.is_empty() {
             return None;
         }
-        let short = strings.iter().filter(|s| s.len() <= 2).count();
-        if short * 100 < strings.len() * TJ_TRACKING_SHORT_STRING_PERCENT {
-            return None;
-        }
         let mut slots: Vec<f32> = array
             .windows(3)
             .filter_map(|w| match w {
@@ -404,7 +413,7 @@ impl<'doc> TextExtractor<'doc> {
                 _ => None,
             })
             .collect();
-        if slots.len() < TJ_TRACKING_MIN_SLOTS {
+        if slots.is_empty() {
             return None;
         }
         slots.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -416,9 +425,6 @@ impl<'doc> TextExtractor<'doc> {
             .iter()
             .filter(|o| (**o - median).abs() <= TJ_TRACKING_SPREAD)
             .count();
-        if common * 100 < slots.len() * TJ_TRACKING_COMMON_PERCENT {
-            return None;
-        }
         let font = font_name.and_then(|name| self.fonts.get(name));
         // The same byte -> text order the show-string path decodes with: the
         // font's byte table, then its ToUnicode map, then the extraction
@@ -442,12 +448,32 @@ impl<'doc> TextExtractor<'doc> {
             .flat_map(|s| s.iter())
             .filter_map(|&b| decode(b))
             .collect();
+        if !glyphs.contains(&' ') {
+            // X45 -- no space character: the array is tracked only when it is
+            // ONE word. ~keep
+            let one_glyph_strings = strings.iter().all(|s| s.len() == 1);
+            return (one_glyph_strings
+                && common == slots.len()
+                && median >= -TJ_TRACKING_WORD_MAX_OFFSET
+                && is_tracked_word(&glyphs))
+            .then_some(median);
+        }
+        let short = strings.iter().filter(|s| s.len() <= 2).count();
+        if short * 100 < strings.len() * TJ_TRACKING_SHORT_STRING_PERCENT {
+            return None;
+        }
+        if slots.len() < TJ_TRACKING_MIN_SLOTS {
+            return None;
+        }
+        if common * 100 < slots.len() * TJ_TRACKING_COMMON_PERCENT {
+            return None;
+        }
         let letters = glyphs.iter().filter(|c| c.is_alphabetic()).count();
         let inked = glyphs.iter().filter(|c| !c.is_whitespace()).count();
         if letters * 100 < inked * TJ_TRACKING_LETTER_PERCENT {
             return None;
         }
-        glyphs.contains(&' ').then_some(median)
+        Some(median)
     }
 
     /// A `TJ` offset past the word-boundary threshold: flush the current
@@ -601,6 +627,33 @@ const TJ_TRACKING_SPREAD: f32 = 25.0;
 /// Smallest tracking (thousandths of an em of extra space) worth reading as
 /// such; ordinary kerning sits well below it.
 const TJ_TRACKING_MIN_OFFSET: f32 = 50.0;
+
+/// Widest tracking (thousandths of an em of extra space) a spaceless array may
+/// carry and still be one tracked word in [`TextExtractor::uniform_tj_tracking`]
+/// (X45). The contract that needed it tracks at 0.13 em; past 0.3 em the gaps
+/// are wider than a space and the glyphs are no longer read as one word.
+const TJ_TRACKING_WORD_MAX_OFFSET: f32 = 300.0;
+
+/// Fewest letters a spaceless tracked array needs to be one word (X45):
+/// `RETURN` has six, while two or three spaced capitals can be initials.
+const TJ_TRACKING_WORD_MIN_LETTERS: usize = 4;
+
+/// The glyphs of a spaceless tracked array, read as one word (X45): letters
+/// only, at least [`TJ_TRACKING_WORD_MIN_LETTERS`] of them; or a section number
+/// closed by its dot (`10.`, `3.2.`), which a tracked heading draws in its own
+/// array. Digits without the closing dot are labels (a drawing's grid row).
+fn is_tracked_word(glyphs: &[char]) -> bool {
+    if glyphs.len() >= TJ_TRACKING_WORD_MIN_LETTERS && glyphs.iter().all(|c| c.is_alphabetic()) {
+        return true;
+    }
+    let Some((&'.', number)) = glyphs.split_last() else {
+        return false;
+    };
+    number.first().is_some_and(char::is_ascii_digit)
+        && number.last().is_some_and(char::is_ascii_digit)
+        && number.iter().all(|c| c.is_ascii_digit() || *c == '.')
+        && !number.windows(2).any(|w| w == ['.', '.'])
+}
 
 /// Share (percent) of an array's glyphs that must be letters for
 /// [`TextExtractor::uniform_tj_tracking`]: tracked text is words, while evenly
