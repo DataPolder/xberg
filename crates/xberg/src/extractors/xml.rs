@@ -438,6 +438,78 @@ mod tests {
         }
     }
 
+    /// UTF-16LE with a byte order mark, as Excel saves "XML Spreadsheet 2003".
+    fn utf16le_with_bom(text: &str) -> Vec<u8> {
+        let mut bytes = vec![0xFF, 0xFE];
+        for unit in text.encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        bytes
+    }
+
+    /// An Excel 2003 XML workbook six levels deep (`Workbook/Worksheet/Table/Row/Cell/Data`)
+    /// whose tags far outnumber the default nesting limit of 1024, the shape of the
+    /// spreadsheet in DataPolder #3440.
+    fn spreadsheet_2003(rows: usize) -> String {
+        let mut xml = String::from(
+            "<?xml version=\"1.0\" encoding=\"utf-16\"?>\r\n<?mso-application progid=\"Excel.Sheet\"?>\r\n\
+             <Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\" \
+             xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\">\r\n\
+             <Styles><Style ss:ID=\"Default\"><Alignment ss:Vertical=\"Bottom\"/></Style></Styles>\r\n\
+             <Worksheet ss:Name=\"Account\"><Table>\r\n",
+        );
+        for row in 0..rows {
+            xml.push_str(&format!(
+                "<Row><Cell><Data ss:Type=\"String\">account {row}</Data></Cell>\
+                 <Cell><Data ss:Type=\"Number\">{row}</Data></Cell></Row>\r\n"
+            ));
+        }
+        xml.push_str("</Table></Worksheet></Workbook>\r\n");
+        xml
+    }
+
+    #[test]
+    fn a_utf16_spreadsheet_2003_is_read_at_its_own_depth() {
+        let content = utf16le_with_bom(&spreadsheet_2003(600));
+        let mut budget = SecurityBudget::with_defaults();
+
+        let doc = build_internal_document(&content, "application/xml", &mut budget)
+            .expect("a six-level UTF-16 document must not be refused for nesting");
+
+        let deepest = doc.elements.iter().map(|element| element.depth).max();
+        assert_eq!(deepest, Some(5), "Data sits at depth 5, its text at 5 too");
+        let texts: Vec<&str> = doc
+            .elements
+            .iter()
+            .filter(|element| element.kind == ElementKind::Paragraph)
+            .map(|element| element.text.as_str())
+            .collect();
+        assert!(
+            texts.contains(&"account 0") && texts.contains(&"account 599"),
+            "{:?}",
+            &texts[..4]
+        );
+        assert!(doc.elements.iter().all(|element| !element.text.contains('\0')));
+        assert!(doc.processing_warnings.is_empty(), "{:?}", doc.processing_warnings);
+    }
+
+    #[test]
+    fn a_utf16_document_nested_past_the_limit_is_still_refused() {
+        let nested = String::from_utf8(nested_xml(1025, false)).unwrap();
+        let content = utf16le_with_bom(&format!("<?xml version=\"1.0\" encoding=\"utf-16\"?>{nested}"));
+        let mut budget = SecurityBudget::with_defaults();
+
+        let error = build_internal_document(&content, "application/xml", &mut budget)
+            .expect_err("real nesting beyond 1024 levels must stay refused");
+
+        match error {
+            crate::XbergError::Security { message, .. } => {
+                assert_eq!(message, "Nesting too deep: 1025 levels (max: 1024)");
+            }
+            other => panic!("expected a security error, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn test_xml_extractor() {
         let extractor = XmlExtractor::new();

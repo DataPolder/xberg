@@ -6,6 +6,15 @@ use std::borrow::Cow;
 /// declaration when present and falling back to charset detection otherwise.
 /// Strips a leading BOM.
 ///
+/// UTF-16 is settled from the bytes first, as XML 1.0 Appendix F.1 does: a UTF-16
+/// byte order mark, or without one the first characters `<?` encoded as UTF-16. The
+/// declaration cannot be read before that: in UTF-16 bytes `encoding` is interleaved
+/// with zero bytes, so the sniff below never finds it, and the detection fallback
+/// does not recognise UTF-16 either. Such a document reached quick-xml as raw
+/// UTF-16, where every `<\0/\0name` reads as a *start* tag, so a shallow Excel 2003
+/// XML spreadsheet (UTF-16 with a BOM, as Excel saves it) climbed one level per tag
+/// and failed the nesting limit (DataPolder #3440, X48).
+///
 /// Returns whether any bytes were lost to a U+FFFD replacement (#395). This is the one
 /// call site in the crate where that can happen under an *explicit* encoding rather
 /// than only through `quality`'s chardetng detection: a declared `<?xml encoding=...?>`
@@ -13,6 +22,11 @@ use std::borrow::Cow;
 /// build configurations, so `decode_with_provenance` must be consulted for the declared
 /// path too, not only the detection fallback.
 pub(crate) fn decode_xml_to_utf8(content: &[u8]) -> (String, bool) {
+    if let Some((encoding, prefix_len)) = utf16_from_bytes(content) {
+        let (decoded, had_errors) = encoding.decode_without_bom_handling(&content[prefix_len..]);
+        return (decoded.into_owned(), had_errors);
+    }
+
     let prolog_len = content.len().min(256);
     let prolog = String::from_utf8_lossy(&content[..prolog_len]);
     let declared = prolog
@@ -36,6 +50,20 @@ pub(crate) fn decode_xml_to_utf8(content: &[u8]) -> (String, bool) {
         crate::utils::strip_bom(&outcome.text).to_string(),
         outcome.replaced_characters,
     )
+}
+
+/// The UTF-16 encoding of an XML document, from its first bytes alone (XML 1.0
+/// Appendix F.1), with the length of the byte order mark to skip. UTF-8 is left to
+/// [`decode_xml_to_utf8`]'s declaration and detection path, BOM or not.
+#[cfg(any(feature = "xml", feature = "office", feature = "hwpx"))]
+fn utf16_from_bytes(content: &[u8]) -> Option<(&'static encoding_rs::Encoding, usize)> {
+    match content {
+        [0xFF, 0xFE, ..] => Some((encoding_rs::UTF_16LE, 2)),
+        [0xFE, 0xFF, ..] => Some((encoding_rs::UTF_16BE, 2)),
+        [0x3C, 0x00, 0x3F, 0x00, ..] => Some((encoding_rs::UTF_16LE, 0)),
+        [0x00, 0x3C, 0x00, 0x3F, ..] => Some((encoding_rs::UTF_16BE, 0)),
+        _ => None,
+    }
 }
 
 /// Borrows an XML tag name as a string.
@@ -161,6 +189,50 @@ mod tests {
 
     fn resolve(name: &str) -> String {
         resolve_general_ref(&BytesRef::new(name))
+    }
+
+    fn utf16(text: &str, big_endian: bool, bom: bool) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        if bom {
+            bytes.extend_from_slice(if big_endian { &[0xFE, 0xFF] } else { &[0xFF, 0xFE] });
+        }
+        for unit in text.encode_utf16() {
+            bytes.extend_from_slice(&if big_endian {
+                unit.to_be_bytes()
+            } else {
+                unit.to_le_bytes()
+            });
+        }
+        bytes
+    }
+
+    const UTF16_DOC: &str = "<?xml version=\"1.0\" encoding=\"utf-16\"?><Workbook><Cell>Prijs €</Cell></Workbook>";
+
+    #[test]
+    fn utf16_with_a_byte_order_mark_is_decoded_whatever_its_byte_order() {
+        for big_endian in [false, true] {
+            let (text, lossy) = decode_xml_to_utf8(&utf16(UTF16_DOC, big_endian, true));
+            assert_eq!(text, UTF16_DOC, "big_endian={big_endian}");
+            assert!(!lossy);
+        }
+    }
+
+    #[test]
+    fn utf16_without_a_byte_order_mark_is_recognised_by_its_declaration_bytes() {
+        for big_endian in [false, true] {
+            let (text, lossy) = decode_xml_to_utf8(&utf16(UTF16_DOC, big_endian, false));
+            assert_eq!(text, UTF16_DOC, "big_endian={big_endian}");
+            assert!(!lossy);
+        }
+    }
+
+    #[test]
+    fn utf8_keeps_its_declaration_path_and_loses_its_bom() {
+        let doc = "<?xml version=\"1.0\"?><a>é</a>";
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(doc.as_bytes());
+        assert_eq!(decode_xml_to_utf8(&bytes), (doc.to_string(), false));
+        assert_eq!(decode_xml_to_utf8(doc.as_bytes()), (doc.to_string(), false));
     }
 
     #[test]
