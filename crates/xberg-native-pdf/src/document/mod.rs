@@ -1401,7 +1401,7 @@ fn first_in_use_uncompressed(xref: &crate::xref::CrossRefTable) -> Option<Object
 /// preprints) without disturbing legitimate data tables — sailing scores,
 /// IRS forms, and the CJK traffic-volume grid all stay well below both
 /// bars.
-fn looks_like_prose_table(table: &crate::structure::Table) -> bool {
+pub(crate) fn looks_like_prose_table(table: &crate::structure::Table) -> bool {
     prose_table_signals(table, false)
 }
 
@@ -1420,7 +1420,7 @@ fn looks_like_prose_table(table: &crate::structure::Table) -> bool {
 /// Only when the header row is filled in every column: the figure panels, flowed
 /// titles and slide text that a rule grid also boxes in open on an empty or
 /// one-cell row, and keep the old verdict. ~keep
-fn looks_like_prose_ruled_table(table: &crate::structure::Table) -> bool {
+pub(crate) fn looks_like_prose_ruled_table(table: &crate::structure::Table) -> bool {
     prose_table_signals(table, header_row_is_full(table))
 }
 

@@ -2721,6 +2721,18 @@ const MIN_ROW_SPLIT_EVIDENCE_COLUMNS: usize = 2;
 /// baseline that happened to line up (xberg-io/xberg#1565). ~keep
 const MIN_EVIDENCED_CLUSTERS_FOR_SPLIT: usize = 2;
 
+/// The largest vertical step, in multiples of the line's font size, between a line and the
+/// line above it for the lower one to still be a wrapped continuation of the same cell. A
+/// wrapped line sits one line spacing below (≈ 1.2–1.5 × the font size); anything further is
+/// a separate line set apart (DataPolder #3462, X49). ~keep
+const MAX_WRAP_LINE_STEP_FONT_SIZES: f32 = 1.75;
+
+/// The width of the space before a wrapped line's first word, in multiples of the font size,
+/// when the band has no word gaps to measure it from (its spans are whole lines) (DataPolder
+/// #3462, X49). Deliberately small: underestimating it only makes the wrap test stricter.
+/// ~keep
+const WRAP_SPACE_FONT_SIZES: f32 = 0.2;
+
 /// Split table rows that contain text spans at multiple distinct Y positions into sub-rows.
 ///
 /// This handles the hybrid case where column boundaries come from vertical lines but there
@@ -2754,6 +2766,18 @@ const MIN_EVIDENCED_CLUSTERS_FOR_SPLIT: usize = 2;
 /// of its own, one cell wide: that is what a heading or lead-in line inside a ruled band
 /// actually is.
 ///
+/// A **keyed record whose cells wrap** (DataPolder #3462, X49) is one row, even though its
+/// continuation lines carry text in two or more columns and so clear the evidence bar: a
+/// fault-code table row "F01 | Geen vlam na drie / startpogingen | …" wraps in three columns at
+/// once, and every continuation line came out as a row of its own with an empty key cell. A
+/// cluster folds into the one directly above it, evidenced or not, when it is a wrap of the
+/// record's key line or of a line that already folds into it ([`is_wrapped_record_line`]): the band's key column is filled on its top line and empty on
+/// this one, every column it fills is filled on the line above, it sits one line spacing below,
+/// and in every column it fills the line above was full, because this line's first word would
+/// not have fitted after it inside the drawn cell. A spec table's intentionally empty first
+/// column ("Afmetingen | hoogte | 800" / " | breedte | 400") fails the last test, since
+/// "hoogte" left room, and so do two records sharing one drawn band, which each carry a key.
+///
 /// The evidence bar is capped at the band's own column count
 /// (`MIN_ROW_SPLIT_EVIDENCE_COLUMNS.min(num_cols)`): a single-column band has no second
 /// column to ever produce corroborating evidence from, so requiring 2 there would reject
@@ -2761,13 +2785,28 @@ const MIN_EVIDENCED_CLUSTERS_FOR_SPLIT: usize = 2;
 /// (e.g. a label/value pair). For `num_cols == 1` this restores the pre-#1555 behaviour of
 /// accepting any non-empty cluster as evidence; the #1555 guard itself only applies where
 /// it can be evaluated, at `num_cols >= 2`.
+#[cfg(test)]
 fn split_rows_by_text_positions(
     table_rows: Vec<TableRow>,
     row_cell_span_indices: &[Vec<Vec<usize>>],
     spans: &[TextSpan],
     config: &TableDetectionConfig,
 ) -> Vec<TableRow> {
+    split_rows_by_text_positions_with(table_rows, row_cell_span_indices, spans, config, true).0
+}
+
+/// [`split_rows_by_text_positions`], with the keyed-record wrap fold (DataPolder #3462, X49)
+/// on or off. Also says whether that fold merged any line, so a caller can tell the two
+/// results apart without comparing them.
+fn split_rows_by_text_positions_with(
+    table_rows: Vec<TableRow>,
+    row_cell_span_indices: &[Vec<Vec<usize>>],
+    spans: &[TextSpan],
+    config: &TableDetectionConfig,
+    fold_wrapped_records: bool,
+) -> (Vec<TableRow>, bool) {
     let mut result: Vec<TableRow> = Vec::new();
+    let mut folded_any = false;
 
     for (row_idx, row) in table_rows.into_iter().enumerate() {
         let cell_indices = &row_cell_span_indices[row_idx];
@@ -2856,8 +2895,38 @@ fn split_rows_by_text_positions(
         // only point to i + 1), so following the chain in `resolve_group` always terminates
         // without needing cycle protection. ~keep
         let mut fold_into: Vec<Option<usize>> = vec![None; y_clusters.len()];
+        // DataPolder #3462 (X49): a keyed record's wrapped lines, walked down from its key
+        // line (the top cluster). A line folds only into the key line or into a line that
+        // already does: a line that is no wrap (a sub-header, a new column) ends the record,
+        // and nothing below it is folded here. ~keep
+        let top = y_clusters.len() - 1;
+        let cluster_of = |idx: usize| -> Option<usize> {
+            let sp = spans.get(idx)?;
+            let nearest = nearest_cluster_value(sp.bbox.center().y);
+            y_clusters.iter().position(|&cy| (cy - nearest).abs() < 0.01)
+        };
+        for i in (0..top).rev() {
+            let continues_record = i + 1 == top || fold_into[i + 1].is_some();
+            if !fold_wrapped_records
+                || !continues_record
+                || !is_wrapped_record_line(
+                    &row,
+                    cell_indices,
+                    spans,
+                    &cluster_columns,
+                    &y_clusters,
+                    i,
+                    top,
+                    &cluster_of,
+                )
+            {
+                break;
+            }
+            fold_into[i] = Some(i + 1);
+            folded_any = true;
+        }
         for i in 0..y_clusters.len().saturating_sub(1) {
-            if is_evidenced[i] {
+            if fold_into[i].is_some() || is_evidenced[i] {
                 continue;
             }
             let is_wrapped_continuation = cluster_columns[i]
@@ -2942,7 +3011,113 @@ fn split_rows_by_text_positions(
         }
     }
 
-    result
+    (result, folded_any)
+}
+
+/// Whether Y-cluster `i` of a drawn row band is a wrapped continuation of the cluster directly
+/// above it (`i + 1`, the next-larger y) in a keyed record (DataPolder #3462, X49); see
+/// `split_rows_by_text_positions`. All must hold:
+///
+/// 1. the band is keyed: its key column (column 0) has text on the band's top line (`top`);
+/// 2. the key column is empty on this line;
+/// 3. every column this line fills is also filled on the line above (a wrap never opens a
+///    column);
+/// 4. it sits at most `MAX_WRAP_LINE_STEP_FONT_SIZES` font sizes below the line above;
+/// 5. in every column it fills, the line above was full: its right edge, plus a space (the
+///    band's own median gap between words on one line) and this line's first word, passes the
+///    cell's inner right edge, the drawn edge less the cell's
+///    padding as its text shows it on the left (capped at one font size, so a right-aligned
+///    column cannot widen it).
+///
+/// A cell without a drawn bbox gives no wrap evidence, so its line is never folded here.
+#[allow(clippy::too_many_arguments)]
+fn is_wrapped_record_line(
+    row: &TableRow,
+    cell_indices: &[Vec<usize>],
+    spans: &[TextSpan],
+    cluster_columns: &[Vec<bool>],
+    y_clusters: &[f32],
+    i: usize,
+    top: usize,
+    cluster_of: &dyn Fn(usize) -> Option<usize>,
+) -> bool {
+    let above = i + 1;
+    if above > top || cluster_columns[top].is_empty() || !cluster_columns[top][0] || cluster_columns[i][0] {
+        return false;
+    }
+    if !cluster_columns[i].iter().any(|&here| here) {
+        return false;
+    }
+    if !cluster_columns[i]
+        .iter()
+        .zip(cluster_columns[above].iter())
+        .all(|(&here, &up)| !here || up)
+    {
+        return false;
+    }
+    // The space as the band sets it: the median gap between neighbouring words on one line.
+    let mut gaps: Vec<f32> = Vec::new();
+    for col_spans in cell_indices {
+        let mut line: Vec<(usize, &TextSpan)> = col_spans
+            .iter()
+            .filter_map(|&idx| Some((cluster_of(idx)?, spans.get(idx)?)))
+            .collect();
+        line.sort_by(|a, b| a.0.cmp(&b.0).then(crate::utils::safe_float_cmp(a.1.bbox.x, b.1.bbox.x)));
+        for pair in line.windows(2) {
+            let ((ca, a), (cb, b)) = (pair[0], pair[1]);
+            let gap = b.bbox.x - (a.bbox.x + a.bbox.width);
+            if ca == cb && gap > 0.0 && gap < a.font_size.max(b.font_size) {
+                gaps.push(gap);
+            }
+        }
+    }
+    gaps.sort_by(|a, b| crate::utils::safe_float_cmp(*a, *b));
+    let measured_space = gaps.get(gaps.len() / 2).copied();
+
+    let mut font_size: f32 = 0.0;
+    for (ci, col_spans) in cell_indices.iter().enumerate() {
+        if !cluster_columns[i][ci] {
+            continue;
+        }
+        let Some(cell) = row.cells.get(ci).and_then(|c| c.bbox) else {
+            return false;
+        };
+        let mut above_right: Option<f32> = None;
+        let mut first: Option<&TextSpan> = None;
+        let mut text_left = f32::INFINITY;
+        for &idx in col_spans {
+            let Some(sp) = spans.get(idx) else { continue };
+            text_left = text_left.min(sp.bbox.x);
+            match cluster_of(idx) {
+                Some(c) if c == above => {
+                    let r = sp.bbox.x + sp.bbox.width;
+                    above_right = Some(above_right.map_or(r, |a: f32| a.max(r)));
+                }
+                Some(c) if c == i => {
+                    font_size = font_size.max(sp.font_size);
+                    if first.is_none_or(|f| sp.bbox.x < f.bbox.x) {
+                        first = Some(sp);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let (Some(above_right), Some(first)) = (above_right, first) else {
+            return false;
+        };
+        let padding = (text_left - cell.x).clamp(0.0, first.font_size.max(0.0));
+        let inner_right = cell.x + cell.width - padding;
+        // A span may hold a whole line: take its first word's share of the width.
+        let text = first.text.trim();
+        let chars = text.chars().count().max(1) as f32;
+        let word = text.split_whitespace().next().unwrap_or("").chars().count() as f32;
+        let first_word_width = first.bbox.width * (word / chars);
+        let space = measured_space.unwrap_or(WRAP_SPACE_FONT_SIZES * first.font_size.max(0.0));
+        if above_right + space + first_word_width <= inner_right {
+            return false;
+        }
+    }
+    font_size > 0.0 && (y_clusters[above] - y_clusters[i]) <= MAX_WRAP_LINE_STEP_FONT_SIZES * font_size
 }
 
 /// Strip form-template numbering artifacts and decorative separators from table rows.
@@ -3573,6 +3748,15 @@ fn rotate_table_rows(rows: &[TableRow], rotation_degrees: f32) -> Option<(Vec<Ta
 
 /// Row splitting, form-artifact stripping, empty-row splitting, and bbox
 /// computation. Produces the final `Table` entries for one table group.
+///
+/// The keyed-record wrap fold (DataPolder #3462, X49) makes a table's rows its records, where
+/// before a wrapped record was several rows. The grid gates downstream (`Table::is_real_grid`,
+/// the prose filters) count rows, and a fold always removes a row that counted towards them,
+/// so a table sitting on one of their bars could be dropped for being read better: the Vaidio
+/// QA report's 25-row compatibility grid fell from 10/25 dense rows to 9/24 under the 0.40 bar
+/// when its two-line header cells were merged. So when the fold merged anything, the table
+/// group is built both ways and the folded one is kept only if it passes those gates at least
+/// as often as the unfolded one; otherwise the rows come out exactly as without the fold.
 fn finalize_intersection_tables(
     table_rows: Vec<TableRow>,
     row_cell_span_indices: &[Vec<Vec<usize>>],
@@ -3580,8 +3764,30 @@ fn finalize_intersection_tables(
     config: &TableDetectionConfig,
     num_cols: usize,
 ) -> Vec<Table> {
-    let mut table_rows = split_rows_by_text_positions(table_rows, row_cell_span_indices, spans, config);
+    let (folded_rows, folded_any) =
+        split_rows_by_text_positions_with(table_rows.clone(), row_cell_span_indices, spans, config, true);
+    let folded = tables_from_split_rows(folded_rows, config, num_cols);
+    if !folded_any {
+        return folded;
+    }
+    let (plain_rows, _) = split_rows_by_text_positions_with(table_rows, row_cell_span_indices, spans, config, false);
+    let plain = tables_from_split_rows(plain_rows, config, num_cols);
+    let passing = |tables: &[Table], prose: fn(&Table) -> bool| -> usize {
+        tables.iter().filter(|t| t.is_real_grid() && !prose(t)).count()
+    };
+    let keeps_its_tables = |prose: fn(&Table) -> bool| passing(&folded, prose) >= passing(&plain, prose);
+    if keeps_its_tables(crate::document::looks_like_prose_ruled_table)
+        && keeps_its_tables(crate::document::looks_like_prose_table)
+    {
+        folded
+    } else {
+        plain
+    }
+}
 
+/// Form-artifact stripping, empty-row splitting, and bbox computation over rows
+/// `split_rows_by_text_positions_with` produced: the `Table` entries for one table group.
+fn tables_from_split_rows(mut table_rows: Vec<TableRow>, config: &TableDetectionConfig, num_cols: usize) -> Vec<Table> {
     strip_form_numbering_artifacts(&mut table_rows);
 
     // Split on completely empty rows (same strategy as cluster-based approach). ~keep
@@ -9355,6 +9561,272 @@ mod tests {
         );
         assert_eq!(result[0].cells[0].text, "1");
         assert_eq!(result[0].cells[1].text, "Versterking van het MKB-segment");
+    }
+
+    /// A drawn cell for the #3462 tests: its text, and its bbox from `x` over `width`.
+    fn drawn_cell(text: &str, x: f32, width: f32) -> TableCell {
+        TableCell {
+            bbox: Some(Rect::new(x, 300.0, width, 60.0)),
+            ..prose_cell(text)
+        }
+    }
+
+    /// DataPolder #3462 (X49): a fault-code record wrapping in three columns at once is one
+    /// row. Every continuation line fills two or three columns, so each is evidenced and the
+    /// band used to come out as four rows with empty key cells. Geometry after the Thermira
+    /// manual's F01 row (fault table, 4 columns, one drawn band per record). ~keep
+    #[test]
+    fn split_rows_by_text_positions_keeps_a_wrapped_keyed_record_as_one_row() {
+        let spans = vec![
+            create_test_span("F01", 53.0, 350.0, 15.0, 0.0),
+            create_test_span("Geen vlam na drie", 86.0, 350.0, 78.0, 0.0),
+            create_test_span("startpogingen", 86.0, 338.0, 59.0, 0.0),
+            create_test_span("Gaskraan dicht, lucht in de", 220.0, 350.0, 113.0, 0.0),
+            create_test_span("gasleiding, ontstekingselektrode", 220.0, 338.0, 137.0, 0.0),
+            create_test_span("vervuild of verkeerd afgesteld,", 220.0, 326.0, 129.0, 0.0),
+            create_test_span("gasdruk te laag.", 220.0, 314.0, 68.0, 0.0),
+            create_test_span("Gaskraan openen en gasleiding", 374.0, 350.0, 133.0, 0.0),
+            create_test_span("ontluchten. Elektrode-afstand", 374.0, 338.0, 125.0, 0.0),
+            create_test_span("controleren (3,5-4,5 mm). Voordruk", 374.0, 326.0, 155.0, 0.0),
+            create_test_span("meten (minimaal 17 mbar bij aardgas).", 374.0, 314.0, 165.0, 0.0),
+        ];
+        let row = TableRow {
+            cells: vec![
+                drawn_cell("", 48.0, 33.0),
+                drawn_cell("", 81.0, 133.0),
+                drawn_cell("", 214.0, 155.0),
+                drawn_cell("", 369.0, 178.0),
+            ],
+            is_header: false,
+        };
+        let row_cell_span_indices = vec![vec![vec![0], vec![1, 2], vec![3, 4, 5, 6], vec![7, 8, 9, 10]]];
+
+        let result = split_rows_by_text_positions(
+            vec![row],
+            &row_cell_span_indices,
+            &spans,
+            &TableDetectionConfig::strict(),
+        );
+
+        assert_eq!(result.len(), 1, "a wrapped record is one row: {result:?}");
+        assert_eq!(result[0].cells[0].text, "F01");
+        assert!(
+            result[0].cells[1].text.contains("startpogingen"),
+            "{:?}",
+            result[0].cells[1].text
+        );
+        assert!(
+            result[0].cells[2].text.ends_with("laag."),
+            "{:?}",
+            result[0].cells[2].text
+        );
+        assert!(
+            result[0].cells[3].text.ends_with("aardgas)."),
+            "{:?}",
+            result[0].cells[3].text
+        );
+    }
+
+    /// The must-not-move side of #3462: a spec band with an intentionally empty key column
+    /// below its label. "hoogte" left room on its line, so "breedte" is no wrap: two rows.
+    /// ~keep
+    #[test]
+    fn split_rows_by_text_positions_keeps_spec_sub_rows_under_one_label() {
+        let spans = vec![
+            create_test_span("Afmetingen", 50.0, 350.0, 50.0, 0.0),
+            create_test_span("hoogte", 130.0, 350.0, 30.0, 0.0),
+            create_test_span("breedte", 130.0, 338.0, 32.0, 0.0),
+            create_test_span("800", 230.0, 350.0, 15.0, 0.0),
+            create_test_span("400", 230.0, 338.0, 15.0, 0.0),
+        ];
+        let row = TableRow {
+            cells: vec![
+                drawn_cell("", 48.0, 80.0),
+                drawn_cell("", 128.0, 100.0),
+                drawn_cell("", 228.0, 60.0),
+            ],
+            is_header: false,
+        };
+        let row_cell_span_indices = vec![vec![vec![0], vec![1, 2], vec![3, 4]]];
+
+        let result = split_rows_by_text_positions(
+            vec![row],
+            &row_cell_span_indices,
+            &spans,
+            &TableDetectionConfig::strict(),
+        );
+
+        assert_eq!(result.len(), 2, "{result:?}");
+        assert_eq!(result[1].cells[0].text, "");
+        assert_eq!(result[1].cells[1].text, "breedte");
+    }
+
+    /// #3462: two records sharing one drawn band each carry a key, and a continuation that
+    /// opens a column the line above left empty is no wrap: both stay split. ~keep
+    #[test]
+    fn split_rows_by_text_positions_keeps_keyed_rows_and_new_columns_apart() {
+        let config = TableDetectionConfig::strict();
+        // Two keyed rows, full lines notwithstanding.
+        let spans = vec![
+            create_test_span("F01", 53.0, 350.0, 15.0, 0.0),
+            create_test_span("F02", 53.0, 338.0, 15.0, 0.0),
+            create_test_span("Geen vlam na drie pogingen", 86.0, 350.0, 125.0, 0.0),
+            create_test_span("Vlamsignaal valt weg", 86.0, 338.0, 100.0, 0.0),
+        ];
+        let row = TableRow {
+            cells: vec![drawn_cell("", 48.0, 33.0), drawn_cell("", 81.0, 133.0)],
+            is_header: false,
+        };
+        let result = split_rows_by_text_positions(vec![row], &[vec![vec![0, 1], vec![2, 3]]], &spans, &config);
+        assert_eq!(result.len(), 2, "{result:?}");
+
+        // A continuation that fills a column the line above left empty.
+        let spans = vec![
+            create_test_span("A1", 53.0, 350.0, 15.0, 0.0),
+            create_test_span("Een regel die de cel vult", 86.0, 350.0, 125.0, 0.0),
+            create_test_span("doorloopt", 86.0, 338.0, 45.0, 0.0),
+            create_test_span("x", 220.0, 338.0, 5.0, 0.0),
+        ];
+        let row = TableRow {
+            cells: vec![
+                drawn_cell("", 48.0, 33.0),
+                drawn_cell("", 81.0, 133.0),
+                drawn_cell("", 214.0, 60.0),
+            ],
+            is_header: false,
+        };
+        let result = split_rows_by_text_positions(vec![row], &[vec![vec![0], vec![1, 2], vec![3]]], &spans, &config);
+        assert_eq!(result.len(), 2, "{result:?}");
+    }
+
+    /// #3462: a record ends at its first line that is no wrap. A header band "No. | NVR / VMS"
+    /// over " |  | File | Video" over " |  | Retrieve | Playback" (the Vaidio QA report's
+    /// compatibility table): "File" opens columns the key line left empty, so it is no wrap,
+    /// and "Retrieve" below it, though a wrap of "File", is not folded into it either. The
+    /// band keeps its three rows, as before X49. ~keep
+    #[test]
+    fn split_rows_by_text_positions_folds_only_along_the_key_lines_chain() {
+        let spans = vec![
+            create_test_span("No.", 53.0, 350.0, 15.0, 0.0),
+            create_test_span("NVR / VMS", 90.0, 350.0, 45.0, 0.0),
+            create_test_span("File", 152.0, 338.0, 16.0, 0.0),
+            create_test_span("Retrieve", 152.0, 326.0, 36.0, 0.0),
+            create_test_span("Video", 192.0, 338.0, 22.0, 0.0),
+            create_test_span("Playback", 192.0, 326.0, 36.0, 0.0),
+        ];
+        let row = TableRow {
+            cells: vec![
+                drawn_cell("", 48.0, 33.0),
+                drawn_cell("", 81.0, 66.0),
+                drawn_cell("", 147.0, 40.0),
+                drawn_cell("", 187.0, 40.0),
+            ],
+            is_header: false,
+        };
+        let result = split_rows_by_text_positions(
+            vec![row],
+            &[vec![vec![0], vec![1], vec![2, 3], vec![4, 5]]],
+            &spans,
+            &TableDetectionConfig::strict(),
+        );
+        assert_eq!(result.len(), 3, "{result:?}");
+        assert_eq!(result[1].cells[2].text, "File");
+        assert_eq!(result[2].cells[2].text, "Retrieve");
+    }
+
+    /// The bands of a small table for the #3462 finalize tests: a header, one record whose
+    /// cells wrap (F01 over two lines), and `notes` one-cell rows below it.
+    fn wrapped_record_table(notes: usize) -> (Vec<TableRow>, Vec<Vec<Vec<usize>>>, Vec<TextSpan>) {
+        let mut spans = vec![
+            create_test_span("Code", 53.0, 400.0, 20.0, 0.0),
+            create_test_span("Omschrijving", 86.0, 400.0, 50.0, 0.0),
+            create_test_span("Oorzaak", 220.0, 400.0, 35.0, 0.0),
+            create_test_span("F01", 53.0, 350.0, 15.0, 0.0),
+            create_test_span("Geen vlam na drie", 86.0, 350.0, 78.0, 0.0),
+            create_test_span("startpogingen", 86.0, 338.0, 59.0, 0.0),
+            create_test_span("Gaskraan dicht, lucht in de", 220.0, 350.0, 113.0, 0.0),
+            create_test_span("gasleiding", 220.0, 338.0, 45.0, 0.0),
+        ];
+        // A band that is not split keeps its own cell text, so give each its text.
+        let band = |texts: [&str; 3]| TableRow {
+            cells: vec![
+                drawn_cell(texts[0], 48.0, 33.0),
+                drawn_cell(texts[1], 81.0, 133.0),
+                drawn_cell(texts[2], 214.0, 155.0),
+            ],
+            is_header: false,
+        };
+        let mut rows = vec![band(["Code", "Omschrijving", "Oorzaak"]), band(["", "", ""])];
+        let mut indices = vec![vec![vec![0], vec![1], vec![2]], vec![vec![3], vec![4, 5], vec![6, 7]]];
+        for n in 0..notes {
+            spans.push(create_test_span(
+                "Zie handleiding",
+                53.0,
+                300.0 - 20.0 * n as f32,
+                30.0,
+                0.0,
+            ));
+            rows.push(band(["Zie handleiding", "", ""]));
+            indices.push(vec![vec![spans.len() - 1], vec![], vec![]]);
+        }
+        (rows, indices, spans)
+    }
+
+    /// #3462: the folded table is kept when it passes the grid gates as the unfolded one does.
+    /// ~keep
+    #[test]
+    fn finalize_intersection_tables_keeps_the_folded_record() {
+        let (rows, indices, spans) = wrapped_record_table(0);
+        let tables = finalize_intersection_tables(rows, &indices, &spans, &TableDetectionConfig::strict(), 3);
+        assert_eq!(tables.len(), 1, "{tables:?}");
+        assert_eq!(tables[0].rows.len(), 2, "header + one record: {:?}", tables[0].rows);
+        assert!(tables[0].rows[1].cells[1].text.contains("startpogingen"));
+    }
+
+    /// #3462: when the fold would drop the table under `is_real_grid`'s bar (3 of 6 rows with
+    /// two filled cells is 0.5; folded, 2 of 5 is 0.4), the rows come out unfolded, exactly as
+    /// before X49. ~keep
+    #[test]
+    fn finalize_intersection_tables_keeps_a_table_the_fold_would_drop() {
+        let (rows, indices, spans) = wrapped_record_table(3);
+        let config = TableDetectionConfig::strict();
+        let (folded, folded_any) = split_rows_by_text_positions_with(rows.clone(), &indices, &spans, &config, true);
+        assert!(
+            folded_any && folded.len() == 5,
+            "the fold itself merges F01: {folded:?}"
+        );
+        let tables = finalize_intersection_tables(rows, &indices, &spans, &config, 3);
+        assert_eq!(tables.len(), 1, "{tables:?}");
+        assert_eq!(tables[0].rows.len(), 6, "unfolded: {:?}", tables[0].rows);
+        assert!(tables[0].is_real_grid());
+    }
+
+    /// #3462: a line set well below the one above is not its wrap, even when the line above
+    /// was full. ~keep
+    #[test]
+    fn split_rows_by_text_positions_does_not_fold_a_line_set_apart() {
+        let spans = vec![
+            create_test_span("F01", 53.0, 350.0, 15.0, 0.0),
+            create_test_span("Geen vlam na drie", 86.0, 350.0, 120.0, 0.0),
+            create_test_span("startpogingen", 86.0, 300.0, 59.0, 0.0),
+            create_test_span("Gaskraan dicht, lucht in de", 220.0, 350.0, 140.0, 0.0),
+            create_test_span("gasleiding", 220.0, 300.0, 45.0, 0.0),
+        ];
+        let row = TableRow {
+            cells: vec![
+                drawn_cell("", 48.0, 33.0),
+                drawn_cell("", 81.0, 133.0),
+                drawn_cell("", 214.0, 155.0),
+            ],
+            is_header: false,
+        };
+        let result = split_rows_by_text_positions(
+            vec![row],
+            &[vec![vec![0], vec![1, 2], vec![3, 4]]],
+            &spans,
+            &TableDetectionConfig::strict(),
+        );
+        assert_eq!(result.len(), 2, "{result:?}");
     }
 
     #[test]
