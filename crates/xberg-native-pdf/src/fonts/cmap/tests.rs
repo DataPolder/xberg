@@ -211,6 +211,33 @@ fn test_parse_bfrange_array_mixed() {
     assert_eq!(cmap.get(&0x12).as_deref(), Some("C"));
 }
 
+/// X50: a bfrange array spread over several lines, as an embedded Type 1
+/// font's ToUnicode writes it (8 destinations per line). Read per line, every
+/// code at the start of a line came out two letters late (`h`→`j`, `1`→`3`).
+#[test]
+fn test_parse_bfrange_array_spanning_lines() {
+    let data = b"/CIDInit/ProcSet findresource begin\n12 dict begin begincmap\n\
+1 begincodespacerange\n<00><FF>endcodespacerange\n\
+1 beginbfrange\n<20><37>[\n\
+<0020><0021><0022><0023><0024><0025><0026><2019>\n\
+<0028><0029><002A><002B><002C><002D><002E><002F>\n\
+<0030><0031><0032><0033><0034><0035><0036><0037>\n\
+]\nendbfrange\nendcmap CMapName currentdict /CMap defineresource pop end end";
+    let cmap = parse_tounicode_cmap(data).unwrap();
+    for (code, want) in [
+        (0x20, " "),
+        (0x21, "!"),
+        (0x27, "\u{2019}"),
+        (0x28, "("),
+        (0x29, ")"),
+        (0x30, "0"),
+        (0x31, "1"),
+        (0x37, "7"),
+    ] {
+        assert_eq!(cmap.get(&code).as_deref(), Some(want), "code 0x{code:02X}");
+    }
+}
+
 #[test]
 fn test_parse_zekat_cmap() {
     let cmap_data = r#"

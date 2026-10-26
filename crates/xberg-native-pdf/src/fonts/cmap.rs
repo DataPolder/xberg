@@ -692,7 +692,8 @@ fn apply_bfchar_section(cmap: &mut CMap, section: &str) {
 fn apply_bfrange_section(cmap: &mut CMap, section: &str) {
     let mut attempted = 0usize;
     let mut malformed = 0usize;
-    for line in significant_lines(section) {
+    for entry in bfrange_entries(section) {
+        let line = entry.as_str();
         attempted += 1;
         let Some(mappings) = parse_bfrange_line(line) else {
             malformed += 1;
@@ -704,6 +705,49 @@ fn apply_bfrange_section(cmap: &mut CMap, section: &str) {
         }
     }
     warn_on_malformed_lines("bfrange", attempted, malformed);
+}
+
+/// The entries of one `beginbfrange` section, one string per entry (X50).
+///
+/// The section is otherwise read line by line, but the array form of an
+/// entry (`<lo> <hi> [<dst> …]`, ISO 32000-1 §9.10.3) may span many lines:
+///
+/// ```text
+/// <20><FB>[
+/// <0020><0021><0022><0023><0024><0025><0026><2019>
+/// …
+/// ]
+/// ```
+///
+/// Read per line, the opening `<20><FB>[` matched no form and was dropped,
+/// and every continuation line matched the sequential form on its first
+/// three entries (`<0020><0021><0022>`: codes 0x20–0x21 → U+0022…), so the
+/// codes at the start of each line came out two letters late (`h`→`j`,
+/// `1`→`3`) across the whole font. A line that opens a `[` it does not close
+/// is therefore joined with the lines that follow, up to the closing `]`,
+/// into one entry. Every other line stays its own entry, as before. ~keep
+fn bfrange_entries(section: &str) -> Vec<String> {
+    let mut entries = Vec::new();
+    let mut open: Option<String> = None;
+    for line in significant_lines(section) {
+        if let Some(buf) = open.as_mut() {
+            buf.push(' ');
+            buf.push_str(line);
+            if buf.matches('[').count() <= buf.matches(']').count() {
+                entries.push(open.take().unwrap_or_default());
+            }
+            continue;
+        }
+        if line.matches('[').count() > line.matches(']').count() {
+            open = Some(line.to_string());
+        } else {
+            entries.push(line.to_string());
+        }
+    }
+    // An array never closed: kept as one entry, which fails to parse and is
+    // counted malformed rather than misread line by line.
+    entries.extend(open);
+    entries
 }
 
 /// Apply every `beginnotdefrange`/`endnotdefrange` section's fallback
