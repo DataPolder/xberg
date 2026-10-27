@@ -402,13 +402,7 @@ pub(super) fn split_embedded_list_items(paragraphs: &mut Vec<PdfParagraph>) {
             continue;
         }
 
-        let full_text: String = para
-            .lines
-            .iter()
-            .flat_map(|l| l.segments.iter())
-            .map(|s| s.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let full_text = positioned_text(&para);
 
         let bullet_count = full_text.matches(['\u{2022}', '\u{00B7}']).count();
         if bullet_count < 2 {
@@ -437,14 +431,49 @@ pub(super) fn split_embedded_list_items(paragraphs: &mut Vec<PdfParagraph>) {
     }
 }
 
+/// The paragraph's text, spaced the way assembly spaces it (X53): a space between
+/// two segments of one line only where `segments_need_space` sees a word gap, and a
+/// space between lines. Joining every segment with a space put one inside words the
+/// PDF draws in kerning pieces (`Goodpasture ' s`). ~keep
+fn positioned_text(para: &PdfParagraph) -> String {
+    let mut text = String::new();
+    for (i, line) in para.lines.iter().enumerate() {
+        if i > 0 && !text.ends_with(char::is_whitespace) {
+            text.push(' ');
+        }
+        let mut previous: Option<&crate::pdf::hierarchy::SegmentData> = None;
+        for segment in &line.segments {
+            if let Some(previous) = previous {
+                let previous_word = previous.text.split_whitespace().next_back().unwrap_or("");
+                let next_word = segment.text.split_whitespace().next().unwrap_or("");
+                if !text.ends_with(char::is_whitespace)
+                    && !segment.text.starts_with(char::is_whitespace)
+                    && super::lines::segments_need_space(previous, previous_word, segment, next_word)
+                {
+                    text.push(' ');
+                }
+            }
+            text.push_str(&segment.text);
+            previous = Some(segment);
+        }
+    }
+    text
+}
+
 /// Create a simple paragraph from text.
 fn text_to_paragraph(text: &str, font_size: f32, is_bold: bool, is_list_item: bool) -> PdfParagraph {
     use crate::pdf::hierarchy::SegmentData;
 
-    let segments: Vec<SegmentData> = text
-        .split_whitespace()
-        .map(|w| SegmentData {
-            text: w.to_string(),
+    // One segment holding the whole item, its words joined by single spaces (X53).
+    // The item has no positions of its own, and one zero-width segment per word
+    // left assembly's `segments_need_space` a gap of 0 between every two words, so
+    // a split list item came out glued (`Anti-C1qandusCD163aremarkers`): the
+    // `text` cache is cleared after the split, so the segments are all there is.
+    let item = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let segments: Vec<SegmentData> = std::iter::once(item)
+        .filter(|t| !t.is_empty())
+        .map(|item| SegmentData {
+            text: item,
             x: 0.0,
             y: 0.0,
             width: 0.0,
@@ -1181,5 +1210,84 @@ mod tests {
             2,
             "a complete heading must not absorb wider body prose merely because it opens lowercase"
         );
+    }
+
+    /// One positioned line of `(text, x, width)` segments at 6.4 pt, as the
+    /// structure-tree path hands a table cell's words over (X53).
+    fn positioned_paragraph(words: &[(&str, f32, f32)]) -> PdfParagraph {
+        let mut para = make_body_paragraph("", 6.4);
+        para.lines[0].segments = words
+            .iter()
+            .map(|&(text, x, width)| {
+                let mut segment = para.lines[0].segments[0].clone();
+                segment.text = text.to_string();
+                segment.x = x;
+                segment.width = width;
+                segment.font_size = 6.4;
+                segment.height = 6.4;
+                segment
+            })
+            .collect();
+        para.dominant_font_size = 6.4;
+        para
+    }
+
+    /// The text assembly emits for each list item of `paragraphs`.
+    fn assembled_list_items(paragraphs: Vec<PdfParagraph>) -> Vec<String> {
+        let document = super::super::assembly::assemble_internal_document(
+            vec![paragraphs],
+            &[],
+            None,
+            &[],
+            &Default::default(),
+        );
+        document
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, crate::types::internal::ElementKind::ListItem { .. }))
+            .map(|element| element.text.clone())
+            .collect()
+    }
+
+    /// X53 (#3512, the Autoantibody paper's table, Remarks column): a structure-tree
+    /// paragraph with inline `·` bullets is split into list items, and each item keeps
+    /// the spaces between its words. Built from per-word segments without positions,
+    /// assembly saw a gap of 0 between every two words and glued them
+    /// (`Loremipsumdolor`). Lorem ipsum stands in for the text; 2–3 pt word gaps at
+    /// 6.4 pt as on the page. ~keep
+    #[test]
+    fn inline_bullet_items_keep_their_word_spaces() {
+        let mut paragraphs = vec![positioned_paragraph(&[
+            ("Intro", 0.0, 15.0),
+            ("\u{00B7}", 18.0, 2.0),
+            ("Lorem", 22.0, 15.0),
+            ("ipsum", 39.0, 15.0),
+            ("dolor", 56.0, 15.0),
+            ("\u{00B7}", 74.0, 2.0),
+            ("sit", 78.0, 8.0),
+            ("amet", 88.0, 12.0),
+        ])];
+        split_embedded_list_items(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 3, "the text before the bullets and two items");
+        assert!(!paragraphs[0].is_list_item);
+        assert_eq!(assembled_list_items(paragraphs), vec!["Lorem ipsum dolor", "sit amet"]);
+    }
+
+    /// X53: the text a split works on is spaced the way assembly spaces it, so a word
+    /// the PDF draws in two touching pieces stays one word (`Goodpasture's`, not
+    /// `Goodpasture ' s` as joining every segment with a space gave). ~keep
+    #[test]
+    fn inline_bullet_split_keeps_a_kerned_word_whole() {
+        let mut paragraphs = vec![positioned_paragraph(&[
+            ("\u{00B7}", 0.0, 2.0),
+            ("Good", 4.0, 14.0),
+            ("pasture's", 18.0, 24.0),
+            ("disease", 45.0, 20.0),
+            ("\u{00B7}", 68.0, 2.0),
+            ("sit", 72.0, 8.0),
+            ("amet", 82.0, 12.0),
+        ])];
+        split_embedded_list_items(&mut paragraphs);
+        assert_eq!(assembled_list_items(paragraphs), vec!["Goodpasture's disease", "sit amet"]);
     }
 }
