@@ -1234,13 +1234,8 @@ mod tests {
 
     /// The text assembly emits for each list item of `paragraphs`.
     fn assembled_list_items(paragraphs: Vec<PdfParagraph>) -> Vec<String> {
-        let document = super::super::assembly::assemble_internal_document(
-            vec![paragraphs],
-            &[],
-            None,
-            &[],
-            &Default::default(),
-        );
+        let document =
+            super::super::assembly::assemble_internal_document(vec![paragraphs], &[], None, &[], &Default::default());
         document
             .elements
             .iter()
@@ -1288,6 +1283,9 @@ mod tests {
             ("amet", 82.0, 12.0),
         ])];
         split_embedded_list_items(&mut paragraphs);
-        assert_eq!(assembled_list_items(paragraphs), vec!["Goodpasture's disease", "sit amet"]);
+        assert_eq!(
+            assembled_list_items(paragraphs),
+            vec!["Goodpasture's disease", "sit amet"]
+        );
     }
 }

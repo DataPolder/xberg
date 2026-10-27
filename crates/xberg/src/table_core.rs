@@ -833,15 +833,34 @@ pub(crate) fn reconstruct_table_with_columns(
         return (Vec::new(), Vec::new());
     }
 
-    let row_positions = detect_rows(words, row_threshold_ratio);
+    let mut row_positions = detect_rows(words, row_threshold_ratio);
     let median_height = median_word_height(words);
-    let groups = group_words_into_cell_tokens(words, &row_positions);
+    let mut groups = group_words_into_cell_tokens(words, &row_positions);
     let cell_tokens: Vec<HocrWord> = groups.iter().map(|(token, _)| token.clone()).collect();
-    let columns = detect_columns(&cell_tokens, &row_positions, column_threshold);
+    let mut columns = detect_columns(&cell_tokens, &row_positions, column_threshold);
 
     if columns.is_empty() || row_positions.is_empty() {
         return (Vec::new(), Vec::new());
     }
+
+    // DataPolder X51 (#3218): one record whose words sit on baselines a few points apart can
+    // come out as two rows closer together than the threshold that built them. When those two
+    // rows fill complementary columns they are one row, and the grid is rebuilt on it.
+    let row_threshold = (median_height as f64 * row_threshold_ratio) as u32;
+    if let Some(merged) =
+        merge_complementary_close_rows(&groups, &row_positions, median_height, &columns, row_threshold)
+    {
+        row_positions = merged;
+        groups = group_words_into_cell_tokens(words, &row_positions);
+        let cell_tokens: Vec<HocrWord> = groups.iter().map(|(token, _)| token.clone()).collect();
+        columns = detect_columns(&cell_tokens, &row_positions, column_threshold);
+        if columns.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+    }
+    // DataPolder X51 (#3218): a cell token that runs over the left edge of a column other rows
+    // start their tokens at holds two cells; split it there.
+    split_tokens_at_supported_columns(&mut groups, &row_positions, median_height, &columns);
 
     let mut result = assign_grouped_words_to_cells(&groups, &row_positions, median_height, &columns);
     let mut col_positions: Vec<u32> = columns.iter().map(|column| column.left).collect();
@@ -856,6 +875,163 @@ pub(crate) fn reconstruct_table_with_columns(
         .collect();
 
     (remove_empty_rows_and_columns(result), kept_col_positions)
+}
+
+/// Rows of `groups` that sit closer than `row_threshold` to their neighbour, fill columns the
+/// neighbour leaves empty, of which the smaller holds values only and the larger a label, merged
+/// into one position each (DataPolder X51, #3218). `None` when no pair qualifies.
+///
+/// [`detect_rows`] anchors a row on the first word it meets, so a record whose price sits a few
+/// points above its label and whose total a few points below can leave the total in a row of its
+/// own: the Aicuda purchase order's `CD-010 | 33 | € 300,00 | Crowd Detection … |` and, 3 pt
+/// below it, `| | | | € 9.900,00 |`. Two rows that close are ambiguous by the very threshold
+/// that built them; they are one row only when neither fills a column the other fills, so two
+/// real rows of a dense table, which share their columns, are never joined. ~keep
+fn merge_complementary_close_rows(
+    groups: &[(HocrWord, Vec<&HocrWord>)],
+    row_positions: &[u32],
+    median_height: u32,
+    columns: &[ColumnTrack],
+    row_threshold: u32,
+) -> Option<Vec<u32>> {
+    if row_positions.len() < 2 {
+        return None;
+    }
+    let mut filled: Vec<Vec<bool>> = vec![vec![false; columns.len()]; row_positions.len()];
+    // Per row: how many tokens, and whether every one of them is a value.
+    let mut tokens = vec![0usize; row_positions.len()];
+    let mut all_values = vec![true; row_positions.len()];
+    for (token, _) in groups {
+        if let (Some(row), Some(col)) = (
+            find_row_index_by_overlap(row_positions, token, median_height),
+            find_column_index(columns, token),
+        ) {
+            filled[row][col] = true;
+            tokens[row] += 1;
+            all_values[row] &= is_cell_value_text(&token.text);
+        }
+    }
+    let mut merged: Vec<u32> = Vec::with_capacity(row_positions.len());
+    let mut changed = false;
+    let mut row = 0;
+    while row < row_positions.len() {
+        let next = row + 1;
+        let complementary = next < row_positions.len()
+            && row_positions[next].abs_diff(row_positions[row]) <= row_threshold
+            && filled[row].iter().any(|&f| f)
+            && filled[next].iter().any(|&f| f)
+            && !filled[row].iter().zip(&filled[next]).any(|(&a, &b)| a && b)
+            // The smaller row is the stray part of a record: values only (`€ 9.900,00`), never
+            // labels. Two rows of diagram labels are complementary too, and are no record.
+            && {
+                let (smaller, larger) = if tokens[next] <= tokens[row] { (next, row) } else { (row, next) };
+                // …and the record itself carries a label: two rows of chart tick values are
+                // complementary as well, and no record.
+                all_values[smaller] && !all_values[larger]
+            };
+        if complementary {
+            merged.push((row_positions[row] + row_positions[next]) / 2);
+            changed = true;
+            row += 2;
+        } else {
+            merged.push(row_positions[row]);
+            row += 1;
+        }
+    }
+    changed.then_some(merged)
+}
+
+/// Split each multi-word cell token below the header row where one of its words starts at the
+/// left edge of another column that at least [`MIN_SPLIT_COLUMN_SUPPORT`] other rows start a
+/// token at, when every word before it is a value and the word itself is not (DataPolder X51,
+/// #3218).
+///
+/// [`group_words_into_cell_tokens`] merges words closer than [`CELL_MERGE_GAP_HEIGHT_RATIO`] of
+/// the text height. A value whose box ends in a trailing space (`1.500,00 `) leaves only a few
+/// points before the next column's text, so `€ 1.500,00` and `VMS Integratie Milestone …` became
+/// one token, and the description landed in the price column. The other rows say where that
+/// column starts; a word that starts there is that column's. ~keep
+fn split_tokens_at_supported_columns<'a>(
+    groups: &mut Vec<(HocrWord, Vec<&'a HocrWord>)>,
+    row_positions: &[u32],
+    median_height: u32,
+    columns: &[ColumnTrack],
+) {
+    let tolerance = (median_height / 2).max(1);
+    let start_rows = |column: usize, except_row: usize| -> usize {
+        let mut rows: Vec<usize> = groups
+            .iter()
+            .filter(|(token, _)| {
+                find_column_index(columns, token) == Some(column)
+                    && token.left.abs_diff(columns[column].left) <= tolerance
+            })
+            .filter_map(|(token, _)| find_row_index_by_overlap(row_positions, token, median_height))
+            .filter(|&row| row != except_row)
+            .collect();
+        rows.sort_unstable();
+        rows.dedup();
+        rows.len()
+    };
+    let mut out: Vec<(HocrWord, Vec<&HocrWord>)> = Vec::with_capacity(groups.len());
+    for (token, members) in groups.iter() {
+        let row = find_row_index_by_overlap(row_positions, token, median_height);
+        let own = find_column_index(columns, token);
+        let mut pieces: Vec<Vec<&HocrWord>> = vec![members.clone()];
+        if let (Some(row), Some(own)) = (row, own)
+            && row > 0
+            && members.len() > 1
+        {
+            for column in (0..columns.len()).filter(|&c| c != own && columns[c].left > token.left) {
+                let last = pieces.last().expect("at least one piece");
+                // Only where values meet text (`€ 1.500,00 | VMS …`): a prose line that happens to
+                // have a word at another column's edge is one cell, and so is `40 (74.1)` or a
+                // phone number, whose parts are values on both sides.
+                let Some(at) = last
+                    .iter()
+                    .position(|word| word.left.abs_diff(columns[column].left) <= tolerance)
+                    .filter(|&at| {
+                        at > 0
+                            && last[..at].iter().all(|word| is_cell_value_text(&word.text))
+                            && !is_cell_value_text(&last[at].text)
+                    })
+                else {
+                    continue;
+                };
+                if start_rows(column, row) < MIN_SPLIT_COLUMN_SUPPORT {
+                    continue;
+                }
+                let tail = pieces.last_mut().expect("at least one piece").split_off(at);
+                pieces.push(tail);
+            }
+        }
+        if pieces.len() == 1 {
+            out.push((token.clone(), members.clone()));
+            continue;
+        }
+        for piece in pieces {
+            out.push((token_of(&piece), piece));
+        }
+    }
+    *groups = out;
+}
+
+/// How many other rows must start a token at a column's left edge before a token is split there.
+const MIN_SPLIT_COLUMN_SUPPORT: usize = 2;
+
+/// The cell token spanning `members` (in reading order), as [`merge_row_into_cell_tokens`]
+/// builds it.
+fn token_of(members: &[&HocrWord]) -> HocrWord {
+    let mut token = members[0].clone();
+    for word in &members[1..] {
+        let right = (word.left + word.width).max(token.left + token.width);
+        let bottom = (word.top + word.height).max(token.top + token.height);
+        token.top = token.top.min(word.top);
+        token.width = right.saturating_sub(token.left);
+        token.height = bottom.saturating_sub(token.top);
+        token.text.push(' ');
+        token.text.push_str(&word.text);
+    }
+    token
 }
 
 fn is_rtl_letter(character: char) -> bool {
@@ -3862,5 +4038,146 @@ mod tests {
                 vec!["C".to_string(), "40,218,965".to_string()],
             ]
         );
+    }
+
+    /// The Aicuda purchase order's Vestiging 1 table (DataPolder #3218), the 73 words of its
+    /// region exactly as the native-PDF heuristic passes them (column gap 60, row ratio 0.5).
+    fn aicuda_vestiging_1() -> Vec<HocrWord> {
+        [
+            ("Vestiging", 83, 260, 38, 9),
+            ("1", 126, 260, 4, 9),
+            ("Totaal", 225, 260, 24, 9),
+            ("86", 253, 260, 8, 9),
+            ("camera’s", 265, 260, 40, 9),
+            ("CPS", 83, 273, 14, 9),
+            ("Core", 103, 273, 19, 9),
+            ("3 ", 151, 273, 8, 9),
+            ("€ ", 175, 273, 8, 9),
+            ("5.000,00 ", 182, 273, 38, 9),
+            ("CPS", 225, 273, 13, 9),
+            ("Vaidio", 242, 273, 25, 9),
+            ("Core", 271, 273, 17, 9),
+            ("Vision", 292, 273, 25, 9),
+            ("Platform", 322, 273, 34, 9),
+            ("Software", 360, 273, 34, 9),
+            ("License", 398, 273, 30, 9),
+            ("per", 431, 273, 11, 9),
+            ("server", 446, 273, 23, 9),
+            ("€", 522, 274, 5, 9),
+            (" 15.000,00 ", 528, 274, 45, 9),
+            ("VS-010 ", 83, 286, 32, 9),
+            ("20 ", 148, 286, 12, 9),
+            ("€ ", 178, 286, 8, 9),
+            ("100,00 ", 186, 286, 30, 9),
+            ("Video", 225, 286, 20, 9),
+            ("search", 249, 286, 25, 9),
+            ("license", 278, 286, 29, 9),
+            ("per", 311, 286, 12, 9),
+            ("stream", 327, 286, 25, 9),
+            ("€ ", 522, 287, 8, 9),
+            ("  2.000,00 ", 530, 287, 42, 9),
+            ("€ ", 178, 297, 8, 9),
+            ("300,00 ", 186, 297, 30, 9),
+            ("CD-010 ", 83, 300, 33, 9),
+            ("33 ", 148, 300, 12, 9),
+            ("Crowd", 225, 300, 21, 9),
+            ("Detection", 250, 300, 37, 9),
+            ("license", 291, 300, 29, 9),
+            ("per", 324, 300, 12, 9),
+            ("stream", 341, 300, 25, 9),
+            ("€", 522, 303, 5, 9),
+            ("   9.900,00 ", 528, 303, 45, 9),
+            ("ID-010 ", 83, 314, 29, 9),
+            ("33 ", 148, 314, 12, 9),
+            ("€", 178, 314, 11, 9),
+            ("300,00", 192, 314, 21, 9),
+            ("Intrusion", 225, 314, 35, 9),
+            ("Detection", 264, 314, 35, 9),
+            ("license", 304, 314, 28, 9),
+            ("per", 335, 314, 12, 9),
+            ("stream", 351, 314, 24, 9),
+            ("€", 522, 315, 5, 9),
+            ("   9.900,00 ", 528, 315, 45, 9),
+            ("VMS-010 ", 83, 327, 40, 9),
+            ("3 ", 151, 327, 8, 9),
+            ("€ ", 175, 327, 8, 9),
+            ("1.500,00 ", 182, 327, 38, 9),
+            ("VMS", 225, 327, 12, 9),
+            ("Integratie", 241, 327, 41, 9),
+            ("Milestone", 286, 327, 37, 9),
+            ("per", 326, 327, 12, 9),
+            ("server", 342, 327, 24, 9),
+            ("€ ", 522, 328, 8, 9),
+            ("  4.500,00 ", 530, 328, 42, 9),
+            ("Discount ", 83, 340, 38, 9),
+            ("1 ", 151, 340, 8, 9),
+            ("Eenmalige", 225, 340, 38, 9),
+            ("projectkorting", 267, 340, 59, 9),
+            ("15%", 330, 340, 13, 9),
+            ("- ", 522, 341, 6, 9),
+            ("€ ", 528, 341, 8, 9),
+            ("6.195,00 ", 536, 341, 37, 9),
+        ]
+        .into_iter()
+        .map(|(text, left, top, width, height)| word(text, left, top, width, height))
+        .collect()
+    }
+
+    fn row_starting<'a>(grid: &'a [Vec<String>], key: &str) -> &'a [String] {
+        grid.iter()
+            .find(|row| row.first().is_some_and(|cell| cell.trim() == key))
+            .unwrap_or_else(|| panic!("no row {key}: {grid:?}"))
+    }
+
+    #[test]
+    fn a_record_on_jittered_baselines_is_one_row() {
+        // CD-010's price sits 3 pt above its label, its total 3 pt below: one row, with its total.
+        let (grid, _) = reconstruct_table_with_columns(&aicuda_vestiging_1(), 60, 0.5);
+        let cd = row_starting(&grid, "CD-010");
+        assert!(cd.last().is_some_and(|cell| cell.contains("9.900,00")), "{cd:?}");
+        assert!(
+            !grid
+                .iter()
+                .any(|row| row.iter().filter(|c| !c.trim().is_empty()).count() == 1
+                    && row.iter().any(|c| c.contains("9.900,00"))),
+            "no loose total row: {grid:?}"
+        );
+    }
+
+    #[test]
+    fn a_token_over_a_supported_column_edge_is_two_cells() {
+        // `1.500,00 ` ends in a space, 5 pt before `VMS`: the description is its own cell, at the
+        // column every other row's description starts at.
+        let (grid, _) = reconstruct_table_with_columns(&aicuda_vestiging_1(), 60, 0.5);
+        let vms = row_starting(&grid, "VMS-010");
+        let desc = vms
+            .iter()
+            .position(|c| c.contains("VMS Integratie"))
+            .expect("description");
+        assert!(!vms[desc].contains("1.500,00"), "{vms:?}");
+        let cd = row_starting(&grid, "CD-010");
+        assert_eq!(
+            cd.iter().position(|c| c.contains("Crowd Detection")),
+            Some(desc),
+            "{grid:?}"
+        );
+    }
+
+    #[test]
+    fn two_close_rows_that_share_a_column_stay_two_rows() {
+        // `detect_rows` anchors on `A1` (yc 100.5), takes `100` (yc 104.5) and starts a row at
+        // `A2` (yc 105.5): two rows 1 pt apart, closer than the threshold (4). Both fill the
+        // first and the last column, so they are two records and stay two rows.
+        let words = vec![
+            word("A1", 10, 96, 20, 9),
+            word("100", 200, 100, 20, 9),
+            word("A2", 10, 101, 20, 9),
+            word("200", 200, 101, 20, 9),
+            word("B", 10, 130, 20, 9),
+            word("300", 200, 130, 20, 9),
+        ];
+        assert_eq!(detect_rows(&words, 0.5).len(), 3, "the setup: three row positions");
+        let (grid, _) = reconstruct_table_with_columns(&words, 30, 0.5);
+        assert_eq!(grid.len(), 3, "{grid:?}");
     }
 }
