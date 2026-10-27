@@ -3134,19 +3134,58 @@ impl XYCutStrategy {
     /// lower "line" and can insert an unrelated same-row cell between a
     /// base glyph and its own subscript. `row_aware_span_cmp` quantizes Y
     /// into `ROW_BAND_TOLERANCE_PT`-wide bands before comparing, so runs
-    /// sharing a baseline band stay ordered by X regardless of height. ~keep
+    /// sharing a baseline band stay ordered by X regardless of height.
+    ///
+    /// DataPolder X52 (#3183): the fixed bands cut a line in two wherever
+    /// its baselines straddle a band edge. An OCR text layer's baselines
+    /// jitter 1–4 pt within one printed line (`NDA getekend.pdf` p3:
+    /// `privacy by` at y 470.2, the rest of its line at 467.8–469.4, bands
+    /// 157 and 156), so part of a line was read a line early. Spans are now
+    /// grouped into lines by baseline: highest baseline first, a span joins
+    /// the current line when its baseline lies within half the smaller text
+    /// height of that line's anchor (its first span), never of the previous
+    /// span, so lines cannot chain; each line then reads left to right. A
+    /// subscript shares its base run's baseline and stays in its line, as
+    /// GH#1600 requires. Non-finite baselines sort last, as before. ~keep
     fn sort_indices(&self, all_spans: &[TextSpan], indices: &[usize]) -> Vec<usize> {
-        let mut sorted: Vec<usize> = indices.to_vec();
-        sorted.sort_by(|&a, &b| {
-            crate::utils::row_aware_span_cmp(
-                all_spans[a].bbox.y,
-                all_spans[a].bbox.x,
-                all_spans[b].bbox.y,
-                all_spans[b].bbox.x,
-            )
-        });
-        sorted
+        sort_indices_by_baseline_lines(all_spans, indices)
     }
+}
+
+/// [`XYCutStrategy::sort_indices`]'s line grouping (DataPolder X52, #3183): lines by baseline
+/// against each line's anchor span, then left to right.
+fn sort_indices_by_baseline_lines(all_spans: &[TextSpan], indices: &[usize]) -> Vec<usize> {
+    let (mut finite, mut rest): (Vec<usize>, Vec<usize>) =
+        indices.iter().partition(|&&i| all_spans[i].bbox.y.is_finite());
+    finite.sort_by(|&a, &b| {
+        crate::utils::safe_float_cmp(all_spans[b].bbox.y, all_spans[a].bbox.y)
+            .then_with(|| crate::utils::safe_float_cmp(all_spans[a].bbox.x, all_spans[b].bbox.x))
+    });
+    // (anchor baseline, anchor height, members)
+    let mut lines: Vec<(f32, f32, Vec<usize>)> = Vec::new();
+    for i in finite {
+        let y = all_spans[i].bbox.y;
+        let h = all_spans[i].bbox.height.abs().max(1.0);
+        match lines.last_mut() {
+            Some((anchor_y, anchor_h, members)) if (*anchor_y - y).abs() <= 0.5 * h.min(*anchor_h) => members.push(i),
+            _ => lines.push((y, h, vec![i])),
+        }
+    }
+    let mut sorted: Vec<usize> = Vec::with_capacity(indices.len());
+    for (_, _, mut members) in lines {
+        members.sort_by(|&a, &b| crate::utils::safe_float_cmp(all_spans[a].bbox.x, all_spans[b].bbox.x));
+        sorted.extend(members);
+    }
+    rest.sort_by(|&a, &b| {
+        crate::utils::row_aware_span_cmp(
+            all_spans[a].bbox.y,
+            all_spans[a].bbox.x,
+            all_spans[b].bbox.y,
+            all_spans[b].bbox.x,
+        )
+    });
+    sorted.extend(rest);
+    sorted
 }
 
 /// Internal projection profile representation.
@@ -3267,6 +3306,68 @@ mod tests {
             mirrored: false,
             page_rotation_applied: 0,
         }
+    }
+
+    fn sorted_text(spans: &[TextSpan]) -> Vec<String> {
+        let indices: Vec<usize> = (0..spans.len()).collect();
+        XYCutStrategy::new()
+            .sort_indices(spans, &indices)
+            .into_iter()
+            .map(|i| spans[i].text.clone())
+            .collect()
+    }
+
+    /// DataPolder X52 (#3183): `NDA getekend.pdf` p3's OCR layer. `privacy by` sits 1.7 pt above
+    /// the rest of its printed line, across a 3 pt band edge (bands 157 and 156): the fixed bands
+    /// read it a line early, before the line's start. One line by baseline, left to right.
+    #[test]
+    fn a_line_whose_baselines_straddle_a_band_edge_is_one_line() {
+        let spans = vec![
+            make_span_text(
+                56.0,
+                468.6,
+                200.0,
+                10.0,
+                "7. Data processor heeft bij het ontwerpen van het product/de dienst",
+                10.0,
+            ),
+            make_span_text(262.0, 470.3, 48.0, 10.0, "privacy by", 10.0),
+            make_span_text(314.0, 469.4, 40.0, 10.0, "design", 10.0),
+            make_span_text(56.0, 455.0, 200.0, 10.0, "next line", 10.0),
+        ];
+        assert_eq!(
+            sorted_text(&spans),
+            [
+                "7. Data processor heeft bij het ontwerpen van het product/de dienst",
+                "privacy by",
+                "design",
+                "next line"
+            ]
+        );
+    }
+
+    /// Lines are measured against their anchor, never the previous span: three baselines 4 pt
+    /// apart are two lines, not one chain.
+    #[test]
+    fn line_grouping_does_not_chain() {
+        let spans = vec![
+            make_span_text(200.0, 470.0, 40.0, 10.0, "a", 10.0),
+            make_span_text(100.0, 466.0, 40.0, 10.0, "b", 10.0),
+            make_span_text(50.0, 462.0, 40.0, 10.0, "c", 10.0),
+        ];
+        assert_eq!(sorted_text(&spans), ["b", "a", "c"]);
+    }
+
+    /// GH#1600 still holds: a subscript shares its base run's baseline and is read right after it.
+    #[test]
+    fn a_subscript_stays_in_its_line() {
+        let spans = vec![
+            make_span_text(50.0, 500.0, 10.0, 10.0, "H", 10.0),
+            make_span_text(61.0, 499.8, 5.0, 6.0, "2", 6.0),
+            make_span_text(67.0, 500.0, 10.0, 10.0, "O", 10.0),
+            make_span_text(50.0, 485.0, 40.0, 10.0, "below", 10.0),
+        ];
+        assert_eq!(sorted_text(&spans), ["H", "2", "O", "below"]);
     }
 
     /// One span per word, 9.96 pt Arial: ~5 pt per character, a 3 pt word space. ~keep
