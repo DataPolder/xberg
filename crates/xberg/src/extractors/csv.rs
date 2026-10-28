@@ -363,6 +363,11 @@ fn parse_csv(text: &str, delimiter: char) -> Vec<Vec<String>> {
 /// When the `quality` feature is enabled, uses chardetng for more sophisticated
 /// encoding detection. Without it, tries common encodings in order.
 fn decode_csv_bytes(content: &[u8]) -> String {
+    // UTF-16 before the UTF-8 fast path: without a BOM, UTF-16 ASCII is valid UTF-8
+    // and would pass it with a zero byte after every character (#3539, X54).
+    if let Some((encoding, bom_len)) = crate::utils::utf16_text_encoding(content) {
+        return encoding.decode_without_bom_handling(&content[bom_len..]).0.into_owned();
+    }
     if let Ok(s) = utf8_validation::from_utf8(content) {
         return crate::utils::strip_bom(s).to_string();
     }

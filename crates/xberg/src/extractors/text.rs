@@ -247,6 +247,34 @@ mod tests {
         );
     }
 
+    /// #3539 (X54): a UTF-16 `.txt` (a JUMO logger export, as Windows tools write it)
+    /// reads as its UTF-8 twin: same words and lines, `°C` intact, no lossy warning.
+    /// Before, every character was followed by a zero byte and the BOM was U+FFFD.
+    #[tokio::test]
+    async fn utf16_text_reads_as_its_utf8_twin() {
+        let text = "\"Analog\",\"\"\r\n\"Archiv: JUMO 1, Run 1 - JUMO LOGOSCREEN 500 cf\"\r\n\"Datum\",\"Zeit\",\"LOW: T1 / °C\"\r\n";
+        let extractor = PlainTextExtractor::new();
+        let config = ExtractionConfig::default();
+        let meta = |doc: &InternalDocument| match doc.metadata.format.as_ref() {
+            Some(crate::types::FormatMetadata::Text(m)) => (m.line_count, m.word_count, m.character_count),
+            other => panic!("expected Text metadata, got {other:?}"),
+        };
+        let twin = extractor
+            .extract_content(text.as_bytes(), "text/plain", &config)
+            .await
+            .unwrap();
+        let mut le = vec![0xFF, 0xFE];
+        le.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+        let mut be = vec![0xFE, 0xFF];
+        be.extend(text.encode_utf16().flat_map(u16::to_be_bytes));
+        let bare: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        for bytes in [le, be, bare] {
+            let doc = extractor.extract_content(&bytes, "text/plain", &config).await.unwrap();
+            assert_eq!(meta(&doc), meta(&twin));
+            assert!(text_warnings(&doc).is_empty(), "{:?}", text_warnings(&doc));
+        }
+    }
+
     #[test]
     fn test_plain_text_plugin_interface() {
         let extractor = PlainTextExtractor::new();

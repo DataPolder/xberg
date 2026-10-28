@@ -61,6 +61,67 @@ pub(crate) fn strip_bom(s: &str) -> &str {
     s.strip_prefix('\u{FEFF}').unwrap_or(s)
 }
 
+/// The UTF-16 encoding of a text document, from its first bytes, with the length of
+/// the byte order mark to skip (DataPolder #3539, X54).
+///
+/// Windows tools, logger software and PowerShell write `.txt` / `.csv` exports as
+/// UTF-16, usually little-endian with a BOM. Neither text decoder recognised it: a
+/// lossy UTF-8 decode turns the BOM into U+FFFD and keeps every second byte, the
+/// zero, so `Analog` reads `A\0n\0a\0l\0o\0g\0`, splitting every word into single
+/// letters and doubling the text; without a BOM UTF-16 ASCII is even valid UTF-8 and
+/// passes the fast path unchanged. Recognised here:
+///
+/// - a UTF-16LE (`FF FE`) or UTF-16BE (`FE FF`) byte order mark, but not the UTF-32LE
+///   one (`FF FE 00 00`), which is left as it was;
+/// - without a BOM, the zero-byte pattern of UTF-16 in mostly-ASCII text: within the
+///   first 4 KiB at least 90 % of the high bytes are zero and at most 1 % of the low
+///   bytes are. Text in any 8-bit encoding has no zero bytes, so it never matches; nor
+///   does UTF-16 without a BOM that is mostly outside Latin (it stays as it was).
+///
+/// A UTF-8 BOM is not handled here: UTF-8 decodes and the BOM is stripped as before.
+/// [`xml_utils`] keeps its own sniff, which also reads XML's `<?` signature.
+pub(crate) fn utf16_text_encoding(bytes: &[u8]) -> Option<(&'static encoding_rs::Encoding, usize)> {
+    match bytes {
+        [0xFF, 0xFE, 0x00, 0x00, ..] => return None,
+        [0xFF, 0xFE, ..] => return Some((encoding_rs::UTF_16LE, 2)),
+        [0xFE, 0xFF, ..] => return Some((encoding_rs::UTF_16BE, 2)),
+        _ => {}
+    }
+    const SAMPLE: usize = 4096;
+    const MIN_PAIRS: usize = 8;
+    let sample = &bytes[..bytes.len().min(SAMPLE) & !1];
+    let pairs = sample.len() / 2;
+    if pairs < MIN_PAIRS {
+        return None;
+    }
+    let (mut first_zero, mut second_zero) = (0usize, 0usize);
+    for pair in sample.chunks_exact(2) {
+        first_zero += usize::from(pair[0] == 0);
+        second_zero += usize::from(pair[1] == 0);
+    }
+    let mostly = |n: usize| n * 10 >= pairs * 9;
+    let hardly = |n: usize| n * 100 <= pairs;
+    if mostly(second_zero) && hardly(first_zero) {
+        Some((encoding_rs::UTF_16LE, 0))
+    } else if mostly(first_zero) && hardly(second_zero) {
+        Some((encoding_rs::UTF_16BE, 0))
+    } else {
+        None
+    }
+}
+
+/// [`utf16_text_encoding`]'s decode, as a [`DecodeOutcome`]: a non-UTF-8 encoding
+/// was used (`fell_back`), and an unpaired surrogate is a replacement.
+fn decode_utf16_text(byte_data: &[u8]) -> Option<DecodeOutcome> {
+    let (encoding, bom_len) = utf16_text_encoding(byte_data)?;
+    let (decoded, had_errors) = encoding.decode_without_bom_handling(&byte_data[bom_len..]);
+    Some(DecodeOutcome {
+        text: decoded.into_owned(),
+        fell_back: true,
+        replaced_characters: had_errors,
+    })
+}
+
 /// JSON helper utilities for safe value traversal and extraction.
 pub mod json_utils;
 /// Markdown post-processing helpers used by extractors that emit Markdown output.
@@ -123,6 +184,13 @@ pub(crate) struct DecodeOutcome {
 /// same input.
 #[cfg(feature = "quality")]
 pub(crate) fn decode_with_provenance(byte_data: &[u8], encoding: Option<&str>) -> DecodeOutcome {
+    // UTF-16 first, as in the build without `quality` below: chardetng does not
+    // detect it either (#3539, X54).
+    if encoding.is_none()
+        && let Some(outcome) = decode_utf16_text(byte_data)
+    {
+        return outcome;
+    }
     string_utils::safe_decode_with_provenance(byte_data, encoding)
 }
 
@@ -142,6 +210,15 @@ pub(crate) fn decode_with_provenance(byte_data: &[u8], encoding: Option<&str>) -
             fell_back: false,
             replaced_characters: false,
         };
+    }
+
+    // An undeclared UTF-16 text (a BOM, or the zero-byte pattern) is decoded as
+    // such; `from_utf8_lossy` below would keep every zero byte (#3539, X54). A
+    // declared encoding is honoured as before.
+    if encoding.is_none()
+        && let Some(outcome) = decode_utf16_text(byte_data)
+    {
+        return outcome;
     }
 
     if let Some(enc_name) = encoding
@@ -359,5 +436,88 @@ mod decode_provenance_tests {
         assert_eq!(outcome.text, "");
         assert!(!outcome.fell_back);
         assert!(!outcome.replaced_characters);
+    }
+}
+
+/// #3539 (X54): UTF-16 text is recognised by its BOM or its zero-byte pattern.
+#[cfg(test)]
+mod utf16_text_tests {
+    use super::*;
+
+    const JUMO: &str = "\"Analog\",\"\"\r\n\"Archiv: JUMO 1, Run 1 - JUMO LOGOSCREEN 500 cf\"\r\n\"Datum\",\"Zeit\",\"LOW: T1 / °C\"\r\n\"1\",\"18-3-2011\",\"9:56:31\",\"8,85\"\r\n";
+
+    fn utf16le(text: &str, bom: bool) -> Vec<u8> {
+        let mut out = if bom { vec![0xFF, 0xFE] } else { vec![] };
+        out.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+        out
+    }
+
+    fn utf16be(text: &str, bom: bool) -> Vec<u8> {
+        let mut out = if bom { vec![0xFE, 0xFF] } else { vec![] };
+        out.extend(text.encode_utf16().flat_map(u16::to_be_bytes));
+        out
+    }
+
+    #[test]
+    fn a_bom_or_the_zero_byte_pattern_names_utf16() {
+        assert_eq!(
+            utf16_text_encoding(&utf16le(JUMO, true)),
+            Some((encoding_rs::UTF_16LE, 2))
+        );
+        assert_eq!(
+            utf16_text_encoding(&utf16be(JUMO, true)),
+            Some((encoding_rs::UTF_16BE, 2))
+        );
+        assert_eq!(
+            utf16_text_encoding(&utf16le(JUMO, false)),
+            Some((encoding_rs::UTF_16LE, 0))
+        );
+        assert_eq!(
+            utf16_text_encoding(&utf16be(JUMO, false)),
+            Some((encoding_rs::UTF_16BE, 0))
+        );
+    }
+
+    #[test]
+    fn eight_bit_text_and_the_rest_are_not_utf16() {
+        // UTF-8, with and without its BOM, and windows-1252: no zero bytes.
+        assert_eq!(utf16_text_encoding(JUMO.as_bytes()), None);
+        let mut utf8_bom = vec![0xEF, 0xBB, 0xBF];
+        utf8_bom.extend(JUMO.as_bytes());
+        assert_eq!(utf16_text_encoding(&utf8_bom), None);
+        let (cp1252, _, _) = encoding_rs::WINDOWS_1252.encode(JUMO);
+        assert_eq!(utf16_text_encoding(&cp1252), None);
+        // The UTF-32LE BOM is not taken for UTF-16LE.
+        assert_eq!(utf16_text_encoding(&[0xFF, 0xFE, 0x00, 0x00, b'A', 0, 0, 0]), None);
+        // Too short to tell without a BOM, and mostly non-Latin UTF-16 without one.
+        assert_eq!(utf16_text_encoding(&utf16le("Ab", false)), None);
+        assert_eq!(utf16_text_encoding(&utf16le("温度測定の記録データです", false)), None);
+        // A binary-looking run of zeros is not UTF-16 either.
+        assert_eq!(utf16_text_encoding(&[0u8; 64]), None);
+    }
+
+    #[test]
+    fn utf16_text_decodes_to_its_utf8_twin() {
+        for bytes in [
+            utf16le(JUMO, true),
+            utf16be(JUMO, true),
+            utf16le(JUMO, false),
+            utf16be(JUMO, false),
+        ] {
+            let outcome = decode_with_provenance(&bytes, None);
+            assert_eq!(outcome.text, JUMO);
+            assert!(outcome.fell_back);
+            assert!(!outcome.replaced_characters);
+        }
+    }
+
+    /// The zero-byte sniff only runs without a declared encoding. (A BOM is honoured
+    /// over a declared label by `encoding_rs` itself, as before.)
+    #[test]
+    fn a_declared_encoding_is_not_second_guessed() {
+        let bytes = utf16le(JUMO, false);
+        let outcome = decode_with_provenance(&bytes, Some("windows-1252"));
+        assert_ne!(outcome.text, JUMO);
+        assert!(outcome.text.contains('\0'));
     }
 }

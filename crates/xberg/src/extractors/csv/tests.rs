@@ -508,3 +508,23 @@ async fn plain_csv_with_no_pipes_or_newlines_produces_zero_warnings() {
         csv_warnings(&result)
     );
 }
+
+/// #3539 (X54): a UTF-16 CSV, with or without its BOM, decodes to its UTF-8 twin.
+/// Before, a BOM sent it through windows-1252 and a bare UTF-16 passed the UTF-8
+/// fast path, a zero byte after every character either way.
+#[test]
+fn test_decode_csv_bytes_utf16() {
+    let text = "\"Datum\";\"Zeit\";\"T1 / °C\"\r\n\"18-3-2011\";\"9:56:31\";\"8,85\"\r\n";
+    let mut le = vec![0xFF, 0xFE];
+    le.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+    let mut be = vec![0xFE, 0xFF];
+    be.extend(text.encode_utf16().flat_map(u16::to_be_bytes));
+    let bare: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    for bytes in [le, be, bare] {
+        assert_eq!(decode_csv_bytes(&bytes), text);
+    }
+    // A UTF-8 BOM CSV is unchanged: decoded and stripped as before.
+    let mut utf8_bom = vec![0xEF, 0xBB, 0xBF];
+    utf8_bom.extend(text.as_bytes());
+    assert_eq!(decode_csv_bytes(&utf8_bom), text);
+}
