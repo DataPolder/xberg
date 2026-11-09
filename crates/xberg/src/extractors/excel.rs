@@ -1103,10 +1103,12 @@ mod tests {
     #[cfg(feature = "excel")]
     #[tokio::test]
     async fn test_xlsx_extract_content_rejects_high_compression_ratio_archive() {
-        // 64 KiB of a single repeated byte, deflated: compresses far past any sane
-        // ratio in a few hundred bytes, so the archive stays tiny while the ratio
-        // comparison still fires.
-        let bomb_payload = vec![0u8; 64 * 1024];
+        // A single repeated byte, deflated: compresses far past any sane ratio, so
+        // the archive stays small (tens of KB) while the ratio comparison still
+        // fires. Just over the per-member ratio floor (32 MiB, DataPolder #3898):
+        // below it a member is bounded by the size caps, not the ratio.
+        let bomb_payload =
+            vec![0u8; crate::extractors::security::ZipBombValidator::MEMBER_RATIO_FLOOR as usize + 1024 * 1024];
         let data = build_test_xlsx(&[("xl/media/bomb.bin", &bomb_payload)]);
         let extractor = ExcelExtractor::new();
         let config = ExtractionConfig {

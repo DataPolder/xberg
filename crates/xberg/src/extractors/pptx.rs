@@ -1605,10 +1605,12 @@ mod tests {
        xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
     <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Hello</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
 </p:sld>"#;
-        // 64 KiB of a single repeated byte, deflated: compresses far past any sane
-        // ratio in a few hundred bytes, so the archive stays tiny while the ratio
-        // comparison still fires.
-        let bomb_payload = vec![0u8; 64 * 1024];
+        // A single repeated byte, deflated: compresses far past any sane ratio, so
+        // the archive stays small (tens of KB) while the ratio comparison still
+        // fires. Just over the per-member ratio floor (32 MiB, DataPolder #3898):
+        // below it a member is bounded by the size caps, not the ratio.
+        let bomb_payload =
+            vec![0u8; crate::extractors::security::ZipBombValidator::MEMBER_RATIO_FLOOR as usize + 1024 * 1024];
         let pptx = crate::extraction::pptx::tests::build_single_slide_pptx(
             slide_xml,
             None,

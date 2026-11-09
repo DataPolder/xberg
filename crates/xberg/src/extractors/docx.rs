@@ -4732,19 +4732,21 @@ mod tests {
     /// `validate_archive_security` checked per-file and total *declared* uncompressed size,
     /// but never a compression ratio -- unlike every other OOXML/ODF container (XLSX, PPTX,
     /// ODT, ODP, HWPX, EPUB, iWork), which routes its ratio check through
-    /// `ZipBombValidator`. A member well under both size limits can still be a compression
-    /// bomb by ratio: this part is 2,000,000 bytes of a single repeated byte -- far under the
-    /// 100 MB per-file / 500 MB total ceilings -- but compresses to a few hundred bytes,
-    /// comfortably past the default 100:1 `max_compression_ratio`. Against the unfixed code
-    /// this document extracts successfully (the ratio is never examined); against the fixed
-    /// code `ZipBombValidator::validate` rejects it before `word/document.xml` is even read.
+    /// `ZipBombValidator`. A member under both size limits can still be a compression bomb
+    /// by ratio: this part is 33 MiB of a single repeated byte -- under the 100 MB per-file
+    /// / 500 MB total ceilings, just over the 32 MiB per-member ratio floor (DataPolder
+    /// #3898) -- and compresses to a few tens of KB, comfortably past the default 100:1
+    /// `max_compression_ratio`. Against the unfixed code this document extracts
+    /// successfully (the ratio is never examined); against the fixed code
+    /// `ZipBombValidator::validate` rejects it before `word/document.xml` is even read.
     #[tokio::test]
     async fn test_docx_extract_content_rejects_high_compression_ratio_member() {
         let document_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body>
 </w:document>"#;
-        let bomb_content = "A".repeat(2_000_000);
+        let bomb_content =
+            "A".repeat(crate::extractors::security::ZipBombValidator::MEMBER_RATIO_FLOOR as usize + 1024 * 1024);
         let data = build_test_docx_with_files(document_xml, &[("word/bomb.xml", &bomb_content)]);
 
         let extractor = DocxExtractor::new();
@@ -4768,6 +4770,42 @@ mod tests {
             "error should mention the compression-ratio rejection, got: {}",
             err_msg
         );
+    }
+
+    /// DataPolder #3898: an ordinary DOCX whose XML is repetitive -- a table of a few
+    /// thousand identical rows -- deflates to 130-230:1 at 1-9 MB unpacked. That is no
+    /// bomb (the size caps bound it), and below the 32 MiB per-member and 100 MiB total
+    /// ratio floors it must extract. Against the unfixed code (a 1 MiB member floor and no
+    /// total floor) it is refused as a ZIP bomb.
+    #[tokio::test]
+    async fn test_docx_with_a_repetitive_multi_megabyte_part_extracts() {
+        let row = "<w:tr><w:tc><w:p><w:r><w:t>Status open item</w:t></w:r></w:p></w:tc></w:tr>";
+        let document_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p><w:tbl>{}</w:tbl></w:body>
+</w:document>"#,
+            row.repeat(40_000)
+        );
+        assert!(document_xml.len() > 2 * 1024 * 1024, "a multi-megabyte part");
+        let data = build_test_docx_with_files(&document_xml, &[]);
+        assert!(
+            document_xml.len() / data.len() > 100,
+            "the part compresses past 100:1 ({} -> {} bytes)",
+            document_xml.len(),
+            data.len()
+        );
+
+        let result = DocxExtractor::new()
+            .extract_content(
+                &data,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                &ExtractionConfig::default(),
+            )
+            .await;
+        let doc = result.expect("an ordinary repetitive DOCX is not a ZIP bomb");
+        // The table is delivered as a table; the body paragraph shows the text came through.
+        assert!(doc.content().contains("Hello"), "{}", doc.content());
     }
 
     /// Positive control for the ratio check above: a validator that rejects everything would

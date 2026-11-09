@@ -103,11 +103,15 @@ fn odp_zip_with_extra_entries(slide_text: &str, extra_entries: &[(&str, &[u8])])
 }
 
 /// A payload that compresses far past any sane ratio: one repeated byte,
-/// deflated. `max_compression_ratio` is lowered to 5 in these tests so the
-/// bomb only needs to be a few kilobytes, not the hundreds of megabytes a
-/// real attack would use -- the code path under test does not care about
-/// scale, only about the ratio comparison firing.
+/// deflated. The ratio only applies to a member of 32 MiB or more (and a total
+/// of 100 MiB or more, DataPolder #3898), so the bomb is just over that floor;
+/// one repeated byte still deflates it to tens of kilobytes.
 fn compressible_bomb_payload() -> Vec<u8> {
+    vec![0u8; 33 * 1024 * 1024]
+}
+
+/// The same shape, small: past the lowered ratio, under both floors.
+fn small_compressible_payload() -> Vec<u8> {
     vec![0u8; 64 * 1024]
 }
 
@@ -167,6 +171,16 @@ fn test_odp_rejects_high_compression_ratio_archive() {
     let config = config_with_limits(low_ratio_limits());
     let result = extract_bytes_document_blocking(&bytes, ODP_MIME, &config);
     assert_is_security_error(result, "ZIP bomb");
+}
+
+/// DataPolder #3898: a small archive past the ratio, under both floors, is no bomb.
+#[test]
+fn test_odt_and_odp_small_highly_compressible_members_pass_under_the_floors() {
+    let config = config_with_limits(low_ratio_limits());
+    let odt = odt_zip_with_extra_entries("<text:p>hi</text:p>", &[("pad.bin", &small_compressible_payload())]);
+    extract_bytes_document_blocking(&odt, ODT_MIME, &config).expect("a small ODT past the ratio extracts");
+    let odp = odp_zip_with_extra_entries("hi", &[("pad.bin", &small_compressible_payload())]);
+    extract_bytes_document_blocking(&odp, ODP_MIME, &config).expect("a small ODP past the ratio extracts");
 }
 
 #[test]

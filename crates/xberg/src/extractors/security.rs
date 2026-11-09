@@ -327,11 +327,21 @@ impl ZipBombValidator {
     /// Smallest uncompressed member size the per-member ratio cap applies to.
     ///
     /// The ratio cap guards against one member that inflates to hundreds of
-    /// megabytes. A member measured in kilobytes cannot exhaust memory whatever
-    /// its ratio, and blank-page JPEGs, empty stylesheets and whitespace-padded
-    /// pages routinely deflate past 100:1 (GH#1496). The total-size cap and the
-    /// whole-archive ratio cap still bound the aggregate.
-    const MEMBER_RATIO_FLOOR: u64 = 1024 * 1024;
+    /// megabytes. A member measured in megabytes cannot exhaust memory whatever
+    /// its ratio, while blank-page JPEGs, empty stylesheets, whitespace-padded
+    /// pages (GH#1496) and repetitive document XML -- a Word table with a few
+    /// thousand identical rows deflates to 130-230:1 at 1-9 MB (DataPolder
+    /// #3898) -- routinely pass 100:1. A real bomb is still bounded by
+    /// `max_archive_size` and the extractors' per-member size caps, which stop
+    /// it long before it gets here; above this floor the ratio cap applies as
+    /// before. (Was 1 MiB.)
+    pub(crate) const MEMBER_RATIO_FLOOR: u64 = 32 * 1024 * 1024;
+
+    /// Smallest total uncompressed size the whole-archive ratio cap applies to
+    /// (DataPolder #3898). It had no floor, so a few megabytes of ordinary,
+    /// well-compressing parts tripped it as surely as a bomb; the absolute
+    /// `max_archive_size` cap bounds the aggregate below this.
+    pub(crate) const TOTAL_RATIO_FLOOR: u64 = 100 * 1024 * 1024;
 
     /// Create a new ZIP bomb validator.
     pub(crate) fn new(limits: SecurityLimits) -> Self {
@@ -414,7 +424,7 @@ impl ZipBombValidator {
             }
         }
 
-        if total_compressed > 0 {
+        if total_compressed > 0 && total_uncompressed >= Self::TOTAL_RATIO_FLOOR {
             let ratio = total_uncompressed as f64 / total_compressed as f64;
             if ratio > max_compression_ratio {
                 return Err(SecurityError::ZipBombDetected {

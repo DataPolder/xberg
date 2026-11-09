@@ -41,12 +41,67 @@ fn zip_ratio_allows_small_highly_compressible_entry() {
 #[cfg(feature = "office")]
 #[test]
 fn zip_ratio_rejects_large_highly_compressible_entry() {
-    let mut archive = archive_with_compressible_entry(4 * 1024 * 1024);
+    // Just over the per-member ratio floor (DataPolder #3898).
+    let size = ZipBombValidator::MEMBER_RATIO_FLOOR as usize + 1024 * 1024;
+    let mut archive = archive_with_compressible_entry(size);
 
     assert!(matches!(
         ZipBombValidator::new(SecurityLimits::default()).validate(&mut archive),
         Err(SecurityError::ZipBombDetected { uncompressed_size, .. })
-            if uncompressed_size == 4 * 1024 * 1024
+            if uncompressed_size == size as u64
+    ));
+}
+
+/// Members of this many zero bytes, deflated, in one archive.
+#[cfg(feature = "office")]
+fn archive_of_compressible_members(count: usize, size: usize) -> zip::ZipArchive<std::io::Cursor<Vec<u8>>> {
+    use std::io::{Cursor, Write};
+    use zip::write::SimpleFileOptions;
+
+    let mut bytes = Vec::new();
+    {
+        let mut writer = zip::ZipWriter::new(Cursor::new(&mut bytes));
+        let deflated = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let zeros = vec![0u8; size];
+        for i in 0..count {
+            writer
+                .start_file(format!("part{i}.xml"), deflated)
+                .expect("start entry");
+            writer.write_all(&zeros).expect("write entry");
+        }
+        writer.finish().expect("finish ZIP");
+    }
+    zip::ZipArchive::new(Cursor::new(bytes)).expect("open ZIP")
+}
+
+/// DataPolder #3898: an ordinary document of a few megabytes of repetitive XML
+/// compresses past 100:1, member by member and as a whole. Under both ratio floors
+/// (32 MiB per member, 100 MiB total) that is no bomb: the size caps bound it.
+#[cfg(feature = "office")]
+#[test]
+fn zip_ratio_allows_a_few_megabytes_of_well_compressing_members() {
+    let mut archive = archive_of_compressible_members(3, 3 * 1024 * 1024);
+
+    assert!(
+        ZipBombValidator::new(SecurityLimits::default())
+            .validate(&mut archive)
+            .is_ok()
+    );
+}
+
+/// The whole-archive ratio still applies once the total is past its floor, even when
+/// every member stays under the per-member floor.
+#[cfg(feature = "office")]
+#[test]
+fn zip_ratio_rejects_a_large_total_of_small_well_compressing_members() {
+    let member = 30 * 1024 * 1024;
+    assert!((member as u64) < ZipBombValidator::MEMBER_RATIO_FLOOR);
+    let mut archive = archive_of_compressible_members(4, member);
+
+    assert!(matches!(
+        ZipBombValidator::new(SecurityLimits::default()).validate(&mut archive),
+        Err(SecurityError::ZipBombDetected { uncompressed_size, .. })
+            if uncompressed_size >= ZipBombValidator::TOTAL_RATIO_FLOOR
     ));
 }
 
@@ -425,12 +480,25 @@ fn zip_bomb_ratio_cap_ignores_small_members_and_keeps_large_ones() {
         .validate(&mut small)
         .expect("a 200 KiB member past the ratio cap is not a bomb");
 
+    // DataPolder #3898: a member of a few megabytes past the ratio cap -- a Word
+    // table of identical rows -- is bounded by the size caps, not the ratio.
+    let mut medium = deflated_archive(&[
+        ("table.xml", vec![b'A'; 8 * 1024 * 1024]),
+        ("photo.jpg", incompressible(2 * 1024 * 1024)),
+    ]);
+    validator
+        .validate(&mut medium)
+        .expect("an 8 MiB member past the ratio cap is under the 32 MiB floor");
+
     let mut large = deflated_archive(&[
-        ("bomb.bin", vec![b'A'; 8 * 1024 * 1024]),
+        (
+            "bomb.bin",
+            vec![b'A'; ZipBombValidator::MEMBER_RATIO_FLOOR as usize + 1024 * 1024],
+        ),
         ("photo.jpg", incompressible(2 * 1024 * 1024)),
     ]);
     let error = validator
         .validate(&mut large)
-        .expect_err("an 8 MiB member past the ratio cap is rejected");
+        .expect_err("a member past the floor and past the ratio cap is rejected");
     assert!(matches!(error, SecurityError::ZipBombDetected { .. }), "{error}");
 }
