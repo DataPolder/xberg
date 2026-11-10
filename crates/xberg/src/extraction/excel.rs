@@ -96,6 +96,9 @@ use package_metadata::{
 
 mod datetime;
 
+/// Trailing 0/blank padding left out before a sheet is read into a grid (X57).
+mod padding;
+
 /// Format dispatch and the `read_excel_file`/`read_excel_bytes` entry points, split out to
 /// keep this file under the line-count limit.
 mod open;
@@ -157,16 +160,24 @@ fn process_xlsx_workbook<RS: Read + Seek>(
 ///
 /// This function streams cells to compute the actual bounding box without allocating
 /// a full Range, then only creates the Range if the bounding box is within safe limits.
+///
+/// X57 (DataPolder #3899): the same streaming pass measures the sheet's
+/// trailing 0/blank padding ([`padding`]). Cells past the kept extent are never
+/// read into a grid, so a column of `0` dragged to row 1,048,576 costs one
+/// streamed read, not a 27-million-cell `Range`, and does not count against
+/// `max_table_cells`.
 fn process_xlsx_sheet_safe<RS: Read + Seek>(
     workbook: &mut calamine::Xlsx<RS>,
     sheet_name: &str,
     warnings: &mut Vec<ProcessingWarning>,
 ) -> Result<ExcelSheet> {
-    match classify_xlsx_sheet_shape(workbook, sheet_name)? {
+    let plan = plan_xlsx_sheet(workbook, sheet_name)?;
+    match plan.shape {
         XlsxSheetShape::Empty => return Ok(empty_excel_sheet(sheet_name)),
         XlsxSheetShape::Dense => {}
         XlsxSheetShape::Sparse => {
-            let (cells, row_min, row_max, col_min, col_max) = collect_xlsx_sheet_cells(workbook, sheet_name)?;
+            let (cells, row_min, row_max, col_min, col_max) =
+                collect_xlsx_sheet_cells(workbook, sheet_name, plan.keep_until)?;
             if cells.is_empty() {
                 return Ok(empty_excel_sheet(sheet_name));
             }
@@ -180,11 +191,29 @@ fn process_xlsx_sheet_safe<RS: Read + Seek>(
         }
     }
 
-    let range = workbook
-        .worksheet_range(sheet_name)
-        .map_err(|e| XbergError::parsing(format!("Failed to parse sheet '{}': {}", sheet_name, e)))?;
+    let range = match plan.keep_until {
+        None => workbook
+            .worksheet_range(sheet_name)
+            .map_err(|e| XbergError::parsing(format!("Failed to parse sheet '{}': {}", sheet_name, e)))?,
+        Some(end) => {
+            let (cells, ..) = collect_xlsx_sheet_cells(workbook, sheet_name, Some(end))?;
+            Range::from_sparse(
+                cells
+                    .into_iter()
+                    .map(|(position, value)| calamine::Cell::new(position, value))
+                    .collect(),
+            )
+        }
+    };
 
     Ok(process_sheet(sheet_name, &range, warnings))
+}
+
+/// How a sheet is read: its shape, judged on the extent that is kept, and the
+/// last row and column to keep when trailing padding is left out (X57).
+struct XlsxSheetPlan {
+    shape: XlsxSheetShape,
+    keep_until: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,42 +223,73 @@ enum XlsxSheetShape {
     Sparse,
 }
 
+#[cfg(test)]
 fn classify_xlsx_sheet_shape<RS: Read + Seek>(
     workbook: &mut calamine::Xlsx<RS>,
     sheet_name: &str,
 ) -> Result<XlsxSheetShape> {
+    Ok(plan_xlsx_sheet(workbook, sheet_name)?.shape)
+}
+
+/// Stream every cell once, positions and classes only, and decide how the
+/// sheet is read. The whole sheet is streamed (no early exit on a huge
+/// bounding box) because where the content ends is only known at the end; the
+/// shape is then judged on the extent that is kept (X57).
+fn plan_xlsx_sheet<RS: Read + Seek>(workbook: &mut calamine::Xlsx<RS>, sheet_name: &str) -> Result<XlsxSheetPlan> {
     let mut cell_reader = workbook
         .worksheet_cells_reader(sheet_name)
         .map_err(|e| XbergError::parsing(format!("Failed to read sheet '{}': {}", sheet_name, e)))?;
-    let mut bounds: Option<(u32, u32, u32, u32)> = None;
+    // Every cell the reader yields, as before X57: the shape of a sheet with
+    // nothing to leave out is judged exactly as it was.
+    let mut all_bounds: Option<(u32, u32, u32, u32)> = None;
+    // The cells `worksheet_range` keeps: a value-less cell (`DataRef::Empty`,
+    // a styled empty cell) is yielded by the reader but never reaches the grid.
+    let mut extent = padding::SheetExtent::default();
 
     while let Ok(Some(cell)) = cell_reader.next_cell() {
         let (row, col) = cell.get_position();
-        let (row_min, row_max, col_min, col_max) = bounds.get_or_insert((row, row, col, col));
+        let (row_min, row_max, col_min, col_max) = all_bounds.get_or_insert((row, row, col, col));
         *row_min = (*row_min).min(row);
         *row_max = (*row_max).max(row);
         *col_min = (*col_min).min(col);
         *col_max = (*col_max).max(col);
-
-        let row_count = u64::from(*row_max - *row_min + 1);
-        let col_count = u64::from(*col_max - *col_min + 1);
-        if row_count.saturating_mul(col_count) > MAX_BOUNDING_BOX_CELLS {
-            return Ok(XlsxSheetShape::Sparse);
+        let value = cell.get_value();
+        if !matches!(value, DataRef::Empty) {
+            extent.observe(row, col, padding::class_of_data_ref(value));
         }
     }
 
-    Ok(if bounds.is_some() {
-        XlsxSheetShape::Dense
-    } else {
-        XlsxSheetShape::Empty
-    })
+    let keep_until = extent.keep_until();
+    if let Some(end) = keep_until {
+        padding::log_trim(sheet_name, &extent, end);
+    }
+    let judged = match keep_until {
+        Some(_) => extent.kept_bounds(),
+        None => all_bounds,
+    };
+    let shape = match judged {
+        None => XlsxSheetShape::Empty,
+        Some((row_min, row_max, col_min, col_max)) => {
+            let row_count = u64::from(row_max - row_min + 1);
+            let col_count = u64::from(col_max - col_min + 1);
+            if row_count.saturating_mul(col_count) > MAX_BOUNDING_BOX_CELLS {
+                XlsxSheetShape::Sparse
+            } else {
+                XlsxSheetShape::Dense
+            }
+        }
+    };
+    Ok(XlsxSheetPlan { shape, keep_until })
 }
 
 type XlsxOwnedCells = (Vec<((u32, u32), Data)>, u32, u32, u32, u32);
 
+/// Collect the sheet's cells, only those up to `keep_until` (inclusive) when
+/// trailing padding is left out (X57).
 fn collect_xlsx_sheet_cells<RS: Read + Seek>(
     workbook: &mut calamine::Xlsx<RS>,
     sheet_name: &str,
+    keep_until: Option<(u32, u32)>,
 ) -> Result<XlsxOwnedCells> {
     let mut cell_reader = workbook
         .worksheet_cells_reader(sheet_name)
@@ -242,6 +302,13 @@ fn collect_xlsx_sheet_cells<RS: Read + Seek>(
 
     while let Ok(Some(cell)) = cell_reader.next_cell() {
         let (row, col) = cell.get_position();
+        // With padding left out, only the cells `worksheet_range` would keep:
+        // inside the kept extent, and with a value.
+        if let Some((end_row, end_col)) = keep_until
+            && (row > end_row || col > end_col || matches!(cell.get_value(), DataRef::Empty))
+        {
+            continue;
+        }
         row_min = row_min.min(row);
         row_max = row_max.max(row);
         col_min = col_min.min(col);
@@ -527,7 +594,7 @@ where
 
     for name in sheet_names {
         match workbook.worksheet_range(name) {
-            Ok(range) => sheets.push(process_sheet(name, &range, warnings)),
+            Ok(range) => sheets.push(process_sheet(name, &padding::trim_range(name, range), warnings)),
             Err(e) => {
                 tracing::warn!("Failed to read worksheet range '{}': {}", name, e);
                 push_warning(

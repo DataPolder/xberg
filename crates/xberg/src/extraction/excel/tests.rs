@@ -539,6 +539,7 @@ fn should_preserve_pathological_sparse_xlsx_output_after_reopening_reader() {
     assert_eq!(sheet.markdown, "## Sheet1\n\n| Start |  |\n| --- | --- |\n|  | End |\n");
 }
 
+mod padding;
 mod revisions;
 mod spreadsheet_compatibility;
 
