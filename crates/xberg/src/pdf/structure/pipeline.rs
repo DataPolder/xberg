@@ -1016,6 +1016,9 @@ fn segments_to_paragraphs(
     apply_text_repair_to_structure_tree_paragraphs(&mut paragraphs, true, witnesses);
     reattach_detached_list_markers(&mut paragraphs, DetachedMarkerFrame::Native);
     merge_continuation_paragraphs(&mut paragraphs);
+    // After the continuation merge: a number joined to its line must not then
+    // pull the next paragraph into that line (#3951, Xtend p52).
+    reattach_section_number_column(&mut paragraphs);
     synchronize_paragraph_text_metadata(&mut paragraphs);
     paragraphs
 }
@@ -1403,6 +1406,223 @@ pub(super) fn accepts_detached_list_marker(
     body_left > marker_start
         && indent >= -(font_size * DETACHED_MARKER_MAX_OVERLAP_FONT_FACTOR)
         && indent <= font_size * DETACHED_MARKER_MAX_INDENT_FONT_FACTOR
+}
+
+/// Master switch for [`reattach_section_number_column`] (#3951).
+const REATTACH_SECTION_NUMBER_COLUMN: bool = true;
+
+/// Fewest number/text pairs a page needs before its section numbers are read as
+/// a hanging-number column (#3951): one pair on its own is a coincidence of
+/// layout, a column of them is the layout.
+const SECTION_NUMBER_COLUMN_MIN_PAIRS: usize = 2;
+
+/// How far the paired section numbers may start from each other, as a multiple
+/// of the font size: they form ONE left-aligned column.
+const SECTION_NUMBER_COLUMN_ALIGN_FONT_FACTOR: f32 = 0.5;
+
+/// Whether `text` is a section number standing alone: dot-separated parts of
+/// one or two digits, without a leading zero and the first one not zero, each
+/// optionally followed by one lowercase letter, carrying at least one dot
+/// (`10.`, `10.1`, `9a.`, `9a.1`). A bare integer is a value, a callout or a
+/// page number, and a decimal such as `0.015` or `0.858` is a value in a table
+/// column: neither ever qualifies. (#3951)
+fn is_lone_section_number(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty() || t.chars().count() > 10 || !t.contains('.') {
+        return false;
+    }
+    let inner = t.strip_suffix('.').unwrap_or(t);
+    !inner.is_empty()
+        && inner.split('.').enumerate().all(|(position, part)| {
+            let digits: String = part.chars().take_while(char::is_ascii_digit).collect();
+            let rest: Vec<char> = part.chars().skip(digits.len()).collect();
+            (1..=2).contains(&digits.len())
+                && !(digits.len() == 2 && digits.starts_with('0'))
+                && !(position == 0 && digits == "0")
+                && (rest.is_empty() || (rest.len() == 1 && rest[0].is_ascii_lowercase()))
+        })
+}
+
+/// The lone section-number segment of a paragraph, if that is all it holds.
+fn lone_section_number(paragraph: &PdfParagraph) -> Option<SegmentData> {
+    if paragraph.is_list_item
+        || paragraph.is_code_block
+        || paragraph.is_formula
+        || paragraph.is_page_furniture
+        || paragraph.caption_for.is_some()
+    {
+        return None;
+    }
+    let [line] = paragraph.lines.as_slice() else {
+        return None;
+    };
+    let [segment] = line.segments.as_slice() else {
+        return None;
+    };
+    let usable = segment.x.is_finite()
+        && segment.width.is_finite()
+        && segment.width >= 0.0
+        && segment.font_size.is_finite()
+        && segment.font_size > 0.0
+        && segment.upright_baseline().is_finite();
+    (usable && is_lone_section_number(&segment.text)).then(|| segment.clone())
+}
+
+/// Whether `paragraph` is the text the lone section number `marker` (from a
+/// paragraph with heading level `marker_heading`) numbers: the same kind of
+/// paragraph (a heading numbers a heading of the same level, body text numbers
+/// body text), its first line on the marker's baseline, starting to the right of
+/// it within one hanging indent, and opening with a letter. (#3951)
+fn numbers_this_paragraph(paragraph: &PdfParagraph, marker: &SegmentData, marker_heading: Option<u8>) -> bool {
+    if paragraph.heading_level != marker_heading
+        || paragraph.is_list_item
+        || paragraph.is_code_block
+        || paragraph.is_formula
+        || paragraph.is_page_furniture
+        || paragraph.caption_for.is_some()
+    {
+        return false;
+    }
+    let Some(first_line) = paragraph.lines.first() else {
+        return false;
+    };
+    let Some(anchor) = first_line.segments.first() else {
+        return false;
+    };
+    if !anchor.has_same_rotation(marker) {
+        return false;
+    }
+    let first_text = first_line
+        .segments
+        .iter()
+        .map(|segment| segment.text.trim())
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !first_text.chars().next().is_some_and(char::is_alphabetic) {
+        return false;
+    }
+    let words = paragraph
+        .lines
+        .iter()
+        .flat_map(|line| line.segments.iter())
+        .flat_map(|segment| segment.text.split_whitespace())
+        .count();
+    if marker_heading.is_none() && words < DETACHED_MARKER_MIN_BODY_WORDS {
+        return false;
+    }
+    let font_size = anchor.font_size.max(marker.font_size);
+    if !font_size.is_finite() || font_size <= 0.0 {
+        return false;
+    }
+    let baseline_delta = (anchor.upright_baseline() - marker.upright_baseline()).abs();
+    if !baseline_delta.is_finite() || baseline_delta > font_size * DETACHED_MARKER_BASELINE_TOLERANCE_FONT_FACTOR {
+        return false;
+    }
+    let body_left = first_line
+        .segments
+        .iter()
+        .map(|segment| segment.upright_advance_extent().0)
+        .fold(f32::INFINITY, f32::min);
+    let (marker_start, marker_end) = marker.upright_advance_extent();
+    if !body_left.is_finite() || !marker_start.is_finite() || !marker_end.is_finite() {
+        return false;
+    }
+    let indent = body_left - marker_end;
+    body_left > marker_start
+        && indent >= -(font_size * DETACHED_MARKER_MAX_OVERLAP_FONT_FACTOR)
+        && indent <= font_size * DETACHED_MARKER_MAX_INDENT_FONT_FACTOR
+}
+
+/// Read a hanging-number column row by row (#3951).
+///
+/// A page that sets its clauses with a hanging number (`10.1` at the margin, the
+/// clause text indented beside it) and draws the numbers as text objects of
+/// their own can reach this point as two columns: every number first, each a
+/// one-segment paragraph, then every clause and title. The numbers are then cut
+/// off from what they number, and a chapter number from its title.
+/// [`reattach_detached_list_markers`] does not cover it: section numbers such as
+/// `10.1` or `9a.` are no list markers, headings are out of its scope, and a
+/// column of more than [`DETACHED_MARKER_MAX_LOOKAHEAD`] numbers puts the
+/// texts out of its reach.
+///
+/// Each lone section number is joined to the one paragraph on its baseline to
+/// its right, within a hanging indent ([`numbers_this_paragraph`]). The join is
+/// only made when the page holds a COLUMN of them: at least
+/// [`SECTION_NUMBER_COLUMN_MIN_PAIRS`] numbers, each with exactly one such
+/// paragraph, all starting at the same x. The joined paragraph keeps its own
+/// kind -- a heading stays a heading, text stays text, never a list item -- so
+/// it reads as the page reads where number and text share one span. A bare
+/// integer (a callout, a value) never takes part. ~keep
+fn reattach_section_number_column(paragraphs: &mut Vec<PdfParagraph>) {
+    if !REATTACH_SECTION_NUMBER_COLUMN || paragraphs.len() < 2 * SECTION_NUMBER_COLUMN_MIN_PAIRS {
+        return;
+    }
+    let mut pairs: Vec<(usize, usize, SegmentData)> = Vec::new();
+    for marker_index in 0..paragraphs.len() {
+        let Some(marker) = lone_section_number(&paragraphs[marker_index]) else {
+            continue;
+        };
+        let marker_heading = paragraphs[marker_index].heading_level;
+        let mut bodies = (0..paragraphs.len())
+            .filter(|&candidate| candidate != marker_index)
+            .filter(|&candidate| numbers_this_paragraph(&paragraphs[candidate], &marker, marker_heading));
+        let (Some(body_index), None) = (bodies.next(), bodies.next()) else {
+            continue;
+        };
+        pairs.push((marker_index, body_index, marker));
+    }
+    if pairs.len() < SECTION_NUMBER_COLUMN_MIN_PAIRS {
+        return;
+    }
+    // One body per number and one number per body.
+    let mut seen = std::collections::HashSet::new();
+    if !pairs.iter().all(|(_, body_index, _)| seen.insert(*body_index)) {
+        return;
+    }
+    // One left-aligned column.
+    let starts: Vec<f32> = pairs
+        .iter()
+        .map(|(_, _, marker)| marker.upright_advance_extent().0)
+        .collect();
+    let font = pairs
+        .iter()
+        .map(|(_, _, marker)| marker.font_size)
+        .fold(0.0f32, f32::max);
+    let (lo, hi) = starts.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &x| {
+        (lo.min(x), hi.max(x))
+    });
+    if !(hi - lo).is_finite() || hi - lo > font * SECTION_NUMBER_COLUMN_ALIGN_FONT_FACTOR {
+        return;
+    }
+
+    for (marker_index, body_index, marker) in &pairs {
+        let marker_bbox = paragraphs[*marker_index].block_bbox;
+        let body = &mut paragraphs[*body_index];
+        if let Some(line) = body.lines.first_mut() {
+            line.segments.insert(0, marker.clone());
+        }
+        body.block_bbox = match (body.block_bbox, marker_bbox) {
+            (Some(body_bbox), Some(marker_bbox)) => Some((
+                body_bbox.0.min(marker_bbox.0),
+                body_bbox.1.min(marker_bbox.1),
+                body_bbox.2.max(marker_bbox.2),
+                body_bbox.3.max(marker_bbox.3),
+            )),
+            (bbox @ Some(_), None) | (None, bbox @ Some(_)) => bbox,
+            (None, None) => None,
+        };
+        // Rebuilt from `lines` downstream (`synchronize_paragraph_text_metadata`).
+        body.text.clear();
+        body.word_count = PdfParagraph::compute_word_count("", &body.lines);
+    }
+    let markers: std::collections::HashSet<usize> = pairs.iter().map(|(marker_index, _, _)| *marker_index).collect();
+    let mut index = 0usize;
+    paragraphs.retain(|_| {
+        let keep = !markers.contains(&index);
+        index += 1;
+        keep
+    });
 }
 
 /// Repair reading order inside maximal rotated runs without touching upright

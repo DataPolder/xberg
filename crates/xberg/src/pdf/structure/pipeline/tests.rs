@@ -7817,3 +7817,231 @@ fn a_title_written_glyph_by_glyph_on_one_baseline_stays_a_heading() {
     let para = finalize_paragraph(&refs, &heading_map, &gap_info).expect("paragraph");
     assert_eq!(para.heading_level, Some(1));
 }
+
+// #3951: a hanging-number column (DataPolder's purchasing conditions p8, real
+// geometry, lorem ipsum text). The numbers are text objects of their own at
+// x 72; the clause text and titles start at x 107.28 on the same baselines.
+// The producer emits the whole number column before the text column.
+
+fn hanging_seg(text: &str, x: f32, width: f32, baseline_y: f32, font_size: f32) -> SegmentData {
+    SegmentData {
+        text: text.to_string(),
+        x,
+        y: baseline_y - font_size,
+        width,
+        height: font_size,
+        font_size,
+        is_bold: false,
+        is_italic: false,
+        is_monospace: false,
+        baseline_y,
+        rotation_degrees: 0.0,
+        assigned_role: None,
+    }
+}
+
+fn hanging_number_page(numbers: &[(&str, f32, f32)], bodies: &[(&str, f32, f32)]) -> Vec<PdfParagraph> {
+    let mut segments: Vec<SegmentData> = numbers
+        .iter()
+        .map(|(t, x, base)| hanging_seg(t, *x, 20.0, *base, 9.0))
+        .collect();
+    segments.extend(bodies.iter().map(|(t, x, base)| hanging_seg(t, *x, 400.0, *base, 9.0)));
+    let gap_ys = compute_paragraph_gap_ys(&segments);
+    segments_to_paragraphs(segments, &[(9.0, None)], &gap_ys, &TextRepairWitnesses::default())
+}
+
+#[test]
+fn hanging_section_numbers_are_read_with_their_clauses_3951() {
+    let paragraphs = hanging_number_page(
+        &[
+            ("9a.1", 72.0, 739.2),
+            ("9a.2", 72.0, 697.68),
+            ("10.1", 72.0, 422.28),
+            ("10.2", 72.0, 391.92),
+        ],
+        &[
+            ("Lorem ipsum dolor sit amet consectetur", 107.28, 739.2),
+            ("Sed do eiusmod tempor incididunt ut labore", 107.28, 697.68),
+            ("Ut enim ad minim veniam quis nostrud", 107.28, 422.28),
+            ("Duis aute irure dolor in reprehenderit", 107.28, 391.92),
+        ],
+    );
+    let texts: Vec<String> = paragraphs.iter().map(paragraph_segment_text).collect();
+    assert_eq!(
+        texts,
+        vec![
+            "9a.1 Lorem ipsum dolor sit amet consectetur",
+            "9a.2 Sed do eiusmod tempor incididunt ut labore",
+            "10.1 Ut enim ad minim veniam quis nostrud",
+            "10.2 Duis aute irure dolor in reprehenderit",
+        ],
+        "each section number is read with the clause on its baseline"
+    );
+    assert!(
+        paragraphs.iter().all(|p| !p.is_list_item),
+        "a numbered clause stays text, as where number and text share one span"
+    );
+}
+
+#[test]
+fn a_chapter_number_heading_is_read_with_its_title_3951() {
+    let mut segments = vec![
+        hanging_seg("10.", 72.0, 14.0, 444.72, 11.04),
+        hanging_seg("11.", 72.0, 14.0, 191.64, 11.04),
+        hanging_seg("10.1", 72.0, 20.0, 422.28, 9.0),
+        hanging_seg("11.1", 72.0, 20.0, 169.32, 9.0),
+    ];
+    segments.extend([
+        hanging_seg("Lorem ipsum dolor", 107.4, 120.0, 444.72, 11.04),
+        hanging_seg("Ut enim ad minim veniam quis nostrud", 107.28, 400.0, 422.28, 9.0),
+        hanging_seg("Excepteur sint occaecat", 107.4, 160.0, 191.64, 11.04),
+        hanging_seg("Duis aute irure dolor in reprehenderit", 107.28, 400.0, 169.32, 9.0),
+    ]);
+    let gap_ys = compute_paragraph_gap_ys(&segments);
+    let paragraphs = segments_to_paragraphs(
+        segments,
+        &[(11.04, Some(1)), (9.0, None)],
+        &gap_ys,
+        &TextRepairWitnesses::default(),
+    );
+    let texts: Vec<(Option<u8>, String)> = paragraphs
+        .iter()
+        .map(|p| (p.heading_level, paragraph_segment_text(p)))
+        .collect();
+    assert_eq!(
+        texts,
+        vec![
+            (Some(1), "10. Lorem ipsum dolor".to_string()),
+            (None, "10.1 Ut enim ad minim veniam quis nostrud".to_string()),
+            (Some(1), "11. Excepteur sint occaecat".to_string()),
+            (None, "11.1 Duis aute irure dolor in reprehenderit".to_string()),
+        ],
+        "a chapter number is read with its title, and each clause number with its clause"
+    );
+}
+
+/// Paragraphs as the page delivers them to the pass: the number column first,
+/// each number a one-segment paragraph, then the text column.
+fn separate_columns(
+    numbers: &[(&str, f32, f32, Option<u8>)],
+    bodies: &[(&str, f32, f32, Option<u8>)],
+) -> Vec<PdfParagraph> {
+    let mut out = Vec::new();
+    for (t, x, base, heading) in numbers.iter().chain(bodies.iter()) {
+        let width = if t.split_whitespace().count() > 1 { 400.0 } else { 20.0 };
+        let mut p = para(vec![line(vec![hanging_seg(t, *x, width, *base, 9.0)])]);
+        p.heading_level = *heading;
+        out.push(p);
+    }
+    out
+}
+
+fn texts_after_pass(mut paragraphs: Vec<PdfParagraph>) -> Vec<String> {
+    reattach_section_number_column(&mut paragraphs);
+    paragraphs.iter().map(paragraph_segment_text).collect()
+}
+
+#[test]
+fn the_pass_joins_a_column_of_section_numbers_3951() {
+    let texts = texts_after_pass(separate_columns(
+        &[("1.1", 72.0, 700.0, None), ("1.2", 72.0, 660.0, None)],
+        &[
+            ("Lorem ipsum dolor sit amet", 107.28, 700.0, None),
+            ("Sed do eiusmod tempor", 107.28, 660.0, None),
+        ],
+    ));
+    assert_eq!(
+        texts,
+        vec!["1.1 Lorem ipsum dolor sit amet", "1.2 Sed do eiusmod tempor"]
+    );
+}
+
+#[test]
+fn a_column_of_bare_integers_is_not_a_hanging_number_column_3951() {
+    // Drawing callouts, a parts list: an integer without a dot is a value.
+    let texts = texts_after_pass(separate_columns(
+        &[
+            ("1", 72.0, 700.0, None),
+            ("2", 72.0, 660.0, None),
+            ("3", 72.0, 620.0, None),
+        ],
+        &[
+            ("Lorem ipsum dolor sit amet", 107.28, 700.0, None),
+            ("Sed do eiusmod tempor incididunt", 107.28, 660.0, None),
+            ("Ut enim ad minim veniam", 107.28, 620.0, None),
+        ],
+    ));
+    assert_eq!(texts.len(), 6, "{texts:?}");
+}
+
+#[test]
+fn a_single_section_number_beside_text_is_left_alone_3951() {
+    let texts = texts_after_pass(separate_columns(
+        &[("4.2", 72.0, 700.0, None)],
+        &[
+            ("Lorem ipsum dolor sit amet", 107.28, 700.0, None),
+            ("Sed do eiusmod tempor", 107.28, 660.0, None),
+        ],
+    ));
+    assert_eq!(texts.len(), 3, "one pair is no column: {texts:?}");
+}
+
+#[test]
+fn section_numbers_out_of_line_are_not_one_column_3951() {
+    let texts = texts_after_pass(separate_columns(
+        &[("1.1", 72.0, 700.0, None), ("1.2", 96.0, 660.0, None)],
+        &[
+            ("Lorem ipsum dolor sit amet", 125.0, 700.0, None),
+            ("Sed do eiusmod tempor", 125.0, 660.0, None),
+        ],
+    ));
+    assert_eq!(
+        texts.len(),
+        4,
+        "numbers that do not start at one x are no column: {texts:?}"
+    );
+}
+
+#[test]
+fn a_heading_number_is_not_joined_to_body_text_3951() {
+    let texts = texts_after_pass(separate_columns(
+        &[("10.", 72.0, 444.72, Some(1)), ("11.", 72.0, 191.64, Some(1))],
+        &[
+            ("Lorem ipsum dolor sit amet consectetur", 107.28, 444.72, None),
+            ("Duis aute irure dolor in reprehenderit", 107.28, 191.64, None),
+        ],
+    ));
+    assert_eq!(texts.len(), 4, "a heading number never numbers body text: {texts:?}");
+}
+
+#[test]
+fn a_number_with_two_texts_on_its_baseline_is_left_alone_3951() {
+    // A table row: the number has two cells beside it, so which one it numbers is unknown.
+    let texts = texts_after_pass(separate_columns(
+        &[("1.1", 72.0, 700.0, None), ("1.2", 72.0, 660.0, None)],
+        &[
+            ("Lorem ipsum dolor", 107.28, 700.0, None),
+            ("Sed do eiusmod", 107.28, 660.0, None),
+            ("Ut enim ad minim", 130.0, 660.0, None),
+        ],
+    ));
+    assert!(texts.iter().any(|t| t == "1.2"), "{texts:?}");
+}
+
+#[test]
+fn decimal_values_in_a_table_column_are_no_section_numbers_3951() {
+    // p-values beside the prose of a two-column paper (measured: two research papers).
+    let texts = texts_after_pass(separate_columns(
+        &[
+            ("0.015", 72.0, 700.0, None),
+            ("0.032", 72.0, 660.0, None),
+            ("0.5", 72.0, 620.0, None),
+        ],
+        &[
+            ("It has not changed as a", 107.28, 700.0, None),
+            ("of patient focused approaches to address", 107.28, 660.0, None),
+            ("Lorem ipsum dolor sit amet", 107.28, 620.0, None),
+        ],
+    ));
+    assert_eq!(texts.len(), 6, "{texts:?}");
+}
