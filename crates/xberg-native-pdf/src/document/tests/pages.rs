@@ -309,3 +309,50 @@ fn should_prefer_nearest_valid_ancestor_and_preserve_valid_indirect_leaf_values(
         }
     }
 }
+
+/// DataPolder #4016: a root `/Pages` whose `/Kids` is an indirect array. The
+/// page lookup behind rendering and annotations (`get_page_ref`) failed every
+/// page with "Pages node missing Kids", and `all_page_refs` took the root for
+/// the one page. Both now resolve the array.
+#[test]
+fn should_find_every_page_when_the_root_kids_are_an_indirect_array() {
+    let doc = PdfDocument::from_bytes(build_indirect_kids_pdf(false)).unwrap();
+    assert_eq!(doc.page_count().unwrap(), 3);
+    for i in 0..3 {
+        assert_eq!(doc.get_page_ref(i).unwrap().id, 10 + i as u32, "page {i}");
+    }
+    let ids: Vec<u32> = doc.all_page_refs().unwrap().iter().map(|r| r.id).collect();
+    assert_eq!(ids, vec![10, 11, 12]);
+    let widths: Vec<f64> = (0..3)
+        .map(|i| {
+            let page = doc.get_page(i).unwrap();
+            let media_box = page
+                .as_dict()
+                .unwrap()
+                .get("MediaBox")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .clone();
+            media_box[2]
+                .as_real()
+                .or_else(|| media_box[2].as_integer().map(|v| v as f64))
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(widths, vec![100.0, 200.0, 300.0]);
+}
+
+/// The same one level down: an intermediate `/Pages` node reached through an
+/// indirect `/Kids`, whose own `/Kids` is indirect as well.
+#[test]
+fn should_find_every_page_through_nested_indirect_kids_arrays() {
+    let doc = PdfDocument::from_bytes(build_indirect_kids_pdf(true)).unwrap();
+    assert_eq!(doc.page_count().unwrap(), 3);
+    for i in 0..3 {
+        assert_eq!(doc.get_page_ref(i).unwrap().id, 10 + i as u32, "page {i}");
+    }
+    let ids: Vec<u32> = doc.all_page_refs().unwrap().iter().map(|r| r.id).collect();
+    assert_eq!(ids, vec![10, 11, 12]);
+    assert!(doc.get_page_ref(3).is_err(), "no fourth page");
+}

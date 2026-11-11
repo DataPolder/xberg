@@ -124,7 +124,7 @@ impl PdfDocument {
             None => return Ok(()),
         };
 
-        let kids = match dict.get("Kids").and_then(|k| k.as_array()) {
+        let kids = match self.page_tree_kids(dict) {
             Some(k) => k,
             None => {
                 out.push(node_ref);

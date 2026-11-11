@@ -1908,4 +1908,44 @@ mod tests {
             "no glyph was dropped, so no warning may report missing ink; got: {warnings:?}"
         );
     }
+
+    /// DataPolder #4016: a root `/Pages` whose `/Kids` is an indirect array
+    /// (`/Kids 3 0 R`), valid per ISO 32000-1 §7.7.3.2. Text extraction found
+    /// the pages, but every render failed with "Pages node missing Kids", so a
+    /// scanned book's unreadable pages could never be shown to the VLM.
+    #[test]
+    fn renders_every_page_of_a_tree_with_an_indirect_kids_array_4016() {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids 3 0 R /Count 3 >>",
+            "[4 0 R 5 0 R 6 0 R]",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>",
+        ];
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, body) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = pdf.len();
+        pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for offset in &offsets {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        assert_eq!(pdf_page_count(&pdf, None).unwrap(), 3);
+        for page in 0..3 {
+            let png = render_pdf_page_to_png(&pdf, page, Some(72), None)
+                .unwrap_or_else(|e| panic!("page {page} must render: {e}"));
+            assert!(png.starts_with(&[0x89, b'P', b'N', b'G']), "page {page}");
+        }
+    }
 }

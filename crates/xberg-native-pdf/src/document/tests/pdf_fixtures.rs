@@ -512,3 +512,56 @@ pub(super) fn build_page_tree_chain_pdf(levels: usize) -> Vec<u8> {
     );
     pdf
 }
+
+/// DataPolder #4016: a page tree whose `/Kids` arrays are indirect objects
+/// (`/Kids 3 0 R` → `[...]`), valid per ISO 32000-1 §7.7.3.2. With `nested`
+/// the root holds one intermediate `/Pages` node whose `/Kids` is indirect too.
+/// Three pages, each with its own `/MediaBox` width (100, 200, 300) to tell
+/// them apart. Objects: page `i` is `10 + i`.
+pub(super) fn build_indirect_kids_pdf(nested: bool) -> Vec<u8> {
+    let pages = "[10 0 R 11 0 R 12 0 R]";
+    let mut objects: Vec<(u32, String)> = vec![(1, "<< /Type /Catalog /Pages 2 0 R >>".to_string())];
+    let parent = if nested {
+        objects.push((2, "<< /Type /Pages /Kids 3 0 R /Count 3 >>".to_string()));
+        objects.push((3, "[4 0 R]".to_string()));
+        objects.push((4, "<< /Type /Pages /Parent 2 0 R /Kids 5 0 R /Count 3 >>".to_string()));
+        objects.push((5, pages.to_string()));
+        4
+    } else {
+        objects.push((2, "<< /Type /Pages /Kids 3 0 R /Count 3 >>".to_string()));
+        objects.push((3, pages.to_string()));
+        2
+    };
+    for i in 0..3u32 {
+        objects.push((
+            10 + i,
+            format!(
+                "<< /Type /Page /Parent {parent} 0 R /MediaBox [0 0 {} 400] >>",
+                100 * (i + 1)
+            ),
+        ));
+    }
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let max = objects.iter().map(|(n, _)| *n).max().unwrap();
+    let mut offsets = vec![None; max as usize + 1];
+    for (n, body) in &objects {
+        offsets[*n as usize] = Some(pdf.len());
+        pdf.extend_from_slice(format!("{n} 0 obj\n{body}\nendobj\n").as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", max + 1).as_bytes());
+    for offset in offsets.iter().skip(1) {
+        match offset {
+            Some(o) => pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes()),
+            None => pdf.extend_from_slice(b"0000000000 65535 f \n"),
+        }
+    }
+    pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            max + 1
+        )
+        .as_bytes(),
+    );
+    pdf
+}

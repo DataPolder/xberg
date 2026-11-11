@@ -328,7 +328,7 @@ impl PdfDocument {
         match node_type {
             Some("Page") => Ok(1),
             Some("Pages") => {
-                let kids = match node_dict.get("Kids").and_then(|obj| obj.as_array()) {
+                let kids = match self.page_tree_kids(node_dict) {
                     Some(k) => k,
                     None => {
                         tracing::warn!(target: LOG_TARGET, "Pages node {} missing /Kids array", node_ref);
@@ -652,7 +652,7 @@ impl PdfDocument {
                     }
                 }
 
-                if let Some(kids) = node_dict.get("Kids").and_then(|obj| obj.as_array()) {
+                if let Some(kids) = self.page_tree_kids(node_dict) {
                     for kid in kids {
                         if let Some(kid_ref) = kid.as_reference()
                             && let Err(error) =
@@ -757,7 +757,7 @@ impl PdfDocument {
             && let Some(pages_ref) = catalog_dict.get("Pages").and_then(|p| p.as_reference())
             && let Ok(pages_obj) = self.load_object(pages_ref)
             && let Some(pages_dict) = pages_obj.as_dict()
-            && let Some(kids) = pages_dict.get("Kids").and_then(|k| k.as_array())
+            && let Some(kids) = self.page_tree_kids(pages_dict)
         {
             let mut kids_index = 0;
             for kid in kids {
@@ -928,7 +928,7 @@ impl PdfDocument {
                     }
                 }
 
-                let kids = match node_dict.get("Kids").and_then(|obj| obj.as_array()) {
+                let kids = match self.page_tree_kids(node_dict) {
                     Some(k) => k,
                     None => {
                         tracing::warn!(target: LOG_TARGET, "Malformed PDF: Pages node missing /Kids array");
@@ -984,6 +984,20 @@ impl PdfDocument {
                 Ok(None)
             }
             _ => Err(Error::InvalidPdf(format!("Unknown page tree node type: {}", node_type))),
+        }
+    }
+
+    /// A page-tree node's `/Kids`, written inline or as an indirect reference
+    /// to an array; ISO 32000-1 §7.7.3.2 allows both. Every page-tree walker
+    /// reads it through here: each used to take only the inline form, so a
+    /// root `/Pages` whose `/Kids` is `12 0 R` failed every page render and
+    /// every annotation read with "Pages node missing Kids", while extraction
+    /// only got its pages by scanning for page objects (DataPolder #4016).
+    /// `None` when there is no `/Kids` or it does not resolve to an array.
+    pub(crate) fn page_tree_kids(&self, node_dict: &HashMap<String, Object>) -> Option<Vec<Object>> {
+        match node_dict.get("Kids")? {
+            Object::Array(kids) => Some(kids.clone()),
+            other => self.resolve_object(other).ok()?.as_array().cloned(),
         }
     }
 
@@ -1062,9 +1076,8 @@ impl PdfDocument {
                 }
             }
             "Pages" => {
-                let kids = node_dict
-                    .get("Kids")
-                    .and_then(|k| k.as_array())
+                let kids = self
+                    .page_tree_kids(node_dict)
                     .ok_or_else(|| Error::InvalidPdf("Pages node missing Kids".to_string()))?;
 
                 for kid_obj in kids {
