@@ -86,7 +86,7 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
         // is not in `is_numbered_section_heading` (the keyword form wants a word in front of
         // the number), so the last bullet of `§ 1` -- no terminator, same size, a blank line
         // above it -- absorbed it here and the section was lost. Only for the paragraph that
-        // would be absorbed; what a `§` paragraph itself may absorb is left as it was. ~keep
+        // would be absorbed; what a `§` paragraph itself may absorb is X58's, below. ~keep
         let next_starts_section = starts_numbered_section(&next) || starts_section_sign_heading(&next);
         // The mirror of `next_starts_section`: a numbered section heading must never be
         // absorbed AS a continuation either. The line grouper in `blocks_to_paragraphs`
@@ -97,7 +97,13 @@ pub(super) fn merge_continuation_paragraphs(paragraphs: &mut Vec<PdfParagraph>) 
         // line, which must stay joined; `heading_wraps_onto` is the same right-edge
         // test the grouper uses, applied to the boundary segments so both passes agree
         // on the same wrap. See #1467. ~keep
-        let current_starts_section = starts_numbered_section(&current);
+        // X58 (#4009): the `§` half of that mirror, which X38 left out. A UAV 2012 paragraph
+        // `§ 28. Afbakening, peilingen en opmetingen` (9.98 pt, no terminator) otherwise absorbs
+        // its first body line `De aannemer zal voor zijn rekening:` (9.06 pt, within 2 pt), the
+        // section is lost to one welded element, and five of the document's fifty paragraphs
+        // never reach the outline. A `§` title that really wraps still joins through
+        // `heading_wrap_exempt`, exactly as a numbered one does. ~keep
+        let current_starts_section = starts_numbered_section(&current) || starts_section_sign_heading(&current);
         // Which wrap test applies depends on the heading's own shape, exactly as in
         // the grouper: a heading set with a hanging indent is continued only by a
         // line at its title's edge that does not outrun it, and the right-edge
@@ -333,6 +339,9 @@ fn starts_numbered_section(para: &PdfParagraph) -> bool {
 /// X38: the paragraph's first line opens on a section sign, a number and a capitalised word --
 /// `§ 2 Definition and scope`, `§3 Geheimhouding`. A lowercase or numeric word after the number
 /// (`§ 3 lid 2`, `§ 3 2021`) is a reference in running text, not a section start. ~keep
+///
+/// X58 (#4009): the number may carry a dot, as the Staatscourant sets it (`§ 28. Afbakening`);
+/// the word after it still has to be capitalised, so `§ 3. lid 2` stays a reference. ~keep
 fn starts_section_sign_heading(para: &PdfParagraph) -> bool {
     let Some(first_line) = para.lines.first() else {
         return false;
@@ -353,6 +362,7 @@ fn starts_section_sign_heading(para: &PdfParagraph) -> bool {
         return false;
     }
     let after = &rest[digits..];
+    let after = after.strip_prefix('.').unwrap_or(after);
     after.starts_with(char::is_whitespace)
         && after
             .trim_start()
@@ -625,6 +635,70 @@ mod tests {
         ];
         merge_continuation_paragraphs(&mut paragraphs);
         assert_eq!(paragraphs.len(), 1, "an ordinary wrap still joins");
+    }
+
+    /// A body line of `text` at `x` on `baseline_y`, `size` pt, `width` pt wide.
+    fn sized_line_at(text: &str, x: f32, baseline_y: f32, size: f32, width: f32) -> PdfParagraph {
+        let mut para = make_body_paragraph_at(text, size, baseline_y);
+        if let Some(segment) = para.lines[0].segments.first_mut() {
+            segment.x = x;
+            segment.width = width;
+        }
+        para
+    }
+
+    /// X58 (#4009, Staatscourant stcrt-2025-6896 p13): the `§ 28.` title (9.98 pt, no
+    /// terminator) does not absorb the body line below it (9.06 pt) at the same margin. Lorem
+    /// ipsum stands in for the text; sizes and margin are the page's own. ~keep
+    #[test]
+    fn a_section_sign_heading_does_not_absorb_its_body_x58() {
+        let mut paragraphs = vec![
+            sized_line_at("§ 28. Lorem ipsum dolor", 119.0, 600.0, 9.98, 150.0),
+            sized_line_at("Lorem ipsum dolor sit amet:", 119.0, 587.0, 9.06, 170.0),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 2, "the § heading must not absorb its body");
+    }
+
+    /// X58's control: a `§` title that fills its column and wraps (the continuation resumes in
+    /// lowercase) still joins, as a numbered heading's wrap does. ~keep
+    #[test]
+    fn a_wrapping_section_sign_title_still_joins_x58() {
+        let mut paragraphs = vec![
+            sized_line_at(
+                "§ 29. Lorem ipsum dolor sit amet consectetur adipiscing elit sed do",
+                119.0,
+                600.0,
+                9.98,
+                436.0,
+            ),
+            sized_line_at("eiusmod tempor", 119.0, 588.0, 9.98, 70.0),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(paragraphs.len(), 1, "a wrapping § title stays one paragraph");
+    }
+
+    /// X58: the dotted number opens a section too; a dotted reference does not. ~keep
+    #[test]
+    fn a_dotted_section_sign_number_opens_a_section_x58() {
+        let opens = |t: &str| starts_section_sign_heading(&body_line_at(t, 119.0, 600.0));
+        assert!(opens("§ 28. Afbakening, peilingen en opmetingen"));
+        assert!(opens("§ 2 Dolor sit amet"));
+        assert!(opens("§3. Geheimhouding"));
+        assert!(!opens("§ 3. lid 2 consectetur"));
+        assert!(!opens("§ 3 2021"));
+        assert!(!opens("§. Lorem"));
+        // X38's `next` side holds for the dotted form as well.
+        let mut paragraphs = vec![
+            body_line_at("Lorem ipsum dolor sit amet consectetur adipiscing", 148.8, 553.0),
+            body_line_at("§ 2. Dolor sit amet", 51.6, 526.0),
+        ];
+        merge_continuation_paragraphs(&mut paragraphs);
+        assert_eq!(
+            paragraphs.len(),
+            2,
+            "a dotted § heading is not absorbed by the line above"
+        );
     }
 
     /// #3013 (Soluble p3): the note under a table ends a sentence; the lowercase line a blank
