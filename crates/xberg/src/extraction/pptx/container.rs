@@ -286,7 +286,7 @@ impl<R: Read + Seek> SlideIterator<R> {
                     };
                     let full_path = get_full_image_path(slide_path, target);
                     match container.read_file(&full_path) {
-                        Ok(bytes) => match super::parser::parse_chart_text(&bytes) {
+                        Ok(bytes) => match super::chart_text::parse_chart_text(&bytes) {
                             Ok(text) => chart_ref.resolved_text = text,
                             Err(e) => push_warning(
                                 warnings,

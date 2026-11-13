@@ -299,52 +299,6 @@ fn parse_graphic_frame(node: &Node) -> Result<Option<GraphicFrameContent>> {
     Ok(None)
 }
 
-/// Parse the text content of a chart part (e.g. `ppt/charts/chart1.xml`).
-///
-/// Recovers the chart title and every cached string/numeric value (`c:v`),
-/// which together cover series names, category labels, and data points.
-/// Returns `Ok(None)` when the chart carries no recoverable text.
-pub(super) fn parse_chart_text(xml_data: &[u8]) -> Result<Option<String>> {
-    let xml_str = utf8_validation::from_utf8(xml_data)
-        .map_err(|e| XbergError::parsing(format!("Invalid UTF-8 in chart XML: {}", e)))?;
-    let doc = Document::parse(xml_str).map_err(|e| XbergError::parsing(format!("Failed to parse chart XML: {}", e)))?;
-
-    let title = doc
-        .descendants()
-        .find(|n| n.tag_name().namespace() == Some(CHART_NAMESPACE) && n.tag_name().name() == "title")
-        .map(|title_node| {
-            title_node
-                .descendants()
-                .filter(|n| n.tag_name().namespace() == Some(DRAWINGML_NAMESPACE) && n.tag_name().name() == "t")
-                .filter_map(|n| n.text())
-                .collect::<Vec<_>>()
-                .join("")
-        })
-        .filter(|s| !s.trim().is_empty());
-
-    let values: Vec<String> = doc
-        .descendants()
-        .filter(|n| n.tag_name().namespace() == Some(CHART_NAMESPACE) && n.tag_name().name() == "v")
-        .filter_map(|n| n.text())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    let mut parts = Vec::new();
-    if let Some(t) = title {
-        parts.push(t);
-    }
-    if !values.is_empty() {
-        parts.push(values.join(", "));
-    }
-
-    if parts.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(parts.join("\n")))
-    }
-}
-
 /// Parse the text content of a SmartArt/diagram data part (e.g.
 /// `ppt/diagrams/data1.xml`). Every diagram node's text lives in a
 /// `<dgm:t>` element containing a normal DrawingML paragraph/run body, so

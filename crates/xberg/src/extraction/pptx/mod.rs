@@ -38,6 +38,7 @@
 //! # }
 //! ```
 
+mod chart_text;
 mod comments;
 mod container;
 mod content_builder;
@@ -45,6 +46,8 @@ mod elements;
 mod image_handling;
 mod metadata;
 mod parser;
+
+pub use chart_text::{DEFAULT_CHART_MAX_VALUES, chart_max_values, set_chart_max_values};
 
 use ahash::AHashMap;
 use bytes::Bytes;
