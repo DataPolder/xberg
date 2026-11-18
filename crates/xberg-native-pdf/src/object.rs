@@ -360,7 +360,16 @@ fn extract_filter_names(filter_obj: &Object) -> Vec<String> {
 pub(crate) fn extract_decode_params(params_obj: Option<&Object>) -> Option<crate::decoders::DecodeParams> {
     let dict = match params_obj? {
         Object::Dictionary(d) => d,
-        Object::Array(arr) => arr.iter().filter_map(|obj| obj.as_dict()).next()?,
+        // One entry per filter, `null` for a filter without parameters. The
+        // predictor belongs to the Flate/LZW entry, which need not be the
+        // first: take the entry that carries one, else the first dictionary.
+        // (X61, DataPolder #4280) ~keep
+        Object::Array(arr) => {
+            let dicts = || arr.iter().filter_map(|obj| obj.as_dict());
+            dicts()
+                .find(|d| d.get("Predictor").and_then(|o| o.as_integer()).is_some_and(|p| p > 1))
+                .or_else(|| dicts().next())?
+        }
         _ => return None,
     };
 

@@ -162,6 +162,45 @@ fn exact_pixel_buffer(w: u32, h: u32, channels: usize, pixels: &[u8], kind: &str
     Ok(pixels.to_vec())
 }
 
+/// Images of at most this many pixels (`/Width × /Height`) are left out
+/// before decoding: 3×2 pattern cells, bullets and rules that carry nothing
+/// to caption or OCR. Thousands of them in one document each cost a decode,
+/// and an off-by-one buffer among them a warning. Not decoded, not
+/// reported. (X61, DataPolder #4280) ~keep
+pub(crate) const TINY_IMAGE_MAX_PIXELS: u64 = 64;
+
+/// Whether an image of `width × height` is one of [`TINY_IMAGE_MAX_PIXELS`]'s.
+pub(crate) fn is_tiny_image(width: u32, height: u32) -> bool {
+    (width as u64) * (height as u64) <= TINY_IMAGE_MAX_PIXELS
+}
+
+/// The image dictionary's decoding keys, named, appended to a dropped image's
+/// error so the warning says which case it is: the filter chain, how
+/// `/DecodeParms` is written, `/BitsPerComponent` and the colour space. Names
+/// only, never content. (X61, DataPolder #4280) ~keep
+fn with_image_diagnostics(error: PdfError, handle: &xberg_native_pdf::PdfImageHandle<'_>) -> PdfError {
+    let filters = if handle.filter_chain.is_empty() {
+        "none".to_string()
+    } else {
+        handle
+            .filter_chain
+            .iter()
+            .map(|f| format!("{f:?}"))
+            .collect::<Vec<_>>()
+            .join("+")
+    };
+    let detail = format!(
+        "filter {filters}, decode_parms {}, bpc {}, color_space {:?}",
+        handle.decode_parms_form(),
+        handle.bits_per_component,
+        handle.color_space
+    );
+    match error {
+        PdfError::ExtractionFailed(message) => PdfError::ExtractionFailed(format!("{message} [{detail}]")),
+        other => other,
+    }
+}
+
 /// Build the `ProcessingWarning` for an image that was dropped because its raw
 /// pixel buffer could not be re-encoded (issue #71). Previously this case only
 /// logged via `tracing::warn!`, so callers had no structured signal that the
@@ -411,18 +450,73 @@ fn skipped_image_outcome(
 /// [`PageImageOutcome`]: `Ok` on a successful (or pass-through JPEG) encode, `Err` when a raw
 /// pixel buffer could not be re-encoded to PNG (issue #71). Shared by both the capped and
 /// uncapped extraction paths so the conversion logic exists once.
+/// A one-ink image (`/Separation`, and a `/DeviceN` with one colorant, which
+/// is stored as one) holds the ink's **tint**: 1 is full ink. Read as gray,
+/// the ink is light on a dark ground, the negative of the printed page. For
+/// the image a caption or OCR model reads, its gray is `255 − tint`: black
+/// ink dark on white paper. The page renderer keeps the tint samples (it
+/// applies the tint transform itself); only this extraction inverts.
+/// (X61, DataPolder #4280) ~keep
+fn is_one_ink(native_img: &xberg_native_pdf::extractors::PdfImage) -> bool {
+    matches!(
+        native_img.color_space(),
+        xberg_native_pdf::extractors::ColorSpace::Separation
+    )
+}
+
+/// The tint samples of a one-ink image as gray: `255 − tint`.
+fn tint_to_gray(pixels: &[u8]) -> Vec<u8> {
+    pixels.iter().map(|tint| 255 - tint).collect()
+}
+
+/// A one-ink JPEG decoded, inverted ([`tint_to_gray`]) and re-encoded as PNG;
+/// `None` when it does not decode as a one-channel image (then it is kept as
+/// it is).
+fn one_ink_jpeg_as_gray_png(jpeg: &[u8]) -> Option<Bytes> {
+    // The audited decode wrapper (security limits), as every decode here. ~keep
+    let decoded = crate::extraction::image_decode::decode_standard_image_with_security_limits(
+        jpeg,
+        &crate::extractors::security::SecurityLimits::default(),
+    )
+    .ok()?;
+    if decoded.color().channel_count() != 1 {
+        return None;
+    }
+    let luma = decoded.to_luma8();
+    let (w, h) = luma.dimensions();
+    let gray = image::GrayImage::from_raw(w, h, tint_to_gray(luma.as_raw()))?;
+    let mut png = Vec::new();
+    DynamicImage::ImageLuma8(gray)
+        .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
+        .ok()?;
+    Some(Bytes::from(png))
+}
+
 fn image_outcome_from_decoded(
     native_img: &xberg_native_pdf::extractors::PdfImage,
     page_number: u32,
     alt_text: Option<String>,
 ) -> PageImageOutcome {
+    let one_ink = is_one_ink(native_img);
     let (data, format) = match native_img.data() {
         xberg_native_pdf::extractors::ImageData::Jpeg(jpeg_bytes) => {
-            let data_bytes = Bytes::copy_from_slice(jpeg_bytes);
-            let actual_format = detect_image_format_from_bytes(data_bytes.as_ref());
-            (data_bytes, Cow::Borrowed(actual_format))
+            match one_ink.then(|| one_ink_jpeg_as_gray_png(jpeg_bytes)).flatten() {
+                Some(png) => (png, Cow::Borrowed("png")),
+                None => {
+                    let data_bytes = Bytes::copy_from_slice(jpeg_bytes);
+                    let actual_format = detect_image_format_from_bytes(data_bytes.as_ref());
+                    (data_bytes, Cow::Borrowed(actual_format))
+                }
+            }
         }
         xberg_native_pdf::extractors::ImageData::Raw { pixels, format } => {
+            let gray;
+            let pixels = if one_ink && matches!(format, xberg_native_pdf::extractors::PixelFormat::Grayscale) {
+                gray = tint_to_gray(pixels);
+                &gray
+            } else {
+                pixels
+            };
             match raw_pixels_to_png(native_img.width(), native_img.height(), format, pixels) {
                 Ok(bytes) => (bytes, Cow::Borrowed("png")),
                 Err(e) => return Err(e),
@@ -707,7 +801,12 @@ fn outcomes_from_uncapped_page(
 
     let page_dimensions = ocr_skip_candidate_pages.get(&page_number).copied();
     let mut outcomes = Vec::with_capacity(handles.len());
+    let mut tiny = 0usize;
     for (page_image_position, handle) in handles.iter().enumerate() {
+        if is_tiny_image(handle.width, handle.height) {
+            tiny += 1;
+            continue;
+        }
         let alt_text = page_alt_texts
             .and_then(|alts| alts.get(page_image_position))
             .and_then(|alt| alt.clone());
@@ -716,11 +815,17 @@ fn outcomes_from_uncapped_page(
             continue;
         }
         match handle.decode() {
-            Ok(native_img) => outcomes.push(image_outcome_from_decoded(&native_img, page_number, alt_text)),
+            Ok(native_img) => outcomes.push(
+                image_outcome_from_decoded(&native_img, page_number, alt_text)
+                    .map_err(|error| with_image_diagnostics(error, handle)),
+            ),
             Err(error) => {
                 tracing::debug!(page = page_idx, "image decompression failed: {error}");
             }
         }
+    }
+    if tiny > 0 {
+        tracing::debug!(page = page_idx, tiny, "tiny images left out before decoding");
     }
     outcomes
 }
@@ -735,6 +840,9 @@ fn decoded_images_to_outcomes(
 ) -> Vec<PageImageOutcome> {
     let mut outcomes = Vec::with_capacity(native_images.len());
     for (page_image_position, native_img) in native_images.iter().enumerate() {
+        if is_tiny_image(native_img.width(), native_img.height()) {
+            continue;
+        }
         let alt_text = page_alt_texts
             .and_then(|alts| alts.get(page_image_position))
             .and_then(|alt| alt.clone());

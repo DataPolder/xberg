@@ -1381,6 +1381,94 @@ fn resolve_image_xobject_metadata(
     })
 }
 
+/// Whether `obj` holds an indirect reference, itself or inside an array or a
+/// dictionary, down to `depth` levels.
+fn holds_reference(obj: &crate::object::Object, depth: usize) -> bool {
+    use crate::object::Object;
+    match obj {
+        Object::Reference(_) => true,
+        _ if depth == 0 => false,
+        Object::Array(items) => items.iter().any(|o| holds_reference(o, depth - 1)),
+        Object::Dictionary(d) => d.values().any(|o| holds_reference(o, depth - 1)),
+        _ => false,
+    }
+}
+
+/// An image's `/Filter` and `/DecodeParms`, and every value inside them, may be
+/// an indirect reference (ISO 32000-1 §7.3.10). The decoders read both from the
+/// stream's own dictionary, where a reference reads as absent: the PNG
+/// predictor of `/DecodeParms 12 0 R` (or of `/Predictor 13 0 R`) was never
+/// undone, every row kept its filter-tag byte, and the buffer came out
+/// `(width × components + 1) × height` bytes long, so the image was dropped.
+/// Returns the stream with those two entries resolved, or `None` when they
+/// hold no reference (the common case, which then costs nothing). The data is
+/// shared (`Bytes`), only the dictionary is rebuilt. (X61, DataPolder #4280) ~keep
+fn with_resolved_decode_entries(
+    doc: Option<&crate::document::PdfDocument>,
+    xobject: &crate::object::Object,
+) -> Option<crate::object::Object> {
+    use crate::object::Object;
+    let doc = doc?;
+    let Object::Stream { dict, data } = xobject else {
+        return None;
+    };
+    const KEYS: [&str; 2] = ["Filter", "DecodeParms"];
+    if !KEYS.iter().any(|k| dict.get(*k).is_some_and(|o| holds_reference(o, 3))) {
+        return None;
+    }
+    let mut resolved = dict.clone();
+    for key in KEYS {
+        if let Some(value) = dict.get(key)
+            && holds_reference(value, 3)
+        {
+            resolved.insert(key.to_string(), resolve_values_keep_streams(doc, value, 4));
+        }
+    }
+    Some(Object::Stream {
+        dict: resolved,
+        data: data.clone(),
+    })
+}
+
+/// `obj` with its references to *values* resolved, `depth` levels deep, and
+/// every reference to a **stream** kept as a reference: a stream in
+/// `/DecodeParms` (`/JBIG2Globals`) is loaded by reference by its decoder,
+/// which needs the reference for decryption. Resolving it into the stream
+/// itself made the JBIG2 globals unreadable. A reference that does not load
+/// stays as it is. (X61, DataPolder #4280) ~keep
+fn resolve_values_keep_streams(
+    doc: &crate::document::PdfDocument,
+    obj: &crate::object::Object,
+    depth: usize,
+) -> crate::object::Object {
+    use crate::object::Object;
+    if depth == 0 {
+        return obj.clone();
+    }
+    match obj {
+        Object::Reference(r) => match doc.load_object(*r) {
+            Ok(Object::Stream { .. }) => obj.clone(),
+            Ok(value) => resolve_values_keep_streams(doc, &value, depth - 1),
+            Err(error) => {
+                tracing::debug!("image decode key reference could not be loaded: {error}");
+                obj.clone()
+            }
+        },
+        Object::Array(items) => Object::Array(
+            items
+                .iter()
+                .map(|o| resolve_values_keep_streams(doc, o, depth - 1))
+                .collect(),
+        ),
+        Object::Dictionary(d) => Object::Dictionary(
+            d.iter()
+                .map(|(k, v)| (k.clone(), resolve_values_keep_streams(doc, v, depth - 1)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 /// Extract an image from an XObject stream.
 pub fn extract_image_from_xobject(
     doc: Option<&crate::document::PdfDocument>,
@@ -1391,6 +1479,8 @@ pub fn extract_image_from_xobject(
     #[cfg(test)]
     DECODE_CALL_COUNT.with(|count| count.set(count.get() + 1));
 
+    let resolved_xobject = with_resolved_decode_entries(doc, xobject);
+    let xobject = resolved_xobject.as_ref().unwrap_or(xobject);
     let dict = xobject
         .as_dict()
         .ok_or_else(|| Error::Image("XObject is not a stream".to_string()))?;
@@ -1421,6 +1511,15 @@ pub fn extract_image_from_xobject(
         is_ccitt,
         ccitt_params,
     } = resolve_image_xobject_metadata(doc, dict, color_space_map)?;
+
+    // A `/DeviceN` with a single colorant is equivalent to a `/Separation`
+    // (ISO 32000-1 §8.6.6.5) and is stored like one: one tint byte per pixel.
+    // Left as `DeviceN` it was declared CMYK while its buffer held one byte per
+    // pixel, so every consumer rejected it ("CMYK→RGB pixel buffer does not
+    // match", 1/4 of the expected size). (X61, DataPolder #4280) ~keep
+    if color_space == ColorSpace::DeviceN && devicen_ink_count(&resolved_color_space) == Some(1) {
+        color_space = ColorSpace::Separation;
+    }
 
     // Bit depth of the buffer actually stored: raised to 8 when a transform
     // below (sub-byte unpack, /Decode application, 16-bit reduction) rewrites
@@ -2986,9 +3085,18 @@ fn decode_jbig2_image(
     let image = hayro_jbig2::Image::new_embedded(&jbig2_bytes, globals.as_deref())
         .map_err(|e| Error::Image(format!("JBIG2 decode error: {e}")))?;
 
+    // Rows are fitted to the dictionary's `/Width`: the codestream's own page
+    // can be wider than the image the PDF declares (a scanner writing a
+    // 1,035-pixel JBIG2 page for a `/Width 1034` image), and taking its rows
+    // as they come gave `(Width + 1) × Height` bytes, a buffer every consumer
+    // rejects. A longer row is cut, a shorter one padded with background, and
+    // rows past `/Height` are left out. (X61, DataPolder #4280) ~keep
     struct PixelCollector {
         pixels: Vec<u8>,
         row_buf: Vec<u8>,
+        width: usize,
+        max_rows: usize,
+        rows: usize,
     }
 
     impl hayro_jbig2::Decoder for PixelCollector {
@@ -3004,14 +3112,31 @@ fn decode_jbig2_image(
         }
 
         fn next_line(&mut self) {
-            self.pixels.append(&mut self.row_buf);
+            if self.rows < self.max_rows {
+                self.row_buf.resize(self.width, 255);
+                self.pixels.extend_from_slice(&self.row_buf);
+                self.rows += 1;
+            }
+            self.row_buf.clear();
         }
     }
 
     let mut collector = PixelCollector {
         pixels: Vec::with_capacity(pixel_count),
         row_buf: Vec::with_capacity(width as usize),
+        width: width as usize,
+        max_rows: height as usize,
+        rows: 0,
     };
+    if image.width() != width || image.height() != height {
+        tracing::debug!(
+            codestream_width = image.width(),
+            codestream_height = image.height(),
+            width,
+            height,
+            "JBIG2 page size differs from the image dictionary; rows fitted to /Width"
+        );
+    }
 
     image
         .decode(&mut collector)
@@ -4130,6 +4255,23 @@ pub struct PdfImageHandle<'doc> {
 }
 
 impl<'doc> PdfImageHandle<'doc> {
+    /// How the image's `/DecodeParms` is written, for diagnostics only:
+    /// `"none"`, `"direct"` or `"indirect"` (an indirect object, or a
+    /// dictionary or array holding a reference). (X61, DataPolder #4280) ~keep
+    pub fn decode_parms_form(&self) -> &'static str {
+        let PdfImageSource::XObject(obj_ref) = &self.source else {
+            return "direct";
+        };
+        let Ok(obj) = self.doc.load_object(*obj_ref) else {
+            return "none";
+        };
+        match obj.as_dict().and_then(|d| d.get("DecodeParms")) {
+            None => "none",
+            Some(value) if holds_reference(value, 3) => "indirect",
+            Some(_) => "direct",
+        }
+    }
+
     /// Decode this image into a [`PdfImage`].
     ///
     /// This is the expensive operation: it decompresses the image stream,
@@ -4751,6 +4893,204 @@ mod handle_color_space_tests {
             .as_bytes(),
         );
         pdf
+    }
+
+    /// A one-page PDF whose object 99 is an image XObject with `dict_extra`
+    /// in its dictionary and `data` as its stream; `extra` are further
+    /// objects `(id, body)`. (X61, DataPolder #4280) ~keep
+    fn pdf_with_image_and_objects(dict_extra: &str, data: &[u8], extra: &[(u32, &str)]) -> Vec<u8> {
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets: Vec<(u32, usize)> = Vec::new();
+        offsets.push((1, pdf.len()));
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+        offsets.push((2, pdf.len()));
+        pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+        offsets.push((3, pdf.len()));
+        pdf.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] >>\nendobj\n");
+        for (id, body) in extra {
+            offsets.push((*id, pdf.len()));
+            pdf.extend_from_slice(format!("{id} 0 obj\n{body}\nendobj\n").as_bytes());
+        }
+        offsets.push((99, pdf.len()));
+        pdf.extend_from_slice(
+            format!(
+                "99 0 obj\n<< /Type /XObject /Subtype /Image {dict_extra} /Length {} >>\nstream\n",
+                data.len()
+            )
+            .as_bytes(),
+        );
+        pdf.extend_from_slice(data);
+        pdf.extend_from_slice(b"\nendstream\nendobj\n");
+        let xref_off = pdf.len();
+        let max_id = 99u32;
+        pdf.extend_from_slice(format!("xref\n0 {}\n", max_id + 1).as_bytes());
+        pdf.extend_from_slice(b"0000000000 65535 f \n");
+        for id in 1..=max_id {
+            if let Some((_, off)) = offsets.iter().find(|(oid, _)| *oid == id) {
+                pdf.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
+            } else {
+                pdf.extend_from_slice(b"0000000000 65535 f \n");
+            }
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+                max_id + 1,
+                xref_off
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
+
+    /// `rows` with a PNG "Sub"/"None" tag byte in front of each, Flate-encoded:
+    /// what a writer with `/Predictor 15` stores.
+    fn png_predicted_flate(rows: &[&[u8]]) -> Vec<u8> {
+        use std::io::Write;
+        let mut raw = Vec::new();
+        for row in rows {
+            raw.push(0u8); // filter type None
+            raw.extend_from_slice(row);
+        }
+        let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(&raw).unwrap();
+        enc.finish().unwrap()
+    }
+
+    fn decoded_pixels(pdf: Vec<u8>) -> (Vec<u8>, PixelFormat) {
+        let doc = crate::document::PdfDocument::from_bytes(pdf).unwrap();
+        let obj_ref = ObjectRef::new(99, 0);
+        let dict = doc.load_object(obj_ref).unwrap().as_dict().unwrap().clone();
+        let handle = image_handle_from_xobject(
+            &doc,
+            obj_ref,
+            &dict,
+            crate::content::Matrix::identity(),
+            0,
+            &empty_map(),
+        )
+        .expect("handle builds");
+        let image = handle.decode().expect("image decodes");
+        match image.data() {
+            ImageData::Raw { pixels, format } => (pixels.clone(), *format),
+            other => panic!("expected raw pixels, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_indirect_decode_parms_dictionary_undoes_the_predictor_x61() {
+        // Grayscale 3×2, `/DecodeParms 50 0 R`: before X61 the reference read
+        // as no parameters, each row kept its tag byte (8 bytes for 6). ~keep
+        let data = png_predicted_flate(&[&[10, 20, 30], &[40, 50, 60]]);
+        let pdf = pdf_with_image_and_objects(
+            "/Width 3 /Height 2 /BitsPerComponent 8 /ColorSpace /DeviceGray /Filter /FlateDecode /DecodeParms 50 0 R",
+            &data,
+            &[(50, "<< /Predictor 15 /Colors 1 /BitsPerComponent 8 /Columns 3 >>")],
+        );
+        let (pixels, format) = decoded_pixels(pdf);
+        assert_eq!(format, PixelFormat::Grayscale);
+        assert_eq!(pixels, vec![10, 20, 30, 40, 50, 60]);
+    }
+
+    #[test]
+    fn indirect_values_inside_decode_parms_undo_the_predictor_x61() {
+        // RGB 2×2, `/Predictor 51 0 R` and `/Columns 52 0 R`: the buffer was
+        // `(3·W + 1)·H` before X61. ~keep
+        let data = png_predicted_flate(&[&[1, 2, 3, 4, 5, 6], &[7, 8, 9, 10, 11, 12]]);
+        let pdf = pdf_with_image_and_objects(
+            "/Width 2 /Height 2 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Filter /FlateDecode \
+             /DecodeParms << /Predictor 51 0 R /Colors 53 0 R /BitsPerComponent 8 /Columns 52 0 R >>",
+            &data,
+            &[(51, "15"), (52, "2"), (53, "3")],
+        );
+        let (pixels, format) = decoded_pixels(pdf);
+        assert_eq!(format, PixelFormat::RGB);
+        assert_eq!(pixels, (1..=12).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn an_indirect_filter_and_parms_array_undo_the_predictor_x61() {
+        // `/Filter 54 0 R` → `[/FlateDecode]`, `/DecodeParms [55 0 R]`. ~keep
+        let data = png_predicted_flate(&[&[9, 8], &[7, 6]]);
+        let pdf = pdf_with_image_and_objects(
+            "/Width 2 /Height 2 /BitsPerComponent 8 /ColorSpace /DeviceGray /Filter 54 0 R /DecodeParms [55 0 R]",
+            &data,
+            &[
+                (54, "[/FlateDecode]"),
+                (55, "<< /Predictor 12 /Colors 1 /BitsPerComponent 8 /Columns 2 >>"),
+            ],
+        );
+        let (pixels, _) = decoded_pixels(pdf);
+        assert_eq!(pixels, vec![9, 8, 7, 6]);
+    }
+
+    #[test]
+    fn a_one_ink_device_n_image_is_stored_as_one_byte_per_pixel_x61() {
+        // `[/DeviceN [/Black] /DeviceCMYK <tint>]`, 3×2 at 8 bpc, with an
+        // indirect `/Filter` as the real files have it. Before X61 the stream
+        // stayed compressed (the reference read as no filter); with that fixed
+        // it was still labelled CMYK at one byte per pixel. ~keep
+        let data = {
+            use std::io::Write;
+            let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+            enc.write_all(&[0, 64, 128, 192, 255, 32]).unwrap();
+            enc.finish().unwrap()
+        };
+        let pdf = pdf_with_image_and_objects(
+            "/Width 3 /Height 2 /BitsPerComponent 8 /Filter 56 0 R \
+             /ColorSpace [/DeviceN [/Black] /DeviceCMYK << /FunctionType 2 /Domain [0 1] /C0 [0 0 0 0] /C1 [0 0 0 1] /N 1 >>]",
+            &data,
+            &[(56, "/FlateDecode")],
+        );
+        let (pixels, format) = decoded_pixels(pdf);
+        assert_eq!(format, PixelFormat::Grayscale);
+        assert_eq!(pixels, vec![0, 64, 128, 192, 255, 32]);
+    }
+
+    #[test]
+    fn a_stream_reference_in_decode_parms_stays_a_reference_x61() {
+        // `/JBIG2Globals 57 0 R` beside an indirect value: the value is
+        // resolved, the globals stream stays a reference (its decoder loads
+        // it by reference). Before, both were resolved and the JBIG2 globals
+        // could not be read. ~keep
+        let pdf = pdf_with_image_and_objects(
+            "/Width 1 /Height 1 /BitsPerComponent 1 /ColorSpace /DeviceGray /Filter /JBIG2Decode \
+             /DecodeParms << /JBIG2Globals 57 0 R /Unused 58 0 R >>",
+            &[0],
+            &[(57, "<< /Length 1 >>\nstream\n\0\nendstream"), (58, "7")],
+        );
+        let doc = crate::document::PdfDocument::from_bytes(pdf).unwrap();
+        let xobj = doc.load_object(ObjectRef::new(99, 0)).unwrap();
+        let resolved = with_resolved_decode_entries(Some(&doc), &xobj).expect("references to resolve");
+        let parms = resolved
+            .as_dict()
+            .unwrap()
+            .get("DecodeParms")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            parms.get("JBIG2Globals").and_then(Object::as_reference),
+            Some(ObjectRef::new(57, 0))
+        );
+        assert_eq!(parms.get("Unused").and_then(Object::as_integer), Some(7));
+    }
+
+    #[test]
+    fn the_predictor_entry_of_a_parms_array_need_not_be_first_x61() {
+        let params = Object::Array(vec![
+            Object::Dictionary(std::collections::HashMap::from([(
+                "K".to_string(),
+                Object::Integer(-1),
+            )])),
+            Object::Dictionary(std::collections::HashMap::from([
+                ("Predictor".to_string(), Object::Integer(15)),
+                ("Columns".to_string(), Object::Integer(7)),
+            ])),
+        ]);
+        let p = crate::object::extract_decode_params(Some(&params)).expect("parameters");
+        assert_eq!((p.predictor, p.columns), (15, 7));
     }
 
     #[test]

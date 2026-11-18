@@ -501,3 +501,212 @@ fn test_extract_images_with_data_reads_tagged_pdf_alt_text() {
         page_one_images[0].description
     );
 }
+
+/// A one-page PDF painting `/Im1` (3×2 gray, its stream one byte long, the
+/// shape of the decorative cells #4280 found by the thousand) and `/Im2`
+/// (10×10 gray, intact). (X61, DataPolder #4280) ~keep
+fn pdf_with_a_tiny_and_a_normal_image() -> Vec<u8> {
+    pdf_with_two_gray_images(&[128u8; 7], 100)
+}
+
+/// Like [`pdf_with_a_tiny_and_a_normal_image`], with `/Im2` holding
+/// `normal_len` bytes for its 10×10 samples.
+fn pdf_with_two_gray_images(tiny: &[u8], normal_len: usize) -> Vec<u8> {
+    let content = b"q 3 0 0 2 0 0 cm /Im1 Do Q q 10 0 0 10 10 10 cm /Im2 Do Q";
+    let normal = vec![200u8; normal_len];
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets: Vec<usize> = Vec::new();
+    let obj = |pdf: &mut Vec<u8>, offsets: &mut Vec<usize>, head: &str, stream: Option<&[u8]>| {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{head}", offsets.len()).as_bytes());
+        if let Some(data) = stream {
+            pdf.extend_from_slice(b"\nstream\n");
+            pdf.extend_from_slice(data);
+            pdf.extend_from_slice(b"\nendstream");
+        }
+        pdf.extend_from_slice(b"\nendobj\n");
+    };
+    obj(&mut pdf, &mut offsets, "<< /Type /Catalog /Pages 2 0 R >>", None);
+    obj(
+        &mut pdf,
+        &mut offsets,
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        None,
+    );
+    obj(
+        &mut pdf,
+        &mut offsets,
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R \
+         /Resources << /XObject << /Im1 5 0 R /Im2 6 0 R >> >> >>",
+        None,
+    );
+    obj(
+        &mut pdf,
+        &mut offsets,
+        &format!("<< /Length {} >>", content.len()),
+        Some(content),
+    );
+    obj(
+        &mut pdf,
+        &mut offsets,
+        &format!(
+            "<< /Type /XObject /Subtype /Image /Width 3 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length {} >>",
+            tiny.len()
+        ),
+        Some(tiny),
+    );
+    obj(
+        &mut pdf,
+        &mut offsets,
+        &format!(
+            "<< /Type /XObject /Subtype /Image /Width 10 /Height 10 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length {} >>",
+            normal.len()
+        ),
+        Some(&normal),
+    );
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+    for off in &offsets {
+        pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            offsets.len() + 1
+        )
+        .as_bytes(),
+    );
+    pdf
+}
+
+#[test]
+fn a_tiny_image_is_left_out_before_decoding_and_not_reported_x61() {
+    let bytes = pdf_with_a_tiny_and_a_normal_image();
+    let mut doc = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("open the PDF");
+    let (images, warnings) =
+        extract_images_with_data(&mut doc, None, None, &std::collections::HashMap::new()).expect("extraction runs");
+    assert_eq!(images.len(), 1, "only the 10×10 image");
+    assert!(warnings.is_empty(), "the tiny image is not reported: {warnings:?}");
+}
+
+#[test]
+fn the_tiny_threshold_is_64_pixels_x61() {
+    assert!(is_tiny_image(3, 2));
+    assert!(is_tiny_image(8, 8));
+    assert!(is_tiny_image(1, 64));
+    assert!(!is_tiny_image(9, 8));
+    assert!(!is_tiny_image(128, 128));
+}
+
+#[test]
+fn a_dropped_image_names_its_decoding_keys_x61() {
+    // `/Im2` one byte long: still dropped, and the warning now says which
+    // filter, parameters, depth and colour space it had. ~keep
+    let bytes = pdf_with_two_gray_images(&[128u8; 6], 101);
+    let mut doc = crate::pdf::native::NativeDocument::open_bytes(&bytes).expect("open the PDF");
+    let (_, warnings) =
+        extract_images_with_data(&mut doc, None, None, &std::collections::HashMap::new()).expect("extraction runs");
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    let message = warnings[0].message.to_string();
+    assert!(
+        message.ends_with("[filter none, decode_parms none, bpc 8, color_space DeviceGray])"),
+        "{message}"
+    );
+}
+
+/// A one-page PDF painting one 2×1 `/Separation` image (`stream` its samples,
+/// `extra` further dictionary keys). (X61, DataPolder #4280) ~keep
+fn pdf_with_one_separation_image(extra: &str, stream: &[u8]) -> Vec<u8> {
+    let content = b"q 2 0 0 1 0 0 cm /Im1 Do Q";
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets: Vec<usize> = Vec::new();
+    let obj = |pdf: &mut Vec<u8>, offsets: &mut Vec<usize>, head: &str, data: Option<&[u8]>| {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{head}", offsets.len()).as_bytes());
+        if let Some(data) = data {
+            pdf.extend_from_slice(b"\nstream\n");
+            pdf.extend_from_slice(data);
+            pdf.extend_from_slice(b"\nendstream");
+        }
+        pdf.extend_from_slice(b"\nendobj\n");
+    };
+    obj(&mut pdf, &mut offsets, "<< /Type /Catalog /Pages 2 0 R >>", None);
+    obj(
+        &mut pdf,
+        &mut offsets,
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        None,
+    );
+    obj(
+        &mut pdf,
+        &mut offsets,
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R /Resources << /XObject << /Im1 5 0 R >> >> >>",
+        None,
+    );
+    obj(
+        &mut pdf,
+        &mut offsets,
+        &format!("<< /Length {} >>", content.len()),
+        Some(content),
+    );
+    obj(
+        &mut pdf,
+        &mut offsets,
+        &format!(
+            "<< /Type /XObject /Subtype /Image /Width 12 /Height 10 /BitsPerComponent 8 \
+             /ColorSpace [/Separation /Black /DeviceGray << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >>] \
+             {extra} /Length {} >>",
+            stream.len()
+        ),
+        Some(stream),
+    );
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
+    for off in &offsets {
+        pdf.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            offsets.len() + 1
+        )
+        .as_bytes(),
+    );
+    pdf
+}
+
+fn extracted_gray(pdf: Vec<u8>) -> Vec<u8> {
+    let mut doc = crate::pdf::native::NativeDocument::open_bytes(&pdf).expect("open the PDF");
+    let (images, warnings) =
+        extract_images_with_data(&mut doc, None, None, &std::collections::HashMap::new()).expect("extraction runs");
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].format, "png");
+    image::load_from_memory(&images[0].data)
+        .expect("a PNG")
+        .to_luma8()
+        .into_raw()
+}
+
+#[test]
+fn a_one_ink_image_is_extracted_as_printed_x61() {
+    // Full ink (tint 255) is black (0), no ink (tint 0) white (255). ~keep
+    let tints: Vec<u8> = (0..120).map(|i| if i % 2 == 0 { 255 } else { 0 }).collect();
+    let gray = extracted_gray(pdf_with_one_separation_image("", &tints));
+    assert_eq!(
+        gray,
+        (0..120).map(|i| if i % 2 == 0 { 0 } else { 255 }).collect::<Vec<u8>>()
+    );
+}
+
+#[test]
+fn a_one_ink_jpeg_is_extracted_as_printed_x61() {
+    // A one-channel JPEG of full ink everywhere: stored as tint 255, so the
+    // extracted image is (near) black. ~keep
+    let mut jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 95)
+        .encode(&[255u8; 120], 12, 10, image::ExtendedColorType::L8)
+        .expect("encode a JPEG");
+    let gray = extracted_gray(pdf_with_one_separation_image("/Filter /DCTDecode", &jpeg));
+    assert!(gray.iter().all(|&g| g < 8), "{gray:?}");
+}
